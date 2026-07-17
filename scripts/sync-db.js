@@ -1,0 +1,1 @@
+console.log('Sync skipped: server.ts handles Neon seeding automatically on startup.');

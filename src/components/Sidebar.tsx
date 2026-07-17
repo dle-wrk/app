@@ -1,0 +1,181 @@
+import React from 'react';
+import {
+  LayoutDashboard,
+  Boxes,
+  Database,
+  ArrowLeftRight,
+  Settings,
+  Tag,
+  Receipt,
+  Factory,
+  TableProperties,
+  HelpCircle,
+  X,
+  Workflow,
+  ClipboardList,
+  Calculator
+} from 'lucide-react';
+import { ViewType, UserProfile } from '../types';
+
+interface SidebarProps {
+  currentView: ViewType;
+  setView: (view: ViewType) => void;
+  appName: string;
+  isSidebarOpen: boolean;
+  setIsSidebarOpen: (open: boolean) => void;
+  profile: UserProfile;
+}
+
+export const Sidebar: React.FC<SidebarProps> = ({
+  currentView,
+  setView,
+  appName,
+  isSidebarOpen,
+  setIsSidebarOpen,
+  profile
+}) => {
+  const navItems = [
+    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'items', label: 'Items & Inventory', icon: Boxes },
+    { id: 'stock_kits', label: 'Stock Tables', icon: TableProperties },
+    { id: 'reports_ledger', label: 'Reports & Ledger', icon: ArrowLeftRight },
+    { id: 'pricing', label: 'Pricing Directory', icon: Tag },
+    { id: 'suppliers', label: 'Suppliers', icon: Factory },
+    { id: 'bookkeeping', label: 'Bookkeeping', icon: Receipt },
+    { id: 'production_costs', label: 'Production Costs', icon: Calculator },
+  ] as const;
+
+  const manufacturingItems = [
+    { id: 'kit_booking', label: 'P&P Kit Booking', icon: Boxes },
+    { id: 'bom_manager', label: 'Bill of Materials', icon: Boxes },
+    { id: 'pick_place', label: 'Pick & Place', icon: Database },
+    { id: 'alternates', label: 'Component Alternates', icon: ArrowLeftRight },
+  ] as const;
+
+  const projectItems = [
+    { id: 'projects', label: 'Project Manager', icon: ClipboardList },
+  ] as const;
+
+  const handleNavClick = (view: ViewType) => {
+    setView(view);
+    setIsSidebarOpen(false);
+  };
+
+  return (
+    <aside className={`fixed min-h-dvh w-64 left-0 top-0 bg-(--sidebar-bg) border-r border-outline-variant flex flex-col py-md z-50 transition-all duration-300 shadow-2xl lg:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+      <div className="px-md mb-xl flex flex-col pt-sm relative">
+        <button
+          onClick={() => setIsSidebarOpen(false)}
+          className="lg:hidden absolute top-0 right-2 p-2 text-on-surface-variant hover:text-on-surface"
+        >
+          <X className="w-5 h-5" aria-label="Close" />
+        </button>
+        <div className="flex items-center gap-xs mb-1">
+          <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center shadow-lg shadow-primary/20">
+            <Workflow className="text-white w-5 h-5" />
+          </div>
+          <span className="text-primary font-black text-[22px] tracking-tighter">{appName}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] bg-primary/10 border border-primary/20 text-primary px-1.5 py-0.5 rounded-full font-black">
+            v2.5.0-PRO
+          </span>
+          <span className="text-[10px] text-[#8c909f] font-bold">
+            Data Captuiring
+          </span>
+        </div>
+      </div>
+
+      <nav className="flex-1 space-y-1 px-3 overflow-y-auto custom-scrollbar">
+        {navItems.map((item) => (
+          <button
+            key={item.id}
+            onClick={() => handleNavClick(item.id as ViewType)}
+            className={`w-full flex items-center px-3.5 py-2.5 rounded-xl text-left transition-all group ${currentView === item.id
+              ? 'text-primary font-black bg-primary/10 shadow-sm ring-1 ring-primary/20'
+              : 'text-on-surface-variant/70 hover:text-on-surface hover:bg-surface-variant/40'
+              }`}
+          >
+            <item.icon className={`w-4.5 h-4.5 mr-3 transition-transform group-hover:scale-110 ${currentView === item.id ? 'text-primary' : 'text-on-surface-variant/50'}`} />
+            <span className="text-[13px] tracking-tight">{item.label}</span>
+          </button>
+        ))}
+
+        <div className="pt-xl px-md mb-xs text-[11px] text-outline font-bold opacity-40">
+          CAD & MANUFACTURING
+        </div>
+
+{manufacturingItems.map((item) => (
+           <button
+             key={item.id}
+             onClick={() => handleNavClick(item.id as ViewType)}
+             className={`w-full flex items-center px-md py-2.5 rounded text-left transition-all ${currentView === item.id
+               ? 'text-primary font-bold border-l-4 border-primary bg-primary/10'
+               : 'text-on-surface-variant/80 hover:text-on-surface hover:bg-surface-variant/40'
+               }`}
+           >
+             <item.icon className="w-4.5 h-4.5 mr-sm" />
+             <span className="font-body-md text-sm">{item.label}</span>
+           </button>
+         ))}
+
+         <div className="pt-xl px-md mb-xs text-[11px] text-outline font-bold opacity-40">
+           PROJECT MANAGEMENT
+         </div>
+
+         {projectItems.map((item) => (
+           <button
+             key={item.id}
+             onClick={() => handleNavClick(item.id as ViewType)}
+             className={`w-full flex items-center px-md py-2.5 rounded text-left transition-all ${currentView === item.id
+               ? 'text-primary font-bold border-l-4 border-primary bg-primary/10'
+               : 'text-on-surface-variant/80 hover:text-on-surface hover:bg-surface-variant/40'
+               }`}
+           >
+             <item.icon className="w-4.5 h-4.5 mr-sm" />
+             <span className="font-body-md text-sm">{item.label}</span>
+           </button>
+         ))}
+
+         <div className="pt-xl px-md mb-xs text-[11px] text-outline font-bold opacity-40">
+           ADMINISTRATION
+         </div>
+
+        <button
+          onClick={() => handleNavClick('settings')}
+          className={`w-full flex items-center px-md py-2.5 rounded text-left transition-all ${currentView === 'settings'
+            ? 'text-primary font-bold border-l-4 border-primary bg-primary/10'
+            : 'text-on-surface-variant/80 hover:text-on-surface hover:bg-surface-variant/40'
+            }`}
+        >
+          <Settings className="w-4.5 h-4.5 mr-sm" />
+          <span className="font-body-md text-sm">System Config</span>
+        </button>
+      </nav>
+
+      <div className="mt-auto px-sm pt-md border-t border-outline-variant/30 space-y-md">
+        <div className="mx-md p-sm rounded bg-surface-container-high/40 flex items-center gap-xs font-mono text-[10px] text-on-surface-variant">
+          <span className="w-2 h-2 rounded-full bg-green-500 inline-block"></span>
+          <span>DB Node: active_sync</span>
+        </div>
+
+        <div
+          onClick={() => handleNavClick('profile')}
+          className="flex items-center px-md py-sm rounded hover:bg-surface-variant/40 cursor-pointer transition-all duration-200"
+        >
+          <div className="w-8 h-8 rounded-full overflow-hidden mr-sm border border-outline-variant shrink-0 relative">
+            <img
+              className="w-full h-full object-cover"
+              src={profile.avatarUrl}
+              alt={`${profile.name} Profile`}
+            />
+          </div>
+          <div className="truncate flex flex-col justify-center">
+            <span className="font-body-md text-xs font-bold leading-tight truncate">{profile.name}</span>
+            <span className="text-[10px] text-outline truncate">{profile.role}</span>
+          </div>
+        </div>
+      </div>
+    </aside>
+  );
+};
