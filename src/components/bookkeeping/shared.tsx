@@ -100,9 +100,13 @@ export async function apiDelete(url: string) {
 // UI PRIMITIVES (match the existing Tracklab design system)
 // ============================================================================
 
+const MODAL_WIDTHS: Record<string, string> = {
+  'max-w-sm': '384px', 'max-w-md': '448px', 'max-w-lg': '512px',
+  'max-w-xl': '576px', 'max-w-2xl': '672px', 'max-w-3xl': '768px', 'max-w-4xl': '896px',
+};
 export const Modal: React.FC<{ title: string; subtitle?: string; onClose: () => void; children: React.ReactNode; maxWidth?: string }> = ({ title, subtitle, onClose, children, maxWidth = 'max-w-2xl' }) => (
   <div className="fixed inset-0 bg-background/80 backdrop-blur-xs flex items-center justify-center z-100 p-md" onClick={onClose}>
-    <div className={`bg-surface-container rounded-xl border border-outline-variant ${maxWidth} w-full p-lg shadow-2xl relative max-h-[90vh] overflow-y-auto custom-scrollbar`} onClick={(e) => e.stopPropagation()}>
+    <div className="bg-surface-container rounded-xl border border-outline-variant w-full p-lg shadow-2xl relative max-h-[90vh] overflow-y-auto custom-scrollbar" style={{ maxWidth: MODAL_WIDTHS[maxWidth] || maxWidth }} onClick={(e) => e.stopPropagation()}>
       <button onClick={onClose} aria-label="Close modal" className="absolute top-sm right-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high p-1.5 rounded-lg transition-colors">
         <X className="w-4 h-4" />
       </button>

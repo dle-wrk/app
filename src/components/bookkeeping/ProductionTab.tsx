@@ -288,7 +288,7 @@ const QuickCreateModal: React.FC<{ title: string; fields: FieldDef[]; onClose: (
   };
 
   return (
-    <Modal title={title} onClose={onClose} maxWidth="max-w-md">
+    <Modal title={title} onClose={onClose} maxWidth="max-w-lg">
       <div className="space-y-3">
         {fields.map(f => (
           <div key={f.key}>
