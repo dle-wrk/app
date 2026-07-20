@@ -30,6 +30,7 @@ export const ReportsTab: React.FC<ModuleDataProps> = ({ triggerToast }) => {
   const [loading, setLoading] = useState(false);
 
   const load = async () => {
+    setData(null);
     setLoading(true);
     try {
       let url = '';
@@ -89,7 +90,7 @@ export const ReportsTab: React.FC<ModuleDataProps> = ({ triggerToast }) => {
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex gap-1 bg-surface-container-high/40 p-1 rounded-lg">
           {(Object.keys(REPORT_LABELS) as ReportKind[]).map(k => (
-            <button key={k} onClick={() => setKind(k)} className={`px-3 py-1.5 rounded text-xs font-bold transition-all ${kind === k ? 'bg-primary text-white' : 'text-on-surface-variant hover:text-on-surface'}`}>{REPORT_LABELS[k]}</button>
+            <button key={k} onClick={() => { setData(null); setKind(k); }} className={`px-3 py-1.5 rounded text-xs font-bold transition-all ${kind === k ? 'bg-primary text-white' : 'text-on-surface-variant hover:text-on-surface'}`}>{REPORT_LABELS[k]}</button>
           ))}
         </div>
         <div className="flex items-center gap-2 ml-auto">
