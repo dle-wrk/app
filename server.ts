@@ -5,6 +5,8 @@ import { spawn } from 'child_process';
 import { pool, query, queryOne, exec, ensureSchema, close } from './src/lib/db';
 import { ensureBookkeepingSchema } from './src/lib/bookkeeping-db';
 import { registerBookkeepingRoutes } from './src/lib/bookkeeping-routes';
+import { ensurePhase5Tables } from './src/lib/phase5-db';
+import phase5Routes from './src/lib/phase5-routes';
 
 const app = express();
 app.use(compression());
@@ -69,6 +71,9 @@ function sql(text: string): string {
 
 // Bookkeeping / ERP module — Chart of Accounts, invoices, bills, payments, reports.
 registerBookkeepingRoutes(app);
+
+// Phase 5: Quality & Compliance + Advanced Automation
+app.use(phase5Routes);
 
 // --- Live pricing lookups (DigiKey, Mouser APIs; LCSC via externally-fed scrape cache) ---
 const PRICING_DAILY_LIMIT = 1000;
@@ -3681,6 +3686,9 @@ async function runSchemaBootstrap() {
     await ensureBookkeepingSchema().catch((e) => console.error('Failed to bootstrap bookkeeping schema:', e));
 
     await ensureProductionCostsSchema().catch((e) => console.error('Failed to bootstrap production costs schema:', e));
+
+    // Phase 5: Quality & Compliance + Advanced Automation
+    await ensurePhase5Tables().catch((e) => console.error('Failed to bootstrap Phase 5 schema:', e));
 
     console.log('Database bootstrapping complete.');
 }

@@ -14,7 +14,9 @@ import {
   Workflow,
   ClipboardList,
   Calculator,
-  Zap
+  Zap,
+  Brain,
+  Shield
 } from 'lucide-react';
 import { ViewType, UserProfile } from '../types';
 
@@ -60,6 +62,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const automationItems = [
     { id: 'automation', label: 'Automation Dashboard', icon: Zap },
     { id: 'auto_po_config', label: 'Auto-PO Config', icon: Settings },
+  ] as const;
+
+  const phase5Items = [
+    { id: 'quality_compliance', label: 'Quality & Compliance', icon: Shield },
+    { id: 'advanced_automation', label: 'Advanced Automation', icon: Brain },
   ] as const;
 
   const handleNavClick = (view: ViewType) => {
@@ -148,6 +155,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
          </div>
 
          {automationItems.map((item) => (
+           <button
+             key={item.id}
+             onClick={() => handleNavClick(item.id as ViewType)}
+             className={`w-full flex items-center px-md py-2.5 rounded text-left transition-all ${currentView === item.id
+               ? 'text-primary font-bold border-l-4 border-primary bg-primary/10'
+               : 'text-on-surface-variant/80 hover:text-on-surface hover:bg-surface-variant/40'
+               }`}
+           >
+             <item.icon className="w-4.5 h-4.5 mr-sm" />
+             <span className="font-body-md text-sm">{item.label}</span>
+           </button>
+         ))}
+
+         <div className="pt-xl px-md mb-xs text-[11px] text-outline font-bold opacity-40">
+           QUALITY & ANALYTICS
+         </div>
+
+         {phase5Items.map((item) => (
            <button
              key={item.id}
              onClick={() => handleNavClick(item.id as ViewType)}

@@ -57,6 +57,8 @@ import { BookkeepingView } from './components/views/BookkeepingView';
 import { ProductionCostsView } from './components/views/ProductionCostsView';
 import AutomationDashboard from './components/views/AutomationDashboard';
 import AutoPOConfigView from './components/views/AutoPOConfigView';
+import QualityComplianceDashboard from './components/views/QualityComplianceDashboard';
+import AdvancedAutomationDashboard from './components/views/AdvancedAutomationDashboard';
 
 const TIMEZONES = [
   { name: 'UTC (Coordinated Universal Time)', value: 'UTC' },
@@ -1662,6 +1664,14 @@ if (currentView === 'alternates') {
 
              if (currentView === 'auto_po_config') {
                return <AutoPOConfigView triggerToast={triggerToast} />;
+             }
+
+             if (currentView === 'quality_compliance') {
+               return <QualityComplianceDashboard triggerToast={triggerToast} />;
+             }
+
+             if (currentView === 'advanced_automation') {
+               return <AdvancedAutomationDashboard triggerToast={triggerToast} />;
              }
 
              return null;

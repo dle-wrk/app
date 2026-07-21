@@ -559,7 +559,9 @@ export type ViewType =
   | 'production_costs'
   | 'bookkeeping'
   | 'automation'
-  | 'auto_po_config';
+  | 'auto_po_config'
+  | 'quality_compliance'
+  | 'advanced_automation';
 
 export interface ProductionProduct {
   id: number;
