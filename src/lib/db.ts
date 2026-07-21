@@ -359,6 +359,127 @@ async function ensureProductionTables() {
   await exec(`CREATE INDEX IF NOT EXISTS fulfillment_order_idx ON order_fulfillment (client_order_id, fulfillment_status)`).catch(() => {});
 }
 
+async function ensureAutomationTables() {
+  // Automation rules engine
+  await exec(`CREATE TABLE IF NOT EXISTS automation_rules (
+    id SERIAL PRIMARY KEY,
+    rule_name TEXT NOT NULL,
+    rule_type TEXT NOT NULL,
+    description TEXT,
+    trigger_event TEXT NOT NULL,
+    conditions JSONB,
+    actions JSONB NOT NULL,
+    is_active BOOLEAN DEFAULT true,
+    priority INTEGER DEFAULT 0,
+    created_by TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  // Scheduled jobs
+  await exec(`CREATE TABLE IF NOT EXISTS scheduled_jobs (
+    id SERIAL PRIMARY KEY,
+    job_name TEXT UNIQUE NOT NULL,
+    job_type TEXT NOT NULL,
+    schedule_type TEXT NOT NULL,
+    cron_expression TEXT,
+    next_run TIMESTAMP,
+    last_run TIMESTAMP,
+    last_status TEXT DEFAULT 'PENDING',
+    is_active BOOLEAN DEFAULT true,
+    retry_count INTEGER DEFAULT 0,
+    max_retries INTEGER DEFAULT 3,
+    config JSONB,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  // Notification templates
+  await exec(`CREATE TABLE IF NOT EXISTS notification_templates (
+    id SERIAL PRIMARY KEY,
+    template_name TEXT UNIQUE NOT NULL,
+    template_type TEXT NOT NULL,
+    subject TEXT,
+    body TEXT NOT NULL,
+    variables JSONB,
+    enabled BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  // Notifications queue
+  await exec(`CREATE TABLE IF NOT EXISTS notifications (
+    id SERIAL PRIMARY KEY,
+    notification_type TEXT NOT NULL,
+    recipient TEXT NOT NULL,
+    subject TEXT,
+    message TEXT NOT NULL,
+    data JSONB,
+    status TEXT DEFAULT 'PENDING',
+    sent_at TIMESTAMP,
+    read_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  // Event log for audit trail
+  await exec(`CREATE TABLE IF NOT EXISTS event_log (
+    id SERIAL PRIMARY KEY,
+    event_type TEXT NOT NULL,
+    entity_type TEXT,
+    entity_id TEXT,
+    action TEXT,
+    user_id TEXT,
+    details JSONB,
+    ip_address TEXT,
+    status TEXT DEFAULT 'SUCCESS',
+    error_message TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  // Auto-PO configuration
+  await exec(`CREATE TABLE IF NOT EXISTS auto_po_config (
+    id SERIAL PRIMARY KEY,
+    component_id TEXT UNIQUE NOT NULL,
+    min_stock_level INTEGER NOT NULL DEFAULT 10,
+    auto_po_threshold INTEGER NOT NULL DEFAULT 5,
+    preferred_supplier TEXT,
+    auto_supplier_select BOOLEAN DEFAULT true,
+    auto_approve BOOLEAN DEFAULT false,
+    enabled BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  // Alert subscriptions
+  await exec(`CREATE TABLE IF NOT EXISTS alert_subscriptions (
+    id SERIAL PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    alert_type TEXT NOT NULL,
+    channel TEXT NOT NULL,
+    is_active BOOLEAN DEFAULT true,
+    preferences JSONB,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  // Automation execution log
+  await exec(`CREATE TABLE IF NOT EXISTS automation_executions (
+    id SERIAL PRIMARY KEY,
+    rule_id INTEGER REFERENCES automation_rules(id) ON DELETE CASCADE,
+    triggered_by TEXT,
+    status TEXT DEFAULT 'PENDING',
+    result_data JSONB,
+    error_message TEXT,
+    execution_time_ms INTEGER,
+    executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  // Indexes for performance
+  await exec(`CREATE INDEX IF NOT EXISTS automation_rules_active_idx ON automation_rules (is_active, trigger_event)`).catch(() => {});
+  await exec(`CREATE INDEX IF NOT EXISTS scheduled_jobs_active_idx ON scheduled_jobs (is_active, next_run)`).catch(() => {});
+  await exec(`CREATE INDEX IF NOT EXISTS notifications_status_idx ON notifications (status, created_at DESC)`).catch(() => {});
+  await exec(`CREATE INDEX IF NOT EXISTS event_log_type_idx ON event_log (event_type, created_at DESC)`).catch(() => {});
+  await exec(`CREATE INDEX IF NOT EXISTS auto_po_enabled_idx ON auto_po_config (enabled, component_id)`).catch(() => {});
+  await exec(`CREATE INDEX IF NOT EXISTS alert_subscriptions_user_idx ON alert_subscriptions (user_id, alert_type)`).catch(() => {});
+}
+
 async function ensureProjectsTable() {
   await exec(`CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY,
@@ -455,6 +576,7 @@ export async function ensureSchema() {
     await ensureProjectsTable();
     await ensurePricingTables();
     await ensureProductionTables();
+    await ensureAutomationTables();
     return;
   }
 
@@ -465,6 +587,7 @@ export async function ensureSchema() {
   await ensureSuppliersTable();
   await ensureProjectsTable();
   await ensureProductionTables();
+  await ensureAutomationTables();
 
   const inventoryCount = await seedTable('inventory', path.join(assetsDir, 'MainInventory.csv'));
   if (inventoryCount === 0) await seedFallbackInventory();
