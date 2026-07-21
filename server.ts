@@ -1693,6 +1693,1091 @@ app.delete('/api/build-jobs/:id', async (req, res) => {
   }
 });
 
+// PHASE 3: PRODUCTION/ORDER MANAGEMENT ENDPOINTS
+
+// Production Jobs (enhanced)
+app.get('/api/production-jobs', async (req, res) => {
+  const status = req.query.status as string | undefined;
+  try {
+    let sql = 'SELECT * FROM production_jobs';
+    const params: any[] = [];
+    if (status) {
+      sql += ' WHERE status = $1';
+      params.push(status);
+    }
+    sql += ' ORDER BY scheduled_start DESC';
+    const { rows } = await query(sql, params);
+    res.json(rows.map((row: any) => ({
+      id: row.id,
+      jobNumber: row.job_number,
+      clientOrderId: row.client_order_id,
+      projectId: row.project_id,
+      status: row.status,
+      priority: row.priority,
+      buildQty: row.build_qty,
+      completedQty: row.completed_qty,
+      defectQty: row.defect_qty,
+      yieldPct: row.yield_pct,
+      scheduledStart: row.scheduled_start,
+      scheduledEnd: row.scheduled_end,
+      actualStart: row.actual_start,
+      actualEnd: row.actual_end,
+      assignedTeam: row.assigned_team,
+      notes: row.notes,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    })));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/production-jobs', async (req, res) => {
+  const { jobNumber, clientOrderId, projectId, status, priority, buildQty, scheduledStart, scheduledEnd, assignedTeam, notes } = req.body;
+  if (!jobNumber) return res.status(400).json({ error: 'jobNumber is required' });
+
+  try {
+    const row = await queryOne(
+      `INSERT INTO production_jobs (job_number, client_order_id, project_id, status, priority, build_qty, scheduled_start, scheduled_end, assigned_team, notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+      [jobNumber, clientOrderId || null, projectId || null, status || 'PLANNED', priority || 'MEDIUM', buildQty || 1, scheduledStart || null, scheduledEnd || null, assignedTeam || null, notes || null]
+    );
+    res.status(201).json({
+      id: row?.id,
+      jobNumber: row?.job_number,
+      clientOrderId: row?.client_order_id,
+      projectId: row?.project_id,
+      status: row?.status,
+      priority: row?.priority,
+      buildQty: row?.build_qty,
+      completedQty: row?.completed_qty,
+      defectQty: row?.defect_qty,
+      yieldPct: row?.yield_pct,
+      scheduledStart: row?.scheduled_start,
+      scheduledEnd: row?.scheduled_end,
+      assignedTeam: row?.assigned_team,
+      notes: row?.notes,
+      createdAt: row?.created_at,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/production-jobs/:id', async (req, res) => {
+  const id = parseInt(req.params.id);
+  const { status, completedQty, defectQty, actualStart, actualEnd, notes } = req.body;
+  try {
+    const row = await queryOne(
+      `UPDATE production_jobs SET status = COALESCE($1, status), completed_qty = COALESCE($2, completed_qty),
+       defect_qty = COALESCE($3, defect_qty), actual_start = COALESCE($4, actual_start),
+       actual_end = COALESCE($5, actual_end), notes = COALESCE($6, notes), updated_at = now()
+       WHERE id = $7 RETURNING *`,
+      [status || null, completedQty ?? null, defectQty ?? null, actualStart || null, actualEnd || null, notes || null, id]
+    );
+    if (!row) return res.status(404).json({ error: 'Production job not found' });
+    res.json({
+      id: row.id,
+      jobNumber: row.job_number,
+      status: row.status,
+      completedQty: row.completed_qty,
+      defectQty: row.defect_qty,
+      actualStart: row.actual_start,
+      actualEnd: row.actual_end,
+      updatedAt: row.updated_at,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Work Orders
+app.get('/api/work-orders', async (req, res) => {
+  const jobId = req.query.jobId as string | undefined;
+  try {
+    let sql = 'SELECT * FROM work_orders';
+    const params: any[] = [];
+    if (jobId) {
+      sql += ' WHERE production_job_id = $1';
+      params.push(parseInt(jobId));
+    }
+    sql += ' ORDER BY sequence_order ASC';
+    const { rows } = await query(sql, params);
+    res.json(rows.map((row: any) => ({
+      id: row.id,
+      productionJobId: row.production_job_id,
+      workOrderNumber: row.work_order_number,
+      workType: row.work_type,
+      description: row.description,
+      status: row.status,
+      sequenceOrder: row.sequence_order,
+      assignedTo: row.assigned_to,
+      estimatedHours: row.estimated_hours,
+      actualHours: row.actual_hours,
+      startedAt: row.started_at,
+      completedAt: row.completed_at,
+      createdAt: row.created_at,
+    })));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/work-orders', async (req, res) => {
+  const { productionJobId, workOrderNumber, workType, description, status, sequenceOrder, assignedTo, estimatedHours } = req.body;
+  if (!productionJobId || !workOrderNumber || !workType) {
+    return res.status(400).json({ error: 'productionJobId, workOrderNumber, and workType are required' });
+  }
+
+  try {
+    const row = await queryOne(
+      `INSERT INTO work_orders (production_job_id, work_order_number, work_type, description, status, sequence_order, assigned_to, estimated_hours)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [productionJobId, workOrderNumber, workType, description || null, status || 'PENDING', sequenceOrder || 1, assignedTo || null, estimatedHours || null]
+    );
+    res.status(201).json({
+      id: row?.id,
+      productionJobId: row?.production_job_id,
+      workOrderNumber: row?.work_order_number,
+      workType: row?.work_type,
+      status: row?.status,
+      sequenceOrder: row?.sequence_order,
+      createdAt: row?.created_at,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/work-orders/:id', async (req, res) => {
+  const id = parseInt(req.params.id);
+  const { status, actualHours, startedAt, completedAt } = req.body;
+  try {
+    const row = await queryOne(
+      `UPDATE work_orders SET status = COALESCE($1, status), actual_hours = COALESCE($2, actual_hours),
+       started_at = COALESCE($3, started_at), completed_at = COALESCE($4, completed_at)
+       WHERE id = $5 RETURNING *`,
+      [status || null, actualHours ?? null, startedAt || null, completedAt || null, id]
+    );
+    if (!row) return res.status(404).json({ error: 'Work order not found' });
+    res.json({
+      id: row.id,
+      status: row.status,
+      actualHours: row.actual_hours,
+      startedAt: row.started_at,
+      completedAt: row.completed_at,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Component Allocation to Jobs
+app.get('/api/job-allocations/:jobId', async (req, res) => {
+  const jobId = parseInt(req.params.jobId);
+  try {
+    const { rows } = await query(
+      'SELECT * FROM job_component_allocation WHERE production_job_id = $1 ORDER BY allocated_at DESC',
+      [jobId]
+    );
+    res.json(rows.map((row: any) => ({
+      id: row.id,
+      productionJobId: row.production_job_id,
+      componentId: row.component_id,
+      qtyAllocated: row.qty_allocated,
+      qtyConsumed: row.qty_consumed,
+      qtyDefective: row.qty_defective,
+      allocatedAt: row.allocated_at,
+      consumedAt: row.consumed_at,
+    })));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/job-allocations', async (req, res) => {
+  const { productionJobId, componentId, qtyAllocated } = req.body;
+  if (!productionJobId || !componentId || !qtyAllocated) {
+    return res.status(400).json({ error: 'productionJobId, componentId, and qtyAllocated are required' });
+  }
+
+  try {
+    const row = await queryOne(
+      `INSERT INTO job_component_allocation (production_job_id, component_id, qty_allocated)
+       VALUES ($1, $2, $3) RETURNING *`,
+      [productionJobId, componentId, qtyAllocated]
+    );
+    res.status(201).json({
+      id: row?.id,
+      productionJobId: row?.production_job_id,
+      componentId: row?.component_id,
+      qtyAllocated: row?.qty_allocated,
+      qtyConsumed: row?.qty_consumed,
+      qtyDefective: row?.qty_defective,
+      allocatedAt: row?.allocated_at,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/job-allocations/:id/consume', async (req, res) => {
+  const id = parseInt(req.params.id);
+  const { qtyConsumed, qtyDefective } = req.body;
+  try {
+    const row = await queryOne(
+      `UPDATE job_component_allocation SET qty_consumed = COALESCE($1, qty_consumed),
+       qty_defective = COALESCE($2, qty_defective), consumed_at = now()
+       WHERE id = $3 RETURNING *`,
+      [qtyConsumed ?? null, qtyDefective ?? null, id]
+    );
+    if (!row) return res.status(404).json({ error: 'Allocation not found' });
+    res.json({
+      id: row.id,
+      qtyConsumed: row.qty_consumed,
+      qtyDefective: row.qty_defective,
+      consumedAt: row.consumed_at,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Quality Control Checkpoints
+app.get('/api/qc-checkpoints/:jobId', async (req, res) => {
+  const jobId = parseInt(req.params.jobId);
+  try {
+    const { rows } = await query(
+      'SELECT * FROM qc_checkpoints WHERE production_job_id = $1 ORDER BY sequence_order ASC',
+      [jobId]
+    );
+    res.json(rows.map((row: any) => ({
+      id: row.id,
+      productionJobId: row.production_job_id,
+      checkpointName: row.checkpoint_name,
+      checkpointType: row.checkpoint_type,
+      sequenceOrder: row.sequence_order,
+      status: row.status,
+      inspector: row.inspector,
+      inspectedAt: row.inspected_at,
+      result: row.result,
+      defectsFound: row.defects_found,
+      notes: row.notes,
+      createdAt: row.created_at,
+    })));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/qc-checkpoints', async (req, res) => {
+  const { productionJobId, checkpointName, checkpointType, sequenceOrder } = req.body;
+  if (!productionJobId || !checkpointName || !checkpointType) {
+    return res.status(400).json({ error: 'productionJobId, checkpointName, and checkpointType are required' });
+  }
+
+  try {
+    const row = await queryOne(
+      `INSERT INTO qc_checkpoints (production_job_id, checkpoint_name, checkpoint_type, sequence_order)
+       VALUES ($1, $2, $3, $4) RETURNING *`,
+      [productionJobId, checkpointName, checkpointType, sequenceOrder || 1]
+    );
+    res.status(201).json({
+      id: row?.id,
+      productionJobId: row?.production_job_id,
+      checkpointName: row?.checkpoint_name,
+      checkpointType: row?.checkpoint_type,
+      status: row?.status,
+      createdAt: row?.created_at,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/qc-checkpoints/:id/complete', async (req, res) => {
+  const id = parseInt(req.params.id);
+  const { inspector, result, defectsFound, notes } = req.body;
+  try {
+    const row = await queryOne(
+      `UPDATE qc_checkpoints SET status = 'COMPLETED', inspector = $1, result = $2,
+       defects_found = $3, notes = $4, inspected_at = now()
+       WHERE id = $5 RETURNING *`,
+      [inspector || null, result || 'PASS', defectsFound || 0, notes || null, id]
+    );
+    if (!row) return res.status(404).json({ error: 'QC checkpoint not found' });
+    res.json({
+      id: row.id,
+      status: row.status,
+      result: row.result,
+      defectsFound: row.defects_found,
+      inspectedAt: row.inspected_at,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Production Defects
+app.get('/api/production-defects/:jobId', async (req, res) => {
+  const jobId = parseInt(req.params.jobId);
+  try {
+    const { rows } = await query(
+      'SELECT * FROM production_defects WHERE production_job_id = $1 ORDER BY discovered_at DESC',
+      [jobId]
+    );
+    res.json(rows.map((row: any) => ({
+      id: row.id,
+      productionJobId: row.production_job_id,
+      qcCheckpointId: row.qc_checkpoint_id,
+      defectCode: row.defect_code,
+      defectDescription: row.defect_description,
+      severity: row.severity,
+      componentAffected: row.component_affected,
+      rootCause: row.root_cause,
+      correctiveAction: row.corrective_action,
+      status: row.status,
+      discoveredAt: row.discovered_at,
+      resolvedAt: row.resolved_at,
+    })));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/production-defects', async (req, res) => {
+  const { productionJobId, qcCheckpointId, defectCode, defectDescription, severity, componentAffected } = req.body;
+  if (!productionJobId || !defectCode) {
+    return res.status(400).json({ error: 'productionJobId and defectCode are required' });
+  }
+
+  try {
+    const row = await queryOne(
+      `INSERT INTO production_defects (production_job_id, qc_checkpoint_id, defect_code, defect_description, severity, component_affected)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [productionJobId, qcCheckpointId || null, defectCode, defectDescription || null, severity || 'MEDIUM', componentAffected || null]
+    );
+    res.status(201).json({
+      id: row?.id,
+      productionJobId: row?.production_job_id,
+      defectCode: row?.defect_code,
+      status: row?.status,
+      discoveredAt: row?.discovered_at,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/production-defects/:id/resolve', async (req, res) => {
+  const id = parseInt(req.params.id);
+  const { rootCause, correctiveAction } = req.body;
+  try {
+    const row = await queryOne(
+      `UPDATE production_defects SET status = 'RESOLVED', root_cause = $1, corrective_action = $2, resolved_at = now()
+       WHERE id = $3 RETURNING *`,
+      [rootCause || null, correctiveAction || null, id]
+    );
+    if (!row) return res.status(404).json({ error: 'Defect not found' });
+    res.json({
+      id: row.id,
+      status: row.status,
+      rootCause: row.root_cause,
+      correctiveAction: row.corrective_action,
+      resolvedAt: row.resolved_at,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Order Fulfillment
+app.get('/api/order-fulfillment', async (req, res) => {
+  const orderId = req.query.orderId as string | undefined;
+  try {
+    let sql = 'SELECT * FROM order_fulfillment';
+    const params: any[] = [];
+    if (orderId) {
+      sql += ' WHERE client_order_id = $1';
+      params.push(parseInt(orderId));
+    }
+    sql += ' ORDER BY created_at DESC';
+    const { rows } = await query(sql, params);
+    res.json(rows.map((row: any) => ({
+      id: row.id,
+      clientOrderId: row.client_order_id,
+      productionJobId: row.production_job_id,
+      fulfillmentStatus: row.fulfillment_status,
+      qtyOrdered: row.qty_ordered,
+      qtyBuilt: row.qty_built,
+      qtyShipped: row.qty_shipped,
+      expectedShipDate: row.expected_ship_date,
+      actualShipDate: row.actual_ship_date,
+      trackingNumber: row.tracking_number,
+      notes: row.notes,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    })));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/order-fulfillment', async (req, res) => {
+  const { clientOrderId, productionJobId, qtyOrdered, expectedShipDate, notes } = req.body;
+  if (!clientOrderId || !qtyOrdered) {
+    return res.status(400).json({ error: 'clientOrderId and qtyOrdered are required' });
+  }
+
+  try {
+    const row = await queryOne(
+      `INSERT INTO order_fulfillment (client_order_id, production_job_id, qty_ordered, expected_ship_date, notes)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [clientOrderId, productionJobId || null, qtyOrdered, expectedShipDate || null, notes || null]
+    );
+    res.status(201).json({
+      id: row?.id,
+      clientOrderId: row?.client_order_id,
+      fulfillmentStatus: row?.fulfillment_status,
+      qtyOrdered: row?.qty_ordered,
+      createdAt: row?.created_at,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/order-fulfillment/:id', async (req, res) => {
+  const id = parseInt(req.params.id);
+  const { fulfillmentStatus, qtyBuilt, qtyShipped, actualShipDate, trackingNumber, notes } = req.body;
+  try {
+    const row = await queryOne(
+      `UPDATE order_fulfillment SET fulfillment_status = COALESCE($1, fulfillment_status),
+       qty_built = COALESCE($2, qty_built), qty_shipped = COALESCE($3, qty_shipped),
+       actual_ship_date = COALESCE($4, actual_ship_date), tracking_number = COALESCE($5, tracking_number),
+       notes = COALESCE($6, notes), updated_at = now()
+       WHERE id = $7 RETURNING *`,
+      [fulfillmentStatus || null, qtyBuilt ?? null, qtyShipped ?? null, actualShipDate || null, trackingNumber || null, notes || null, id]
+    );
+    if (!row) return res.status(404).json({ error: 'Order fulfillment not found' });
+    res.json({
+      id: row.id,
+      fulfillmentStatus: row.fulfillment_status,
+      qtyBuilt: row.qty_built,
+      qtyShipped: row.qty_shipped,
+      actualShipDate: row.actual_ship_date,
+      trackingNumber: row.tracking_number,
+      updatedAt: row.updated_at,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Production Metrics/Analytics
+app.get('/api/production-metrics', async (req, res) => {
+  const metricDate = req.query.date as string | undefined;
+  try {
+    let sql = 'SELECT * FROM production_metrics';
+    const params: any[] = [];
+    if (metricDate) {
+      sql += ' WHERE metric_date = $1';
+      params.push(metricDate);
+    } else {
+      sql += ' WHERE metric_date >= CURRENT_DATE - INTERVAL \'30 days\'';
+    }
+    sql += ' ORDER BY metric_date DESC';
+    const { rows } = await query(sql, params);
+    res.json(rows.map((row: any) => ({
+      id: row.id,
+      metricDate: row.metric_date,
+      totalJobsStarted: row.total_jobs_started,
+      totalJobsCompleted: row.total_jobs_completed,
+      avgCycleTimeHours: row.avg_cycle_time_hours,
+      avgYieldPct: row.avg_yield_pct,
+      totalDefects: row.total_defects,
+      defectRatePct: row.defect_rate_pct,
+      onTimeCompletionPct: row.on_time_completion_pct,
+      createdAt: row.created_at,
+    })));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/production-metrics/calculate', async (req, res) => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const startOfDay = `${today} 00:00:00`;
+    const endOfDay = `${today} 23:59:59`;
+
+    // Calculate metrics for today
+    const jobsStarted = await queryOne<{ count: number }>(
+      `SELECT COUNT(*) as count FROM production_jobs WHERE actual_start::date = $1`,
+      [today]
+    );
+    const jobsCompleted = await queryOne<{ count: number }>(
+      `SELECT COUNT(*) as count FROM production_jobs WHERE actual_end::date = $1 AND status = 'COMPLETED'`,
+      [today]
+    );
+    const avgCycleTime = await queryOne<{ avg_hours: number | null }>(
+      `SELECT EXTRACT(EPOCH FROM (actual_end - actual_start))/3600 as avg_hours
+       FROM production_jobs WHERE actual_end::date = $1 AND status = 'COMPLETED'`,
+      [today]
+    );
+    const avgYield = await queryOne<{ avg_yield: number | null }>(
+      `SELECT AVG(yield_pct) as avg_yield FROM production_jobs WHERE actual_end::date = $1`,
+      [today]
+    );
+    const totalDefects = await queryOne<{ count: number }>(
+      `SELECT COUNT(*) as count FROM production_defects WHERE discovered_at::date = $1`,
+      [today]
+    );
+
+    // Upsert metrics
+    const row = await queryOne(
+      `INSERT INTO production_metrics (metric_date, total_jobs_started, total_jobs_completed, avg_cycle_time_hours, avg_yield_pct, total_defects)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (metric_date) DO UPDATE SET
+         total_jobs_started = $2, total_jobs_completed = $3, avg_cycle_time_hours = $4, avg_yield_pct = $5, total_defects = $6
+       RETURNING *`,
+      [today, jobsStarted?.count || 0, jobsCompleted?.count || 0, avgCycleTime?.avg_hours || 0, avgYield?.avg_yield || 0, totalDefects?.count || 0]
+    );
+    res.json({
+      metricDate: row?.metric_date,
+      totalJobsStarted: row?.total_jobs_started,
+      totalJobsCompleted: row?.total_jobs_completed,
+      avgCycleTimeHours: row?.avg_cycle_time_hours,
+      avgYieldPct: row?.avg_yield_pct,
+      totalDefects: row?.total_defects,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PHASE 4: AUTOMATION & WORKFLOW ENDPOINTS
+
+// Automation Rules Management
+app.get('/api/automation-rules', async (req, res) => {
+  const isActive = req.query.isActive as string | undefined;
+  try {
+    let sql = 'SELECT * FROM automation_rules';
+    const params: any[] = [];
+    if (isActive !== undefined) {
+      sql += ' WHERE is_active = $1';
+      params.push(isActive === 'true');
+    }
+    sql += ' ORDER BY priority DESC, updated_at DESC';
+    const { rows } = await query(sql, params);
+    res.json(rows.map((row: any) => ({
+      id: row.id,
+      ruleName: row.rule_name,
+      ruleType: row.rule_type,
+      description: row.description,
+      triggerEvent: row.trigger_event,
+      conditions: row.conditions,
+      actions: row.actions,
+      isActive: row.is_active,
+      priority: row.priority,
+      createdBy: row.created_by,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    })));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/automation-rules', async (req, res) => {
+  const { ruleName, ruleType, description, triggerEvent, conditions, actions, priority, createdBy } = req.body;
+  if (!ruleName || !ruleType || !triggerEvent || !actions) {
+    return res.status(400).json({ error: 'ruleName, ruleType, triggerEvent, and actions are required' });
+  }
+
+  try {
+    const row = await queryOne(
+      `INSERT INTO automation_rules (rule_name, rule_type, description, trigger_event, conditions, actions, priority, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [ruleName, ruleType, description || null, triggerEvent, conditions || null, actions, priority || 0, createdBy || null]
+    );
+    res.status(201).json({
+      id: row?.id,
+      ruleName: row?.rule_name,
+      ruleType: row?.rule_type,
+      triggerEvent: row?.trigger_event,
+      isActive: row?.is_active,
+      createdAt: row?.created_at,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/automation-rules/:id', async (req, res) => {
+  const id = parseInt(req.params.id);
+  const { isActive, priority, actions, conditions } = req.body;
+  try {
+    const row = await queryOne(
+      `UPDATE automation_rules SET is_active = COALESCE($1, is_active), priority = COALESCE($2, priority),
+       actions = COALESCE($3, actions), conditions = COALESCE($4, conditions), updated_at = now()
+       WHERE id = $5 RETURNING *`,
+      [isActive ?? null, priority ?? null, actions || null, conditions || null, id]
+    );
+    if (!row) return res.status(404).json({ error: 'Automation rule not found' });
+    res.json({
+      id: row.id,
+      isActive: row.is_active,
+      priority: row.priority,
+      updatedAt: row.updated_at,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Scheduled Jobs Management
+app.get('/api/scheduled-jobs', async (req, res) => {
+  const isActive = req.query.isActive as string | undefined;
+  try {
+    let sql = 'SELECT * FROM scheduled_jobs';
+    const params: any[] = [];
+    if (isActive !== undefined) {
+      sql += ' WHERE is_active = $1';
+      params.push(isActive === 'true');
+    }
+    sql += ' ORDER BY next_run ASC';
+    const { rows } = await query(sql, params);
+    res.json(rows.map((row: any) => ({
+      id: row.id,
+      jobName: row.job_name,
+      jobType: row.job_type,
+      scheduleType: row.schedule_type,
+      cronExpression: row.cron_expression,
+      nextRun: row.next_run,
+      lastRun: row.last_run,
+      lastStatus: row.last_status,
+      isActive: row.is_active,
+      retryCount: row.retry_count,
+      maxRetries: row.max_retries,
+      createdAt: row.created_at,
+    })));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/scheduled-jobs', async (req, res) => {
+  const { jobName, jobType, scheduleType, cronExpression, config } = req.body;
+  if (!jobName || !jobType || !scheduleType) {
+    return res.status(400).json({ error: 'jobName, jobType, and scheduleType are required' });
+  }
+
+  try {
+    const row = await queryOne(
+      `INSERT INTO scheduled_jobs (job_name, job_type, schedule_type, cron_expression, config, next_run)
+       VALUES ($1, $2, $3, $4, $5, now()) RETURNING *`,
+      [jobName, jobType, scheduleType, cronExpression || null, config || null]
+    );
+    res.status(201).json({
+      id: row?.id,
+      jobName: row?.job_name,
+      jobType: row?.job_type,
+      isActive: row?.is_active,
+      createdAt: row?.created_at,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/scheduled-jobs/:id/toggle', async (req, res) => {
+  const id = parseInt(req.params.id);
+  try {
+    const row = await queryOne(
+      `UPDATE scheduled_jobs SET is_active = NOT is_active WHERE id = $1 RETURNING *`,
+      [id]
+    );
+    if (!row) return res.status(404).json({ error: 'Scheduled job not found' });
+    res.json({ id: row.id, isActive: row.is_active });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Notifications
+app.get('/api/notifications', async (req, res) => {
+  const userId = req.query.userId as string | undefined;
+  const status = req.query.status as string | undefined;
+  try {
+    let sql = 'SELECT * FROM notifications WHERE 1=1';
+    const params: any[] = [];
+    if (userId) {
+      sql += ' AND recipient = $' + (params.length + 1);
+      params.push(userId);
+    }
+    if (status) {
+      sql += ' AND status = $' + (params.length + 1);
+      params.push(status);
+    }
+    sql += ' ORDER BY created_at DESC LIMIT 50';
+    const { rows } = await query(sql, params);
+    res.json(rows.map((row: any) => ({
+      id: row.id,
+      notificationType: row.notification_type,
+      recipient: row.recipient,
+      subject: row.subject,
+      message: row.message,
+      data: row.data,
+      status: row.status,
+      sentAt: row.sent_at,
+      readAt: row.read_at,
+      createdAt: row.created_at,
+    })));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/notifications', async (req, res) => {
+  const { notificationType, recipient, subject, message, data } = req.body;
+  if (!notificationType || !recipient || !message) {
+    return res.status(400).json({ error: 'notificationType, recipient, and message are required' });
+  }
+
+  try {
+    const row = await queryOne(
+      `INSERT INTO notifications (notification_type, recipient, subject, message, data)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [notificationType, recipient, subject || null, message, data || null]
+    );
+    res.status(201).json({
+      id: row?.id,
+      notificationType: row?.notification_type,
+      status: row?.status,
+      createdAt: row?.created_at,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/notifications/:id/mark-read', async (req, res) => {
+  const id = parseInt(req.params.id);
+  try {
+    const row = await queryOne(
+      `UPDATE notifications SET status = 'READ', read_at = now() WHERE id = $1 RETURNING *`,
+      [id]
+    );
+    if (!row) return res.status(404).json({ error: 'Notification not found' });
+    res.json({ id: row.id, status: row.status, readAt: row.read_at });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Auto-PO Configuration
+app.get('/api/auto-po-config', async (req, res) => {
+  const isEnabled = req.query.enabled as string | undefined;
+  try {
+    let sql = 'SELECT * FROM auto_po_config';
+    const params: any[] = [];
+    if (isEnabled !== undefined) {
+      sql += ' WHERE enabled = $1';
+      params.push(isEnabled === 'true');
+    }
+    sql += ' ORDER BY component_id ASC';
+    const { rows } = await query(sql, params);
+    res.json(rows.map((row: any) => ({
+      id: row.id,
+      componentId: row.component_id,
+      minStockLevel: row.min_stock_level,
+      autoPOThreshold: row.auto_po_threshold,
+      preferredSupplier: row.preferred_supplier,
+      autoSupplierSelect: row.auto_supplier_select,
+      autoApprove: row.auto_approve,
+      enabled: row.enabled,
+      createdAt: row.created_at,
+    })));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/auto-po-config', async (req, res) => {
+  const { componentId, minStockLevel, autoPOThreshold, preferredSupplier, autoSupplierSelect, autoApprove } = req.body;
+  if (!componentId || !minStockLevel || !autoPOThreshold) {
+    return res.status(400).json({ error: 'componentId, minStockLevel, and autoPOThreshold are required' });
+  }
+
+  try {
+    const row = await queryOne(
+      `INSERT INTO auto_po_config (component_id, min_stock_level, auto_po_threshold, preferred_supplier, auto_supplier_select, auto_approve)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [componentId, minStockLevel, autoPOThreshold, preferredSupplier || null, autoSupplierSelect ?? true, autoApprove ?? false]
+    );
+    res.status(201).json({
+      id: row?.id,
+      componentId: row?.component_id,
+      minStockLevel: row?.min_stock_level,
+      autoPOThreshold: row?.auto_po_threshold,
+      enabled: row?.enabled,
+      createdAt: row?.created_at,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/auto-po-config/:id', async (req, res) => {
+  const id = parseInt(req.params.id);
+  const { minStockLevel, autoPOThreshold, preferredSupplier, autoSupplierSelect, autoApprove, enabled } = req.body;
+  try {
+    const row = await queryOne(
+      `UPDATE auto_po_config SET min_stock_level = COALESCE($1, min_stock_level),
+       auto_po_threshold = COALESCE($2, auto_po_threshold), preferred_supplier = COALESCE($3, preferred_supplier),
+       auto_supplier_select = COALESCE($4, auto_supplier_select), auto_approve = COALESCE($5, auto_approve),
+       enabled = COALESCE($6, enabled), updated_at = now()
+       WHERE id = $7 RETURNING *`,
+      [minStockLevel ?? null, autoPOThreshold ?? null, preferredSupplier || null, autoSupplierSelect ?? null, autoApprove ?? null, enabled ?? null, id]
+    );
+    if (!row) return res.status(404).json({ error: 'Auto-PO config not found' });
+    res.json({
+      id: row.id,
+      componentId: row.component_id,
+      enabled: row.enabled,
+      updatedAt: row.updated_at,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Event Logging (Audit Trail)
+app.get('/api/event-log', async (req, res) => {
+  const eventType = req.query.eventType as string | undefined;
+  const limit = Math.min(parseInt(req.query.limit as string) || 100, 1000);
+  try {
+    let sql = 'SELECT * FROM event_log';
+    const params: any[] = [];
+    if (eventType) {
+      sql += ' WHERE event_type = $1';
+      params.push(eventType);
+    }
+    sql += ' ORDER BY created_at DESC LIMIT $' + (params.length + 1);
+    params.push(limit);
+    const { rows } = await query(sql, params);
+    res.json(rows.map((row: any) => ({
+      id: row.id,
+      eventType: row.event_type,
+      entityType: row.entity_type,
+      entityId: row.entity_id,
+      action: row.action,
+      userId: row.user_id,
+      details: row.details,
+      status: row.status,
+      createdAt: row.created_at,
+    })));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/event-log', async (req, res) => {
+  const { eventType, entityType, entityId, action, userId, details, status } = req.body;
+  if (!eventType || !action) {
+    return res.status(400).json({ error: 'eventType and action are required' });
+  }
+
+  try {
+    const row = await queryOne(
+      `INSERT INTO event_log (event_type, entity_type, entity_id, action, user_id, details, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      [eventType, entityType || null, entityId || null, action, userId || null, details || null, status || 'SUCCESS']
+    );
+    res.status(201).json({
+      id: row?.id,
+      eventType: row?.event_type,
+      status: row?.status,
+      createdAt: row?.created_at,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Alert Subscriptions
+app.get('/api/alert-subscriptions', async (req, res) => {
+  const userId = req.query.userId as string | undefined;
+  try {
+    let sql = 'SELECT * FROM alert_subscriptions';
+    const params: any[] = [];
+    if (userId) {
+      sql += ' WHERE user_id = $1';
+      params.push(userId);
+    }
+    sql += ' ORDER BY created_at DESC';
+    const { rows } = await query(sql, params);
+    res.json(rows.map((row: any) => ({
+      id: row.id,
+      userId: row.user_id,
+      alertType: row.alert_type,
+      channel: row.channel,
+      isActive: row.is_active,
+      preferences: row.preferences,
+      createdAt: row.created_at,
+    })));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/alert-subscriptions', async (req, res) => {
+  const { userId, alertType, channel, preferences } = req.body;
+  if (!userId || !alertType || !channel) {
+    return res.status(400).json({ error: 'userId, alertType, and channel are required' });
+  }
+
+  try {
+    const row = await queryOne(
+      `INSERT INTO alert_subscriptions (user_id, alert_type, channel, preferences)
+       VALUES ($1, $2, $3, $4) RETURNING *`,
+      [userId, alertType, channel, preferences || null]
+    );
+    res.status(201).json({
+      id: row?.id,
+      userId: row?.user_id,
+      alertType: row?.alert_type,
+      isActive: row?.is_active,
+      createdAt: row?.created_at,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/alert-subscriptions/:id', async (req, res) => {
+  const id = parseInt(req.params.id);
+  const { isActive, preferences } = req.body;
+  try {
+    const row = await queryOne(
+      `UPDATE alert_subscriptions SET is_active = COALESCE($1, is_active), preferences = COALESCE($2, preferences)
+       WHERE id = $3 RETURNING *`,
+      [isActive ?? null, preferences || null, id]
+    );
+    if (!row) return res.status(404).json({ error: 'Alert subscription not found' });
+    res.json({ id: row.id, isActive: row.is_active });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Trigger Actions: Auto-PO Creation
+app.post('/api/automation/trigger-auto-po', async (req, res) => {
+  const { componentId } = req.body;
+  if (!componentId) return res.status(400).json({ error: 'componentId is required' });
+
+  try {
+    // Get auto-PO config
+    const config = await queryOne(
+      `SELECT * FROM auto_po_config WHERE component_id = $1 AND enabled = true`,
+      [componentId]
+    );
+    if (!config) return res.status(404).json({ error: 'Auto-PO config not found or disabled' });
+
+    // Get current stock
+    const item = await queryOne(`SELECT * FROM inventory WHERE serial_number = $1`, [componentId]);
+    if (!item) return res.status(404).json({ error: 'Component not found' });
+
+    // Check if stock is below threshold
+    if (item.stock > config.auto_po_threshold) {
+      return res.json({ message: 'Stock level above threshold, no PO created' });
+    }
+
+    // Auto-select supplier or use preferred
+    let supplierId = config.preferred_supplier;
+    if (config.auto_supplier_select && !supplierId) {
+      // Query best supplier from performance metrics
+      const bestSupplier = await queryOne(
+        `SELECT supplier FROM supplier_performance WHERE stock_availability_pct > 50 ORDER BY avg_lead_time_days ASC LIMIT 1`
+      );
+      supplierId = bestSupplier?.supplier || 'digikey';
+    }
+
+    // Create PO
+    const poNumber = `PO-AUTO-${Date.now()}`;
+    const po = await queryOne(
+      `INSERT INTO purchase_orders (po_number, supplier_id, order_date, status, notes)
+       VALUES ($1, $2, now(), $3, $4) RETURNING *`,
+      [poNumber, supplierId || null, config.auto_approve ? 'APPROVED' : 'DRAFT', `Auto-generated for ${componentId}`]
+    );
+
+    // Add line item
+    await exec(
+      `INSERT INTO purchase_order_items (purchase_order_id, component_id, quantity_ordered)
+       VALUES ($1, $2, $3)`,
+      [po?.id, componentId, Math.max(config.min_stock_level - item.stock, 10)]
+    );
+
+    // Log event
+    await exec(
+      `INSERT INTO event_log (event_type, entity_type, entity_id, action, status, details)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      ['AUTO_PO_CREATED', 'PURCHASE_ORDER', po?.id, 'AUTO_TRIGGER', 'SUCCESS', JSON.stringify({ componentId, supplierId })]
+    );
+
+    res.status(201).json({
+      poId: po?.id,
+      poNumber: po?.po_number,
+      status: po?.status,
+      createdAt: po?.created_at,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Trigger Actions: Send Alert Notification
+app.post('/api/automation/send-alert', async (req, res) => {
+  const { alertType, recipientId, message, data } = req.body;
+  if (!alertType || !recipientId || !message) {
+    return res.status(400).json({ error: 'alertType, recipientId, and message are required' });
+  }
+
+  try {
+    // Get alert subscriptions
+    const subs = await query(
+      `SELECT * FROM alert_subscriptions WHERE user_id = $1 AND alert_type = $2 AND is_active = true`,
+      [recipientId, alertType]
+    );
+
+    // Create notifications for each subscription
+    const notifications = [];
+    for (const sub of subs.rows) {
+      const notif = await queryOne(
+        `INSERT INTO notifications (notification_type, recipient, message, data, status)
+         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+        [alertType, recipientId, message, data || null, 'PENDING']
+      );
+      notifications.push(notif);
+    }
+
+    // Log event
+    await exec(
+      `INSERT INTO event_log (event_type, entity_type, action, user_id, status, details)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      ['ALERT_SENT', 'NOTIFICATION', 'AUTO_ALERT', recipientId, 'SUCCESS', JSON.stringify({ alertType, notifCount: notifications.length })]
+    );
+
+    res.json({
+      notificationsSent: notifications.length,
+      notificationIds: notifications.map((n: any) => n.id),
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/bom-structures', async (_req, res) => {
   try {
     const { rows } = await query('SELECT * FROM bom_structures ORDER BY id');
@@ -2259,6 +3344,197 @@ app.post('/api/shortages/convert-to-po', async (req, res) => {
     res.status(400).json({ error: err.message });
   } finally {
     client.release();
+  }
+});
+
+// POST /api/suppliers/compare-prices - fetch and compare prices across suppliers
+app.post('/api/suppliers/compare-prices', async (req, res) => {
+  const { partNumbers, forceRefresh } = req.body;
+  if (!Array.isArray(partNumbers) || partNumbers.length === 0) {
+    return res.status(400).json({ error: 'partNumbers array required' });
+  }
+
+  try {
+    const results: any[] = [];
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    for (const partNumber of partNumbers) {
+      const comparison = {
+        partNumber,
+        digikey: null as any,
+        mouser: null as any,
+        lcsc: null as any,
+        bestPrice: null as any,
+        bestSupplier: null as string | null,
+      };
+
+      // LCSC: check cache (always cached via scraper)
+      const lcscCached = await queryOne(
+        'SELECT * FROM lcsc_price_cache WHERE part_number = $1 OR mpn = $1 ORDER BY updated_at DESC LIMIT 1',
+        [partNumber]
+      );
+      if (lcscCached) {
+        comparison.lcsc = {
+          price: lcscCached.price,
+          currency: lcscCached.currency || 'USD',
+          stock: lcscCached.stock || 0,
+          moq: 1,
+          leadTime: 14,
+          cached: true,
+          updatedAt: lcscCached.updated_at,
+        };
+      }
+
+      // DigiKey/Mouser: check 24-hr cache first, fall back to live API if stale or force refresh
+      let digikeyFromCache = false, mouserFromCache = false;
+
+      if (!forceRefresh) {
+        const recentPrices = await query(
+          `SELECT * FROM supplier_price_history
+           WHERE part_number = $1 AND queried_at > $2`,
+          [partNumber, twentyFourHoursAgo.toISOString()]
+        );
+
+        recentPrices.rows.forEach(row => {
+          if (row.supplier === 'digikey') {
+            comparison.digikey = {
+              price: parseFloat(row.price),
+              currency: row.currency || 'USD',
+              stock: row.stock || 0,
+              moq: row.moq || 1,
+              leadTime: row.lead_time_days || 7,
+              cached: true,
+              updatedAt: row.queried_at,
+            };
+            digikeyFromCache = true;
+          } else if (row.supplier === 'mouser') {
+            comparison.mouser = {
+              price: parseFloat(row.price),
+              currency: row.currency || 'USD',
+              stock: row.stock || 0,
+              moq: row.moq || 1,
+              leadTime: row.lead_time_days || 5,
+              cached: true,
+              updatedAt: row.queried_at,
+            };
+            mouserFromCache = true;
+          }
+        });
+      }
+
+      // DigiKey: fetch live if no cache hit
+      if (!digikeyFromCache && process.env.DIGIKEY_CLIENT_ID && process.env.DIGIKEY_CLIENT_SECRET && await getDigikeyRefreshToken()) {
+        if ((await getPricingUsage('digikey')) < PRICING_DAILY_LIMIT) {
+          try {
+            await incrementPricingUsage('digikey');
+            const digiKeyResult = await searchDigikey(partNumber, 1);
+            if (digiKeyResult) {
+              comparison.digikey = {
+                price: digiKeyResult.unitPrice,
+                currency: digiKeyResult.currency,
+                stock: digiKeyResult.stock || 0,
+                moq: digiKeyResult.breakQuantity || 1,
+                leadTime: 7,
+                cached: false,
+                updatedAt: new Date().toISOString(),
+              };
+              // Store in history for caching
+              await exec(
+                `INSERT INTO supplier_price_history (supplier, part_number, price, currency, stock, moq, lead_time_days, queried_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, now())`,
+                ['digikey', partNumber, digiKeyResult.unitPrice || 0, digiKeyResult.currency, digiKeyResult.stock || 0, digiKeyResult.breakQuantity || 1, 7]
+              ).catch(() => {});
+            }
+          } catch (err: any) {
+            // silently fail live lookup, keep cached if available
+          }
+        }
+      }
+
+      // Mouser: fetch live if no cache hit
+      if (!mouserFromCache && process.env.MOUSER_API_KEY) {
+        if ((await getPricingUsage('mouser')) < PRICING_DAILY_LIMIT) {
+          try {
+            await incrementPricingUsage('mouser');
+            const mouserResult = await searchMouser(partNumber, 1);
+            if (mouserResult) {
+              comparison.mouser = {
+                price: mouserResult.unitPrice,
+                currency: mouserResult.currency,
+                stock: mouserResult.stock || 0,
+                moq: mouserResult.breakQuantity || 1,
+                leadTime: 5,
+                cached: false,
+                updatedAt: new Date().toISOString(),
+              };
+              // Store in history for caching
+              await exec(
+                `INSERT INTO supplier_price_history (supplier, part_number, price, currency, stock, moq, lead_time_days, queried_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, now())`,
+                ['mouser', partNumber, mouserResult.unitPrice || 0, mouserResult.currency, mouserResult.stock || 0, mouserResult.breakQuantity || 1, 5]
+              ).catch(() => {});
+            }
+          } catch (err: any) {
+            // silently fail live lookup, keep cached if available
+          }
+        }
+      }
+
+      // Determine best price (lowest available)
+      const validPrices = [
+        comparison.digikey && { supplier: 'digikey', price: parseFloat(comparison.digikey.price) },
+        comparison.mouser && { supplier: 'mouser', price: parseFloat(comparison.mouser.price) },
+        comparison.lcsc && { supplier: 'lcsc', price: parseFloat(comparison.lcsc.price) },
+      ].filter(Boolean) as any[];
+
+      if (validPrices.length > 0) {
+        const best = validPrices.reduce((a, b) => a.price < b.price ? a : b);
+        comparison.bestPrice = best.price;
+        comparison.bestSupplier = best.supplier;
+      }
+
+      results.push(comparison);
+    }
+
+    res.json({ comparisons: results });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/suppliers/price-history/:partNumber - get historical pricing data
+app.get('/api/suppliers/price-history/:partNumber', async (req, res) => {
+  const { partNumber } = req.params;
+
+  try {
+    const history = await query(
+      `SELECT supplier, price, stock, moq, lead_time_days, queried_at
+       FROM supplier_price_history
+       WHERE part_number = $1
+       ORDER BY queried_at DESC
+       LIMIT 100`,
+      [partNumber]
+    );
+
+    res.json({ partNumber, history: history.rows });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/suppliers/performance - get supplier performance metrics
+app.get('/api/suppliers/performance', async (req, res) => {
+  try {
+    const performance = await query(
+      `SELECT supplier, total_lookups, avg_price, avg_lead_time_days, stock_availability_pct, last_updated
+       FROM supplier_performance
+       ORDER BY total_lookups DESC`,
+      []
+    );
+
+    res.json({ suppliers: performance.rows });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 
