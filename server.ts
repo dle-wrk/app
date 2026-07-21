@@ -170,6 +170,49 @@ function pickBreakForQty<T>(breaks: T[], qty: number, getQty: (b: T) => number):
   return chosen ?? breaks[0];
 }
 
+// Helper functions for document numbering and mapping
+async function nextDocNumber(client: any, docType: string, seqTable: string): Promise<string> {
+  const result = await client.query(
+    `SELECT nextval('${seqTable}') as seq`
+  );
+  const seq = result.rows[0].seq;
+  return `${docType}-${String(seq).padStart(6, '0')}`;
+}
+
+function mapPurchaseOrder(row: any) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    poNumber: row.po_number,
+    supplierId: row.supplier_id,
+    supplierName: row.supplier_name,
+    orderDate: row.order_date,
+    expectedDate: row.expected_date,
+    status: row.status,
+    currency: row.currency,
+    subtotal: row.subtotal,
+    taxTotal: row.tax_total,
+    total: row.total,
+    notes: row.notes,
+    createdAt: row.created_at,
+  };
+}
+
+function mapPurchaseOrderItem(row: any) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    purchaseOrderId: row.purchase_order_id,
+    partNumber: row.part_number,
+    description: row.description,
+    quantity: row.quantity,
+    unitPrice: row.unit_price,
+    taxAmount: row.tax_amount || 0,
+    lineTotal: row.line_total || 0,
+    qtyReceived: row.qty_received || 0,
+  };
+}
+
 async function searchDigikey(partNumber: string, qty = 1) {
   const token = await getDigikeyToken();
   const res = await fetch('https://api.digikey.com/products/v4/search/keyword', {
@@ -2718,14 +2761,14 @@ app.post('/api/automation/trigger-auto-po', async (req, res) => {
     );
 
     // Add line item
-    await exec(
+    await query(
       `INSERT INTO purchase_order_items (purchase_order_id, component_id, quantity_ordered)
        VALUES ($1, $2, $3)`,
       [po?.id, componentId, Math.max(config.min_stock_level - item.stock, 10)]
     );
 
     // Log event
-    await exec(
+    await query(
       `INSERT INTO event_log (event_type, entity_type, entity_id, action, status, details)
        VALUES ($1, $2, $3, $4, $5, $6)`,
       ['AUTO_PO_CREATED', 'PURCHASE_ORDER', po?.id, 'AUTO_TRIGGER', 'SUCCESS', JSON.stringify({ componentId, supplierId })]
@@ -2768,7 +2811,7 @@ app.post('/api/automation/send-alert', async (req, res) => {
     }
 
     // Log event
-    await exec(
+    await query(
       `INSERT INTO event_log (event_type, entity_type, action, user_id, status, details)
        VALUES ($1, $2, $3, $4, $5, $6)`,
       ['ALERT_SENT', 'NOTIFICATION', 'AUTO_ALERT', recipientId, 'SUCCESS', JSON.stringify({ alertType, notifCount: notifications.length })]
@@ -3444,7 +3487,7 @@ app.post('/api/suppliers/compare-prices', async (req, res) => {
                 updatedAt: new Date().toISOString(),
               };
               // Store in history for caching
-              await exec(
+              await query(
                 `INSERT INTO supplier_price_history (supplier, part_number, price, currency, stock, moq, lead_time_days, queried_at)
                  VALUES ($1, $2, $3, $4, $5, $6, $7, now())`,
                 ['digikey', partNumber, digiKeyResult.unitPrice || 0, digiKeyResult.currency, digiKeyResult.stock || 0, digiKeyResult.breakQuantity || 1, 7]
@@ -3473,7 +3516,7 @@ app.post('/api/suppliers/compare-prices', async (req, res) => {
                 updatedAt: new Date().toISOString(),
               };
               // Store in history for caching
-              await exec(
+              await query(
                 `INSERT INTO supplier_price_history (supplier, part_number, price, currency, stock, moq, lead_time_days, queried_at)
                  VALUES ($1, $2, $3, $4, $5, $6, $7, now())`,
                 ['mouser', partNumber, mouserResult.unitPrice || 0, mouserResult.currency, mouserResult.stock || 0, mouserResult.breakQuantity || 1, 5]
