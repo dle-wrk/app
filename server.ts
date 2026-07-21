@@ -952,12 +952,29 @@ app.post('/api/items/bulk', async (req, res) => {
 
 app.post('/api/items/set-all-active', async (_req, res) => {
   try {
-    const sqlText = `UPDATE inventory SET status = 'ACTIVE'`;
+    // Set all items with NULL, empty string, or any non-compliant status to ACTIVE
+    const sqlText = `UPDATE inventory SET status = 'ACTIVE' WHERE status IS NULL OR status = '' OR status NOT IN ('ACTIVE', 'INACTIVE', 'BOOKED OUT', 'DISCONTINUED')`;
     const { rowCount } = await query(sqlText);
     console.log(`[POST /api/items/set-all-active] Update complete. ${rowCount} items set to ACTIVE.`);
     res.json({ ok: true, updatedCount: rowCount });
   } catch (err: any) {
     console.error('ERROR IN POST /api/items/set-all-active:', err.message);
+    res.status(500).json({ error: 'Internal Server Error', details: err.message });
+  }
+});
+
+app.post('/api/items/fix-status', async (_req, res) => {
+  try {
+    // Comprehensive fix: set all NULL/empty status to ACTIVE
+    const fixNull = await query(`UPDATE inventory SET status = 'ACTIVE' WHERE status IS NULL`);
+    const fixEmpty = await query(`UPDATE inventory SET status = 'ACTIVE' WHERE status = ''`);
+    const fixInvalid = await query(`UPDATE inventory SET status = 'ACTIVE' WHERE status NOT IN ('ACTIVE', 'INACTIVE', 'BOOKED OUT', 'DISCONTINUED')`);
+
+    const total = (fixNull.rowCount || 0) + (fixEmpty.rowCount || 0) + (fixInvalid.rowCount || 0);
+    console.log(`[POST /api/items/fix-status] Fixed ${total} items with invalid status. NULL: ${fixNull.rowCount}, Empty: ${fixEmpty.rowCount}, Invalid: ${fixInvalid.rowCount}`);
+    res.json({ ok: true, fixedCount: total, details: { nullFixed: fixNull.rowCount, emptyFixed: fixEmpty.rowCount, invalidFixed: fixInvalid.rowCount } });
+  } catch (err: any) {
+    console.error('ERROR IN POST /api/items/fix-status:', err.message);
     res.status(500).json({ error: 'Internal Server Error', details: err.message });
   }
 });
