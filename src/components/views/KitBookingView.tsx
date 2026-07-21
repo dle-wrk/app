@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Project } from '../../types';
+import ShortageToPOModal from '../ShortageToPOModal';
 import {
   Package,
   AlertTriangle,
@@ -8,7 +9,8 @@ import {
   Play,
   Loader2,
   Layers,
-  ArrowRightLeft
+  ArrowRightLeft,
+  ShoppingCart
 } from 'lucide-react';
 
 interface AuditResult {
@@ -35,6 +37,7 @@ export default function KitBookingView({ projects, triggerToast }: KitBookingVie
   const [auditResults, setAuditResults] = useState<AuditResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [executing, setExecuting] = useState(false);
+  const [showShortagePOModal, setShowShortagePOModal] = useState(false);
 
   useEffect(() => {
     if (projects.length > 0 && !projects.find(p => p.id === selectedProjectId)) {
@@ -125,6 +128,16 @@ export default function KitBookingView({ projects, triggerToast }: KitBookingVie
               onChange={(e) => setBuildQty(Math.max(1, Number(e.target.value)))}
             />
           </div>
+
+          {totalShortages > 0 && (
+            <button
+              onClick={() => setShowShortagePOModal(true)}
+              className="mt-auto h-9 px-lg rounded-lg flex items-center gap-xs text-xs font-bold uppercase tracking-wider transition-all bg-error/10 text-error hover:bg-error/20 active:scale-95 border border-error/20"
+            >
+              <ShoppingCart className="w-3.5 h-3.5" />
+              Generate PO
+            </button>
+          )}
 
           <button
             onClick={handleExecute}
@@ -241,6 +254,19 @@ export default function KitBookingView({ projects, triggerToast }: KitBookingVie
           </table>
         </div>
       </div>
+
+      {showShortagePOModal && (
+        <ShortageToPOModal
+          shortages={auditResults}
+          onClose={() => setShowShortagePOModal(false)}
+          onSuccess={(po) => {
+            setShowShortagePOModal(false);
+            // Refresh audit after PO created
+            handleValidate();
+          }}
+          triggerToast={triggerToast}
+        />
+      )}
     </div>
   );
 }

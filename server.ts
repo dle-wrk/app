@@ -2184,6 +2184,84 @@ app.post('/api/kit-booking/execute', async (req, res) => {
   }
 });
 
+app.post('/api/shortages/convert-to-po', async (req, res) => {
+  const { shortages, supplierId, supplierName } = req.body;
+  if (!shortages || !Array.isArray(shortages) || shortages.length === 0) {
+    return res.status(400).json({ error: 'shortages array is required' });
+  }
+  if (!supplierId && !supplierName) {
+    return res.status(400).json({ error: 'supplierId or supplierName is required' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Get or create supplier
+    let sId: number | null = null;
+    if (supplierId) {
+      sId = Number(supplierId);
+    } else if (supplierName) {
+      const existing = await queryOne(`SELECT id FROM suppliers WHERE name = $1`, [supplierName]);
+      if (existing) {
+        sId = existing.id;
+      } else {
+        const newSupplier = await queryOne(`INSERT INTO suppliers (name, contact_name, email, phone, address, status) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+          [supplierName, '', '', '', '', 'ACTIVE']);
+        sId = newSupplier.id;
+      }
+    }
+
+    // Create PO with items from shortages
+    const poNumber = await nextDocNumber(client, 'PO', 'po_seq');
+    const orderDate = new Date().toISOString().slice(0, 10);
+
+    // Transform shortages into line items (use shortage_qty as quantity)
+    const items = shortages.map((s: any) => ({
+      partNumber: s.resolved_part_number || s.component_id,
+      description: s.description || s.comment || '',
+      quantity: Math.ceil(s.shortage_qty || 0),
+      unitPrice: 0, // Will be filled in from supplier pricing if available
+    }));
+
+    // Calculate totals
+    const subtotal = 0; // User will fill in actual pricing
+    const taxTotal = 0;
+    const total = 0;
+
+    const poRes = await client.query(
+      `INSERT INTO purchase_orders (po_number, supplier_id, order_date, status, currency, subtotal, tax_total, total, notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+      [poNumber, sId || null, orderDate, 'DRAFT', 'ZAR', subtotal, taxTotal, total, `Generated from shortage detection`]
+    );
+    const poId = poRes.rows[0].id;
+
+    // Insert PO items
+    for (const item of items) {
+      await client.query(
+        `INSERT INTO purchase_order_items (purchase_order_id, part_number, description, quantity, unit_price)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [poId, item.partNumber, item.description, item.quantity, item.unitPrice]
+      );
+    }
+
+    await client.query('COMMIT');
+    const poRow = await queryOne(`SELECT po.*, s.name as supplier_name FROM purchase_orders po LEFT JOIN suppliers s ON s.id = po.supplier_id WHERE po.id = $1`, [poId]);
+    const poItems = await query(`SELECT * FROM purchase_order_items WHERE purchase_order_id = $1`, [poId]);
+
+    res.status(201).json({
+      po: mapPurchaseOrder(poRow),
+      items: poItems.rows.map(mapPurchaseOrderItem),
+      message: `PO ${poNumber} created with ${items.length} items`
+    });
+  } catch (err: any) {
+    await client.query('ROLLBACK');
+    res.status(400).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
 async function runSchemaBootstrap() {
   await ensureSchema();
     // NOTE: these were previously fire-and-forget (no `await`), which raced across the
