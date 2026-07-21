@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Edit2, Trash2, Toggle2, Loader2, AlertTriangle } from 'lucide-react';
+import { Plus, Edit2, Trash2, ToggleRight, Loader2, AlertTriangle } from 'lucide-react';
 
 interface AutoPOConfig {
   id: number;
@@ -274,7 +274,7 @@ export default function AutoPOConfigView({ triggerToast }: Props) {
                       onClick={() => handleToggle(config.id, config.enabled)}
                       className="p-2 hover:bg-surface-container rounded transition text-on-surface-variant hover:text-on-surface"
                     >
-                      <Toggle2 className="w-4 h-4" />
+                      <ToggleRight className="w-4 h-4" />
                     </button>
                     <button className="p-2 hover:bg-surface-container rounded transition text-on-surface-variant hover:text-on-surface">
                       <Edit2 className="w-4 h-4" />
