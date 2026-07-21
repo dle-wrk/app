@@ -214,6 +214,11 @@ const DispatchEditorModal: React.FC<ModuleDataProps & { type: DispatchNoteType; 
       : [newItem()]
   );
   const [saving, setSaving] = useState<'DRAFT' | 'ISSUED' | null>(null);
+  const [productionProducts, setProductionProducts] = useState<{ modelNumber: string; description: string }[]>([]);
+
+  useEffect(() => {
+    apiGet('/api/production-products').then((pp: any[]) => setProductionProducts(pp.map(p => ({ modelNumber: p.model_number || p.modelNumber, description: p.description })))).catch(() => {});
+  }, []);
 
   const relevantOrders = useMemo(() => clientOrders.filter(o => !clientId || String(o.clientId) === clientId), [clientOrders, clientId]);
 
@@ -238,7 +243,8 @@ const DispatchEditorModal: React.FC<ModuleDataProps & { type: DispatchNoteType; 
 
   const onPickPart = (key: string, partNumber: string) => {
     const item = items.find(i => i.partNumber === partNumber);
-    updateLine(key, { partNumber, description: item ? item.name : '' });
+    const pp = productionProducts.find(p => p.modelNumber === partNumber);
+    updateLine(key, { partNumber, description: item ? item.name : pp ? pp.description : '' });
   };
 
   const submit = async (status: 'DRAFT' | 'ISSUED') => {
@@ -325,7 +331,12 @@ const DispatchEditorModal: React.FC<ModuleDataProps & { type: DispatchNoteType; 
                 <td className="py-1.5 px-2">
                   <select className={`${inputClass} !py-1`} value={l.partNumber || ''} onChange={(e) => onPickPart(l.key, e.target.value)}>
                     <option value="">— free text —</option>
-                    {items.map(i => <option key={i.partNumber} value={i.partNumber}>{i.partNumber}</option>)}
+                    {productionProducts.length > 0 && <optgroup label="Production Products">
+                      {productionProducts.map(p => <option key={p.modelNumber} value={p.modelNumber}>{p.modelNumber}</option>)}
+                    </optgroup>}
+                    <optgroup label="Inventory Items">
+                      {items.map(i => <option key={i.partNumber} value={i.partNumber}>{i.partNumber}</option>)}
+                    </optgroup>
                   </select>
                 </td>
                 <td className="py-1.5 px-2"><input className={`${inputClass} !py-1`} value={l.description} onChange={(e) => updateLine(l.key, { description: e.target.value })} placeholder="Item description" /></td>
