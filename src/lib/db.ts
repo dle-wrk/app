@@ -234,6 +234,131 @@ async function ensurePricingTables() {
   )`);
 }
 
+async function ensureProductionTables() {
+  // Production jobs/build jobs extended schema
+  await exec(`CREATE TABLE IF NOT EXISTS production_jobs (
+    id SERIAL PRIMARY KEY,
+    job_number TEXT UNIQUE NOT NULL,
+    client_order_id INTEGER REFERENCES client_orders(id) ON DELETE SET NULL,
+    project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+    status TEXT DEFAULT 'PLANNED',
+    priority TEXT DEFAULT 'MEDIUM',
+    build_qty INTEGER DEFAULT 1,
+    completed_qty INTEGER DEFAULT 0,
+    defect_qty INTEGER DEFAULT 0,
+    yield_pct NUMERIC(5,2),
+    scheduled_start DATE,
+    scheduled_end DATE,
+    actual_start TIMESTAMP,
+    actual_end TIMESTAMP,
+    assigned_team TEXT,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  // Work orders / assembly procedures
+  await exec(`CREATE TABLE IF NOT EXISTS work_orders (
+    id SERIAL PRIMARY KEY,
+    production_job_id INTEGER REFERENCES production_jobs(id) ON DELETE CASCADE,
+    work_order_number TEXT UNIQUE NOT NULL,
+    work_type TEXT NOT NULL,
+    description TEXT,
+    status TEXT DEFAULT 'PENDING',
+    sequence_order INTEGER,
+    assigned_to TEXT,
+    estimated_hours NUMERIC(8,2),
+    actual_hours NUMERIC(8,2),
+    started_at TIMESTAMP,
+    completed_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  // Component allocation to production jobs
+  await exec(`CREATE TABLE IF NOT EXISTS job_component_allocation (
+    id SERIAL PRIMARY KEY,
+    production_job_id INTEGER REFERENCES production_jobs(id) ON DELETE CASCADE,
+    component_id TEXT NOT NULL,
+    qty_allocated INTEGER NOT NULL,
+    qty_consumed INTEGER DEFAULT 0,
+    qty_defective INTEGER DEFAULT 0,
+    allocated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    consumed_at TIMESTAMP
+  )`);
+
+  // Quality control checkpoints
+  await exec(`CREATE TABLE IF NOT EXISTS qc_checkpoints (
+    id SERIAL PRIMARY KEY,
+    production_job_id INTEGER REFERENCES production_jobs(id) ON DELETE CASCADE,
+    checkpoint_name TEXT NOT NULL,
+    checkpoint_type TEXT NOT NULL,
+    sequence_order INTEGER,
+    status TEXT DEFAULT 'PENDING',
+    inspector TEXT,
+    inspected_at TIMESTAMP,
+    result TEXT,
+    defects_found INTEGER DEFAULT 0,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  // Defect/issue logging
+  await exec(`CREATE TABLE IF NOT EXISTS production_defects (
+    id SERIAL PRIMARY KEY,
+    production_job_id INTEGER REFERENCES production_jobs(id) ON DELETE CASCADE,
+    qc_checkpoint_id INTEGER REFERENCES qc_checkpoints(id) ON DELETE SET NULL,
+    defect_code TEXT NOT NULL,
+    defect_description TEXT,
+    severity TEXT DEFAULT 'MEDIUM',
+    component_affected TEXT,
+    root_cause TEXT,
+    corrective_action TEXT,
+    status TEXT DEFAULT 'OPEN',
+    discovered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    resolved_at TIMESTAMP
+  )`);
+
+  // Order fulfillment tracking
+  await exec(`CREATE TABLE IF NOT EXISTS order_fulfillment (
+    id SERIAL PRIMARY KEY,
+    client_order_id INTEGER REFERENCES client_orders(id) ON DELETE CASCADE,
+    production_job_id INTEGER REFERENCES production_jobs(id) ON DELETE SET NULL,
+    fulfillment_status TEXT DEFAULT 'PENDING',
+    qty_ordered INTEGER NOT NULL,
+    qty_built INTEGER DEFAULT 0,
+    qty_shipped INTEGER DEFAULT 0,
+    expected_ship_date DATE,
+    actual_ship_date DATE,
+    tracking_number TEXT,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  // Production metrics/analytics
+  await exec(`CREATE TABLE IF NOT EXISTS production_metrics (
+    id SERIAL PRIMARY KEY,
+    metric_date DATE DEFAULT CURRENT_DATE,
+    total_jobs_started INTEGER DEFAULT 0,
+    total_jobs_completed INTEGER DEFAULT 0,
+    avg_cycle_time_hours NUMERIC(8,2),
+    avg_yield_pct NUMERIC(5,2),
+    total_defects INTEGER DEFAULT 0,
+    defect_rate_pct NUMERIC(5,2),
+    on_time_completion_pct NUMERIC(5,2),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  // Indexes for performance
+  await exec(`CREATE INDEX IF NOT EXISTS production_jobs_status_idx ON production_jobs (status)`).catch(() => {});
+  await exec(`CREATE INDEX IF NOT EXISTS production_jobs_order_idx ON production_jobs (client_order_id)`).catch(() => {});
+  await exec(`CREATE INDEX IF NOT EXISTS work_orders_job_idx ON work_orders (production_job_id, status)`).catch(() => {});
+  await exec(`CREATE INDEX IF NOT EXISTS job_allocation_job_idx ON job_component_allocation (production_job_id)`).catch(() => {});
+  await exec(`CREATE INDEX IF NOT EXISTS qc_checkpoints_job_idx ON qc_checkpoints (production_job_id, status)`).catch(() => {});
+  await exec(`CREATE INDEX IF NOT EXISTS defects_job_idx ON production_defects (production_job_id, status)`).catch(() => {});
+  await exec(`CREATE INDEX IF NOT EXISTS fulfillment_order_idx ON order_fulfillment (client_order_id, fulfillment_status)`).catch(() => {});
+}
+
 async function ensureProjectsTable() {
   await exec(`CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY,
@@ -329,6 +454,7 @@ export async function ensureSchema() {
     await ensureSuppliersTable();
     await ensureProjectsTable();
     await ensurePricingTables();
+    await ensureProductionTables();
     return;
   }
 
@@ -338,6 +464,7 @@ export async function ensureSchema() {
   await ensureInventoryTable();
   await ensureSuppliersTable();
   await ensureProjectsTable();
+  await ensureProductionTables();
 
   const inventoryCount = await seedTable('inventory', path.join(assetsDir, 'MainInventory.csv'));
   if (inventoryCount === 0) await seedFallbackInventory();
