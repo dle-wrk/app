@@ -240,7 +240,7 @@ async function ensureProductionTables() {
     id SERIAL PRIMARY KEY,
     job_number TEXT UNIQUE NOT NULL,
     client_order_id INTEGER REFERENCES client_orders(id) ON DELETE SET NULL,
-    project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+    project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
     status TEXT DEFAULT 'PLANNED',
     priority TEXT DEFAULT 'MEDIUM',
     build_qty INTEGER DEFAULT 1,
