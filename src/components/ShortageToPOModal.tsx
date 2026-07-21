@@ -24,6 +24,8 @@ export default function ShortageToPOModal({ shortages, onClose, onSuccess, trigg
   const [saving, setSaving] = useState(false);
 
   const shortageList = shortages.filter(s => s.shortage_qty > 0);
+  const poItems = shortageList.filter(s => !s.component_id.toUpperCase().includes('DNF'));
+  const dnfItems = shortageList.filter(s => s.component_id.toUpperCase().includes('DNF'));
   const useCustom = selectedSupplier === 'custom';
 
   const handleSubmit = async () => {
@@ -38,11 +40,17 @@ export default function ShortageToPOModal({ shortages, onClose, onSuccess, trigg
 
     setSaving(true);
     try {
+      if (poItems.length === 0) {
+        triggerToast('No items to order (all are DNF)', 'ERROR');
+        setSaving(false);
+        return;
+      }
+
       const res = await fetch('/api/shortages/convert-to-po', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          shortages: shortageList,
+          shortages: poItems,
           supplierId: useCustom ? null : selectedSupplier || null,
           supplierName: useCustom ? customSupplier : null,
         }),
@@ -74,21 +82,38 @@ export default function ShortageToPOModal({ shortages, onClose, onSuccess, trigg
         </div>
 
         <p className="text-sm text-on-surface-variant mb-lg">
-          {shortageList.length} component{shortageList.length !== 1 ? 's' : ''} with insufficient stock will be added to a new PO.
+          {poItems.length} component{poItems.length !== 1 ? 's' : ''} will be added to a new PO. {dnfItems.length > 0 && `(${dnfItems.length} DNF items excluded)`}
         </p>
 
-        {/* Shortages summary */}
-        <div className="bg-error/10 border border-error/20 rounded-lg p-md mb-lg">
-          <div className="text-xs font-bold text-error uppercase mb-2">Items with shortages:</div>
-          <div className="space-y-1">
-            {shortageList.map(s => (
-              <div key={s.component_id} className="text-xs text-on-surface-variant flex justify-between">
-                <span>{s.component_id} - {s.description}</span>
-                <span className="font-mono font-bold text-error">-{s.shortage_qty}</span>
-              </div>
-            ))}
+        {/* Items to order */}
+        {poItems.length > 0 && (
+          <div className="bg-primary/10 border border-primary/20 rounded-lg p-md mb-lg">
+            <div className="text-xs font-bold text-primary uppercase mb-2">Items to order:</div>
+            <div className="space-y-1">
+              {poItems.map(s => (
+                <div key={s.component_id} className="text-xs text-on-surface-variant flex justify-between">
+                  <span>{s.component_id} - {s.description}</span>
+                  <span className="font-mono font-bold text-primary">-{s.shortage_qty}</span>
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
+
+        {/* DNF items (excluded) */}
+        {dnfItems.length > 0 && (
+          <div className="bg-surface-container-high/50 border border-outline-variant rounded-lg p-md mb-lg">
+            <div className="text-xs font-bold text-outline uppercase mb-2">Do Not Fit (excluded from PO):</div>
+            <div className="space-y-1">
+              {dnfItems.map(s => (
+                <div key={s.component_id} className="text-xs text-outline/60 flex justify-between line-through">
+                  <span>{s.component_id}</span>
+                  <span className="font-mono text-outline/60">-{s.shortage_qty}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Supplier selection */}
         <div className="space-y-3 mb-lg">
@@ -126,10 +151,10 @@ export default function ShortageToPOModal({ shortages, onClose, onSuccess, trigg
           </button>
           <button
             onClick={handleSubmit}
-            disabled={saving}
+            disabled={saving || poItems.length === 0}
             className="px-4 py-2 rounded-lg bg-primary text-on-primary text-sm font-bold hover:brightness-110 disabled:opacity-50 transition"
           >
-            {saving ? 'Creating PO...' : 'Create Purchase Order'}
+            {saving ? 'Creating PO...' : `Create Purchase Order (${poItems.length} items)`}
           </button>
         </div>
       </div>
