@@ -539,15 +539,15 @@ export interface SystemConfig {
   primaryTint: string;
 }
 
-export type ViewType = 
-  | 'dashboard' 
-  | 'items' 
-  | 'stock_kits' 
-  | 'reports_ledger' 
-  | 'pricing' 
-  | 'suppliers' 
-  | 'settings' 
-  | 'search' 
+export type ViewType =
+  | 'dashboard'
+  | 'items'
+  | 'stock_kits'
+  | 'reports_ledger'
+  | 'pricing'
+  | 'suppliers'
+  | 'settings'
+  | 'search'
   | 'profile'
   | 'bom_manager'
   | 'pick_place'
@@ -557,7 +557,11 @@ export type ViewType =
   | 'kit_booking'
   | 'projects'
   | 'production_costs'
-  | 'bookkeeping';
+  | 'bookkeeping'
+  | 'automation'
+  | 'auto_po_config'
+  | 'quality_compliance'
+  | 'advanced_automation';
 
 export interface ProductionProduct {
   id: number;

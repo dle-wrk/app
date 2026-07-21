@@ -5,6 +5,8 @@ import { spawn } from 'child_process';
 import { pool, query, queryOne, exec, ensureSchema, close } from './src/lib/db';
 import { ensureBookkeepingSchema } from './src/lib/bookkeeping-db';
 import { registerBookkeepingRoutes } from './src/lib/bookkeeping-routes';
+import { ensurePhase5Tables } from './src/lib/phase5-db';
+import phase5Routes from './src/lib/phase5-routes';
 
 const app = express();
 app.use(compression());
@@ -69,6 +71,9 @@ function sql(text: string): string {
 
 // Bookkeeping / ERP module — Chart of Accounts, invoices, bills, payments, reports.
 registerBookkeepingRoutes(app);
+
+// Phase 5: Quality & Compliance + Advanced Automation
+app.use(phase5Routes);
 
 // --- Live pricing lookups (DigiKey, Mouser APIs; LCSC via externally-fed scrape cache) ---
 const PRICING_DAILY_LIMIT = 1000;
@@ -163,6 +168,49 @@ function pickBreakForQty<T>(breaks: T[], qty: number, getQty: (b: T) => number):
     if (bq <= qty && (chosen === null || bq >= getQty(chosen))) chosen = b;
   }
   return chosen ?? breaks[0];
+}
+
+// Helper functions for document numbering and mapping
+async function nextDocNumber(client: any, docType: string, seqTable: string): Promise<string> {
+  const result = await client.query(
+    `SELECT nextval('${seqTable}') as seq`
+  );
+  const seq = result.rows[0].seq;
+  return `${docType}-${String(seq).padStart(6, '0')}`;
+}
+
+function mapPurchaseOrder(row: any) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    poNumber: row.po_number,
+    supplierId: row.supplier_id,
+    supplierName: row.supplier_name,
+    orderDate: row.order_date,
+    expectedDate: row.expected_date,
+    status: row.status,
+    currency: row.currency,
+    subtotal: row.subtotal,
+    taxTotal: row.tax_total,
+    total: row.total,
+    notes: row.notes,
+    createdAt: row.created_at,
+  };
+}
+
+function mapPurchaseOrderItem(row: any) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    purchaseOrderId: row.purchase_order_id,
+    partNumber: row.part_number,
+    description: row.description,
+    quantity: row.quantity,
+    unitPrice: row.unit_price,
+    taxAmount: row.tax_amount || 0,
+    lineTotal: row.line_total || 0,
+    qtyReceived: row.qty_received || 0,
+  };
 }
 
 async function searchDigikey(partNumber: string, qty = 1) {
@@ -904,12 +952,29 @@ app.post('/api/items/bulk', async (req, res) => {
 
 app.post('/api/items/set-all-active', async (_req, res) => {
   try {
-    const sqlText = `UPDATE inventory SET status = 'ACTIVE'`;
+    // Set all items with NULL, empty string, or any non-compliant status to ACTIVE
+    const sqlText = `UPDATE inventory SET status = 'ACTIVE' WHERE status IS NULL OR status = '' OR status NOT IN ('ACTIVE', 'INACTIVE', 'BOOKED OUT', 'DISCONTINUED')`;
     const { rowCount } = await query(sqlText);
     console.log(`[POST /api/items/set-all-active] Update complete. ${rowCount} items set to ACTIVE.`);
     res.json({ ok: true, updatedCount: rowCount });
   } catch (err: any) {
     console.error('ERROR IN POST /api/items/set-all-active:', err.message);
+    res.status(500).json({ error: 'Internal Server Error', details: err.message });
+  }
+});
+
+app.post('/api/items/fix-status', async (_req, res) => {
+  try {
+    // Comprehensive fix: set all NULL/empty status to ACTIVE
+    const fixNull = await query(`UPDATE inventory SET status = 'ACTIVE' WHERE status IS NULL`);
+    const fixEmpty = await query(`UPDATE inventory SET status = 'ACTIVE' WHERE status = ''`);
+    const fixInvalid = await query(`UPDATE inventory SET status = 'ACTIVE' WHERE status NOT IN ('ACTIVE', 'INACTIVE', 'BOOKED OUT', 'DISCONTINUED')`);
+
+    const total = (fixNull.rowCount || 0) + (fixEmpty.rowCount || 0) + (fixInvalid.rowCount || 0);
+    console.log(`[POST /api/items/fix-status] Fixed ${total} items with invalid status. NULL: ${fixNull.rowCount}, Empty: ${fixEmpty.rowCount}, Invalid: ${fixInvalid.rowCount}`);
+    res.json({ ok: true, fixedCount: total, details: { nullFixed: fixNull.rowCount, emptyFixed: fixEmpty.rowCount, invalidFixed: fixInvalid.rowCount } });
+  } catch (err: any) {
+    console.error('ERROR IN POST /api/items/fix-status:', err.message);
     res.status(500).json({ error: 'Internal Server Error', details: err.message });
   }
 });
@@ -2713,14 +2778,14 @@ app.post('/api/automation/trigger-auto-po', async (req, res) => {
     );
 
     // Add line item
-    await exec(
+    await query(
       `INSERT INTO purchase_order_items (purchase_order_id, component_id, quantity_ordered)
        VALUES ($1, $2, $3)`,
       [po?.id, componentId, Math.max(config.min_stock_level - item.stock, 10)]
     );
 
     // Log event
-    await exec(
+    await query(
       `INSERT INTO event_log (event_type, entity_type, entity_id, action, status, details)
        VALUES ($1, $2, $3, $4, $5, $6)`,
       ['AUTO_PO_CREATED', 'PURCHASE_ORDER', po?.id, 'AUTO_TRIGGER', 'SUCCESS', JSON.stringify({ componentId, supplierId })]
@@ -2763,7 +2828,7 @@ app.post('/api/automation/send-alert', async (req, res) => {
     }
 
     // Log event
-    await exec(
+    await query(
       `INSERT INTO event_log (event_type, entity_type, action, user_id, status, details)
        VALUES ($1, $2, $3, $4, $5, $6)`,
       ['ALERT_SENT', 'NOTIFICATION', 'AUTO_ALERT', recipientId, 'SUCCESS', JSON.stringify({ alertType, notifCount: notifications.length })]
@@ -3439,7 +3504,7 @@ app.post('/api/suppliers/compare-prices', async (req, res) => {
                 updatedAt: new Date().toISOString(),
               };
               // Store in history for caching
-              await exec(
+              await query(
                 `INSERT INTO supplier_price_history (supplier, part_number, price, currency, stock, moq, lead_time_days, queried_at)
                  VALUES ($1, $2, $3, $4, $5, $6, $7, now())`,
                 ['digikey', partNumber, digiKeyResult.unitPrice || 0, digiKeyResult.currency, digiKeyResult.stock || 0, digiKeyResult.breakQuantity || 1, 7]
@@ -3468,7 +3533,7 @@ app.post('/api/suppliers/compare-prices', async (req, res) => {
                 updatedAt: new Date().toISOString(),
               };
               // Store in history for caching
-              await exec(
+              await query(
                 `INSERT INTO supplier_price_history (supplier, part_number, price, currency, stock, moq, lead_time_days, queried_at)
                  VALUES ($1, $2, $3, $4, $5, $6, $7, now())`,
                 ['mouser', partNumber, mouserResult.unitPrice || 0, mouserResult.currency, mouserResult.stock || 0, mouserResult.breakQuantity || 1, 5]
@@ -3681,6 +3746,9 @@ async function runSchemaBootstrap() {
     await ensureBookkeepingSchema().catch((e) => console.error('Failed to bootstrap bookkeeping schema:', e));
 
     await ensureProductionCostsSchema().catch((e) => console.error('Failed to bootstrap production costs schema:', e));
+
+    // Phase 5: Quality & Compliance + Advanced Automation
+    await ensurePhase5Tables().catch((e) => console.error('Failed to bootstrap Phase 5 schema:', e));
 
     console.log('Database bootstrapping complete.');
 }
