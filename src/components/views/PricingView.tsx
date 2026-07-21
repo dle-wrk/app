@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Item, ViewType } from '../../types';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import BulkPricingWizard from '../BulkPricingWizard';
 
 interface PricingViewProps {
@@ -106,6 +107,8 @@ export const PricingView: React.FC<PricingViewProps> = ({
   const [searching, setSearching] = useState(false);
   const [searchResult, setSearchResult] = useState<SearchResponse | null>(null);
   const [usage, setUsage] = useState<UsageResponse | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const ITEMS_PER_PAGE = 50;
 
   const loadUsage = async () => {
     try {
@@ -136,6 +139,18 @@ export const PricingView: React.FC<PricingViewProps> = ({
       setSearching(false);
     }
   };
+
+  // Pagination logic
+  const filteredItems = items.filter(i => pricingFilter === 'ALL' || i.category === pricingFilter);
+  const totalPages = Math.ceil(filteredItems.length / ITEMS_PER_PAGE);
+  const startIdx = (currentPage - 1) * ITEMS_PER_PAGE;
+  const endIdx = startIdx + ITEMS_PER_PAGE;
+  const pageItems = filteredItems.slice(startIdx, endIdx);
+
+  // Reset to page 1 when filter changes
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [pricingFilter]);
 
   return (
     <div className="p-container-margin space-y-4 max-w-7xl mx-auto w-full">
@@ -208,7 +223,10 @@ export const PricingView: React.FC<PricingViewProps> = ({
       {/* Main list of items with price list */}
       <div className="bg-surface-container rounded-xl border border-outline-variant overflow-hidden">
         <div className="px-lg py-sm border-b border-outline-variant bg-surface-container-high/10 flex justify-between items-center">
-          <span className="font-bold text-sm">Inventory Price List</span>
+          <div className="flex items-center gap-md">
+            <span className="font-bold text-sm">Inventory Price List</span>
+            <span className="text-xs text-on-surface-variant">({filteredItems.length} items)</span>
+          </div>
           <div className="flex gap-sm select-none text-xs">
             <button
               onClick={() => setPricingFilter('ALL')}
@@ -242,9 +260,7 @@ export const PricingView: React.FC<PricingViewProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-outline-variant/30 text-xs">
-              {items
-                .filter(i => pricingFilter === 'ALL' || i.category === pricingFilter)
-                .map(i => (
+              {pageItems.map(i => (
                   <tr key={i.partNumber} className="hover:bg-surface-variant/20 transition-all duration-150">
                     <td className="px-lg py-sm font-bold text-on-surface">
                       {i.name}
@@ -270,6 +286,31 @@ export const PricingView: React.FC<PricingViewProps> = ({
             </tbody>
           </table>
         </div>
+
+        {/* Pagination Controls */}
+        {totalPages > 1 && (
+          <div className="px-lg py-sm border-t border-outline-variant bg-surface-container-high/10 flex justify-between items-center">
+            <span className="text-xs text-on-surface-variant">
+              Page {currentPage} of {totalPages} ({startIdx + 1}–{Math.min(endIdx, filteredItems.length)} of {filteredItems.length})
+            </span>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                className="p-2 rounded-lg bg-surface-container-high text-on-surface-variant hover:text-on-surface disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+                className="p-2 rounded-lg bg-surface-container-high text-on-surface-variant hover:text-on-surface disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -3421,7 +3421,9 @@ app.post('/api/suppliers/compare-prices', async (req, res) => {
 
   try {
     const results: any[] = [];
-    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    // Cache pricing data for 30 days to reduce API credit usage
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const twentyFourHoursAgo = thirtyDaysAgo; // Use 30-day cache window
 
     for (const partNumber of partNumbers) {
       const comparison = {
