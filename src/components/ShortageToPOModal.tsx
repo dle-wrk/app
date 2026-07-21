@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { AlertTriangle, X } from 'lucide-react';
+import SupplierComparisonModal from './SupplierComparisonModal';
 
 interface Shortage {
   component_id: string;
@@ -22,6 +23,7 @@ export default function ShortageToPOModal({ shortages, onClose, onSuccess, trigg
   const [selectedSupplier, setSelectedSupplier] = useState<string>('');
   const [customSupplier, setCustomSupplier] = useState<string>('');
   const [saving, setSaving] = useState(false);
+  const [showComparison, setShowComparison] = useState(false);
 
   const shortageList = shortages.filter(s => s.shortage_qty > 0);
   const poItems = shortageList.filter(s => !s.component_id.toUpperCase().includes('DNF'));
@@ -117,7 +119,15 @@ export default function ShortageToPOModal({ shortages, onClose, onSuccess, trigg
 
         {/* Supplier selection */}
         <div className="space-y-3 mb-lg">
-          <label className="text-xs font-bold uppercase text-outline">Select Supplier</label>
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-xs font-bold uppercase text-outline">Select Supplier</label>
+            <button
+              onClick={() => setShowComparison(true)}
+              className="text-xs font-bold text-primary hover:text-primary/80 transition uppercase tracking-wider"
+            >
+              Compare Prices →
+            </button>
+          </div>
           <select
             value={selectedSupplier}
             onChange={(e) => setSelectedSupplier(e.target.value)}
@@ -158,6 +168,19 @@ export default function ShortageToPOModal({ shortages, onClose, onSuccess, trigg
           </button>
         </div>
       </div>
+
+      {showComparison && (
+        <SupplierComparisonModal
+          shortages={shortageList}
+          onClose={() => setShowComparison(false)}
+          onSelectSupplier={(supplier) => {
+            setSelectedSupplier(supplier);
+            setShowComparison(false);
+            triggerToast(`Selected ${supplier.toUpperCase()}`, 'SUCCESS');
+          }}
+          triggerToast={triggerToast}
+        />
+      )}
     </div>
   );
 }

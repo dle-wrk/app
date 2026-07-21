@@ -211,6 +211,27 @@ async function ensurePricingTables() {
     refresh_token TEXT NOT NULL,
     updated_at TIMESTAMPTZ DEFAULT now()
   )`);
+  await exec(`CREATE TABLE IF NOT EXISTS supplier_price_history (
+    id SERIAL PRIMARY KEY,
+    supplier TEXT NOT NULL,
+    part_number TEXT NOT NULL,
+    price NUMERIC(12,4),
+    currency TEXT,
+    stock INTEGER,
+    moq INTEGER,
+    lead_time_days INTEGER,
+    queried_at TIMESTAMPTZ DEFAULT now(),
+    UNIQUE(supplier, part_number, queried_at)
+  )`);
+  await exec(`CREATE INDEX IF NOT EXISTS supplier_price_history_part_supplier_idx ON supplier_price_history (part_number, supplier, queried_at DESC)`).catch(() => {});
+  await exec(`CREATE TABLE IF NOT EXISTS supplier_performance (
+    supplier TEXT PRIMARY KEY,
+    total_lookups INTEGER DEFAULT 0,
+    avg_price NUMERIC(12,4),
+    avg_lead_time_days NUMERIC(5,1),
+    stock_availability_pct NUMERIC(5,2),
+    last_updated TIMESTAMPTZ DEFAULT now()
+  )`);
 }
 
 async function ensureProjectsTable() {

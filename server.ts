@@ -2262,6 +2262,142 @@ app.post('/api/shortages/convert-to-po', async (req, res) => {
   }
 });
 
+// GET /api/suppliers/compare-prices - fetch and compare prices across suppliers
+app.post('/api/suppliers/compare-prices', async (req, res) => {
+  const { partNumbers } = req.body;
+  if (!Array.isArray(partNumbers) || partNumbers.length === 0) {
+    return res.status(400).json({ error: 'partNumbers array required' });
+  }
+
+  try {
+    const results: any[] = [];
+
+    for (const partNumber of partNumbers) {
+      const comparison = {
+        partNumber,
+        digikey: null as any,
+        mouser: null as any,
+        lcsc: null as any,
+        bestPrice: null as any,
+        bestSupplier: null as string | null,
+      };
+
+      // Check LCSC cache first (always has cached data)
+      const lcscCached = await queryOne(
+        'SELECT * FROM lcsc_price_cache WHERE part_number = $1',
+        [partNumber]
+      );
+      if (lcscCached) {
+        comparison.lcsc = {
+          price: lcscCached.price,
+          currency: lcscCached.currency || 'USD',
+          stock: lcscCached.stock,
+          moq: 1,
+          leadTime: 14,
+          cached: true,
+          updatedAt: lcscCached.updated_at,
+        };
+      }
+
+      // Check supplier_price_history for recent DigiKey/Mouser data (within 24 hours)
+      const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const recentPrices = await query(
+        `SELECT DISTINCT ON (supplier) * FROM supplier_price_history
+         WHERE part_number = $1 AND queried_at > $2
+         ORDER BY supplier, queried_at DESC`,
+        [partNumber, twentyFourHoursAgo.toISOString()]
+      );
+
+      recentPrices.rows.forEach(row => {
+        if (row.supplier === 'digikey') {
+          comparison.digikey = {
+            price: row.price,
+            currency: row.currency || 'USD',
+            stock: row.stock,
+            moq: row.moq || 1,
+            leadTime: row.lead_time_days || 7,
+            cached: true,
+            updatedAt: row.queried_at,
+          };
+        } else if (row.supplier === 'mouser') {
+          comparison.mouser = {
+            price: row.price,
+            currency: row.currency || 'USD',
+            stock: row.stock,
+            moq: row.moq || 1,
+            leadTime: row.lead_time_days || 5,
+            cached: true,
+            updatedAt: row.queried_at,
+          };
+        }
+      });
+
+      // Determine best price (lowest available)
+      const validPrices = [
+        comparison.digikey && { supplier: 'digikey', price: parseFloat(comparison.digikey.price) },
+        comparison.mouser && { supplier: 'mouser', price: parseFloat(comparison.mouser.price) },
+        comparison.lcsc && { supplier: 'lcsc', price: parseFloat(comparison.lcsc.price) },
+      ].filter(Boolean) as any[];
+
+      if (validPrices.length > 0) {
+        const best = validPrices.reduce((a, b) => a.price < b.price ? a : b);
+        comparison.bestPrice = best.price;
+        comparison.bestSupplier = best.supplier;
+      }
+
+      // Log this lookup to history
+      await exec(
+        `INSERT INTO supplier_price_history (supplier, part_number, price, currency, stock, moq, lead_time_days, queried_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+         ON CONFLICT (supplier, part_number, queried_at) DO NOTHING`,
+        ['combined', partNumber, comparison.bestPrice || 0, 'USD', 0, 1, 7]
+      ).catch(() => {});
+
+      results.push(comparison);
+    }
+
+    res.json({ comparisons: results });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/suppliers/price-history/:partNumber - get historical pricing data
+app.get('/api/suppliers/price-history/:partNumber', async (req, res) => {
+  const { partNumber } = req.params;
+
+  try {
+    const history = await query(
+      `SELECT supplier, price, stock, moq, lead_time_days, queried_at
+       FROM supplier_price_history
+       WHERE part_number = $1
+       ORDER BY queried_at DESC
+       LIMIT 100`,
+      [partNumber]
+    );
+
+    res.json({ partNumber, history: history.rows });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/suppliers/performance - get supplier performance metrics
+app.get('/api/suppliers/performance', async (req, res) => {
+  try {
+    const performance = await query(
+      `SELECT supplier, total_lookups, avg_price, avg_lead_time_days, stock_availability_pct, last_updated
+       FROM supplier_performance
+       ORDER BY total_lookups DESC`,
+      []
+    );
+
+    res.json({ suppliers: performance.rows });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 async function runSchemaBootstrap() {
   await ensureSchema();
     // NOTE: these were previously fire-and-forget (no `await`), which raced across the
