@@ -30,7 +30,8 @@ import {
   ChevronLeft,
   Upload,
   FileSpreadsheet,
-  AlertCircle
+  AlertCircle,
+  Zap
 } from 'lucide-react';
 import { Item, Transaction, Supplier, ProductionKit, SystemConfig, ViewType, Project, BOMItem, PickPlaceItem, UserProfile, JobCard, Client, ClientOrder, ClientOrderItem, BuildJob, BomStructure, SubAssembly, FieldedAsset, StockLedgerEntry } from './types';
 import { INITIAL_TRANSACTIONS, INITIAL_PRODUCTION_KITS, INITIAL_SYSTEM_CONFIG, INITIAL_BOM_ITEMS, INITIAL_PP_BOM_ITEMS, generateCSVFromItems, CSV_HEADER } from './mockData';
@@ -54,6 +55,8 @@ import KitBookingView from './components/views/KitBookingView';
 import { ProjectsView } from './components/views/ProjectsView';
 import { BookkeepingView } from './components/views/BookkeepingView';
 import { ProductionCostsView } from './components/views/ProductionCostsView';
+import AutomationDashboard from './components/views/AutomationDashboard';
+import AutoPOConfigView from './components/views/AutoPOConfigView';
 
 const TIMEZONES = [
   { name: 'UTC (Coordinated Universal Time)', value: 'UTC' },
@@ -1651,6 +1654,14 @@ if (currentView === 'alternates') {
 
              if (currentView === 'production_costs') {
                return <ProductionCostsView triggerToast={triggerToast} />;
+             }
+
+             if (currentView === 'automation') {
+               return <AutomationDashboard triggerToast={triggerToast} />;
+             }
+
+             if (currentView === 'auto_po_config') {
+               return <AutoPOConfigView triggerToast={triggerToast} />;
              }
 
              return null;
