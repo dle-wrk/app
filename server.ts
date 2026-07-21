@@ -2262,15 +2262,16 @@ app.post('/api/shortages/convert-to-po', async (req, res) => {
   }
 });
 
-// GET /api/suppliers/compare-prices - fetch and compare prices across suppliers
+// POST /api/suppliers/compare-prices - fetch and compare prices across suppliers
 app.post('/api/suppliers/compare-prices', async (req, res) => {
-  const { partNumbers } = req.body;
+  const { partNumbers, forceRefresh } = req.body;
   if (!Array.isArray(partNumbers) || partNumbers.length === 0) {
     return res.status(400).json({ error: 'partNumbers array required' });
   }
 
   try {
     const results: any[] = [];
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
     for (const partNumber of partNumbers) {
       const comparison = {
@@ -2282,16 +2283,16 @@ app.post('/api/suppliers/compare-prices', async (req, res) => {
         bestSupplier: null as string | null,
       };
 
-      // Check LCSC cache first (always has cached data)
+      // LCSC: check cache (always cached via scraper)
       const lcscCached = await queryOne(
-        'SELECT * FROM lcsc_price_cache WHERE part_number = $1',
+        'SELECT * FROM lcsc_price_cache WHERE part_number = $1 OR mpn = $1 ORDER BY updated_at DESC LIMIT 1',
         [partNumber]
       );
       if (lcscCached) {
         comparison.lcsc = {
           price: lcscCached.price,
           currency: lcscCached.currency || 'USD',
-          stock: lcscCached.stock,
+          stock: lcscCached.stock || 0,
           moq: 1,
           leadTime: 14,
           cached: true,
@@ -2299,38 +2300,100 @@ app.post('/api/suppliers/compare-prices', async (req, res) => {
         };
       }
 
-      // Check supplier_price_history for recent DigiKey/Mouser data (within 24 hours)
-      const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-      const recentPrices = await query(
-        `SELECT DISTINCT ON (supplier) * FROM supplier_price_history
-         WHERE part_number = $1 AND queried_at > $2
-         ORDER BY supplier, queried_at DESC`,
-        [partNumber, twentyFourHoursAgo.toISOString()]
-      );
+      // DigiKey/Mouser: check 24-hr cache first, fall back to live API if stale or force refresh
+      let digikeyFromCache = false, mouserFromCache = false;
 
-      recentPrices.rows.forEach(row => {
-        if (row.supplier === 'digikey') {
-          comparison.digikey = {
-            price: row.price,
-            currency: row.currency || 'USD',
-            stock: row.stock,
-            moq: row.moq || 1,
-            leadTime: row.lead_time_days || 7,
-            cached: true,
-            updatedAt: row.queried_at,
-          };
-        } else if (row.supplier === 'mouser') {
-          comparison.mouser = {
-            price: row.price,
-            currency: row.currency || 'USD',
-            stock: row.stock,
-            moq: row.moq || 1,
-            leadTime: row.lead_time_days || 5,
-            cached: true,
-            updatedAt: row.queried_at,
-          };
+      if (!forceRefresh) {
+        const recentPrices = await query(
+          `SELECT * FROM supplier_price_history
+           WHERE part_number = $1 AND queried_at > $2`,
+          [partNumber, twentyFourHoursAgo.toISOString()]
+        );
+
+        recentPrices.rows.forEach(row => {
+          if (row.supplier === 'digikey') {
+            comparison.digikey = {
+              price: parseFloat(row.price),
+              currency: row.currency || 'USD',
+              stock: row.stock || 0,
+              moq: row.moq || 1,
+              leadTime: row.lead_time_days || 7,
+              cached: true,
+              updatedAt: row.queried_at,
+            };
+            digikeyFromCache = true;
+          } else if (row.supplier === 'mouser') {
+            comparison.mouser = {
+              price: parseFloat(row.price),
+              currency: row.currency || 'USD',
+              stock: row.stock || 0,
+              moq: row.moq || 1,
+              leadTime: row.lead_time_days || 5,
+              cached: true,
+              updatedAt: row.queried_at,
+            };
+            mouserFromCache = true;
+          }
+        });
+      }
+
+      // DigiKey: fetch live if no cache hit
+      if (!digikeyFromCache && process.env.DIGIKEY_CLIENT_ID && process.env.DIGIKEY_CLIENT_SECRET && await getDigikeyRefreshToken()) {
+        if ((await getPricingUsage('digikey')) < PRICING_DAILY_LIMIT) {
+          try {
+            await incrementPricingUsage('digikey');
+            const digiKeyResult = await searchDigikey(partNumber, 1);
+            if (digiKeyResult) {
+              comparison.digikey = {
+                price: digiKeyResult.unitPrice,
+                currency: digiKeyResult.currency,
+                stock: digiKeyResult.stock || 0,
+                moq: digiKeyResult.breakQuantity || 1,
+                leadTime: 7,
+                cached: false,
+                updatedAt: new Date().toISOString(),
+              };
+              // Store in history for caching
+              await exec(
+                `INSERT INTO supplier_price_history (supplier, part_number, price, currency, stock, moq, lead_time_days, queried_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, now())`,
+                ['digikey', partNumber, digiKeyResult.unitPrice || 0, digiKeyResult.currency, digiKeyResult.stock || 0, digiKeyResult.breakQuantity || 1, 7]
+              ).catch(() => {});
+            }
+          } catch (err: any) {
+            // silently fail live lookup, keep cached if available
+          }
         }
-      });
+      }
+
+      // Mouser: fetch live if no cache hit
+      if (!mouserFromCache && process.env.MOUSER_API_KEY) {
+        if ((await getPricingUsage('mouser')) < PRICING_DAILY_LIMIT) {
+          try {
+            await incrementPricingUsage('mouser');
+            const mouserResult = await searchMouser(partNumber, 1);
+            if (mouserResult) {
+              comparison.mouser = {
+                price: mouserResult.unitPrice,
+                currency: mouserResult.currency,
+                stock: mouserResult.stock || 0,
+                moq: mouserResult.breakQuantity || 1,
+                leadTime: 5,
+                cached: false,
+                updatedAt: new Date().toISOString(),
+              };
+              // Store in history for caching
+              await exec(
+                `INSERT INTO supplier_price_history (supplier, part_number, price, currency, stock, moq, lead_time_days, queried_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, now())`,
+                ['mouser', partNumber, mouserResult.unitPrice || 0, mouserResult.currency, mouserResult.stock || 0, mouserResult.breakQuantity || 1, 5]
+              ).catch(() => {});
+            }
+          } catch (err: any) {
+            // silently fail live lookup, keep cached if available
+          }
+        }
+      }
 
       // Determine best price (lowest available)
       const validPrices = [
@@ -2344,14 +2407,6 @@ app.post('/api/suppliers/compare-prices', async (req, res) => {
         comparison.bestPrice = best.price;
         comparison.bestSupplier = best.supplier;
       }
-
-      // Log this lookup to history
-      await exec(
-        `INSERT INTO supplier_price_history (supplier, part_number, price, currency, stock, moq, lead_time_days, queried_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, now())
-         ON CONFLICT (supplier, part_number, queried_at) DO NOTHING`,
-        ['combined', partNumber, comparison.bestPrice || 0, 'USD', 0, 1, 7]
-      ).catch(() => {});
 
       results.push(comparison);
     }

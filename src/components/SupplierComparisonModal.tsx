@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AlertTriangle, X, Loader2, TrendingDown, Package, Clock } from 'lucide-react';
+import { AlertTriangle, X, Loader2, TrendingDown, Package, Clock, RefreshCw } from 'lucide-react';
 
 interface Shortage {
   component_id: string;
@@ -44,13 +44,14 @@ export default function SupplierComparisonModal({
 }: SupplierComparisonModalProps) {
   const [comparisons, setComparisons] = useState<PriceComparison[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [selectedSupplier, setSelectedSupplier] = useState<string>('');
 
   useEffect(() => {
     fetchComparisons();
   }, [shortages]);
 
-  const fetchComparisons = async () => {
+  const fetchComparisons = async (forceRefresh = false) => {
     const partNumbers = shortages
       .filter(s => s.shortage_qty > 0 && !s.component_id.toUpperCase().includes('DNF'))
       .map(s => s.resolved_part_number);
@@ -61,12 +62,17 @@ export default function SupplierComparisonModal({
       return;
     }
 
-    setLoading(true);
+    if (forceRefresh) {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
+
     try {
       const res = await fetch('/api/suppliers/compare-prices', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ partNumbers }),
+        body: JSON.stringify({ partNumbers, forceRefresh }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to compare prices');
@@ -85,11 +91,16 @@ export default function SupplierComparisonModal({
         const preferred = Object.entries(mostCommon).sort((a, b) => (b[1] as number) - (a[1] as number))[0][0];
         setSelectedSupplier(preferred);
       }
+
+      if (forceRefresh) {
+        triggerToast('Prices refreshed from live suppliers', 'SUCCESS');
+      }
     } catch (err: any) {
       triggerToast(err.message || 'Failed to compare prices', 'ERROR');
-      onClose();
+      if (!forceRefresh) onClose();
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
@@ -124,9 +135,19 @@ export default function SupplierComparisonModal({
           <X className="w-4 h-4" />
         </button>
 
-        <div className="flex items-center gap-2 mb-md">
-          <TrendingDown className="w-5 h-5 text-primary" />
-          <h3 className="text-lg font-bold">Compare Supplier Prices</h3>
+        <div className="flex items-center justify-between mb-md">
+          <div className="flex items-center gap-2">
+            <TrendingDown className="w-5 h-5 text-primary" />
+            <h3 className="text-lg font-bold">Compare Supplier Prices</h3>
+          </div>
+          <button
+            onClick={() => fetchComparisons(true)}
+            disabled={refreshing}
+            className="p-2 rounded hover:bg-surface-container-high transition-colors disabled:opacity-50"
+            title="Fetch live prices from suppliers"
+          >
+            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+          </button>
         </div>
 
         <p className="text-sm text-on-surface-variant mb-lg">
@@ -153,6 +174,8 @@ export default function SupplierComparisonModal({
                     {comp.digikey ? (
                       <div className="space-y-1">
                         <div className="font-bold text-sm">${comp.digikey.price.toFixed(2)}</div>
+                        {!comp.digikey.cached && <div className="text-[8px] bg-green-500/20 text-green-400 px-1 py-0.5 rounded uppercase font-bold">Live</div>}
+                        {comp.digikey.cached && <div className="text-[8px] bg-surface-container text-outline px-1 py-0.5 rounded uppercase font-bold">Cached</div>}
                         <div className="text-[10px] text-on-surface-variant flex items-center justify-center gap-0.5">
                           <Package className="w-3 h-3" /> {comp.digikey.stock}
                         </div>
@@ -168,6 +191,8 @@ export default function SupplierComparisonModal({
                     {comp.mouser ? (
                       <div className="space-y-1">
                         <div className="font-bold text-sm">${comp.mouser.price.toFixed(2)}</div>
+                        {!comp.mouser.cached && <div className="text-[8px] bg-green-500/20 text-green-400 px-1 py-0.5 rounded uppercase font-bold">Live</div>}
+                        {comp.mouser.cached && <div className="text-[8px] bg-surface-container text-outline px-1 py-0.5 rounded uppercase font-bold">Cached</div>}
                         <div className="text-[10px] text-on-surface-variant flex items-center justify-center gap-0.5">
                           <Package className="w-3 h-3" /> {comp.mouser.stock}
                         </div>
@@ -183,6 +208,8 @@ export default function SupplierComparisonModal({
                     {comp.lcsc ? (
                       <div className="space-y-1">
                         <div className="font-bold text-sm">${comp.lcsc.price.toFixed(2)}</div>
+                        {!comp.lcsc.cached && <div className="text-[8px] bg-green-500/20 text-green-400 px-1 py-0.5 rounded uppercase font-bold">Live</div>}
+                        {comp.lcsc.cached && <div className="text-[8px] bg-surface-container text-outline px-1 py-0.5 rounded uppercase font-bold">Cached</div>}
                         <div className="text-[10px] text-on-surface-variant flex items-center justify-center gap-0.5">
                           <Package className="w-3 h-3" /> {comp.lcsc.stock}
                         </div>
