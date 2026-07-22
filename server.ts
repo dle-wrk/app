@@ -991,6 +991,45 @@ app.post('/api/items/fix-inactive', async (_req, res) => {
   }
 });
 
+app.get('/api/items/generate-code/:category', async (req, res) => {
+  try {
+    const category = req.params.category?.toUpperCase();
+    if (!category) {
+      return res.status(400).json({ error: 'Category is required' });
+    }
+
+    // Get category prefix (first 3 letters)
+    const prefix = category.substring(0, 3).toUpperCase();
+
+    // Find all items with this prefix
+    const { rows } = await query(`
+      SELECT serial_number FROM inventory
+      WHERE serial_number LIKE $1
+      ORDER BY serial_number DESC
+      LIMIT 1
+    `, [`${prefix}%`]);
+
+    let nextNumber = 1;
+    if (rows.length > 0) {
+      const lastCode = rows[0].serial_number;
+      // Extract number from code (e.g., "BUT-003" -> 3)
+      const match = lastCode.match(/(\d+)$/);
+      if (match) {
+        nextNumber = parseInt(match[1], 10) + 1;
+      }
+    }
+
+    // Format with leading zeros (e.g., "BUT-001")
+    const newCode = `${prefix}-${String(nextNumber).padStart(3, '0')}`;
+
+    console.log(`[GET /api/items/generate-code] Generated ${newCode} for category ${category}`);
+    res.json({ code: newCode, category, nextNumber });
+  } catch (err: any) {
+    console.error('ERROR IN GET /api/items/generate-code:', err.message);
+    res.status(500).json({ error: 'Internal Server Error', details: err.message });
+  }
+});
+
 app.get('/api/suppliers', async (_req, res) => {
   const { rows } = await query('SELECT * FROM suppliers ORDER BY id');
   res.json(rows);
