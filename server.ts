@@ -4075,6 +4075,11 @@ async function runSchemaBootstrap() {
     // Phase 5: Quality & Compliance + Advanced Automation
     await ensurePhase5Tables().catch((e) => console.error('Failed to bootstrap Phase 5 schema:', e));
 
+    // Seed demo user if it doesn't exist
+    await exec(`INSERT INTO users (email, first_name, last_name, role, status, password, created_at)
+      VALUES ('dedw13@gmail.com', 'Demo', 'User', 'admin', 'ACTIVE', 'password123', NOW())
+      ON CONFLICT (email) DO NOTHING`).catch(() => {});
+
     console.log('Database bootstrapping complete.');
 }
 
