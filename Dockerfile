@@ -26,13 +26,7 @@ COPY package*.json ./
 COPY .npmrc ./
 RUN npm ci --only=production
 
-# Copy source files (needed for build during startup)
-COPY index.html ./
-COPY vite.config.ts ./
-COPY tsconfig.json ./
-COPY src ./src
-
-# Copy built React app from builder
+# Copy built React app from builder (already built in builder stage)
 COPY --from=builder /app/dist ./dist
 
 # Copy server files
@@ -41,5 +35,5 @@ COPY server.ts ./
 # Expose port
 EXPOSE 3000
 
-# Start server
+# Start server (no build needed - using pre-built dist)
 CMD ["npm", "start"]
