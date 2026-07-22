@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Item, ViewType } from '../../types';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Search, Settings, Database } from 'lucide-react';
 import BulkPricingWizard from '../BulkPricingWizard';
 
 interface PricingViewProps {
@@ -103,6 +103,7 @@ export const PricingView: React.FC<PricingViewProps> = ({
   setSelectedDetailPartNumber,
   setView
 }) => {
+  const [activeTab, setActiveTab] = useState<'lookup' | 'wizard' | 'directory'>('lookup');
   const [searchInput, setSearchInput] = useState('');
   const [searching, setSearching] = useState(false);
   const [searchResult, setSearchResult] = useState<SearchResponse | null>(null);
@@ -153,8 +154,46 @@ export const PricingView: React.FC<PricingViewProps> = ({
   }, [pricingFilter]);
 
   return (
-    <div className="p-container-margin space-y-4 max-w-7xl mx-auto w-full">
-      {/* Live price lookup */}
+    <div className="p-container-margin space-y-lg max-w-7xl mx-auto w-full">
+      {/* Tab Navigation */}
+      <div className="flex gap-xs border-b border-outline-variant">
+        <button
+          onClick={() => setActiveTab('lookup')}
+          className={`px-md py-2 text-sm font-bold flex items-center gap-2 whitespace-nowrap transition ${
+            activeTab === 'lookup'
+              ? 'text-primary border-b-2 border-primary'
+              : 'text-on-surface-variant hover:text-on-surface'
+          }`}
+        >
+          <Search className="w-4 h-4" />
+          Live Price Lookup
+        </button>
+        <button
+          onClick={() => setActiveTab('wizard')}
+          className={`px-md py-2 text-sm font-bold flex items-center gap-2 whitespace-nowrap transition ${
+            activeTab === 'wizard'
+              ? 'text-primary border-b-2 border-primary'
+              : 'text-on-surface-variant hover:text-on-surface'
+          }`}
+        >
+          <Settings className="w-4 h-4" />
+          Bulk Pricing
+        </button>
+        <button
+          onClick={() => setActiveTab('directory')}
+          className={`px-md py-2 text-sm font-bold flex items-center gap-2 whitespace-nowrap transition ${
+            activeTab === 'directory'
+              ? 'text-primary border-b-2 border-primary'
+              : 'text-on-surface-variant hover:text-on-surface'
+          }`}
+        >
+          <Database className="w-4 h-4" />
+          Price Directory ({items.length})
+        </button>
+      </div>
+
+      {/* Live price lookup tab */}
+      {activeTab === 'lookup' && (
       <div className="bg-surface-container rounded-xl border border-outline-variant p-lg">
         <div className="flex justify-between items-center mb-md">
           <span className="font-bold text-sm">Live Price Lookup</span>
@@ -212,15 +251,21 @@ export const PricingView: React.FC<PricingViewProps> = ({
           <div className="text-[10px] text-outline mt-sm">Mouser API key not configured — add MOUSER_API_KEY to .env.</div>
         )}
       </div>
+      )}
 
-      {/* Wholesale Volume Calibration Wizard */}
+      {/* Bulk Pricing Wizard tab */}
+      {activeTab === 'wizard' && (
+      <div>
       <BulkPricingWizard
         items={items}
         onUpdatePrices={handleUpdateBulkPrices}
         onShowNotification={triggerToast}
       />
+      </div>
+      )}
 
-      {/* Main list of items with price list */}
+      {/* Price Directory tab */}
+      {activeTab === 'directory' && (
       <div className="bg-surface-container rounded-xl border border-outline-variant overflow-hidden">
         <div className="px-lg py-sm border-b border-outline-variant bg-surface-container-high/10 flex justify-between items-center">
           <div className="flex items-center gap-md">
@@ -312,6 +357,7 @@ export const PricingView: React.FC<PricingViewProps> = ({
           </div>
         )}
       </div>
+      )}
     </div>
   );
 };
