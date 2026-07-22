@@ -4,7 +4,7 @@
     "builder": "nixpacks"
   },
   "deploy": {
-    "startCommand": "npm run build && node server.ts",
+    "startCommand": "npm run build && npx tsx server.ts",
     "restartPolicyMaxRetries": 5
   }
 }

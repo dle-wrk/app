@@ -1,1 +1,1 @@
-web: npm run build && node server.ts
+web: npm run build && npx tsx server.ts
