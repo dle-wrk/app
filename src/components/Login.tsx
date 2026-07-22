@@ -48,9 +48,12 @@ export default function Login({ onLogin, isLoading = false }: LoginProps) {
 
           {/* Error Message */}
           {error && (
-            <div className="bg-error/10 border border-error/30 rounded-lg p-3 mb-6 flex items-start gap-3">
+            <div className="bg-error/15 border border-error/40 rounded-lg p-4 mb-6 flex items-start gap-3">
               <AlertCircle className="w-5 h-5 text-error flex-shrink-0 mt-0.5" />
-              <p className="text-sm text-error">{error}</p>
+              <div>
+                <p className="text-sm font-semibold text-error mb-1">Authentication Failed</p>
+                <p className="text-xs text-error/90">{error}</p>
+              </div>
             </div>
           )}
 
@@ -102,11 +105,20 @@ export default function Login({ onLogin, isLoading = false }: LoginProps) {
             {/* Submit Button */}
             <button
               type="submit"
-              disabled={isLoading}
-              className="w-full bg-primary text-on-primary py-2.5 font-bold rounded-lg hover:brightness-110 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all mt-6 flex items-center justify-center gap-2"
+              disabled={isLoading || !email || !password}
+              className="w-full bg-primary text-on-primary py-2.5 font-bold rounded-lg hover:brightness-110 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all mt-6 flex items-center justify-center gap-2 shadow-md shadow-primary/20"
             >
-              <LogIn className="w-5 h-5" />
-              {isLoading ? 'Signing in...' : 'Sign In'}
+              {isLoading ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-on-primary/30 border-t-on-primary rounded-full animate-spin" />
+                  Signing in...
+                </>
+              ) : (
+                <>
+                  <LogIn className="w-5 h-5" />
+                  Sign In
+                </>
+              )}
             </button>
           </form>
 
