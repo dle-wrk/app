@@ -550,7 +550,7 @@ app.get('/api/bootstrap', async (_req, res) => {
     // 3. Projects
     const { rows: projectsRows } = await query('SELECT * FROM projects ORDER BY id');
     const projects = projectsRows.map((r: any) => ({
-      id: parseInt(r.id) || 0,
+      id: String(r.id),
       projectName: r.project_name,
       description: r.description,
       status: r.status,
