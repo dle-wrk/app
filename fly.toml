@@ -1,35 +1,44 @@
-# Fly.io configuration
-app = "tracklab-im"
-primary_region = "lhr"
+# fly.toml app configuration file generated for tracklab-im on 2026-07-22T14:48:33+02:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'tracklab-im'
+primary_region = 'lhr'
 
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = 'Dockerfile'
 
 [env]
-  PORT = "3000"
+  PORT = '3000'
 
 [[services]]
-  protocol = "tcp"
+  protocol = 'tcp'
   internal_port = 3000
-  processes = ["app"]
+  processes = ['app']
+
+  [[services.ports]]
+    port = 80
+    handlers = ['http']
+    force_https = true
+
+  [[services.ports]]
+    port = 443
+    handlers = ['tls', 'http']
 
   [services.concurrency]
     hard_limit = 25
     soft_limit = 20
 
-  [[services.ports]]
-    port = 80
-    handlers = ["http"]
-    force_https = true
+  [[services.http_checks]]
+    interval = '10s'
+    timeout = '5s'
+    grace_period = '10s'
+    method = 'get'
+    path = '/'
 
-  [[services.ports]]
-    port = 443
-    handlers = ["tls", "http"]
-
-  [services.http_checks]
-    enabled = true
-    interval = 10000
-    timeout = 5000
-    grace_period = "10s"
-    method = "get"
-    path = "/"
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
+  memory_mb = 1024
