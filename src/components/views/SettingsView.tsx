@@ -243,6 +243,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </button>
         </div>
       </div>
+        </div>
       )}
 
       {/* User Management Tab */}
