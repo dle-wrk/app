@@ -399,7 +399,14 @@ export default function App() {
     const loadFromAPI = async () => {
       try {
         const bootstrapRes = await fetch('/api/bootstrap');
-        const data = await bootstrapRes.json();
+        if (!bootstrapRes.ok) {
+          throw new Error(`Bootstrap API returned ${bootstrapRes.status}: ${bootstrapRes.statusText}`);
+        }
+        const text = await bootstrapRes.text();
+        if (!text) {
+          throw new Error('Bootstrap API returned empty response');
+        }
+        const data = JSON.parse(text);
 
         const itemsRaw = data.items?.items || [];
         const suppliers = data.suppliers || [];
