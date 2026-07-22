@@ -3,6 +3,7 @@ import compression from 'compression';
 import { z } from 'zod';
 import { spawn } from 'child_process';
 import path from 'path';
+import { existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { pool, query, queryOne, exec, ensureSchema, close } from './src/lib/db';
 
@@ -12,7 +13,7 @@ const __dirname = path.dirname(__filename);
 // Determine dist directory path (handle both dev and prod)
 const distPath = path.resolve(__dirname, 'dist');
 const altDistPath = path.resolve(process.cwd(), 'dist');
-const DIST_DIR = path.existsSync(distPath) ? distPath : altDistPath;
+const DIST_DIR = existsSync(distPath) ? distPath : altDistPath;
 
 import { ensureBookkeepingSchema } from './src/lib/bookkeeping-db';
 import { registerBookkeepingRoutes } from './src/lib/bookkeeping-routes';
