@@ -2,6 +2,7 @@ import express from 'express';
 import compression from 'compression';
 import { z } from 'zod';
 import { spawn } from 'child_process';
+import path from 'path';
 import { pool, query, queryOne, exec, ensureSchema, close } from './src/lib/db';
 import { ensureBookkeepingSchema } from './src/lib/bookkeeping-db';
 import { registerBookkeepingRoutes } from './src/lib/bookkeeping-routes';
@@ -20,6 +21,9 @@ app.use((req, res, next) => {
   next();
 });
 app.use(express.json({ limit: '1mb' }));
+
+// Serve static files from dist directory
+app.use(express.static(path.join(__dirname, 'dist')));
 
 const ItemSchema = z.object({
   serial_number: z.string().min(1),
@@ -3872,6 +3876,11 @@ app.get('/api/suppliers/performance', async (req, res) => {
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// Serve index.html for all non-API routes (client-side routing)
+app.get('*', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
 async function runSchemaBootstrap() {
