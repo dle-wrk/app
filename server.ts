@@ -979,6 +979,18 @@ app.post('/api/items/fix-status', async (_req, res) => {
   }
 });
 
+app.post('/api/items/fix-inactive', async (_req, res) => {
+  try {
+    // Convert all INACTIVE items to ACTIVE
+    const { rowCount } = await query(`UPDATE inventory SET status = 'ACTIVE' WHERE status = 'INACTIVE'`);
+    console.log(`[POST /api/items/fix-inactive] Fixed ${rowCount} INACTIVE items to ACTIVE`);
+    res.json({ ok: true, fixedCount: rowCount });
+  } catch (err: any) {
+    console.error('ERROR IN POST /api/items/fix-inactive:', err.message);
+    res.status(500).json({ error: 'Internal Server Error', details: err.message });
+  }
+});
+
 app.get('/api/suppliers', async (_req, res) => {
   const { rows } = await query('SELECT * FROM suppliers ORDER BY id');
   res.json(rows);
