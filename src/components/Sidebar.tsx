@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   LayoutDashboard,
   Boxes,
@@ -16,7 +16,8 @@ import {
   Calculator,
   Zap,
   Brain,
-  Shield
+  Shield,
+  ChevronDown
 } from 'lucide-react';
 import { ViewType, UserProfile } from '../types';
 
@@ -37,6 +38,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
   setIsSidebarOpen,
   profile
 }) => {
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
+    main: true,
+    manufacturing: true,
+    projects: true,
+    automation: true,
+    quality: true,
+  });
+
+  const toggleSection = (section: string) => {
+    setExpandedSections(prev => ({
+      ...prev,
+      [section]: !prev[section]
+    }));
+  };
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'items', label: 'Items & Inventory', icon: Boxes },
@@ -114,81 +129,93 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </button>
         ))}
 
+        <button
+          onClick={() => toggleSection('manufacturing')}
+          className="w-full flex items-center justify-between px-md py-2 mt-xl text-[11px] text-outline font-bold opacity-60 hover:opacity-100 transition-opacity"
+        >
+          <span>CAD & MANUFACTURING</span>
+          <ChevronDown className={`w-3.5 h-3.5 transition-transform ${expandedSections.manufacturing ? '' : '-rotate-90'}`} />
+        </button>
+        {expandedSections.manufacturing && manufacturingItems.map((item) => (
+          <button
+            key={item.id}
+            onClick={() => handleNavClick(item.id as ViewType)}
+            className={`w-full flex items-center px-md py-2.5 rounded text-left transition-all ${currentView === item.id
+              ? 'text-primary font-bold border-l-4 border-primary bg-primary/10'
+              : 'text-on-surface-variant/80 hover:text-on-surface hover:bg-surface-variant/40'
+              }`}
+          >
+            <item.icon className="w-4.5 h-4.5 mr-sm" />
+            <span className="font-body-md text-sm">{item.label}</span>
+          </button>
+        ))}
+
+        <button
+          onClick={() => toggleSection('projects')}
+          className="w-full flex items-center justify-between px-md py-2 mt-xl text-[11px] text-outline font-bold opacity-60 hover:opacity-100 transition-opacity"
+        >
+          <span>PROJECT MANAGEMENT</span>
+          <ChevronDown className={`w-3.5 h-3.5 transition-transform ${expandedSections.projects ? '' : '-rotate-90'}`} />
+        </button>
+        {expandedSections.projects && projectItems.map((item) => (
+          <button
+            key={item.id}
+            onClick={() => handleNavClick(item.id as ViewType)}
+            className={`w-full flex items-center px-md py-2.5 rounded text-left transition-all ${currentView === item.id
+              ? 'text-primary font-bold border-l-4 border-primary bg-primary/10'
+              : 'text-on-surface-variant/80 hover:text-on-surface hover:bg-surface-variant/40'
+              }`}
+          >
+            <item.icon className="w-4.5 h-4.5 mr-sm" />
+            <span className="font-body-md text-sm">{item.label}</span>
+          </button>
+        ))}
+
+        <button
+          onClick={() => toggleSection('automation')}
+          className="w-full flex items-center justify-between px-md py-2 mt-xl text-[11px] text-outline font-bold opacity-60 hover:opacity-100 transition-opacity"
+        >
+          <span>AUTOMATION</span>
+          <ChevronDown className={`w-3.5 h-3.5 transition-transform ${expandedSections.automation ? '' : '-rotate-90'}`} />
+        </button>
+        {expandedSections.automation && automationItems.map((item) => (
+          <button
+            key={item.id}
+            onClick={() => handleNavClick(item.id as ViewType)}
+            className={`w-full flex items-center px-md py-2.5 rounded text-left transition-all ${currentView === item.id
+              ? 'text-primary font-bold border-l-4 border-primary bg-primary/10'
+              : 'text-on-surface-variant/80 hover:text-on-surface hover:bg-surface-variant/40'
+              }`}
+          >
+            <item.icon className="w-4.5 h-4.5 mr-sm" />
+            <span className="font-body-md text-sm">{item.label}</span>
+          </button>
+        ))}
+
+        <button
+          onClick={() => toggleSection('quality')}
+          className="w-full flex items-center justify-between px-md py-2 mt-xl text-[11px] text-outline font-bold opacity-60 hover:opacity-100 transition-opacity"
+        >
+          <span>QUALITY & ANALYTICS</span>
+          <ChevronDown className={`w-3.5 h-3.5 transition-transform ${expandedSections.quality ? '' : '-rotate-90'}`} />
+        </button>
+        {expandedSections.quality && phase5Items.map((item) => (
+          <button
+            key={item.id}
+            onClick={() => handleNavClick(item.id as ViewType)}
+            className={`w-full flex items-center px-md py-2.5 rounded text-left transition-all ${currentView === item.id
+              ? 'text-primary font-bold border-l-4 border-primary bg-primary/10'
+              : 'text-on-surface-variant/80 hover:text-on-surface hover:bg-surface-variant/40'
+              }`}
+          >
+            <item.icon className="w-4.5 h-4.5 mr-sm" />
+            <span className="font-body-md text-sm">{item.label}</span>
+          </button>
+        ))}
+
         <div className="pt-xl px-md mb-xs text-[11px] text-outline font-bold opacity-40">
-          CAD & MANUFACTURING
+          ADMINISTRATION
         </div>
-
-{manufacturingItems.map((item) => (
-           <button
-             key={item.id}
-             onClick={() => handleNavClick(item.id as ViewType)}
-             className={`w-full flex items-center px-md py-2.5 rounded text-left transition-all ${currentView === item.id
-               ? 'text-primary font-bold border-l-4 border-primary bg-primary/10'
-               : 'text-on-surface-variant/80 hover:text-on-surface hover:bg-surface-variant/40'
-               }`}
-           >
-             <item.icon className="w-4.5 h-4.5 mr-sm" />
-             <span className="font-body-md text-sm">{item.label}</span>
-           </button>
-         ))}
-
-         <div className="pt-xl px-md mb-xs text-[11px] text-outline font-bold opacity-40">
-           PROJECT MANAGEMENT
-         </div>
-
-         {projectItems.map((item) => (
-           <button
-             key={item.id}
-             onClick={() => handleNavClick(item.id as ViewType)}
-             className={`w-full flex items-center px-md py-2.5 rounded text-left transition-all ${currentView === item.id
-               ? 'text-primary font-bold border-l-4 border-primary bg-primary/10'
-               : 'text-on-surface-variant/80 hover:text-on-surface hover:bg-surface-variant/40'
-               }`}
-           >
-             <item.icon className="w-4.5 h-4.5 mr-sm" />
-             <span className="font-body-md text-sm">{item.label}</span>
-           </button>
-         ))}
-
-         <div className="pt-xl px-md mb-xs text-[11px] text-outline font-bold opacity-40">
-           AUTOMATION
-         </div>
-
-         {automationItems.map((item) => (
-           <button
-             key={item.id}
-             onClick={() => handleNavClick(item.id as ViewType)}
-             className={`w-full flex items-center px-md py-2.5 rounded text-left transition-all ${currentView === item.id
-               ? 'text-primary font-bold border-l-4 border-primary bg-primary/10'
-               : 'text-on-surface-variant/80 hover:text-on-surface hover:bg-surface-variant/40'
-               }`}
-           >
-             <item.icon className="w-4.5 h-4.5 mr-sm" />
-             <span className="font-body-md text-sm">{item.label}</span>
-           </button>
-         ))}
-
-         <div className="pt-xl px-md mb-xs text-[11px] text-outline font-bold opacity-40">
-           QUALITY & ANALYTICS
-         </div>
-
-         {phase5Items.map((item) => (
-           <button
-             key={item.id}
-             onClick={() => handleNavClick(item.id as ViewType)}
-             className={`w-full flex items-center px-md py-2.5 rounded text-left transition-all ${currentView === item.id
-               ? 'text-primary font-bold border-l-4 border-primary bg-primary/10'
-               : 'text-on-surface-variant/80 hover:text-on-surface hover:bg-surface-variant/40'
-               }`}
-           >
-             <item.icon className="w-4.5 h-4.5 mr-sm" />
-             <span className="font-body-md text-sm">{item.label}</span>
-           </button>
-         ))}
-
-         <div className="pt-xl px-md mb-xs text-[11px] text-outline font-bold opacity-40">
-           ADMINISTRATION
-         </div>
 
         <button
           onClick={() => handleNavClick('settings')}
