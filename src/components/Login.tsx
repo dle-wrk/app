@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { LogIn, Mail, Lock, AlertCircle } from 'lucide-react';
+import { LogIn, Mail, Lock, AlertCircle, Eye, EyeOff } from 'lucide-react';
 
 interface LoginProps {
   onLogin: (email: string, password: string) => Promise<void>;
@@ -11,6 +11,7 @@ export default function Login({ onLogin, isLoading = false }: LoginProps) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [focused, setFocused] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -32,72 +33,94 @@ export default function Login({ onLogin, isLoading = false }: LoginProps) {
     <div className="min-h-screen bg-gradient-to-br from-primary via-surface to-surface-container flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         {/* Logo/Header */}
-        <div className="text-center mb-8">
-          <div className="flex items-center justify-center mb-4">
-            <div className="w-12 h-12 bg-primary rounded-xl flex items-center justify-center">
-              <LogIn className="w-6 h-6 text-on-primary" />
+        <div className="text-center mb-12">
+          <div className="flex items-center justify-center mb-6">
+            <div className="w-14 h-14 bg-primary/20 rounded-2xl flex items-center justify-center border border-primary/40">
+              <LogIn className="w-8 h-8 text-primary" />
             </div>
           </div>
-          <h1 className="text-3xl font-bold text-on-surface mb-2">Tracklab IM</h1>
-          <p className="text-sm text-on-surface-variant">Enterprise Inventory Management</p>
+          <h1 className="text-4xl font-black text-on-surface mb-2 tracking-tight">Tracklab IM</h1>
+          <p className="text-sm text-on-surface-variant/80 font-medium">Enterprise Inventory Management System</p>
         </div>
 
         {/* Login Card */}
-        <div className="bg-surface-container rounded-2xl border border-outline-variant shadow-lg p-8">
-          <h2 className="text-2xl font-bold text-on-surface mb-6">Sign In</h2>
+        <div className="bg-surface-container rounded-2xl border border-outline-variant shadow-2xl p-8 space-y-6">
+          <div>
+            <h2 className="text-2xl font-bold text-on-surface">Welcome Back</h2>
+            <p className="text-xs text-on-surface-variant mt-1">Sign in to your account to continue</p>
+          </div>
 
           {/* Error Message */}
           {error && (
-            <div className="bg-error/15 border border-error/40 rounded-lg p-4 mb-6 flex items-start gap-3">
+            <div className="bg-error/20 border border-error/50 rounded-xl p-4 flex items-start gap-3 animate-pulse">
               <AlertCircle className="w-5 h-5 text-error flex-shrink-0 mt-0.5" />
               <div>
-                <p className="text-sm font-semibold text-error mb-1">Authentication Failed</p>
-                <p className="text-xs text-error/90">{error}</p>
+                <p className="text-sm font-bold text-error">Authentication Failed</p>
+                <p className="text-xs text-error/80 mt-1">{error}</p>
               </div>
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-5">
             {/* Email Field */}
             <div>
-              <label className="block text-sm font-bold text-on-surface mb-2">
+              <label className="block text-xs font-bold text-on-surface mb-2 uppercase tracking-wider">
                 Email Address
               </label>
-              <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-on-surface-variant" />
+              <div className={`relative rounded-lg border-2 transition-all ${
+                focused === 'email'
+                  ? 'border-primary bg-surface-container-high/50'
+                  : 'border-outline-variant/50 bg-surface-container-high'
+              }`}>
+                <Mail className={`absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 transition-colors ${
+                  focused === 'email' ? 'text-primary' : 'text-on-surface-variant'
+                }`} />
                 <input
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@example.com"
-                  className="w-full bg-surface-container-high border border-outline-variant rounded-lg pl-10 pr-4 py-2.5 text-on-surface placeholder-on-surface-variant/50 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
+                  onFocus={() => setFocused('email')}
+                  onBlur={() => setFocused(null)}
+                  placeholder="name@example.com"
+                  className="w-full bg-transparent outline-none pl-10 pr-4 py-3 text-on-surface placeholder-on-surface-variant/50 text-sm font-medium"
                   disabled={isLoading}
+                  autoComplete="email"
                 />
               </div>
             </div>
 
             {/* Password Field */}
             <div>
-              <label className="block text-sm font-bold text-on-surface mb-2">
+              <label className="block text-xs font-bold text-on-surface mb-2 uppercase tracking-wider">
                 Password
               </label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-on-surface-variant" />
+              <div className={`relative rounded-lg border-2 transition-all ${
+                focused === 'password'
+                  ? 'border-primary bg-surface-container-high/50'
+                  : 'border-outline-variant/50 bg-surface-container-high'
+              }`}>
+                <Lock className={`absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 transition-colors ${
+                  focused === 'password' ? 'text-primary' : 'text-on-surface-variant'
+                }`} />
                 <input
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
+                  onFocus={() => setFocused('password')}
+                  onBlur={() => setFocused(null)}
                   placeholder="••••••••"
-                  className="w-full bg-surface-container-high border border-outline-variant rounded-lg pl-10 pr-10 py-2.5 text-on-surface placeholder-on-surface-variant/50 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
+                  className="w-full bg-transparent outline-none pl-10 pr-12 py-3 text-on-surface placeholder-on-surface-variant/50 text-sm font-medium"
                   disabled={isLoading}
+                  autoComplete="current-password"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-on-surface transition-colors"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-on-surface transition-colors p-1"
                   disabled={isLoading}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
                 >
-                  {showPassword ? '👁️' : '👁️‍🗨️'}
+                  {showPassword ? <Eye className="w-5 h-5" /> : <EyeOff className="w-5 h-5" />}
                 </button>
               </div>
             </div>
@@ -106,12 +129,12 @@ export default function Login({ onLogin, isLoading = false }: LoginProps) {
             <button
               type="submit"
               disabled={isLoading || !email || !password}
-              className="w-full bg-primary text-on-primary py-2.5 font-bold rounded-lg hover:brightness-110 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all mt-6 flex items-center justify-center gap-2 shadow-md shadow-primary/20"
+              className="w-full bg-primary text-on-primary py-3 font-bold text-sm rounded-lg hover:brightness-110 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all mt-8 flex items-center justify-center gap-2 shadow-lg shadow-primary/30 uppercase tracking-wider"
             >
               {isLoading ? (
                 <>
                   <div className="w-4 h-4 border-2 border-on-primary/30 border-t-on-primary rounded-full animate-spin" />
-                  Signing in...
+                  Signing In
                 </>
               ) : (
                 <>
@@ -123,25 +146,23 @@ export default function Login({ onLogin, isLoading = false }: LoginProps) {
           </form>
 
           {/* Demo Credentials */}
-          <div className="mt-6 pt-6 border-t border-outline-variant">
-            <p className="text-xs text-on-surface-variant mb-3">
-              Demo credentials:
-            </p>
-            <div className="space-y-2 text-xs font-mono bg-surface-container-high p-3 rounded-lg">
-              <div>
+          <div className="pt-6 border-t border-outline-variant/30">
+            <p className="text-xs font-bold text-on-surface-variant uppercase mb-3 tracking-wide">Demo Account</p>
+            <div className="space-y-2 text-xs font-mono bg-primary/5 border border-primary/20 p-4 rounded-lg">
+              <div className="flex items-center justify-between">
                 <span className="text-on-surface-variant">Email:</span>
-                <span className="text-primary ml-2">dedw13@gmail.com</span>
+                <code className="text-primary font-semibold">dedw13@gmail.com</code>
               </div>
-              <div>
+              <div className="flex items-center justify-between">
                 <span className="text-on-surface-variant">Password:</span>
-                <span className="text-primary ml-2">password123</span>
+                <code className="text-primary font-semibold">password123</code>
               </div>
             </div>
           </div>
         </div>
 
         {/* Footer */}
-        <p className="text-center text-xs text-on-surface-variant mt-6">
+        <p className="text-center text-xs text-on-surface-variant/60 mt-8">
           © 2026 Tracklab IM • All rights reserved
         </p>
       </div>
