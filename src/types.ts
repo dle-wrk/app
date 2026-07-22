@@ -656,3 +656,34 @@ export interface EventLog {
   createdAt?: string;
 }
 
+// ============================================================================
+// USER MANAGEMENT & AUTHENTICATION
+// ============================================================================
+
+export type UserRole = 'admin' | 'manager' | 'viewer';
+export type UserStatus = 'ACTIVE' | 'INACTIVE' | 'SUSPENDED';
+
+export interface User {
+  id?: number;
+  email: string;
+  password?: string;
+  firstName?: string;
+  lastName?: string;
+  role: UserRole;
+  status: UserStatus;
+  createdAt?: string;
+  updatedAt?: string;
+  lastLogin?: string;
+}
+
+export interface RolePermission {
+  role: UserRole;
+  permission: string;
+  createdAt?: string;
+}
+
+export interface UserPermissions {
+  role: UserRole;
+  permissions: string[];
+}
+

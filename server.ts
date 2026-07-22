@@ -1030,6 +1030,167 @@ app.get('/api/items/generate-code/:category', async (req, res) => {
   }
 });
 
+// ============================================================================
+// USER MANAGEMENT & AUTHENTICATION
+// ============================================================================
+
+app.post('/api/users/init-roles', async (_req, res) => {
+  try {
+    // Initialize default roles and permissions
+    const roles = ['admin', 'manager', 'viewer'];
+    const permissions: Record<string, string[]> = {
+      admin: [
+        'users.create', 'users.read', 'users.update', 'users.delete',
+        'inventory.create', 'inventory.read', 'inventory.update', 'inventory.delete',
+        'suppliers.create', 'suppliers.read', 'suppliers.update', 'suppliers.delete',
+        'orders.create', 'orders.read', 'orders.update', 'orders.delete',
+        'reports.read', 'settings.update', 'automation.create', 'automation.delete'
+      ],
+      manager: [
+        'users.read',
+        'inventory.create', 'inventory.read', 'inventory.update',
+        'suppliers.read', 'suppliers.update',
+        'orders.create', 'orders.read', 'orders.update',
+        'reports.read', 'automation.create'
+      ],
+      viewer: [
+        'inventory.read', 'suppliers.read', 'orders.read', 'reports.read'
+      ]
+    };
+
+    for (const role of roles) {
+      for (const permission of permissions[role]) {
+        await query(
+          `INSERT INTO role_permissions (role, permission) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+          [role, permission]
+        );
+      }
+    }
+
+    res.json({ ok: true, message: 'Roles and permissions initialized' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/users', async (_req, res) => {
+  try {
+    const { rows } = await query(
+      `SELECT id, email, first_name, last_name, role, status, created_at, last_login FROM users ORDER BY created_at DESC`
+    );
+    res.json(rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/users', async (req, res) => {
+  try {
+    const { email, password, firstName, lastName, role } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
+
+    // Hash password (in production, use bcrypt)
+    const hashedPassword = Buffer.from(password).toString('base64');
+
+    const { rows } = await query(
+      `INSERT INTO users (email, password, first_name, last_name, role, status)
+       VALUES ($1, $2, $3, $4, $5, 'ACTIVE')
+       RETURNING id, email, first_name, last_name, role, status, created_at`,
+      [email, hashedPassword, firstName, lastName, role || 'viewer']
+    );
+
+    console.log(`[POST /api/users] Created user: ${email}`);
+    res.status(201).json(rows[0]);
+  } catch (err: any) {
+    if (err.message.includes('duplicate')) {
+      res.status(409).json({ error: 'Email already exists' });
+    } else {
+      res.status(500).json({ error: err.message });
+    }
+  }
+});
+
+app.put('/api/users/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { firstName, lastName, role, status } = req.body;
+
+    const { rows } = await query(
+      `UPDATE users SET first_name = $1, last_name = $2, role = $3, status = $4, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $5
+       RETURNING id, email, first_name, last_name, role, status, updated_at`,
+      [firstName, lastName, role, status, id]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    console.log(`[PUT /api/users] Updated user: ${id}`);
+    res.json(rows[0]);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/users/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const { rowCount } = await query('DELETE FROM users WHERE id = $1', [id]);
+
+    if (rowCount === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    console.log(`[DELETE /api/users] Deleted user: ${id}`);
+    res.json({ ok: true, message: 'User deleted' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/users/:id/permissions', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const userRes = await queryOne<{ role: string }>(
+      'SELECT role FROM users WHERE id = $1',
+      [id]
+    );
+
+    if (!userRes) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const { rows } = await query(
+      'SELECT permission FROM role_permissions WHERE role = $1 ORDER BY permission',
+      [userRes.role]
+    );
+
+    res.json({
+      role: userRes.role,
+      permissions: rows.map(r => r.permission)
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/roles', async (_req, res) => {
+  try {
+    const { rows } = await query(
+      `SELECT DISTINCT role FROM role_permissions ORDER BY role`
+    );
+    res.json(rows.map(r => r.role));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/suppliers', async (_req, res) => {
   const { rows } = await query('SELECT * FROM suppliers ORDER BY id');
   res.json(rows);
@@ -3686,6 +3847,25 @@ async function runSchemaBootstrap() {
     await exec(`CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT
+    )`).catch(() => {});
+    await exec(`CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      email TEXT UNIQUE NOT NULL,
+      password TEXT NOT NULL,
+      first_name TEXT,
+      last_name TEXT,
+      role TEXT DEFAULT 'VIEWER',
+      status TEXT DEFAULT 'ACTIVE',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      last_login TIMESTAMP
+    )`).catch(() => {});
+    await exec(`CREATE TABLE IF NOT EXISTS role_permissions (
+      id SERIAL PRIMARY KEY,
+      role TEXT NOT NULL,
+      permission TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(role, permission)
     )`).catch(() => {});
     await exec(`CREATE TABLE IF NOT EXISTS clients (
       id SERIAL PRIMARY KEY,
