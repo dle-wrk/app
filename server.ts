@@ -780,7 +780,26 @@ app.get('/api/bootstrap', async (_req, res) => {
     });
   } catch (err: any) {
     console.error('ERROR IN GET /api/bootstrap:', err.message);
-    res.status(500).json({ error: err.message });
+    // Return empty data if database is unavailable, so app can still function
+    res.json({
+      items: { items: [], total: 0 },
+      suppliers: [],
+      projects: [],
+      transactions: [],
+      productionKits: [],
+      bomItems: [],
+      ppItems: [],
+      settings: {},
+      jobCards: [],
+      clients: [],
+      clientOrders: [],
+      clientOrderItems: [],
+      buildJobs: [],
+      bomStructures: [],
+      subAssemblies: [],
+      fieldedAssets: [],
+      stockLedger: []
+    });
   }
 });
 
