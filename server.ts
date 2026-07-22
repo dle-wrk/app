@@ -1034,6 +1034,57 @@ app.get('/api/items/generate-code/:category', async (req, res) => {
 // USER MANAGEMENT & AUTHENTICATION
 // ============================================================================
 
+app.post('/api/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
+
+    const { rows } = await query(
+      `SELECT id, email, first_name, last_name, role, status FROM users WHERE email = $1`,
+      [email]
+    );
+
+    if (rows.length === 0) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    const user = rows[0];
+
+    // For now, simple password comparison (in production, use bcrypt.compare)
+    // Get the stored password hash
+    const { rows: pwRows } = await query(
+      `SELECT password FROM users WHERE email = $1`,
+      [email]
+    );
+
+    if (pwRows.length === 0 || pwRows[0].password !== Buffer.from(password).toString('base64')) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    // Check if user is active
+    if (user.status !== 'ACTIVE') {
+      return res.status(401).json({ error: 'User account is not active' });
+    }
+
+    // Return user info (without password)
+    res.json({
+      id: user.id,
+      email: user.email,
+      firstName: user.first_name,
+      lastName: user.last_name,
+      role: user.role,
+      status: user.status
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================================
+
 app.post('/api/users/init-roles', async (_req, res) => {
   try {
     // Initialize default roles and permissions

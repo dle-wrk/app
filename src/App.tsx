@@ -41,6 +41,7 @@ import AlternatesManager from './components/AlternatesManager';
 import BulkPricingWizard from './components/BulkPricingWizard';
 import ItemDetailModal, { deriveMetric, deriveImperial } from './components/ItemDetailModal';
 import ProductionKitsManager from './components/ProductionKitsManager';
+import Login from './components/Login';
 import { Sidebar } from './components/Sidebar';
 import { DashboardView } from './components/views/DashboardView';
 import { InventoryView } from './components/views/InventoryView';
@@ -76,6 +77,56 @@ const TIMEZONES = [
 ];
 
 export default function App() {
+  // Authentication State
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    return localStorage.getItem('userLoggedIn') === 'true';
+  });
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [isLoginLoading, setIsLoginLoading] = useState(false);
+
+  // Load user from localStorage on mount
+  useEffect(() => {
+    const savedUser = localStorage.getItem('currentUser');
+    if (savedUser && localStorage.getItem('userLoggedIn') === 'true') {
+      setCurrentUser(JSON.parse(savedUser));
+    }
+  }, []);
+
+  const handleLogin = async (email: string, password: string) => {
+    setIsLoginLoading(true);
+    try {
+      const response = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Login failed');
+      }
+
+      const user = await response.json();
+      localStorage.setItem('userLoggedIn', 'true');
+      localStorage.setItem('currentUser', JSON.stringify(user));
+      setCurrentUser(user);
+      setIsAuthenticated(true);
+      triggerToast('Login successful', 'success');
+    } catch (err: any) {
+      throw new Error(err.message || 'Login failed');
+    } finally {
+      setIsLoginLoading(false);
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('userLoggedIn');
+    localStorage.removeItem('currentUser');
+    setCurrentUser(null);
+    setIsAuthenticated(false);
+    triggerToast('Logged out successfully', 'success');
+  };
+
   // Advanced Filtering State Management
   const [selectedItemType, setSelectedItemType] = useState<string>('ALL');
   const [selectedStatus, setSelectedStatus] = useState<string>('ALL');
@@ -1277,6 +1328,11 @@ export default function App() {
   const criticalPercent = totalItemsCount > 0 ? 100 - okPercent - lowPercent : 0;
   const detailItem = items.find(i => i.partNumber === selectedDetailPartNumber);
 
+  // Show login screen if not authenticated
+  if (!isAuthenticated) {
+    return <Login onLogin={handleLogin} isLoading={isLoginLoading} />;
+  }
+
   return (
     <div
       className={`min-h-screen text-on-surface font-sans flex ${systemConfig.visualTheme === 'light' ? 'light-mode bg-[#F8FAFC]' : 'dark-mode bg-[#10131a]'
@@ -1387,6 +1443,23 @@ export default function App() {
               <Plus className="w-3.5 h-3.5" />
               Add Item
             </button>
+
+            <div className="h-4 w-px bg-outline-variant mx-1 self-center"></div>
+
+            {/* User Profile & Logout */}
+            <div className="flex items-center gap-2">
+              <div className="text-right hidden sm:block">
+                <p className="text-xs font-bold text-on-surface">{currentUser?.firstName || 'User'}</p>
+                <p className="text-[10px] text-on-surface-variant capitalize">{currentUser?.role || 'viewer'}</p>
+              </div>
+              <button
+                onClick={handleLogout}
+                className="p-2 text-on-surface-variant hover:text-error hover:bg-error/10 rounded-lg transition-all duration-200 border border-transparent hover:border-error/30"
+                title="Logout"
+              >
+                <User className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </header>
 
