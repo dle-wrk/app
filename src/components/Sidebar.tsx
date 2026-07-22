@@ -40,10 +40,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     main: true,
-    manufacturing: true,
-    projects: true,
-    automation: true,
-    quality: true,
+    manufacturing: false,
+    projects: false,
+    automation: false,
+    quality: false,
   });
 
   const toggleSection = (section: string) => {
@@ -114,118 +114,118 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       </div>
 
-      <nav className="flex-1 space-y-1 px-3 overflow-y-auto custom-scrollbar min-h-0">
+      <nav className="flex-1 space-y-0.5 px-2 overflow-y-auto custom-scrollbar min-h-0">
         {navItems.map((item) => (
           <button
             key={item.id}
             onClick={() => handleNavClick(item.id as ViewType)}
-            className={`w-full flex items-center px-3.5 py-2.5 rounded-xl text-left transition-all group ${currentView === item.id
+            className={`w-full flex items-center px-2.5 py-2 rounded-lg text-left transition-all group ${currentView === item.id
               ? 'text-primary font-black bg-primary/10 shadow-sm ring-1 ring-primary/20'
               : 'text-on-surface-variant/70 hover:text-on-surface hover:bg-surface-variant/40'
               }`}
           >
-            <item.icon className={`w-4.5 h-4.5 mr-3 transition-transform group-hover:scale-110 ${currentView === item.id ? 'text-primary' : 'text-on-surface-variant/50'}`} />
-            <span className="text-[13px] tracking-tight">{item.label}</span>
+            <item.icon className={`w-4 h-4 mr-2.5 transition-transform group-hover:scale-110 ${currentView === item.id ? 'text-primary' : 'text-on-surface-variant/50'}`} />
+            <span className="text-[12px] tracking-tight">{item.label}</span>
           </button>
         ))}
 
         <button
           onClick={() => toggleSection('manufacturing')}
-          className="w-full flex items-center justify-between px-md py-2 mt-xl text-[11px] text-outline font-bold opacity-60 hover:opacity-100 transition-opacity"
+          className="w-full flex items-center justify-between px-2.5 py-1.5 mt-3 text-[10px] text-outline font-bold opacity-60 hover:opacity-100 transition-opacity"
         >
-          <span>CAD & MANUFACTURING</span>
-          <ChevronDown className={`w-3.5 h-3.5 transition-transform ${expandedSections.manufacturing ? '' : '-rotate-90'}`} />
+          <span>MANUFACTURING</span>
+          <ChevronDown className={`w-3 h-3 transition-transform ${expandedSections.manufacturing ? '' : '-rotate-90'}`} />
         </button>
         {expandedSections.manufacturing && manufacturingItems.map((item) => (
           <button
             key={item.id}
             onClick={() => handleNavClick(item.id as ViewType)}
-            className={`w-full flex items-center px-md py-2.5 rounded text-left transition-all ${currentView === item.id
+            className={`w-full flex items-center px-2.5 py-1.5 rounded text-left transition-all text-[12px] ${currentView === item.id
               ? 'text-primary font-bold border-l-4 border-primary bg-primary/10'
               : 'text-on-surface-variant/80 hover:text-on-surface hover:bg-surface-variant/40'
               }`}
           >
-            <item.icon className="w-4.5 h-4.5 mr-sm" />
-            <span className="font-body-md text-sm">{item.label}</span>
+            <item.icon className="w-3.5 h-3.5 mr-2" />
+            <span>{item.label}</span>
           </button>
         ))}
 
         <button
           onClick={() => toggleSection('projects')}
-          className="w-full flex items-center justify-between px-md py-2 mt-xl text-[11px] text-outline font-bold opacity-60 hover:opacity-100 transition-opacity"
+          className="w-full flex items-center justify-between px-2.5 py-1.5 mt-3 text-[10px] text-outline font-bold opacity-60 hover:opacity-100 transition-opacity"
         >
-          <span>PROJECT MANAGEMENT</span>
-          <ChevronDown className={`w-3.5 h-3.5 transition-transform ${expandedSections.projects ? '' : '-rotate-90'}`} />
+          <span>PROJECTS</span>
+          <ChevronDown className={`w-3 h-3 transition-transform ${expandedSections.projects ? '' : '-rotate-90'}`} />
         </button>
         {expandedSections.projects && projectItems.map((item) => (
           <button
             key={item.id}
             onClick={() => handleNavClick(item.id as ViewType)}
-            className={`w-full flex items-center px-md py-2.5 rounded text-left transition-all ${currentView === item.id
+            className={`w-full flex items-center px-2.5 py-1.5 rounded text-left transition-all text-[12px] ${currentView === item.id
               ? 'text-primary font-bold border-l-4 border-primary bg-primary/10'
               : 'text-on-surface-variant/80 hover:text-on-surface hover:bg-surface-variant/40'
               }`}
           >
-            <item.icon className="w-4.5 h-4.5 mr-sm" />
-            <span className="font-body-md text-sm">{item.label}</span>
+            <item.icon className="w-3.5 h-3.5 mr-2" />
+            <span>{item.label}</span>
           </button>
         ))}
 
         <button
           onClick={() => toggleSection('automation')}
-          className="w-full flex items-center justify-between px-md py-2 mt-xl text-[11px] text-outline font-bold opacity-60 hover:opacity-100 transition-opacity"
+          className="w-full flex items-center justify-between px-2.5 py-1.5 mt-3 text-[10px] text-outline font-bold opacity-60 hover:opacity-100 transition-opacity"
         >
           <span>AUTOMATION</span>
-          <ChevronDown className={`w-3.5 h-3.5 transition-transform ${expandedSections.automation ? '' : '-rotate-90'}`} />
+          <ChevronDown className={`w-3 h-3 transition-transform ${expandedSections.automation ? '' : '-rotate-90'}`} />
         </button>
         {expandedSections.automation && automationItems.map((item) => (
           <button
             key={item.id}
             onClick={() => handleNavClick(item.id as ViewType)}
-            className={`w-full flex items-center px-md py-2.5 rounded text-left transition-all ${currentView === item.id
+            className={`w-full flex items-center px-2.5 py-1.5 rounded text-left transition-all text-[12px] ${currentView === item.id
               ? 'text-primary font-bold border-l-4 border-primary bg-primary/10'
               : 'text-on-surface-variant/80 hover:text-on-surface hover:bg-surface-variant/40'
               }`}
           >
-            <item.icon className="w-4.5 h-4.5 mr-sm" />
-            <span className="font-body-md text-sm">{item.label}</span>
+            <item.icon className="w-3.5 h-3.5 mr-2" />
+            <span>{item.label}</span>
           </button>
         ))}
 
         <button
           onClick={() => toggleSection('quality')}
-          className="w-full flex items-center justify-between px-md py-2 mt-xl text-[11px] text-outline font-bold opacity-60 hover:opacity-100 transition-opacity"
+          className="w-full flex items-center justify-between px-2.5 py-1.5 mt-3 text-[10px] text-outline font-bold opacity-60 hover:opacity-100 transition-opacity"
         >
-          <span>QUALITY & ANALYTICS</span>
-          <ChevronDown className={`w-3.5 h-3.5 transition-transform ${expandedSections.quality ? '' : '-rotate-90'}`} />
+          <span>QUALITY</span>
+          <ChevronDown className={`w-3 h-3 transition-transform ${expandedSections.quality ? '' : '-rotate-90'}`} />
         </button>
         {expandedSections.quality && phase5Items.map((item) => (
           <button
             key={item.id}
             onClick={() => handleNavClick(item.id as ViewType)}
-            className={`w-full flex items-center px-md py-2.5 rounded text-left transition-all ${currentView === item.id
+            className={`w-full flex items-center px-2.5 py-1.5 rounded text-left transition-all text-[12px] ${currentView === item.id
               ? 'text-primary font-bold border-l-4 border-primary bg-primary/10'
               : 'text-on-surface-variant/80 hover:text-on-surface hover:bg-surface-variant/40'
               }`}
           >
-            <item.icon className="w-4.5 h-4.5 mr-sm" />
-            <span className="font-body-md text-sm">{item.label}</span>
+            <item.icon className="w-3.5 h-3.5 mr-2" />
+            <span>{item.label}</span>
           </button>
         ))}
 
-        <div className="pt-xl px-md mb-xs text-[11px] text-outline font-bold opacity-40">
-          ADMINISTRATION
+        <div className="pt-3 px-2.5 mb-1 text-[10px] text-outline font-bold opacity-40">
+          ADMIN
         </div>
 
         <button
           onClick={() => handleNavClick('settings')}
-          className={`w-full flex items-center px-md py-2.5 rounded text-left transition-all ${currentView === 'settings'
+          className={`w-full flex items-center px-2.5 py-1.5 rounded text-left transition-all text-[12px] ${currentView === 'settings'
             ? 'text-primary font-bold border-l-4 border-primary bg-primary/10'
             : 'text-on-surface-variant/80 hover:text-on-surface hover:bg-surface-variant/40'
             }`}
         >
-          <Settings className="w-4.5 h-4.5 mr-sm" />
-          <span className="font-body-md text-sm">System Config</span>
+          <Settings className="w-3.5 h-3.5 mr-2" />
+          <span>System Config</span>
         </button>
       </nav>
 
