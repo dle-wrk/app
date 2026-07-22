@@ -3,7 +3,11 @@ import compression from 'compression';
 import { z } from 'zod';
 import { spawn } from 'child_process';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { pool, query, queryOne, exec, ensureSchema, close } from './src/lib/db';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 import { ensureBookkeepingSchema } from './src/lib/bookkeeping-db';
 import { registerBookkeepingRoutes } from './src/lib/bookkeeping-routes';
 import { ensurePhase5Tables } from './src/lib/phase5-db';
