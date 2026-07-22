@@ -4076,9 +4076,16 @@ async function runSchemaBootstrap() {
     await ensurePhase5Tables().catch((e) => console.error('Failed to bootstrap Phase 5 schema:', e));
 
     // Seed demo user if it doesn't exist
-    await exec(`INSERT INTO users (email, first_name, last_name, role, status, password, created_at)
-      VALUES ('dedw13@gmail.com', 'Demo', 'User', 'admin', 'ACTIVE', 'password123', NOW())
-      ON CONFLICT (email) DO NOTHING`).catch(() => {});
+    try {
+      const demoUser = await queryOne(`SELECT id FROM users WHERE email = $1`, ['dedw13@gmail.com']);
+      if (!demoUser) {
+        await exec(`INSERT INTO users (email, first_name, last_name, role, status, password, created_at)
+          VALUES ('dedw13@gmail.com', 'Demo', 'User', 'admin', 'ACTIVE', 'password123', datetime('now'))`);
+        console.log('Demo user created successfully');
+      }
+    } catch (e) {
+      console.error('Error seeding demo user:', (e as any).message);
+    }
 
     console.log('Database bootstrapping complete.');
 }
