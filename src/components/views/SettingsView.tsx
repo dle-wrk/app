@@ -1,6 +1,7 @@
-import React from 'react';
-import { SlidersHorizontal, Database, HelpCircle, Check } from 'lucide-react';
+import React, { useState } from 'react';
+import { SlidersHorizontal, Database, HelpCircle, Check, Users } from 'lucide-react';
 import { SystemConfig, UserProfile } from '../../types';
+import UserManagement from '../UserManagement';
 
 interface SettingsViewProps {
   systemConfig: SystemConfig;
@@ -9,6 +10,7 @@ interface SettingsViewProps {
   TIMEZONES: { name: string; value: string }[];
   handleSaveSettings: () => void;
   isSavingSettings: boolean;
+  triggerToast?: (msg: string, type?: string) => void;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
@@ -17,10 +19,42 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   setProfile,
   TIMEZONES,
   handleSaveSettings,
-  isSavingSettings
+  isSavingSettings,
+  triggerToast = () => {}
 }) => {
+  const [activeTab, setActiveTab] = useState<'system' | 'users'>('system');
+
   return (
-    <div className="p-container-margin space-y-4 max-w-[1200px] mx-auto w-full select-none">
+    <div className="p-container-margin space-y-4 max-w-[1400px] mx-auto w-full select-none">
+      {/* Tab Navigation */}
+      <div className="flex gap-md border-b border-outline-variant">
+        <button
+          onClick={() => setActiveTab('system')}
+          className={`px-lg py-md font-bold text-sm transition-all ${
+            activeTab === 'system'
+              ? 'text-primary border-b-2 border-primary'
+              : 'text-on-surface-variant hover:text-on-surface'
+          }`}
+        >
+          <SlidersHorizontal className="w-4 h-4 inline mr-2" />
+          System Configuration
+        </button>
+        <button
+          onClick={() => setActiveTab('users')}
+          className={`px-lg py-md font-bold text-sm transition-all ${
+            activeTab === 'users'
+              ? 'text-primary border-b-2 border-primary'
+              : 'text-on-surface-variant hover:text-on-surface'
+          }`}
+        >
+          <Users className="w-4 h-4 inline mr-2" />
+          User Management
+        </button>
+      </div>
+
+      {/* System Configuration Tab */}
+      {activeTab === 'system' && (
+        <div className="space-y-4">
       {/* Core configs form */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-lg">
         {/* Left core system sections column */}
@@ -209,6 +243,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </button>
         </div>
       </div>
+      )}
+
+      {/* User Management Tab */}
+      {activeTab === 'users' && (
+        <div className="bg-surface-container rounded-xl border border-outline-variant p-lg">
+          <UserManagement triggerToast={triggerToast} />
+        </div>
+      )}
     </div>
   );
 };

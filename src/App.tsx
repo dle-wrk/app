@@ -1553,6 +1553,7 @@ export default function App() {
                   TIMEZONES={TIMEZONES}
                   handleSaveSettings={handleSaveSettings}
                   isSavingSettings={isSavingSettings}
+                  triggerToast={triggerToast}
                 />
               );
             }
