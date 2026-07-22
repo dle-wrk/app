@@ -1057,47 +1057,64 @@ app.post('/api/login', async (req, res) => {
       return res.status(400).json({ error: 'Email and password are required' });
     }
 
-    // Fetch user with password in single query
-    const { rows } = await query(
-      `SELECT id, email, first_name, last_name, role, status, password FROM users WHERE email = $1`,
-      [email]
-    );
+    // Check hardcoded demo credentials first
+    if (email === 'dedw13@gmail.com' && password === 'password123') {
+      return res.json({
+        id: 1,
+        email: 'dedw13@gmail.com',
+        firstName: 'Demo',
+        lastName: 'User',
+        role: 'admin',
+        status: 'ACTIVE'
+      });
+    }
 
-    if (rows.length === 0) {
+    // Try to authenticate against database
+    try {
+      const { rows } = await query(
+        `SELECT id, email, first_name, last_name, role, status, password FROM users WHERE email = $1`,
+        [email]
+      );
+
+      if (rows.length === 0) {
+        return res.status(401).json({ error: 'Invalid email or password' });
+      }
+
+      const user = rows[0];
+
+      // Check if user is active
+      if (user.status !== 'ACTIVE') {
+        return res.status(401).json({ error: 'User account is not active' });
+      }
+
+      // Password comparison - handle both hashed and plain text for testing
+      const hashedPassword = Buffer.from(password).toString('base64');
+      const storedPassword = user.password;
+
+      // Support both hashed passwords and plain text for demo/test accounts
+      const passwordMatch =
+        (storedPassword && storedPassword === hashedPassword) ||
+        (storedPassword && storedPassword.includes(password)) ||
+        (!storedPassword && password); // Allow if no password set in DB (legacy)
+
+      if (!passwordMatch) {
+        return res.status(401).json({ error: 'Invalid email or password' });
+      }
+
+      // Return user info (without password)
+      res.json({
+        id: user.id,
+        email: user.email,
+        firstName: user.first_name,
+        lastName: user.last_name,
+        role: user.role,
+        status: user.status
+      });
+    } catch (dbErr) {
+      // If database query fails, only allow demo credentials (already checked above)
+      console.error('Database login error:', (dbErr as any).message);
       return res.status(401).json({ error: 'Invalid email or password' });
     }
-
-    const user = rows[0];
-
-    // Check if user is active
-    if (user.status !== 'ACTIVE') {
-      return res.status(401).json({ error: 'User account is not active' });
-    }
-
-    // Password comparison - handle both hashed and plain text for testing
-    const hashedPassword = Buffer.from(password).toString('base64');
-    const storedPassword = user.password;
-
-    // Support both hashed passwords and plain text for demo/test accounts
-    const passwordMatch =
-      (storedPassword && storedPassword === hashedPassword) ||
-      (storedPassword && storedPassword.includes(password)) ||
-      (email === 'dedw13@gmail.com' && password === 'password123') ||
-      (!storedPassword && password); // Allow if no password set in DB (legacy)
-
-    if (!passwordMatch) {
-      return res.status(401).json({ error: 'Invalid email or password' });
-    }
-
-    // Return user info (without password)
-    res.json({
-      id: user.id,
-      email: user.email,
-      firstName: user.first_name,
-      lastName: user.last_name,
-      role: user.role,
-      status: user.status
-    });
   } catch (err: any) {
     console.error('Login error:', err.message);
     res.status(500).json({ error: 'Authentication failed' });
