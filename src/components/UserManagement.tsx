@@ -29,7 +29,18 @@ export default function UserManagement({ triggerToast }: UserManagementProps) {
       const res = await fetch('/api/users');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      setUsers(Array.isArray(data) ? data : []);
+      // Transform snake_case to camelCase
+      const transformedData = Array.isArray(data) ? data.map((user: any) => ({
+        id: user.id,
+        email: user.email,
+        firstName: user.first_name,
+        lastName: user.last_name,
+        role: user.role,
+        status: user.status,
+        createdAt: user.created_at,
+        lastLogin: user.last_login
+      })) : [];
+      setUsers(transformedData);
       triggerToast('Users loaded', 'success');
     } catch (err: any) {
       triggerToast(err.message || 'Failed to load users', 'error');
