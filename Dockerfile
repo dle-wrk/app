@@ -29,8 +29,9 @@ RUN npm ci --only=production
 # Copy built React app from builder (already built in builder stage)
 COPY --from=builder /app/dist ./dist
 
-# Copy server files
+# Copy server and source files (server.ts imports from src/lib/db)
 COPY server.ts ./
+COPY src ./src
 
 # Expose port
 EXPOSE 3000
