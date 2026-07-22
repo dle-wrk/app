@@ -8,6 +8,12 @@ import { pool, query, queryOne, exec, ensureSchema, close } from './src/lib/db';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Determine dist directory path (handle both dev and prod)
+const distPath = path.resolve(__dirname, 'dist');
+const altDistPath = path.resolve(process.cwd(), 'dist');
+const DIST_DIR = path.existsSync(distPath) ? distPath : altDistPath;
+
 import { ensureBookkeepingSchema } from './src/lib/bookkeeping-db';
 import { registerBookkeepingRoutes } from './src/lib/bookkeeping-routes';
 import { ensurePhase5Tables } from './src/lib/phase5-db';
@@ -27,7 +33,7 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '1mb' }));
 
 // Serve static files from dist directory
-app.use(express.static(path.join(__dirname, 'dist')));
+app.use(express.static(DIST_DIR));
 
 const ItemSchema = z.object({
   serial_number: z.string().min(1),
@@ -3884,7 +3890,13 @@ app.get('/api/suppliers/performance', async (req, res) => {
 
 // Serve index.html for all non-API routes (client-side routing)
 app.get('*', (_req, res) => {
-  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+  const indexPath = path.join(DIST_DIR, 'index.html');
+  res.sendFile(indexPath, (err) => {
+    if (err) {
+      console.error('Error serving index.html:', err.message);
+      res.status(500).send('Error loading page');
+    }
+  });
 });
 
 async function runSchemaBootstrap() {
