@@ -578,3 +578,81 @@ export interface ProductionProduct {
   updatedAt?: string;
 }
 
+// ============================================================================
+// AUTOMATION & WORKFLOW MANAGEMENT
+// ============================================================================
+
+export type AutomationRuleState = 'ACTIVE' | 'INACTIVE' | 'PAUSED' | 'ARCHIVED' | 'ERROR';
+export type ScheduledJobState = 'SCHEDULED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'PAUSED' | 'CANCELLED';
+export type NotificationState = 'PENDING' | 'SENT' | 'FAILED' | 'READ' | 'ARCHIVED';
+export type EventState = 'CREATED' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'RETRYING';
+export type AutomationTriggerType = 'MANUAL' | 'SCHEDULED' | 'EVENT_BASED' | 'WEBHOOK' | 'API';
+export type AutomationActionType = 'CREATE_PO' | 'SEND_EMAIL' | 'UPDATE_INVENTORY' | 'CREATE_ALERT' | 'RUN_REPORT' | 'WEBHOOK_CALL' | 'CUSTOM_SCRIPT';
+
+export interface AutomationRule {
+  id?: number;
+  name: string;
+  description?: string;
+  triggerType: AutomationTriggerType;
+  triggerConfig: Record<string, any>;
+  actions: AutomationAction[];
+  conditions?: Record<string, any>;
+  isActive: boolean;
+  state: AutomationRuleState;
+  executionCount?: number;
+  lastExecuted?: string;
+  nextExecution?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface AutomationAction {
+  id?: number;
+  type: AutomationActionType;
+  config: Record<string, any>;
+  order: number;
+  enabled?: boolean;
+}
+
+export interface ScheduledJob {
+  id?: number;
+  name: string;
+  description?: string;
+  state: ScheduledJobState;
+  schedulePattern: string; // Cron expression or ISO interval
+  automationRuleId?: number;
+  lastRun?: string;
+  nextRun?: string;
+  executionCount?: number;
+  failureCount?: number;
+  lastError?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface Notification {
+  id?: number;
+  type: string;
+  state: NotificationState;
+  recipient: string;
+  subject: string;
+  message: string;
+  data?: Record<string, any>;
+  readAt?: string;
+  createdAt?: string;
+}
+
+export interface EventLog {
+  id?: number;
+  eventType: string;
+  state: EventState;
+  source?: string;
+  sourceId?: string;
+  data?: Record<string, any>;
+  error?: string;
+  retryCount?: number;
+  nextRetry?: string;
+  completedAt?: string;
+  createdAt?: string;
+}
+
