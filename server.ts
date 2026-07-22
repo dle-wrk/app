@@ -326,12 +326,27 @@ app.get('/api/pricing/search', async (req, res) => {
     results.digikey = { error: 'Not configured' };
   } else if (!(await getDigikeyRefreshToken())) {
     results.digikey = { error: 'Not authorized — run "npm run digikey:authorize"' };
-  } else if ((await getPricingUsage('digikey')) >= PRICING_DAILY_LIMIT) {
-    results.digikey = { error: 'Daily limit reached' };
   } else {
     try {
-      await incrementPricingUsage('digikey');
-      results.digikey = (await searchDigikey(partNumber, qty)) ?? { error: 'No match found' };
+      const cached = await queryOne<any>(
+        `SELECT * FROM pricing_cache WHERE provider = 'digikey' AND part_number = $1 AND qty = $2 ORDER BY created_at DESC LIMIT 1`,
+        [partNumber, qty]
+      );
+      if (cached && new Date().getTime() - new Date(cached.created_at).getTime() < 86400000) {
+        results.digikey = JSON.parse(cached.data);
+      } else if ((await getPricingUsage('digikey')) >= PRICING_DAILY_LIMIT) {
+        results.digikey = { error: 'Daily limit reached' };
+      } else {
+        const result = await searchDigikey(partNumber, qty);
+        results.digikey = result ?? { error: 'No match found' };
+        await incrementPricingUsage('digikey');
+        await query(
+          `INSERT INTO pricing_cache (provider, part_number, qty, data, created_at)
+           VALUES ($1, $2, $3, $4, now())
+           ON CONFLICT (provider, part_number, qty) DO UPDATE SET data = EXCLUDED.data, created_at = now()`,
+          ['digikey', partNumber, qty, JSON.stringify(results.digikey)]
+        );
+      }
     } catch (err: any) {
       results.digikey = { error: err.message };
     }
@@ -339,12 +354,27 @@ app.get('/api/pricing/search', async (req, res) => {
 
   if (!process.env.MOUSER_API_KEY) {
     results.mouser = { error: 'Not configured' };
-  } else if ((await getPricingUsage('mouser')) >= PRICING_DAILY_LIMIT) {
-    results.mouser = { error: 'Daily limit reached' };
   } else {
     try {
-      await incrementPricingUsage('mouser');
-      results.mouser = (await searchMouser(partNumber, qty)) ?? { error: 'No match found' };
+      const cached = await queryOne<any>(
+        `SELECT * FROM pricing_cache WHERE provider = 'mouser' AND part_number = $1 AND qty = $2 ORDER BY created_at DESC LIMIT 1`,
+        [partNumber, qty]
+      );
+      if (cached && new Date().getTime() - new Date(cached.created_at).getTime() < 86400000) {
+        results.mouser = JSON.parse(cached.data);
+      } else if ((await getPricingUsage('mouser')) >= PRICING_DAILY_LIMIT) {
+        results.mouser = { error: 'Daily limit reached' };
+      } else {
+        const result = await searchMouser(partNumber, qty);
+        results.mouser = result ?? { error: 'No match found' };
+        await incrementPricingUsage('mouser');
+        await query(
+          `INSERT INTO pricing_cache (provider, part_number, qty, data, created_at)
+           VALUES ($1, $2, $3, $4, now())
+           ON CONFLICT (provider, part_number, qty) DO UPDATE SET data = EXCLUDED.data, created_at = now()`,
+          ['mouser', partNumber, qty, JSON.stringify(results.mouser)]
+        );
+      }
     } catch (err: any) {
       results.mouser = { error: err.message };
     }
