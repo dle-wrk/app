@@ -75,8 +75,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   return (
-    <aside className={`fixed min-h-dvh w-64 left-0 top-0 bg-(--sidebar-bg) border-r border-outline-variant flex flex-col py-md z-50 transition-all duration-300 shadow-2xl lg:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-      <div className="px-md mb-xl flex flex-col pt-sm relative">
+    <aside className={`fixed min-h-dvh w-64 left-0 top-0 bg-(--sidebar-bg) border-r border-outline-variant flex flex-col z-50 transition-all duration-300 shadow-2xl lg:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+      <div className="px-md mb-xl flex flex-col pt-sm relative py-md shrink-0">
         <button
           onClick={() => setIsSidebarOpen(false)}
           className="lg:hidden absolute top-0 right-2 p-2 text-on-surface-variant hover:text-on-surface"
@@ -99,7 +99,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       </div>
 
-      <nav className="flex-1 space-y-1 px-3 overflow-y-auto custom-scrollbar">
+      <nav className="flex-1 space-y-1 px-3 overflow-y-auto custom-scrollbar min-h-0">
         {navItems.map((item) => (
           <button
             key={item.id}
