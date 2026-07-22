@@ -1,0 +1,1235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tracklab IM - Complete User Guide & Tutorial</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f5f5f5;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 60px 20px;
+            text-align: center;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+
+        .toc {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 40px;
+        }
+
+        .toc h2 {
+            color: #667eea;
+            margin-bottom: 20px;
+            font-size: 1.5em;
+        }
+
+        .toc ul {
+            list-style: none;
+            columns: 2;
+        }
+
+        .toc li {
+            margin-bottom: 10px;
+        }
+
+        .toc a {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .toc a:hover {
+            text-decoration: underline;
+        }
+
+        .section {
+            background: white;
+            padding: 40px;
+            margin-bottom: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .section h2 {
+            color: #667eea;
+            font-size: 2em;
+            margin-bottom: 20px;
+            border-bottom: 3px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+        .section h3 {
+            color: #764ba2;
+            font-size: 1.3em;
+            margin-top: 30px;
+            margin-bottom: 15px;
+        }
+
+        .step {
+            background: #f9f9f9;
+            border-left: 4px solid #667eea;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+
+        .step h4 {
+            color: #667eea;
+            margin-bottom: 10px;
+            font-size: 1.1em;
+        }
+
+        .step p {
+            color: #555;
+            margin-bottom: 10px;
+        }
+
+        .step ol, .step ul {
+            margin-left: 20px;
+            margin-top: 10px;
+        }
+
+        .step li {
+            margin-bottom: 8px;
+        }
+
+        .image-placeholder {
+            background: #e8e8e8;
+            border: 2px dashed #999;
+            border-radius: 4px;
+            padding: 40px;
+            text-align: center;
+            margin: 20px 0;
+            color: #666;
+        }
+
+        .image-placeholder img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 4px;
+        }
+
+        .tip {
+            background: #e8f4f8;
+            border-left: 4px solid #00a8cc;
+            padding: 15px 20px;
+            margin: 15px 0;
+            border-radius: 4px;
+            color: #00598a;
+        }
+
+        .warning {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px 20px;
+            margin: 15px 0;
+            border-radius: 4px;
+            color: #856404;
+        }
+
+        .success {
+            background: #d4edda;
+            border-left: 4px solid #28a745;
+            padding: 15px 20px;
+            margin: 15px 0;
+            border-radius: 4px;
+            color: #155724;
+        }
+
+        .menu-path {
+            background: #f0f0f0;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.95em;
+            display: inline-block;
+            margin: 5px 0;
+        }
+
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+
+        .feature-card {
+            background: #f9f9f9;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+            text-align: center;
+        }
+
+        .feature-card h4 {
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+
+        .feature-card p {
+            color: #666;
+            font-size: 0.95em;
+        }
+
+        .badge {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            margin-right: 5px;
+            margin-bottom: 5px;
+        }
+
+        .badge.new {
+            background: #28a745;
+        }
+
+        .badge.advanced {
+            background: #764ba2;
+        }
+
+        .footer {
+            background: #333;
+            color: white;
+            text-align: center;
+            padding: 20px;
+            margin-top: 40px;
+            border-radius: 8px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+
+        table th, table td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: left;
+        }
+
+        table th {
+            background: #667eea;
+            color: white;
+        }
+
+        table tr:nth-child(even) {
+            background: #f9f9f9;
+        }
+
+        code {
+            background: #f0f0f0;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.95em;
+        }
+
+        .keyboard {
+            background: #333;
+            color: #0f0;
+            padding: 15px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            overflow-x: auto;
+            margin: 15px 0;
+        }
+
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 1.8em;
+            }
+
+            .toc ul {
+                columns: 1;
+            }
+
+            .feature-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .section {
+                padding: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🚀 Tracklab IM Complete User Guide</h1>
+        <p>Master the ERP System from Setup to Advanced Automation</p>
+    </div>
+
+    <div class="container">
+        <!-- Table of Contents -->
+        <div class="toc">
+            <h2>📋 Table of Contents</h2>
+            <ul>
+                <li><a href="#getting-started">Getting Started</a></li>
+                <li><a href="#dashboard">Dashboard Overview</a></li>
+                <li><a href="#inventory">Inventory Management</a></li>
+                <li><a href="#suppliers">Supplier Management</a></li>
+                <li><a href="#pricing">Pricing Directory</a></li>
+                <li><a href="#manufacturing">Manufacturing & Production</a></li>
+                <li><a href="#bookkeeping">Bookkeeping & Accounting</a></li>
+                <li><a href="#automation">Automation & Workflow</a></li>
+                <li><a href="#quality">Quality & Compliance</a></li>
+                <li><a href="#advanced">Advanced Features</a></li>
+                <li><a href="#tips">Pro Tips & Best Practices</a></li>
+            </ul>
+        </div>
+
+        <!-- Getting Started -->
+        <div class="section" id="getting-started">
+            <h2>1. Getting Started with Tracklab IM</h2>
+
+            <h3>First Time Login</h3>
+            <div class="step">
+                <h4>Step 1: Access the Application</h4>
+                <ol>
+                    <li>Open your web browser and navigate to your Tracklab IM instance URL</li>
+                    <li>You should see the main dashboard after authentication</li>
+                    <li>Your profile information appears in the bottom-left of the sidebar</li>
+                </ol>
+            </div>
+
+            <div class="tip">
+                <strong>💡 Tip:</strong> Bookmark the URL for quick access. The application works best on desktop browsers (Chrome, Firefox, Safari, Edge).
+            </div>
+
+            <h3>Understanding the Interface</h3>
+            <div class="step">
+                <h4>The Sidebar Navigation</h4>
+                <p>The left sidebar contains all major sections, organized into groups:</p>
+                <ul>
+                    <li><strong>Core Sections:</strong> Dashboard, Items & Inventory, Stock Tables, Reports & Ledger, Pricing Directory, Suppliers, Bookkeeping, Production Costs</li>
+                    <li><strong>CAD & Manufacturing:</strong> P&P Kit Booking, Bill of Materials, Pick & Place, Component Alternates</li>
+                    <li><strong>Project Management:</strong> Project Manager</li>
+                    <li><strong>Automation:</strong> Automation Dashboard, Auto-PO Config</li>
+                    <li><strong>Quality & Analytics:</strong> Quality & Compliance, Advanced Automation</li>
+                    <li><strong>Administration:</strong> System Config</li>
+                </ul>
+            </div>
+
+            <div class="tip">
+                <strong>💡 Tip:</strong> Click section headers in the sidebar to expand/collapse categories and reduce clutter.
+            </div>
+
+            <h3>Essential Settings</h3>
+            <div class="step">
+                <h4>Step 1: Configure Basic Settings</h4>
+                <ol>
+                    <li>Click <span class="menu-path">Settings → System Config</span></li>
+                    <li>Set your preferred visual theme (Dark/Light mode)</li>
+                    <li>Enable/disable low stock alerts</li>
+                    <li>Configure sync frequency for real-time or interval-based updates</li>
+                </ol>
+            </div>
+        </div>
+
+        <!-- Dashboard Overview -->
+        <div class="section" id="dashboard">
+            <h2>2. Dashboard Overview</h2>
+
+            <p>The Dashboard is your command center, providing real-time insights into your inventory, projects, and business operations.</p>
+
+            <h3>Key Metrics Cards</h3>
+            <div class="step">
+                <h4>Understanding the Statistics</h4>
+                <ul>
+                    <li><strong>Total Items:</strong> Complete inventory count with trend percentage</li>
+                    <li><strong>Active Projects:</strong> Current project status (Stable/At Risk)</li>
+                    <li><strong>Low Stock Alerts:</strong> Items requiring immediate attention</li>
+                    <li><strong>Critical Shortages:</strong> Number of items urgently needed</li>
+                    <li><strong>Asset Valuation:</strong> Total monetary value of inventory</li>
+                </ul>
+            </div>
+
+            <h3>Inventory Insights</h3>
+            <div class="step">
+                <h4>Items by Category</h4>
+                <p>View inventory distribution across all categories:</p>
+                <ol>
+                    <li>Scroll to "Items by Category" section</li>
+                    <li>Hover over charts to see category names and SKU counts</li>
+                    <li>Click category to drill down into that inventory subset</li>
+                </ol>
+            </div>
+
+            <h3>Stock Status Overview</h3>
+            <div class="step">
+                <h4>Monitor Stock Levels</h4>
+                <ul>
+                    <li><strong>Status: OK (67%):</strong> Items with adequate stock levels</li>
+                    <li><strong>Status: Low (8%):</strong> Items below low stock threshold</li>
+                    <li><strong>Status: Critical (25%):</strong> Items requiring urgent reordering</li>
+                </ul>
+            </div>
+
+            <div class="success">
+                <strong>✅ Pro Tip:</strong> Check the dashboard every morning to identify critical items that need reordering.
+            </div>
+        </div>
+
+        <!-- Inventory Management -->
+        <div class="section" id="inventory">
+            <h2>3. Inventory Management</h2>
+
+            <h3>Accessing Inventory</h3>
+            <div class="step">
+                <h4>Step 1: Navigate to Items & Inventory</h4>
+                <ol>
+                    <li>Click <span class="menu-path">Items & Inventory</span> in the sidebar</li>
+                    <li>You'll see a comprehensive table of all inventory items</li>
+                    <li>Use search (⌘K or Ctrl+K) to quickly find items by SKU, name, or ID</li>
+                </ol>
+            </div>
+
+            <h3>Search and Filter</h3>
+            <div class="step">
+                <h4>Finding Specific Items</h4>
+                <ol>
+                    <li>Click the search box at the top: "Search SKU, name, ID..."</li>
+                    <li>Type part number, SKU, or item name</li>
+                    <li>Use dropdown filters:
+                        <ul>
+                            <li>Stock Code filter for exact SKU matches</li>
+                            <li>Status filter (Active/Inactive/etc.)</li>
+                            <li>Stock Health filter (All Levels, Low, Critical)</li>
+                        </ul>
+                    </li>
+                    <li>Results update in real-time</li>
+                </ol>
+            </div>
+
+            <div class="tip">
+                <strong>💡 Keyboard Shortcut:</strong> Press ⌘K (Mac) or Ctrl+K (Windows) from anywhere to open the global search.
+            </div>
+
+            <h3>Adding New Items</h3>
+            <div class="step">
+                <h4>Step 1: Create a New Item</h4>
+                <ol>
+                    <li>Click the <strong>Add Item</strong> button</li>
+                    <li>Fill in required fields:
+                        <ul>
+                            <li>Part Number (unique identifier)</li>
+                            <li>Item Name</li>
+                            <li>Description</li>
+                            <li>Category (Component, Consumable, Product, etc.)</li>
+                            <li>Stock Level</li>
+                            <li>Unit Price</li>
+                            <li>Low Stock Level (threshold for alerts)</li>
+                        </ul>
+                    </li>
+                    <li>Click Save</li>
+                </ol>
+            </div>
+
+            <h3>Updating Stock Levels</h3>
+            <div class="step">
+                <h4>Book In Components</h4>
+                <ol>
+                    <li>Click <strong>Book In Component</strong> button on dashboard</li>
+                    <li>Select the item to increase stock</li>
+                    <li>Enter quantity received</li>
+                    <li>Add reference/PO number</li>
+                    <li>Confirm transaction</li>
+                </ol>
+            </div>
+
+            <div class="step">
+                <h4>Book Out Components</h4>
+                <ol>
+                    <li>Select item in inventory table</li>
+                    <li>Click <strong>Book Out</strong> option</li>
+                    <li>Enter quantity used/removed</li>
+                    <li>Add project or work order reference</li>
+                    <li>Confirm transaction</li>
+                </ol>
+            </div>
+
+            <h3>Item Details & Editing</h3>
+            <div class="step">
+                <h4>View Full Item Information</h4>
+                <ol>
+                    <li>Click an item row to expand details</li>
+                    <li>View all properties: manufacturer part numbers, supplier numbers, datasheets, weblinks</li>
+                    <li>Edit inline by clicking field values</li>
+                    <li>Changes save automatically</li>
+                </ol>
+            </div>
+
+            <div class="warning">
+                <strong>⚠️ Warning:</strong> Carefully verify part numbers before creating new items to avoid duplicates. Check Similar Part Numbers section before adding.
+            </div>
+        </div>
+
+        <!-- Suppliers -->
+        <div class="section" id="suppliers">
+            <h2>4. Supplier Management</h2>
+
+            <h3>Accessing Suppliers</h3>
+            <div class="step">
+                <h4>Step 1: Navigate to Suppliers</h4>
+                <ol>
+                    <li>Click <span class="menu-path">Suppliers</span> in the sidebar</li>
+                    <li>View list of all registered suppliers</li>
+                    <li>Search by supplier name or ID</li>
+                </ol>
+            </div>
+
+            <h3>Adding a New Supplier</h3>
+            <div class="step">
+                <h4>Register a Supplier</h4>
+                <ol>
+                    <li>Click <strong>Add Supplier</strong> button</li>
+                    <li>Enter supplier information:
+                        <ul>
+                            <li>Supplier Name</li>
+                            <li>Website URL</li>
+                            <li>Contact Email</li>
+                            <li>Notes (optional but recommended)</li>
+                            <li>Lead Time (in days)</li>
+                            <li>Response Time (in hours)</li>
+                        </ul>
+                    </li>
+                    <li>Click Save</li>
+                </ol>
+            </div>
+
+            <h3>Supplier Performance Tracking</h3>
+            <div class="step">
+                <h4>Monitor Supplier Metrics</h4>
+                <ul>
+                    <li><strong>Lead Time:</strong> Average days from order to delivery</li>
+                    <li><strong>Response Time:</strong> Average hours to respond to inquiries</li>
+                    <li><strong>Quality Score:</strong> Tracked through defects and returns</li>
+                    <li><strong>Order History:</strong> View past purchase orders and completion rates</li>
+                </ul>
+            </div>
+
+            <div class="tip">
+                <strong>💡 Tip:</strong> Maintain multiple suppliers for critical components to avoid supply chain disruptions.
+            </div>
+        </div>
+
+        <!-- Pricing Directory -->
+        <div class="section" id="pricing">
+            <h2>5. Pricing Directory</h2>
+
+            <h3>Accessing Pricing Tools</h3>
+            <div class="step">
+                <h4>Step 1: Open Pricing Directory</h4>
+                <ol>
+                    <li>Click <span class="menu-path">Pricing Directory</span> in the sidebar</li>
+                    <li>You'll see three tabs: Live Price Lookup, Bulk Pricing, Price Directory</li>
+                </ol>
+            </div>
+
+            <h3>Live Price Lookup</h3>
+            <div class="step">
+                <h4>Compare Supplier Prices in Real-Time</h4>
+                <ol>
+                    <li>Click the <strong>Live Price Lookup</strong> tab (Search icon)</li>
+                    <li>Enter part number or manufacturer part number</li>
+                    <li>System queries multiple suppliers:
+                        <ul>
+                            <li>DigiKey</li>
+                            <li>Mouser Electronics</li>
+                            <li>LCSC (web-scraped pricing)</li>
+                        </ul>
+                    </li>
+                    <li>View API usage meters to track credit consumption</li>
+                    <li>Click "View listing" to visit supplier webpage</li>
+                </ol>
+            </div>
+
+            <div class="tip">
+                <strong>💡 Tip:</strong> The system caches pricing data for 30 days to reduce API costs while keeping prices current.
+            </div>
+
+            <h3>Bulk Pricing Wizard</h3>
+            <div class="step">
+                <h4>Update Prices for Multiple Items</h4>
+                <ol>
+                    <li>Click the <strong>Bulk Pricing</strong> tab (Settings icon)</li>
+                    <li>Enter calibration parameters:
+                        <ul>
+                            <li>Wholesale volume breakpoints</li>
+                            <li>Percentage markups for different volumes</li>
+                        </ul>
+                    </li>
+                    <li>Select items to update</li>
+                    <li>Review calculated prices</li>
+                    <li>Click Apply to update database</li>
+                </ol>
+            </div>
+
+            <h3>Price Directory Browser</h3>
+            <div class="step">
+                <h4>Browse All Inventory Prices</h4>
+                <ol>
+                    <li>Click the <strong>Price Directory</strong> tab (Database icon)</li>
+                    <li>Browse paginated inventory (50 items per page)</li>
+                    <li>Filter by category using buttons (All Classes, Microcontrollers, Capacitors)</li>
+                    <li>Navigate pages using chevron buttons</li>
+                    <li>View total item count</li>
+                </ol>
+            </div>
+
+            <div class="success">
+                <strong>✅ Best Practice:</strong> Review pricing quarterly and update based on market conditions and supplier agreements.
+            </div>
+        </div>
+
+        <!-- Manufacturing & Production -->
+        <div class="section" id="manufacturing">
+            <h2>6. Manufacturing & Production</h2>
+
+            <h3>Bill of Materials (BOM)</h3>
+            <div class="step">
+                <h4>Create and Manage BOMs</h4>
+                <ol>
+                    <li>Navigate to <span class="menu-path">CAD & MANUFACTURING → Bill of Materials</span></li>
+                    <li>Click <strong>Create New BOM</strong></li>
+                    <li>Enter assembly name and description</li>
+                    <li>Add components by:
+                        <ul>
+                            <li>Searching existing inventory</li>
+                            <li>Specifying quantity needed per unit</li>
+                            <li>Adding designator (reference number)</li>
+                            <li>Including footprint and package info</li>
+                        </ul>
+                    </li>
+                    <li>Review total component cost</li>
+                    <li>Save BOM for production use</li>
+                </ol>
+            </div>
+
+            <h3>Production Kits</h3>
+            <div class="step">
+                <h4>Manage Production Kits</h4>
+                <ol>
+                    <li>Navigate to <span class="menu-path">CAD & MANUFACTURING → P&P Kit Booking</span></li>
+                    <li>View available kits with status:
+                        <ul>
+                            <li>READY: Available for use</li>
+                            <li>STAGING: Being prepared</li>
+                            <li>BLOCKED: Temporarily unavailable</li>
+                            <li>ACTIVE: Currently in use</li>
+                        </ul>
+                    </li>
+                    <li>Book a kit for a production run</li>
+                    <li>Track kit status and update as production progresses</li>
+                </ol>
+            </div>
+
+            <h3>Pick & Place Operations</h3>
+            <div class="step">
+                <h4>Manage Pick & Place Components</h4>
+                <ol>
+                    <li>Navigate to <span class="menu-path">CAD & MANUFACTURING → Pick & Place</span></li>
+                    <li>View all P&P components organized by project</li>
+                    <li>Track component designators and quantities</li>
+                    <li>Update placement status as manufacturing progresses</li>
+                </ol>
+            </div>
+
+            <h3>Production Costs</h3>
+            <div class="step">
+                <h4>Calculate and Track Production Costs</h4>
+                <ol>
+                    <li>Navigate to <span class="menu-path">Production Costs</span></li>
+                    <li>View products with:
+                        <ul>
+                            <li>Model numbers</li>
+                            <li>Production cost (BOM cost + labor)</li>
+                            <li>Selling price</li>
+                            <li>Margin calculation</li>
+                        </ul>
+                    </li>
+                    <li>Edit costs and prices as needed</li>
+                </ol>
+            </div>
+
+            <div class="tip">
+                <strong>💡 Tip:</strong> Track BOM costs carefully - they're the foundation of accurate pricing and margin calculations.
+            </div>
+        </div>
+
+        <!-- Bookkeeping & Accounting -->
+        <div class="section" id="bookkeeping">
+            <h2>7. Bookkeeping & Accounting</h2>
+
+            <h3>Accessing the Bookkeeping Module</h3>
+            <div class="step">
+                <h4>Step 1: Navigate to Bookkeeping</h4>
+                <ol>
+                    <li>Click <span class="menu-path">Bookkeeping</span> in the sidebar</li>
+                    <li>You'll see tabbed interface with sections:
+                        <ul>
+                            <li>Overview</li>
+                            <li>Chart of Accounts</li>
+                            <li>Invoices</li>
+                            <li>Bills</li>
+                            <li>Purchase Orders</li>
+                            <li>Payments Received</li>
+                            <li>Payments Made</li>
+                            <li>Expenses</li>
+                            <li>Reports</li>
+                        </ul>
+                    </li>
+                </ol>
+            </div>
+
+            <h3>Creating Invoices</h3>
+            <div class="step">
+                <h4>Invoice Creation Process</h4>
+                <ol>
+                    <li>Click <strong>Invoices</strong> tab</li>
+                    <li>Click <strong>Create Invoice</strong></li>
+                    <li>Fill invoice details:
+                        <ul>
+                            <li>Select customer/client</li>
+                            <li>Set invoice date and due date</li>
+                            <li>Choose currency</li>
+                        </ul>
+                    </li>
+                    <li>Add line items:
+                        <ul>
+                            <li>Part number or description</li>
+                            <li>Quantity</li>
+                            <li>Unit price</li>
+                            <li>Tax rate (optional)</li>
+                        </ul>
+                    </li>
+                    <li>Review subtotal, taxes, and total</li>
+                    <li>Send to customer or save as draft</li>
+                </ol>
+            </div>
+
+            <h3>Managing Bills (Purchase Invoices)</h3>
+            <div class="step">
+                <h4>Record Supplier Bills</h4>
+                <ol>
+                    <li>Click <strong>Bills</strong> tab</li>
+                    <li>Click <strong>Create Bill</strong></li>
+                    <li>Select supplier</li>
+                    <li>Enter bill number and date</li>
+                    <li>Add line items with amounts and accounts</li>
+                    <li>Save and track for payment processing</li>
+                </ol>
+            </div>
+
+            <h3>Purchase Orders</h3>
+            <div class="step">
+                <h4>Create Purchase Orders</h4>
+                <ol>
+                    <li>Click <strong>Purchase Orders</strong> tab</li>
+                    <li>Click <strong>Create PO</strong></li>
+                    <li>Select supplier</li>
+                    <li>Set expected delivery date</li>
+                    <li>Add ordered items with quantities and prices</li>
+                    <li>System calculates totals automatically</li>
+                    <li>Send PO to supplier via email</li>
+                </ol>
+            </div>
+
+            <h3>Recording Payments</h3>
+            <div class="step">
+                <h4>Payments Received from Customers</h4>
+                <ol>
+                    <li>Click <strong>Payments Received</strong> tab</li>
+                    <li>Click <strong>Record Payment</strong></li>
+                    <li>Select customer and invoice(s)</li>
+                    <li>Enter payment method and amount</li>
+                    <li>Allocate payment to invoices</li>
+                    <li>System updates customer balance automatically</li>
+                </ol>
+            </div>
+
+            <div class="step">
+                <h4>Payments Made to Suppliers</h4>
+                <ol>
+                    <li>Click <strong>Payments Made</strong> tab</li>
+                    <li>Click <strong>Record Payment</strong></li>
+                    <li>Select supplier and bills</li>
+                    <li>Enter payment details (method, amount, date)</li>
+                    <li>Confirm and record in accounting ledger</li>
+                </ol>
+            </div>
+
+            <h3>Financial Reports</h3>
+            <div class="step">
+                <h4>Generate Reports</h4>
+                <ol>
+                    <li>Click <strong>Reports</strong> tab</li>
+                    <li>Available reports:
+                        <ul>
+                            <li>Balance Sheet</li>
+                            <li>Income Statement</li>
+                            <li>Cash Flow Statement</li>
+                            <li>Accounts Receivable Aging</li>
+                            <li>Accounts Payable Aging</li>
+                        </ul>
+                    </li>
+                    <li>Select date range</li>
+                    <li>Export to PDF or Excel</li>
+                </ol>
+            </div>
+
+            <div class="warning">
+                <strong>⚠️ Important:</strong> Reconcile accounts monthly and maintain accurate records for audit purposes.
+            </div>
+        </div>
+
+        <!-- Automation & Workflow -->
+        <div class="section" id="automation">
+            <h2>8. Automation & Workflow Management</h2>
+
+            <h3>Accessing Automation</h3>
+            <div class="step">
+                <h4>Step 1: Navigate to Automation</h4>
+                <ol>
+                    <li>Click <span class="menu-path">AUTOMATION → Automation Dashboard</span></li>
+                    <li>View real-time statistics:
+                        <ul>
+                            <li>Active Rules count</li>
+                            <li>Scheduled Jobs</li>
+                            <li>Pending Notifications</li>
+                            <li>Auto-POs Created</li>
+                        </ul>
+                    </li>
+                </ol>
+            </div>
+
+            <h3>Creating Automation Rules</h3>
+            <div class="step">
+                <h4>Set Up an Automation Rule</h4>
+                <ol>
+                    <li>Click <strong>Automation Dashboard</strong> tab</li>
+                    <li>Click <strong>Create Rule</strong> button</li>
+                    <li>Define rule:
+                        <ul>
+                            <li>Rule name and description</li>
+                            <li>Trigger type (Manual, Scheduled, Event-Based)</li>
+                            <li>Conditions (e.g., stock level < 50)</li>
+                            <li>Actions to perform (Create PO, Send Email, etc.)</li>
+                        </ul>
+                    </li>
+                    <li>Set execution order if multiple actions</li>
+                    <li>Enable the rule</li>
+                </ol>
+            </div>
+
+            <h3>Auto-PO Configuration</h3>
+            <div class="step">
+                <h4>Automatically Create Purchase Orders</h4>
+                <ol>
+                    <li>Click <strong>Auto-PO Config</strong> in sidebar</li>
+                    <li>For each component, configure:
+                        <ul>
+                            <li>Minimum stock level threshold</li>
+                            <li>Automatic PO quantity (how many to order)</li>
+                            <li>Preferred supplier</li>
+                            <li>Auto-approval option</li>
+                        </ul>
+                    </li>
+                    <li>Toggle component on/off for auto-PO</li>
+                    <li>System will create POs automatically when stock drops below minimum</li>
+                </ol>
+            </div>
+
+            <h3>Scheduled Jobs</h3>
+            <div class="step">
+                <h4>Set Up Recurring Tasks</h4>
+                <ol>
+                    <li>Navigate to <strong>Automation Dashboard</strong></li>
+                    <li>Click <strong>Scheduled Jobs</strong> tab</li>
+                    <li>Create new job:
+                        <ul>
+                            <li>Job name and description</li>
+                            <li>Cron schedule (e.g., daily at 2 AM)</li>
+                            <li>Action to perform</li>
+                        </ul>
+                    </li>
+                    <li>Enable and monitor execution</li>
+                </ol>
+            </div>
+
+            <h3>Event Logging</h3>
+            <div class="step">
+                <h4>Monitor Automation Events</h4>
+                <ol>
+                    <li>Click <strong>Event Log</strong> tab in Automation Dashboard</li>
+                    <li>View all automation activity:
+                        <ul>
+                            <li>Triggered rules</li>
+                            <li>Completed actions</li>
+                            <li>Failed operations</li>
+                            <li>Performance metrics</li>
+                        </ul>
+                    </li>
+                    <li>Export logs for analysis</li>
+                </ol>
+            </div>
+
+            <div class="success">
+                <strong>✅ Best Practice:</strong> Start with simple automation rules and gradually add complexity as you become comfortable with the system.
+            </div>
+        </div>
+
+        <!-- Quality & Compliance -->
+        <div class="section" id="quality">
+            <h2>9. Quality & Compliance Management</h2>
+
+            <h3>Accessing Quality Module</h3>
+            <div class="step">
+                <h4>Step 1: Navigate to Quality Management</h4>
+                <ol>
+                    <li>Click <span class="menu-path">QUALITY & ANALYTICS → Quality & Compliance</span></li>
+                    <li>View quality metrics dashboard with:
+                        <ul>
+                            <li>Passed inspections count</li>
+                            <li>Failed inspections count</li>
+                            <li>Open NCRs (Non-Conformance Reports)</li>
+                            <li>Defect rate percentage</li>
+                        </ul>
+                    </li>
+                </ol>
+            </div>
+
+            <h3>Quality Assurance Inspections</h3>
+            <div class="step">
+                <h4>Schedule and Conduct QA Inspections</h4>
+                <ol>
+                    <li>Click <strong>QA Inspections</strong> tab</li>
+                    <li>Click <strong>Schedule Inspection</strong></li>
+                    <li>Define inspection:
+                        <ul>
+                            <li>Component/product to inspect</li>
+                            <li>Inspection type (incoming, in-process, final)</li>
+                            <li>Sample size</li>
+                            <li>Criteria and standards</li>
+                        </ul>
+                    </li>
+                    <li>Record results:
+                        <ul>
+                            <li>Accept/reject decision</li>
+                            <li>Defects found (if any)</li>
+                            <li>Inspector notes</li>
+                        </ul>
+                    </li>
+                    <li>System tracks pass/fail rates</li>
+                </ol>
+            </div>
+
+            <h3>Defect Tracking</h3>
+            <div class="step">
+                <h4>Log and Manage Defects</h4>
+                <ol>
+                    <li>Click <strong>Defects</strong> tab</li>
+                    <li>Click <strong>Report Defect</strong></li>
+                    <li>Enter defect details:
+                        <ul>
+                            <li>Component/product affected</li>
+                            <li>Defect description</li>
+                            <li>Severity (CRITICAL, MAJOR, MINOR)</li>
+                            <li>Root cause (if known)</li>
+                            <li>Assigned to (person responsible for fix)</li>
+                        </ul>
+                    </li>
+                    <li>Track defect through resolution</li>
+                    <li>Close defect with closure notes</li>
+                </ol>
+            </div>
+
+            <h3>Non-Conformance Reports (NCR)</h3>
+            <div class="step">
+                <h4>Create and Manage NCRs</h4>
+                <ol>
+                    <li>Click <strong>NCRs</strong> tab</li>
+                    <li>Click <strong>Create NCR</strong></li>
+                    <li>Document non-conformance:
+                        <ul>
+                            <li>NCR number (auto-generated)</li>
+                            <li>Issue description</li>
+                            <li>Item/process affected</li>
+                            <li>Date discovered</li>
+                            <li>Immediate action taken</li>
+                        </ul>
+                    </li>
+                    <li>Assign corrective actions</li>
+                    <li>Set follow-up review date</li>
+                    <li>Close NCR after verification</li>
+                </ol>
+            </div>
+
+            <div class="tip">
+                <strong>💡 Tip:</strong> Use the Quality module to maintain compliance records for ISO 9001, AS9100, or other standards your organization follows.
+            </div>
+        </div>
+
+        <!-- Advanced Features -->
+        <div class="section" id="advanced">
+            <h2>10. Advanced Features</h2>
+
+            <h3>Advanced Automation Dashboard</h3>
+            <div class="step">
+                <h4>ML Models and Predictive Analytics</h4>
+                <ol>
+                    <li>Navigate to <span class="menu-path">QUALITY & ANALYTICS → Advanced Automation</span></li>
+                    <li>Available ML features:
+                        <ul>
+                            <li><strong>Demand Forecasting:</strong> Predict future component needs</li>
+                            <li><strong>Anomaly Detection:</strong> Identify unusual patterns</li>
+                            <li><strong>Supplier Ranking:</strong> Rank suppliers by performance</li>
+                            <li><strong>Defect Prediction:</strong> Forecast quality issues</li>
+                        </ul>
+                    </li>
+                    <li>Train models on historical data</li>
+                    <li>Act on predictions to prevent issues</li>
+                </ol>
+            </div>
+
+            <h3>Project Management</h3>
+            <div class="step">
+                <h4>Manage Projects and Deployments</h4>
+                <ol>
+                    <li>Navigate to <span class="menu-path">PROJECT MANAGEMENT → Project Manager</span></li>
+                    <li>Create new projects with:
+                        <ul>
+                            <li>Project name and description</li>
+                            <li>Timeline (start/end dates)</li>
+                            <li>Assigned team members</li>
+                            <li>Design specifications</li>
+                            <li>Status tracking (Planning, Active, Completed)</li>
+                        </ul>
+                    </li>
+                    <li>Link BOMs and production kits to projects</li>
+                    <li>Track project progress and resource allocation</li>
+                </ol>
+            </div>
+
+            <h3>Stock Tables & Kits</h3>
+            <div class="step">
+                <h4>Manage Stock Kits</h4>
+                <ol>
+                    <li>Navigate to <span class="menu-path">Stock Tables</span></li>
+                    <li>View all pre-assembled stock kits</li>
+                    <li>Track kit composition and availability</li>
+                    <li>Update kit status (READY, STAGING, BLOCKED, ACTIVE)</li>
+                    <li>Use kits in production for faster assembly</li>
+                </ol>
+            </div>
+
+            <h3>Reports & Ledger</h3>
+            <div class="step">
+                <h4>Generate Business Reports</h4>
+                <ol>
+                    <li>Navigate to <span class="menu-path">Reports & Ledger</span></li>
+                    <li>Available reports:
+                        <ul>
+                            <li>Inventory reports (value, turnover, SKU counts)</li>
+                            <li>Transaction ledgers (all stock movements)</li>
+                            <li>Supplier performance reports</li>
+                            <li>Production cost analysis</li>
+                            <li>Quality metrics and trends</li>
+                        </ul>
+                    </li>
+                    <li>Export to PDF or Excel for sharing</li>
+                    <li>Schedule automated reports to email</li>
+                </ol>
+            </div>
+
+            <h3>Component Alternates</h3>
+            <div class="step">
+                <h4>Manage Component Substitutes</h4>
+                <ol>
+                    <li>Navigate to <span class="menu-path">CAD & MANUFACTURING → Component Alternates</span></li>
+                    <li>Define alternate components for:
+                        <ul>
+                            <li>Supply chain flexibility</li>
+                            <li>Cost optimization</li>
+                            <li>Lead time management</li>
+                        </ul>
+                    </li>
+                    <li>Mark alternates with compatibility level</li>
+                    <li>Use in BOMs when primary components unavailable</li>
+                </ol>
+            </div>
+        </div>
+
+        <!-- Pro Tips -->
+        <div class="section" id="tips">
+            <h2>11. Pro Tips & Best Practices</h2>
+
+            <h3>Daily Operations Checklist</h3>
+            <div class="step">
+                <h4>Morning Routine</h4>
+                <ul>
+                    <li>Check Dashboard for critical shortages</li>
+                    <li>Review low stock alerts</li>
+                    <li>Process any pending purchase orders</li>
+                    <li>Check automation event logs for errors</li>
+                    <li>Review pending notifications</li>
+                </ul>
+            </div>
+
+            <h3>Weekly Tasks</h3>
+            <div class="step">
+                <h4>Weekly Maintenance</h4>
+                <ul>
+                    <li>Update inventory counts for high-value items</li>
+                    <li>Review supplier performance metrics</li>
+                    <li>Process incoming inventory</li>
+                    <li>Check quality metrics and defect trends</li>
+                    <li>Reconcile accounts receivable/payable</li>
+                </ul>
+            </div>
+
+            <h3>Monthly Reviews</h3>
+            <div class="step">
+                <h4>Month-End Procedures</h4>
+                <ul>
+                    <li>Complete physical inventory count</li>
+                    <li>Reconcile with system records</li>
+                    <li>Review and approve all transactions</li>
+                    <li>Generate financial reports</li>
+                    <li>Update supplier performance scores</li>
+                    <li>Review pricing and adjust as needed</li>
+                </ul>
+            </div>
+
+            <h3>System Optimization Tips</h3>
+            <div class="tip">
+                <h4>Performance Improvements</h4>
+                <ul>
+                    <li><strong>Bulk Operations:</strong> Use bulk pricing wizard instead of updating items one-by-one</li>
+                    <li><strong>Keyboard Shortcuts:</strong> Use Ctrl+K/⌘K for global search instead of clicking</li>
+                    <li><strong>Filters:</strong> Apply filters before searching to reduce result set</li>
+                    <li><strong>Automation:</strong> Set up rules to eliminate manual, repetitive tasks</li>
+                    <li><strong>Caching:</strong> Pricing data cached 30 days to reduce API costs</li>
+                </ul>
+            </div>
+
+            <h3>Data Management Best Practices</h3>
+            <div class="warning">
+                <h4>Critical Guidelines</h4>
+                <ul>
+                    <li><strong>Unique Part Numbers:</strong> Never duplicate SKUs - verify before creating items</li>
+                    <li><strong>Supplier Master:</strong> Maintain accurate supplier information for correspondence</li>
+                    <li><strong>Regular Backups:</strong> Ensure database backups occur regularly</li>
+                    <li><strong>Access Control:</strong> Limit admin access to authorized personnel only</li>
+                    <li><strong>Audit Trail:</strong> Monitor who makes what changes for compliance</li>
+                </ul>
+            </div>
+
+            <h3>Troubleshooting Common Issues</h3>
+            <div class="step">
+                <h4>Slow Performance</h4>
+                <ul>
+                    <li>Clear browser cache (Ctrl+Shift+Delete)</li>
+                    <li>Use filters to reduce large result sets</li>
+                    <li>Check internet connection speed</li>
+                    <li>Try different browser if issue persists</li>
+                </ul>
+            </div>
+
+            <div class="step">
+                <h4>Missing or Incorrect Data</h4>
+                <ul>
+                    <li>Refresh page (F5 or ⌘R)</li>
+                    <li>Clear filters to ensure complete view</li>
+                    <li>Check for pending sync operations</li>
+                    <li>Verify user permissions for field visibility</li>
+                </ul>
+            </div>
+
+            <div class="step">
+                <h4>API Connection Issues</h4>
+                <ul>
+                    <li>Check API key configuration in system settings</li>
+                    <li>Verify supplier API credentials are valid</li>
+                    <li>Check network firewall rules</li>
+                    <li>Review API rate limits and throttling</li>
+                </ul>
+            </div>
+
+            <h3>Advanced Techniques</h3>
+            <div class="success">
+                <h4>Power User Features</h4>
+                <ul>
+                    <li><strong>Custom Fields:</strong> Add custom attributes to items for your business needs</li>
+                    <li><strong>Bulk Import:</strong> Import items via CSV for faster onboarding</li>
+                    <li><strong>Export Templates:</strong> Create reusable export templates for reports</li>
+                    <li><strong>API Integration:</strong> Connect external systems via REST API for seamless data flow</li>
+                    <li><strong>Workflow Automation:</strong> Chain multiple rules for complex business processes</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Support and Resources -->
+        <div class="section">
+            <h2>Need Help?</h2>
+            <div class="step">
+                <h4>Resources & Support</h4>
+                <ul>
+                    <li><strong>Documentation:</strong> Visit the online help system (? button in interface)</li>
+                    <li><strong>Tutorial Videos:</strong> Check the training portal for video walkthroughs</li>
+                    <li><strong>Contact Support:</strong> Email support@tracklab.io with detailed issue description</li>
+                    <li><strong>Keyboard Shortcuts:</strong> Press ? anywhere in the app to see available shortcuts</li>
+                    <li><strong>Community Forum:</strong> Share tips and ask questions with other users</li>
+                </ul>
+            </div>
+
+            <div class="success">
+                <strong>✅ Congratulations!</strong> You now have a comprehensive understanding of Tracklab IM. Start with basic inventory management and gradually explore advanced features as you become more comfortable with the system. Don't hesitate to reference this guide whenever you need clarification!
+            </div>
+        </div>
+    </div>
+
+    <div class="footer">
+        <p>Tracklab IM v2.5.0-PRO | Complete User Guide | Last Updated: July 2026</p>
+        <p>© 2026 Tracklab. All rights reserved. | <a href="#" style="color: #fff; text-decoration: none;">Privacy Policy</a> | <a href="#" style="color: #fff; text-decoration: none;">Terms of Service</a></p>
+    </div>
+</body>
+</html>
