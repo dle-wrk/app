@@ -254,6 +254,14 @@ function FeatureCard({ icon, title, description, action }: any) {
 function AutomationRulesSection({ triggerToast }: any) {
   const [rules, setRules] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [formData, setFormData] = useState({
+    ruleName: '',
+    description: '',
+    triggerEvent: 'LOW_STOCK',
+    ruleType: 'AUTO_PO',
+    isActive: true,
+  });
 
   useEffect(() => {
     fetchRules();
@@ -270,14 +278,110 @@ function AutomationRulesSection({ triggerToast }: any) {
     }
   };
 
+  const handleCreateRule = async () => {
+    if (!formData.ruleName.trim()) {
+      triggerToast('Rule name is required', 'error');
+      return;
+    }
+    try {
+      const res = await fetch('/api/automation-rules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData),
+      });
+      if (res.ok) {
+        triggerToast('Automation rule created', 'success');
+        setShowCreateForm(false);
+        setFormData({ ruleName: '', description: '', triggerEvent: 'LOW_STOCK', ruleType: 'AUTO_PO', isActive: true });
+        fetchRules();
+      } else {
+        triggerToast('Failed to create rule', 'error');
+      }
+    } catch (err: any) {
+      triggerToast('Error creating rule', 'error');
+    }
+  };
+
   if (loading) return <div className="text-center py-8 text-outline">Loading...</div>;
 
   return (
     <div className="space-y-md">
-      <button className="px-lg py-2 rounded-lg bg-primary text-on-primary text-xs font-bold hover:brightness-110 transition flex items-center gap-2">
+      <button onClick={() => setShowCreateForm(!showCreateForm)} className="px-lg py-2 rounded-lg bg-primary text-on-primary text-xs font-bold hover:brightness-110 transition flex items-center gap-2">
         <Plus className="w-4 h-4" />
         Create Automation Rule
       </button>
+
+      {showCreateForm && (
+        <div className="bg-surface-container border border-outline-variant rounded-lg p-lg space-y-md">
+          <h4 className="text-sm font-bold text-on-surface">New Automation Rule</h4>
+          <div className="space-y-sm">
+            <div>
+              <label className="text-xs font-bold text-on-surface-variant block mb-1">Rule Name</label>
+              <input
+                type="text"
+                value={formData.ruleName}
+                onChange={(e) => setFormData({ ...formData, ruleName: e.target.value })}
+                placeholder="e.g., Auto-order resistors when low"
+                className="w-full bg-surface-container-high border border-outline-variant rounded px-2 py-1.5 text-xs text-on-surface"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-on-surface-variant block mb-1">Description</label>
+              <textarea
+                value={formData.description}
+                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                placeholder="Brief description of what this rule does"
+                className="w-full bg-surface-container-high border border-outline-variant rounded px-2 py-1.5 text-xs text-on-surface"
+                rows={2}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-sm">
+              <div>
+                <label className="text-xs font-bold text-on-surface-variant block mb-1">Trigger Event</label>
+                <select
+                  value={formData.triggerEvent}
+                  onChange={(e) => setFormData({ ...formData, triggerEvent: e.target.value })}
+                  className="w-full bg-surface-container-high border border-outline-variant rounded px-2 py-1.5 text-xs text-on-surface"
+                >
+                  <option>LOW_STOCK</option>
+                  <option>CRITICAL_STOCK</option>
+                  <option>OUT_OF_STOCK</option>
+                  <option>SCHEDULED</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-on-surface-variant block mb-1">Rule Type</label>
+                <select
+                  value={formData.ruleType}
+                  onChange={(e) => setFormData({ ...formData, ruleType: e.target.value })}
+                  className="w-full bg-surface-container-high border border-outline-variant rounded px-2 py-1.5 text-xs text-on-surface"
+                >
+                  <option>AUTO_PO</option>
+                  <option>NOTIFICATION</option>
+                  <option>CUSTOM</option>
+                </select>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={formData.isActive}
+                onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })}
+                className="rounded"
+              />
+              <label className="text-xs text-on-surface-variant">Activate immediately</label>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={handleCreateRule} className="flex-1 px-3 py-1.5 rounded bg-primary text-on-primary text-xs font-bold hover:brightness-110 transition">
+              Create Rule
+            </button>
+            <button onClick={() => setShowCreateForm(false)} className="flex-1 px-3 py-1.5 rounded bg-surface-container-high border border-outline-variant text-on-surface text-xs font-bold hover:bg-surface-variant transition">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="space-y-md">
         {rules.length === 0 ? (
