@@ -364,11 +364,15 @@ export async function ensureBookkeepingSchema() {
   const customerCount = await queryOne<{ count: string }>(`SELECT COUNT(*) as count FROM customers`);
   if (parseInt(customerCount?.count || '0', 10) === 0) {
     const defaultCustomers = [
+      ['Bokpoort', 'Jan de Villiers', 'jan@bokpoort.co.za', '+27-54-XXX-XXXX', 'Northern Cape, SA', 'ZA-789012', 'ACTIVE'],
+      ['Damlaagte', 'Maria Garcia', 'maria@damlaagte.com', '+27-21-XXX-XXXX', 'Cape Town, SA', 'ZA-111111', 'ACTIVE'],
+      ['Gravitas', 'David Smith', 'david@gravitas.co.za', '+27-11-XXX-XXXX', 'Pretoria, SA', 'ZA-222222', 'ACTIVE'],
       ['DEWA', 'Ahmed Hassan', 'ahmed@dewa.ae', '+971-4-XXX-XXXX', 'Dubai, UAE', 'AE-123456', 'ACTIVE'],
-      ['SASOL', 'Thembi Ntuli', 'thembi@sasol.com', '+27-11-XXX-XXXX', 'Johannesburg, SA', 'ZA-654321', 'ACTIVE'],
-      ['BOKPOORT', 'Jan de Villiers', 'jan@bokpoort.co.za', '+27-54-XXX-XXXX', 'Northern Cape, SA', 'ZA-789012', 'ACTIVE'],
-      ['ESKOM', 'Lindiwe Khumalo', 'lindiwe@eskom.co.za', '+27-11-XXX-XXXX', 'Pretoria, SA', 'ZA-345678', 'ACTIVE'],
-      ['ARAMCO', 'Mohammed Al-Saud', 'mohammed@aramco.com.sa', '+966-1-XXX-XXXX', 'Riyadh, SA', 'SA-111111', 'ACTIVE'],
+      ['Sasol', 'Thembi Ntuli', 'thembi@sasol.com', '+27-11-XXX-XXXX', 'Johannesburg, SA', 'ZA-654321', 'ACTIVE'],
+      ['Zwemkuil', 'François Dupont', 'francois@zwemkuil.co.za', '+27-31-XXX-XXXX', 'Durban, SA', 'ZA-333333', 'ACTIVE'],
+      ['Nurfcor', 'Rajesh Patel', 'rajesh@nurfcor.co.za', '+27-12-XXX-XXXX', 'Johannesburg, SA', 'ZA-444444', 'ACTIVE'],
+      ['Millvale', 'Emma Thompson', 'emma@millvale.co.uk', '+44-20-XXX-XXXX', 'London, UK', 'GB-555555', 'ACTIVE'],
+      ['Ferrero', 'Giovanni Rossi', 'giovanni@ferrero.it', '+39-11-XXX-XXXX', 'Turin, Italy', 'IT-666666', 'ACTIVE'],
     ];
     for (const [customerName, contactName, email, phone, address, vatNum, status] of defaultCustomers) {
       await pool.query(
