@@ -3,6 +3,7 @@ import { Plus, Eye, FileText } from 'lucide-react';
 import { PurchaseOrder } from '../../types';
 import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, apiPost, apiPut, apiGet, PrimaryButton, SecondaryButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
 import { LineItemsEditor, EditableLine, newEditableLine } from './LineItemsEditor';
+import { ErrorBoundary } from '../ErrorBoundary';
 
 export const PurchaseOrdersTab: React.FC<ModuleDataProps & { onConvertToBill?: (po: PurchaseOrder) => void }> = (props) => {
   const { purchaseOrders, triggerToast, refresh, onConvertToBill } = props;
@@ -166,7 +167,9 @@ const POEditorModal: React.FC<ModuleDataProps & { onClose: () => void; onSaved: 
         </div>
       </div>
 
-      <LineItemsEditor lines={lines} onChange={setLines} items={items} taxRates={taxRates} mode="PURCHASE" currency={currency} />
+      <ErrorBoundary>
+        <LineItemsEditor lines={lines} onChange={setLines} items={items} taxRates={taxRates} mode="PURCHASE" currency={currency} />
+      </ErrorBoundary>
 
       <div className="mt-md">
         <FieldLabel>Notes</FieldLabel>

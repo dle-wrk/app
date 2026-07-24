@@ -3,6 +3,7 @@ import { Plus, Send, Ban, Eye, Wallet } from 'lucide-react';
 import { Bill, PurchaseOrder } from '../../types';
 import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, addDaysISO, apiPost, apiGet, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
 import { LineItemsEditor, EditableLine, newEditableLine } from './LineItemsEditor';
+import { ErrorBoundary } from '../ErrorBoundary';
 
 const STATUS_FILTERS = ['ALL', 'DRAFT', 'AWAITING_PAYMENT', 'PARTIAL', 'PAID', 'OVERDUE', 'VOID'];
 
@@ -244,7 +245,9 @@ const BillEditorModal: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
         </div>
       </div>
 
-      <LineItemsEditor lines={lines} onChange={setLines} items={items} taxRates={taxRates} accounts={accounts} mode="PURCHASE" currency={currency} />
+      <ErrorBoundary>
+        <LineItemsEditor lines={lines} onChange={setLines} items={items} taxRates={taxRates} accounts={accounts} mode="PURCHASE" currency={currency} />
+      </ErrorBoundary>
 
       <div className="mt-md">
         <FieldLabel>Notes</FieldLabel>

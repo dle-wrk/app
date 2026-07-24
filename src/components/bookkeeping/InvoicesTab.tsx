@@ -3,6 +3,7 @@ import { Plus, Printer, Ban, Eye, Wallet, FileText } from 'lucide-react';
 import { Invoice, InvoiceItem } from '../../types';
 import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, addDaysISO, apiPost, apiPut, apiDelete, apiGet, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
 import { LineItemsEditor, EditableLine, newEditableLine, lineTotals } from './LineItemsEditor';
+import { ErrorBoundary } from '../ErrorBoundary';
 
 const STATUS_FILTERS = ['ALL', 'DRAFT', 'SENT', 'PARTIAL', 'PAID', 'OVERDUE', 'VOID'];
 
@@ -337,7 +338,9 @@ const InvoiceEditorModal: React.FC<ModuleDataProps & { initial: Invoice | null; 
         </button>
       </div>
 
-      <LineItemsEditor lines={lines} onChange={setLines} items={items} taxRates={taxRates} mode="SALES" currency={currency} />
+      <ErrorBoundary>
+        <LineItemsEditor lines={lines} onChange={setLines} items={items} taxRates={taxRates} mode="SALES" currency={currency} />
+      </ErrorBoundary>
 
       <div className="grid md:grid-cols-2 gap-3 mt-md">
         <div>
