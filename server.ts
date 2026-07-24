@@ -870,7 +870,7 @@ app.get('/api/items', async (req, res) => {
 
 app.get('/api/items/products', async (req, res) => {
   try {
-    const { rows } = await query(sql('SELECT * FROM production_products ORDER BY model_number'));
+    const { rows } = await query(`SELECT * FROM production_products ORDER BY model_number`);
     const items = rows.map((r: any) => ({
       partNumber: r.model_number,
       name: r.description,
