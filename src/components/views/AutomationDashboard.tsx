@@ -584,59 +584,106 @@ function AutoPOConfigSection({ triggerToast }: any) {
 
 function EventLogSection({ triggerToast }: any) {
   const [events, setEvents] = useState<any[]>([]);
+  const [rules, setRules] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchEvents();
+    fetchData();
+    const interval = setInterval(fetchData, 5000); // Auto-refresh every 5 seconds
+    return () => clearInterval(interval);
   }, []);
 
-  const fetchEvents = async () => {
+  const fetchData = async () => {
     try {
-      const res = await fetch('/api/event-log?limit=50');
-      setEvents(await res.json());
+      const [eventsRes, rulesRes] = await Promise.all([
+        fetch('/api/event-log?limit=50'),
+        fetch('/api/automation-rules')
+      ]);
+      setEvents(await eventsRes.json());
+      const rulesData = await rulesRes.json();
+      setRules(rulesData.filter((r: any) => r.isActive));
     } catch (err: any) {
-      triggerToast('Failed to load event log', 'ERROR');
+      triggerToast('Failed to load data', 'ERROR');
     } finally {
       setLoading(false);
     }
   };
 
+  const getEventDescription = (eventType: string, details: any) => {
+    const descriptions: Record<string, string> = {
+      'AUTO_PO_CREATED': `✓ Auto-purchase order created for ${details?.componentId || 'item'}`,
+      'MPN_ENRICHMENT': `✓ Supplier information enriched for missing data`,
+      'LOW_STOCK_ALERT': `⚠ Low stock alert triggered`,
+      'CRITICAL_STOCK': `🚨 Critical stock threshold reached`,
+      'AUTO_TRIGGER': `🤖 Automation rule triggered`,
+      'ENRICH_SUPPLIERS': `✓ Supplier enrichment completed`
+    };
+    return descriptions[eventType] || eventType;
+  };
+
   if (loading) return <div className="text-center py-8 text-outline">Loading...</div>;
 
   return (
-    <div className="overflow-x-auto border border-outline-variant rounded-lg">
-      <table className="w-full text-left text-xs">
-        <thead className="bg-surface-container-high border-b border-outline-variant">
-          <tr>
-            <th className="px-md py-2 font-bold text-outline uppercase">Event Type</th>
-            <th className="px-md py-2 font-bold text-outline uppercase">Entity</th>
-            <th className="px-md py-2 font-bold text-outline uppercase">Action</th>
-            <th className="px-md py-2 font-bold text-outline uppercase">Status</th>
-            <th className="px-md py-2 font-bold text-outline uppercase">Time</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-outline-variant/30">
-          {events.map(event => (
-            <tr key={event.id} className="hover:bg-surface-variant/20 transition">
-              <td className="px-md py-2 font-mono text-primary">{event.eventType}</td>
-              <td className="px-md py-2 text-on-surface-variant">{event.entityType || '-'}</td>
-              <td className="px-md py-2">{event.action}</td>
-              <td className="px-md py-2">
-                <span className={`px-2 py-1 rounded text-[9px] font-bold ${
-                  event.status === 'SUCCESS'
-                    ? 'bg-green-500/10 text-green-400'
-                    : 'bg-red-500/10 text-red-400'
-                }`}>
-                  {event.status}
-                </span>
-              </td>
-              <td className="px-md py-2 text-on-surface-variant text-[10px]">
-                {new Date(event.createdAt).toLocaleString()}
-              </td>
+    <div className="space-y-md">
+      {/* Active Rules Summary */}
+      <div className="bg-surface-container-high/40 border border-primary/20 rounded-lg p-md">
+        <div className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-green-500"></span>
+          <span className="text-xs font-bold text-on-surface uppercase">Active Automation Rules</span>
+          <span className="text-xs font-mono bg-primary/20 text-primary px-2 py-1 rounded">{rules.length} rules actively monitoring events</span>
+        </div>
+      </div>
+
+      {/* Event Log Table */}
+      <div className="overflow-x-auto border border-outline-variant rounded-lg">
+        <table className="w-full text-left text-xs">
+          <thead className="bg-surface-container-high border-b border-outline-variant">
+            <tr>
+              <th className="px-md py-2 font-bold text-outline uppercase">Event</th>
+              <th className="px-md py-2 font-bold text-outline uppercase">Details</th>
+              <th className="px-md py-2 font-bold text-outline uppercase">Status</th>
+              <th className="px-md py-2 font-bold text-outline uppercase">Time</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody className="divide-y divide-outline-variant/30">
+            {events.length === 0 ? (
+              <tr>
+                <td colSpan={4} className="px-md py-4 text-center text-on-surface-variant text-[10px]">
+                  No events recorded yet. Automation rules will log events here.
+                </td>
+              </tr>
+            ) : (
+              events.map(event => (
+                <tr key={event.id} className="hover:bg-surface-variant/20 transition">
+                  <td className="px-md py-2 font-mono text-primary font-bold">{event.eventType}</td>
+                  <td className="px-md py-2 text-on-surface">
+                    <div className="flex flex-col gap-0.5">
+                      <span>{getEventDescription(event.eventType, event.details ? JSON.parse(event.details) : {})}</span>
+                      {event.entityType && (
+                        <span className="text-[9px] text-outline">{event.entityType}: {event.action}</span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-md py-2">
+                    <span className={`px-2 py-1 rounded text-[9px] font-bold inline-block ${
+                      event.status === 'SUCCESS'
+                        ? 'bg-green-500/10 text-green-400'
+                        : event.status === 'PENDING'
+                        ? 'bg-yellow-500/10 text-yellow-400'
+                        : 'bg-red-500/10 text-red-400'
+                    }`}>
+                      {event.status}
+                    </span>
+                  </td>
+                  <td className="px-md py-2 text-on-surface-variant text-[10px] whitespace-nowrap">
+                    {new Date(event.createdAt).toLocaleString()}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
