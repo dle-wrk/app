@@ -104,8 +104,13 @@ export const BookkeepingView: React.FC<BookkeepingViewProps> = ({
       setExpenses(data.expenses);
 
       // Load production items for invoicing
-      const prodItems = await apiGet('/api/items/products');
-      setProductionItems(prodItems);
+      try {
+        const prodItems = await apiGet('/api/items/products');
+        setProductionItems(prodItems);
+      } catch (err: any) {
+        console.warn('Could not load production items, using regular items:', err.message);
+        // Fall back to regular items - they'll be used if productionItems is empty
+      }
     } catch (err: any) {
       triggerToast(err.message || 'Failed to load bookkeeping data', 'ERROR');
     } finally {
