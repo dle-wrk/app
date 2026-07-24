@@ -1479,7 +1479,6 @@ export default function App() {
                   handleExportCSV={handleExportCSV}
                   syncRotated={syncRotated}
                   triggerToast={triggerToast}
-                  transactions={transactions}
                   totalItemsCount={totalItemsCount}
                   totalValuation={totalValuation}
                   okPercent={okPercent}

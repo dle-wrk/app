@@ -8,10 +8,9 @@ import {
   FileDown,
   ChevronRight,
   Check,
-  AlertCircle,
-  Lightbulb
+  AlertCircle
 } from 'lucide-react';
-import { Item, Transaction, ViewType } from '../../types';
+import { Item, ViewType } from '../../types';
 
 interface DashboardViewProps {
   items: Item[];
@@ -26,7 +25,6 @@ interface DashboardViewProps {
   okPercent: number;
   lowPercent: number;
   criticalPercent: number;
-  transactions: Transaction[];
   setView: (view: ViewType) => void;
   handleStockSync: () => void;
   setShowAddModal: (show: boolean) => void;
@@ -48,7 +46,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   okPercent,
   lowPercent,
   criticalPercent,
-  transactions,
   setView,
   handleStockSync,
   setShowAddModal,
@@ -275,43 +272,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
 
-        {/* Recent Transactions List widget */}
-        <div className="col-span-12 lg:col-span-9 bg-surface-container rounded-xl border border-outline-variant overflow-hidden">
-          <div className="px-lg py-md border-b border-outline-variant flex justify-between items-center bg-surface-container-high/30">
-            <h4 className="font-headline-sm text-lg font-black tracking-tighter leading-none">Recent Ledger Activity</h4>
-            <button onClick={() => setView('reports_ledger')} className="text-primary text-xs font-bold hover:underline">View Full Ledger</button>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-surface-container-high/50 text-[11px] font-bold text-outline border-b border-outline-variant">
-                  <th className="px-lg py-sm">ID</th>
-                  <th className="px-lg py-sm">Item & description</th>
-                  <th className="px-lg py-sm">Type</th>
-                  <th className="px-lg py-sm text-right">Qty</th>
-                  <th className="px-lg py-sm text-right">Timestamp</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-outline-variant/30 text-xs">
-                {transactions.slice(0, 5).map(trx => (
-                  <tr key={trx.id} className="hover:bg-surface-variant/20 transition-all cursor-pointer">
-                    <td className="px-lg py-sm font-mono text-primary font-bold">{trx.id}</td>
-                    <td className="px-lg py-sm font-semibold text-on-surface">
-                      {trx.itemName}
-                      <span className="text-[10px] text-outline font-normal block">{trx.itemPartNumber}</span>
-                    </td>
-                    <td className="px-lg py-sm">
-                      <span className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-bold border ${trx.type === 'INBOUND' || trx.type === 'BOOK-IN' ? 'bg-green-500/10 text-green-400 border-green-500/20' : 'bg-red-500/10 text-red-400 border-red-500/20'}`}>{trx.type}</span>
-                    </td>
-                    <td className={`px-lg py-sm font-mono text-right font-bold ${trx.qtyChange > 0 ? 'text-green-400' : 'text-red-400'}`}>{trx.qtyChange > 0 ? `+${trx.qtyChange}` : trx.qtyChange}</td>
-                    <td className="px-lg py-sm text-outline text-right">{trx.dateTime}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
         {/* Quick operations panel widgets */}
         <div className="col-span-12 lg:col-span-3 space-y-4">
           <div className="bg-surface-container p-lg rounded-xl border border-outline-variant min-h-76 flex flex-col justify-between">
@@ -345,17 +305,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
       </div>
 
-      {/* Heatmap and Advice contextual cards */}
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-lg mt-xl">
-        <div className="col-span-12 bg-surface-container-high border border-primary-container/20 p-lg rounded-xl flex flex-col justify-between">
-          <div>
-            <div className="flex items-center gap-xs text-primary mb-sm"><Lightbulb className="w-4 h-4" /><span className="text-[10px] font-bold">AI INSIGHT ACTION</span></div>
-            <h5 className="font-headline-sm text-lg font-black tracking-tighter leading-none text-on-surface">Restock recommendation</h5>
-            <p className="text-on-surface-variant text-xs mt-2 leading-relaxed italic pr-2">"Titanium Fastener M8 usage logs have increased dynamically by 400% on floor this week. Suggest raising safety reorder by 5,000 units."</p>
-          </div>
-          <button onClick={() => triggerToast('Reorder workflow successfully triggered.')} className="mt-lg w-full border border-primary text-primary hover:bg-primary hover:text-on-primary transition-all duration-150 py-2 rounded font-bold text-xs capitalize text-center shadow-sm">Create Reorder Action</button>
-        </div>
-      </div>
     </div>
   );
 };
