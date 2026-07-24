@@ -115,19 +115,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
 
         {/* Total Inventory Value */}
-        <div className="bg-surface-container p-5 rounded-xl border border-outline-variant hover:border-green-400/50 transition-all duration-300 group relative overflow-hidden shadow-sm hover:shadow-green-400/5">
+        <div className="bg-surface-container p-5 rounded-xl border border-outline-variant hover:border-primary/50 transition-all duration-300 group relative overflow-hidden shadow-sm hover:shadow-primary/5">
           <div className="absolute -right-4 -top-4 opacity-5 group-hover:opacity-10 transition-all duration-500 transform group-hover:rotate-12 group-hover:scale-110">
-            <TrendingUp className="w-24 h-24 text-green-400" />
+            <TrendingUp className="w-24 h-24 text-primary" />
           </div>
           <div className="flex flex-col">
-            <span className="text-on-surface-variant text-[11px] font-bold mb-2">Asset Valuation</span>
+            <span className="text-on-surface-variant text-[11px] font-bold mb-2">Asset Valuation (USD)</span>
             <div className="flex items-baseline gap-sm">
-              <span className="text-3xl font-black text-green-400 tracking-tighter">
+              <span className="text-3xl font-black text-primary tracking-tighter">
                 ${Math.round(totalValuation).toLocaleString()}
               </span>
             </div>
             <div className="mt-4">
-              <svg className="w-full h-8 opacity-40 text-green-400 group-hover:opacity-80 transition-opacity" viewBox="0 0 60 20" preserveAspectRatio="none">
+              <svg className="w-full h-8 opacity-40 text-primary group-hover:opacity-80 transition-opacity" viewBox="0 0 60 20" preserveAspectRatio="none">
                 <path d={sparklineCoords} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </div>
@@ -138,121 +138,92 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       {/* Main Dashboard Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-md items-start">
 
-        {/* Category interactive Chart widget */}
-        <div className="col-span-12 lg:col-span-8 bg-surface-container p-lg rounded-xl border border-outline-variant flex flex-col justify-between">
-          <div className="flex items-center mb-xl h-8">
-            <h4 className="font-headline-sm text-lg font-black tracking-tighter leading-none">Items by Category</h4>
-          </div>
-
-          <div className="overflow-x-auto pb-sm custom-scrollbar">
-            <div className="h-64 flex items-end justify-between px-md gap-md min-w-[500px]">
-              {categoryCounts.map(({ cat, count }, idx) => {
-                const pctHeight = `${(count / maxCategoryCount) * 100}%`;
-                // Cyan-tinted monochromatic palette
-                const barColors = [
-                  '#00e5ff', // Primary Cyan
-                  '#00d4eb',
-                  '#00c2d6',
-                  '#00b1c2',
-                  '#009fad',
-                  '#008d99',
-                  '#007c85',
-                  '#006a70'
-                ];
-                const uniqueBarColor = barColors[idx % barColors.length];
-
-                return (
-                  <div key={cat} className="flex-1 flex flex-col items-center gap-sm group cursor-pointer min-w-[60px]">
-                    <div className="w-full bg-outline-variant/10 rounded-t h-48 flex items-end relative overflow-hidden">
-                      <div
-                        className="w-full rounded-t transition-all duration-500 group-hover:brightness-110 group-hover:saturate-120"
-                        style={{
-                          height: pctHeight,
-                          backgroundColor: uniqueBarColor
-                        }}
-                      ></div>
-                      <span className="absolute top-2 left-1/2 -translate-x-1/2 bg-surface-container-lowest/90 backdrop-blur px-2 py-0.5 rounded text-[10px] font-mono font-bold text-on-surface shadow opacity-100 lg:opacity-0 group-hover:opacity-100 transition-opacity z-10 whitespace-nowrap border border-outline-variant/30">
-                        {count} {count === 1 ? 'SKU' : 'SKUs'}
-                      </span>
-                    </div>
-                    <span
-                      className="text-[11px] font-mono text-outline w-full text-center transition-all group-hover:font-bold leading-tight wrap-break-words"
-                      style={{ color: 'inherit' }}
-                      title={cat}
-                    >
-                      {cat}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="mt-md grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-6 gap-y-1.5 select-none">
-            {categoryCounts.map(({ cat, count }) => {
-              const idx = categoryCounts.findIndex(c => c.cat === cat);
-              const barColors = ['#00e5ff', '#00d4eb', '#00c2d6', '#00b1c2', '#009fad', '#008d99', '#007c85', '#006a70'];
-              const dotColor = barColors[idx % barColors.length];
-              return (
-                <div key={cat} className="flex items-center gap-2 text-xs">
-                  <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: dotColor }} />
-                  <span className="text-on-surface-variant truncate flex-1">{cat}</span>
-                  <span className="font-mono font-bold text-on-surface">{count}</span>
-                  <span className="text-outline text-[10px]">SKUs</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Stock status circular indicator ring breakdown */}
-        <div className="col-span-12 lg:col-span-4 bg-surface-container p-lg rounded-xl border border-outline-variant min-h-88.5">
+        {/* Stock Status - Left */}
+        <div className="col-span-12 lg:col-span-4 bg-surface-container p-lg rounded-xl border border-outline-variant">
           <h4 className="font-headline-sm text-lg font-black tracking-tighter leading-none mb-lg">Stock Status</h4>
           <div className="relative flex justify-center items-center h-48">
             <div className="w-32 h-32 relative flex items-center justify-center">
               <svg className="w-full h-full -rotate-90" viewBox="0 0 120 120">
-                <circle cx="60" cy="60" r="50" fill="transparent" stroke="currentColor" strokeWidth="10" className="text-primary-container/20" />
+                <circle cx="60" cy="60" r="50" fill="transparent" stroke="currentColor" strokeWidth="10" className="text-primary/10" />
                 {okPercent > 0 && (
                   <circle cx="60" cy="60" r="50" fill="transparent" stroke="var(--primary)" strokeWidth="10" strokeDasharray="314.159" strokeDashoffset={314.159 - (314.159 * okPercent) / 100} className="transition-all duration-1000 ease-out" />
                 )}
                 {lowPercent > 0 && (
-                  <circle cx="60" cy="60" r="50" fill="transparent" stroke="var(--tertiary)" strokeWidth="10" strokeDasharray="314.159" strokeDashoffset={314.159 - (314.159 * lowPercent) / 100} transform={`rotate(${(okPercent * 3.6)}, 60, 60)`} className="transition-all duration-1000 ease-out" />
+                  <circle cx="60" cy="60" r="50" fill="transparent" stroke="#ffc107" strokeWidth="10" strokeDasharray="314.159" strokeDashoffset={314.159 - (314.159 * lowPercent) / 100} transform={`rotate(${(okPercent * 3.6)}, 60, 60)`} className="transition-all duration-1000 ease-out" />
                 )}
                 {criticalPercent > 0 && (
                   <circle cx="60" cy="60" r="50" fill="transparent" stroke="var(--error)" strokeWidth="10" strokeDasharray="314.159" strokeDashoffset={314.159 - (314.159 * criticalPercent) / 100} transform={`rotate(${((okPercent + lowPercent) * 3.6)}, 60, 60)`} className="transition-all duration-1000 ease-out" />
                 )}
               </svg>
               <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className="font-mono text-lg font-bold">
+                <span className="font-mono text-lg font-bold text-primary">
                   {totalItemsCount >= 1000 ? `${(totalItemsCount / 1000).toFixed(1)}k` : totalItemsCount}
                 </span>
-                <span className="text-[10px] text-outline font-bold">Total SKUs</span>
+                <span className="text-[10px] text-on-surface-variant font-bold">Total SKUs</span>
               </div>
             </div>
           </div>
 
-          <div className="mt-md space-y-sm text-xs select-none">
-            <div className="flex items-center justify-between">
+          <div className="mt-lg space-y-sm text-xs select-none">
+            <div className="flex items-center justify-between p-sm bg-surface-container-high/50 rounded-lg">
               <div className="flex items-center gap-sm">
                 <span className="w-2.5 h-2.5 rounded-full bg-primary"></span>
-                <span className="text-on-surface-variant">Status: OK</span>
+                <span className="text-on-surface-variant">In Stock</span>
               </div>
-              <span className="font-mono font-bold text-on-surface">{okPercent}%</span>
+              <span className="font-mono font-bold text-primary">{okPercent}%</span>
             </div>
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between p-sm bg-surface-container-high/50 rounded-lg">
               <div className="flex items-center gap-sm">
-                <span className="w-2.5 h-2.5 rounded-full bg-tertiary"></span>
-                <span className="text-on-surface-variant">Status: Low</span>
+                <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: '#ffc107' }}></span>
+                <span className="text-on-surface-variant">Low Stock</span>
               </div>
-              <span className="font-mono font-bold text-on-surface">{lowPercent}%</span>
+              <span className="font-mono font-bold" style={{ color: '#ffc107' }}>{lowPercent}%</span>
             </div>
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between p-sm bg-surface-container-high/50 rounded-lg">
               <div className="flex items-center gap-sm">
                 <span className="w-2.5 h-2.5 rounded-full bg-error"></span>
-                <span className="text-on-surface-variant">Status: Critical</span>
+                <span className="text-on-surface-variant">Critical</span>
               </div>
-              <span className="font-mono font-bold text-on-surface">{criticalPercent}%</span>
+              <span className="font-mono font-bold text-error">{criticalPercent}%</span>
             </div>
+          </div>
+        </div>
+
+        {/* Category Breakdown Table - Right */}
+        <div className="col-span-12 lg:col-span-8 bg-surface-container p-lg rounded-xl border border-outline-variant">
+          <h4 className="font-headline-sm text-lg font-black tracking-tighter leading-none mb-lg">Inventory by Category</h4>
+
+          <div className="space-y-2 max-h-96 overflow-y-auto custom-scrollbar">
+            {categoryCounts.map(({ cat, count }, idx) => {
+              const percentage = Math.round((count / totalItemsCount) * 100);
+              const themeColors = [
+                'var(--primary)',
+                '#7c3aed', // violet
+                '#2563eb', // blue
+                '#16a34a', // green
+                '#ea580c', // orange
+                '#dc2626', // red
+                '#0891b2', // cyan
+                '#8b5cf6'  // purple
+              ];
+              const barColor = themeColors[idx % themeColors.length];
+
+              return (
+                <div key={cat} className="group">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-sm font-bold text-on-surface flex-1 truncate">{cat}</span>
+                    <span className="text-xs font-mono text-on-surface-variant">{count} SKUs</span>
+                    <span className="text-xs font-bold text-primary ml-2 w-8 text-right">{percentage}%</span>
+                  </div>
+                  <div className="w-full bg-surface-container-high rounded-lg h-2 overflow-hidden">
+                    <div
+                      className="h-full rounded-lg transition-all duration-500 group-hover:brightness-110"
+                      style={{ width: `${percentage}%`, backgroundColor: barColor }}
+                    ></div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
 
