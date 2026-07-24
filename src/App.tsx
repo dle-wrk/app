@@ -2256,8 +2256,9 @@ if (currentView === 'alternates') {
                 onSubmit={(e) => {
                   e.preventDefault();
                   const fd = new FormData(e.currentTarget);
+                  const nextId = editingSupplier?.id || String(Math.max(...suppliers.map(s => parseInt(s.id) || 0), 0) + 1);
                   const supplier: Supplier = {
-                    id: editingSupplier?.id || (fd.get('id') as string),
+                    id: nextId,
                     name: fd.get('name') as string,
                     website: fd.get('website') as string,
                     contact_email: fd.get('contact_email') as string,
@@ -2273,12 +2274,11 @@ if (currentView === 'alternates') {
                   <label className="font-bold text-outline">Supplier ID</label>
                   <input
                     name="id"
-                    placeholder="e.g. 1"
-                    className={`bg-surface-container-high border border-outline-variant rounded p-2 text-on-surface outline-none focus:border-primary font-mono text-xs ${editingSupplier ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    className="bg-surface-container-high border border-outline-variant rounded p-2 text-on-surface outline-none font-mono text-xs opacity-60 cursor-not-allowed"
                     type="text"
-                    required
-                    readOnly={!!editingSupplier}
-                    defaultValue={editingSupplier?.id || ''}
+                    disabled
+                    value={editingSupplier?.id || String(Math.max(...suppliers.map(s => parseInt(s.id) || 0), 0) + 1)}
+                    readOnly
                   />
                 </div>
 
