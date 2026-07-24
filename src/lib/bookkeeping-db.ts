@@ -30,6 +30,31 @@ export async function ensureBookkeepingSchema() {
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   )`).catch(() => {});
 
+  // --- Clients & Suppliers -------------------------------------------------------
+  await exec(`CREATE TABLE IF NOT EXISTS clients (
+    id SERIAL PRIMARY KEY,
+    client_name TEXT NOT NULL UNIQUE,
+    contact_name TEXT,
+    email TEXT,
+    phone TEXT,
+    address TEXT,
+    vat_number TEXT,
+    status TEXT DEFAULT 'ACTIVE',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`).catch(() => {});
+
+  await exec(`CREATE TABLE IF NOT EXISTS suppliers (
+    id SERIAL PRIMARY KEY,
+    supplier_name TEXT NOT NULL UNIQUE,
+    contact_name TEXT,
+    email TEXT,
+    phone TEXT,
+    address TEXT,
+    vat_number TEXT,
+    status TEXT DEFAULT 'ACTIVE',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`).catch(() => {});
+
   // --- General Ledger ----------------------------------------------------------
   await exec(`CREATE TABLE IF NOT EXISTS journal_entries (
     id SERIAL PRIMARY KEY,
@@ -333,6 +358,44 @@ export async function ensureBookkeepingSchema() {
     await pool.query(`INSERT INTO tax_rates (name, rate, is_default) VALUES ($1,$2,$3)`, ['Zero-Rated (0%)', 0, false]);
     await pool.query(`INSERT INTO tax_rates (name, rate, is_default) VALUES ($1,$2,$3)`, ['Exempt', 0, false]);
     console.log('Seeded default tax rates.');
+  }
+
+  // --- Default Clients (seeded once) -------------------------------------------
+  const clientCount = await queryOne<{ count: string }>(`SELECT COUNT(*) as count FROM clients`);
+  if (parseInt(clientCount?.count || '0', 10) === 0) {
+    const defaultClients = [
+      ['DEWA', 'Ahmed Hassan', 'ahmed@dewa.ae', '+971-4-XXX-XXXX', 'Dubai, UAE', 'AE-123456', 'ACTIVE'],
+      ['SASOL', 'Thembi Ntuli', 'thembi@sasol.com', '+27-11-XXX-XXXX', 'Johannesburg, SA', 'ZA-654321', 'ACTIVE'],
+      ['BOKPOORT', 'Jan de Villiers', 'jan@bokpoort.co.za', '+27-54-XXX-XXXX', 'Northern Cape, SA', 'ZA-789012', 'ACTIVE'],
+      ['ESKOM', 'Lindiwe Khumalo', 'lindiwe@eskom.co.za', '+27-11-XXX-XXXX', 'Pretoria, SA', 'ZA-345678', 'ACTIVE'],
+      ['ARAMCO', 'Mohammed Al-Saud', 'mohammed@aramco.com.sa', '+966-1-XXX-XXXX', 'Riyadh, SA', 'SA-111111', 'ACTIVE'],
+    ];
+    for (const [clientName, contactName, email, phone, address, vatNum, status] of defaultClients) {
+      await pool.query(
+        `INSERT INTO clients (client_name, contact_name, email, phone, address, vat_number, status) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (client_name) DO NOTHING`,
+        [clientName, contactName, email, phone, address, vatNum, status]
+      );
+    }
+    console.log('Seeded default clients.');
+  }
+
+  // --- Default Suppliers (seeded once) -----------------------------------------
+  const supplierCount = await queryOne<{ count: string }>(`SELECT COUNT(*) as count FROM suppliers`);
+  if (parseInt(supplierCount?.count || '0', 10) === 0) {
+    const defaultSuppliers = [
+      ['MOUSER ELECTRONICS', 'John Smith', 'john@mouser.com', '+1-817-XXX-XXXX', 'Fort Worth, USA', 'US-111111', 'ACTIVE'],
+      ['DIGIKEY', 'Sarah Johnson', 'sarah@digikey.com', '+1-218-XXX-XXXX', 'Thief River Falls, USA', 'US-222222', 'ACTIVE'],
+      ['LCSC ELECTRONICS', 'Li Wei', 'li@lcsc.com', '+86-755-XXX-XXXX', 'Shenzhen, China', 'CN-333333', 'ACTIVE'],
+      ['HEILIND INDUSTRIAL', 'Mike Brown', 'mike@heilind.com', '+27-11-XXX-XXXX', 'Johannesburg, SA', 'ZA-444444', 'ACTIVE'],
+      ['RS COMPONENTS', 'Emma White', 'emma@rs-online.com', '+44-20-XXX-XXXX', 'Corby, UK', 'GB-555555', 'ACTIVE'],
+    ];
+    for (const [supplierName, contactName, email, phone, address, vatNum, status] of defaultSuppliers) {
+      await pool.query(
+        `INSERT INTO suppliers (supplier_name, contact_name, email, phone, address, vat_number, status) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (supplier_name) DO NOTHING`,
+        [supplierName, contactName, email, phone, address, vatNum, status]
+      );
+    }
+    console.log('Seeded default suppliers.');
   }
 }
 
