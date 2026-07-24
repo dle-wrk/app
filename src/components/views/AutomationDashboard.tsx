@@ -142,7 +142,7 @@ export default function AutomationDashboard({ triggerToast }: DashboardProps) {
 
       {/* Content Area */}
       <div className="min-h-[400px]">
-        {selectedView === 'overview' && <OverviewSection stats={stats} />}
+        {selectedView === 'overview' && <OverviewSection stats={stats} onNavigate={setSelectedView} />}
         {selectedView === 'rules' && <AutomationRulesSection triggerToast={triggerToast} />}
         {selectedView === 'jobs' && <ScheduledJobsSection triggerToast={triggerToast} />}
         {selectedView === 'notifications' && <NotificationsSection triggerToast={triggerToast} />}
@@ -167,7 +167,7 @@ function StatCard({ icon, label, value, color }: any) {
   );
 }
 
-function OverviewSection({ stats }: any) {
+function OverviewSection({ stats, onNavigate }: any) {
   return (
     <div className="space-y-lg">
       <div className="bg-surface-container border border-outline-variant rounded-lg p-lg">
@@ -202,24 +202,28 @@ function OverviewSection({ stats }: any) {
           title="Automation Rules"
           description="Define trigger-based workflows with conditions and actions"
           action="Manage Rules"
+          onClick={() => onNavigate('rules')}
         />
         <FeatureCard
           icon={<Clock className="w-6 h-6" />}
           title="Scheduled Jobs"
           description="Configure background tasks with cron scheduling"
           action="View Jobs"
+          onClick={() => onNavigate('jobs')}
         />
         <FeatureCard
           icon={<Bell className="w-6 h-6" />}
           title="Notifications"
           description="Queue and track alert delivery to users"
           action="View Notifications"
+          onClick={() => onNavigate('notifications')}
         />
         <FeatureCard
           icon={<AlertCircle className="w-6 h-6" />}
           title="Auto-PO Creation"
           description="Automatically generate purchase orders for low stock"
           action="Configure Auto-PO"
+          onClick={() => onNavigate('auto-po')}
         />
       </div>
     </div>
@@ -238,13 +242,13 @@ function StatusItem({ icon, label, value }: any) {
   );
 }
 
-function FeatureCard({ icon, title, description, action }: any) {
+function FeatureCard({ icon, title, description, action, onClick }: any) {
   return (
     <div className="bg-surface-container border border-outline-variant rounded-lg p-lg hover:border-primary transition-all">
       <div className="text-primary mb-3">{icon}</div>
       <h5 className="text-sm font-bold text-on-surface mb-2">{title}</h5>
       <p className="text-xs text-on-surface-variant mb-4">{description}</p>
-      <button className="text-xs font-bold text-primary hover:text-primary/80 transition-colors flex items-center gap-1">
+      <button onClick={onClick} className="text-xs font-bold text-primary hover:text-primary/80 transition-colors flex items-center gap-1">
         {action} <ChevronRight className="w-3 h-3" />
       </button>
     </div>
