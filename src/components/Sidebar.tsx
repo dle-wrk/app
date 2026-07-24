@@ -47,10 +47,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
   });
 
   const toggleSection = (section: string) => {
-    setExpandedSections(prev => ({
-      ...prev,
-      [section]: !prev[section]
-    }));
+    setExpandedSections(prev => {
+      const isCurrentlyOpen = prev[section];
+      return {
+        main: true,
+        manufacturing: section === 'manufacturing' && !isCurrentlyOpen,
+        projects: section === 'projects' && !isCurrentlyOpen,
+        automation: section === 'automation' && !isCurrentlyOpen,
+        quality: section === 'quality' && !isCurrentlyOpen,
+      };
+    });
   };
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
