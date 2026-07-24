@@ -85,7 +85,7 @@ export async function ensureBookkeepingSchema() {
   await exec(`CREATE TABLE IF NOT EXISTS invoices (
     id SERIAL PRIMARY KEY,
     invoice_number TEXT UNIQUE NOT NULL,
-    client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL,
+    customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL,
     client_order_id INTEGER REFERENCES client_orders(id) ON DELETE SET NULL,
     invoice_date DATE NOT NULL DEFAULT CURRENT_DATE,
     due_date DATE,
@@ -121,7 +121,7 @@ export async function ensureBookkeepingSchema() {
   await exec(`CREATE TABLE IF NOT EXISTS payments_received (
     id SERIAL PRIMARY KEY,
     payment_number TEXT UNIQUE NOT NULL,
-    client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL,
+    customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL,
     payment_date DATE NOT NULL DEFAULT CURRENT_DATE,
     amount NUMERIC(14,2) NOT NULL,
     unallocated_amount NUMERIC(14,2) DEFAULT 0,
@@ -266,7 +266,7 @@ export async function ensureBookkeepingSchema() {
     id SERIAL PRIMARY KEY,
     note_number TEXT UNIQUE NOT NULL,
     note_type TEXT NOT NULL CHECK (note_type IN ('DELIVERY','COLLECTION')),
-    client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL,
+    customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL,
     client_order_id INTEGER REFERENCES client_orders(id) ON DELETE SET NULL,
     invoice_id INTEGER REFERENCES invoices(id) ON DELETE SET NULL,
     note_date DATE NOT NULL DEFAULT CURRENT_DATE,
@@ -575,7 +575,7 @@ export const mapJournalLine = (r: any) => ({
 export const mapInvoice = (r: any) => ({
   id: r.id,
   invoiceNumber: r.invoice_number,
-  clientId: r.client_id,
+  customerId: r.customer_id,
   clientOrderId: r.client_order_id,
   invoiceDate: r.invoice_date,
   dueDate: r.due_date,
@@ -612,7 +612,7 @@ export const mapInvoiceItem = (r: any) => ({
 export const mapPaymentReceived = (r: any) => ({
   id: r.id,
   paymentNumber: r.payment_number,
-  clientId: r.client_id,
+  customerId: r.customer_id,
   paymentDate: r.payment_date,
   amount: parseFloat(r.amount) || 0,
   unallocatedAmount: parseFloat(r.unallocated_amount) || 0,
@@ -746,7 +746,7 @@ export const mapDispatchNote = (r: any) => ({
   id: r.id,
   noteNumber: r.note_number,
   noteType: r.note_type,
-  clientId: r.client_id,
+  customerId: r.customer_id,
   clientOrderId: r.client_order_id,
   invoiceId: r.invoice_id,
   noteDate: r.note_date,
