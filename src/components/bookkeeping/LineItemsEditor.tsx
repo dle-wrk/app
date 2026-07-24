@@ -64,28 +64,28 @@ export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChang
   const total = subtotal + taxTotal;
 
   return (
-    <div className="space-y-2">
-      <div className="overflow-x-auto rounded-lg border border-outline-variant/40">
-        <table className="w-full text-left text-xs min-w-[720px]">
+    <div className="space-y-3">
+      <div className="overflow-x-auto rounded-lg border border-outline-variant/40 bg-surface-container">
+        <table className="w-full text-left text-xs min-w-[820px]">
           <thead>
-            <tr className="bg-surface-container-high/50 text-[10px] uppercase text-outline">
-              <th className="py-2 px-2 w-36">Part # (optional)</th>
-              <th className="py-2 px-2">Description</th>
-              <th className="py-2 px-2 w-20 text-right">Qty</th>
-              <th className="py-2 px-2 w-28 text-right">Unit Price</th>
-              <th className="py-2 px-2 w-32">Tax</th>
-              {mode === 'PURCHASE' && accounts && <th className="py-2 px-2 w-36">Account</th>}
-              <th className="py-2 px-2 w-24 text-right">Line Total</th>
-              <th className="py-2 px-2 w-28 text-center">{mode === 'SALES' ? 'Deduct Stock' : 'Receive Stock'}</th>
-              <th className="py-2 px-2 w-8"></th>
+            <tr className="bg-surface-container-high/60 text-[11px] uppercase text-outline font-semibold">
+              <th className="py-3 px-3 w-40">Part # (optional)</th>
+              <th className="py-3 px-3 flex-1">Description</th>
+              <th className="py-3 px-3 w-24 text-center">Qty</th>
+              <th className="py-3 px-3 w-32 text-right">Unit Price</th>
+              <th className="py-3 px-3 w-36">Tax</th>
+              {mode === 'PURCHASE' && accounts && <th className="py-3 px-3 w-40">Account</th>}
+              <th className="py-3 px-3 w-28 text-right">Line Total</th>
+              <th className="py-3 px-3 w-32 text-center">{mode === 'SALES' ? 'Deduct Stock' : 'Receive Stock'}</th>
+              <th className="py-3 px-3 w-10"></th>
             </tr>
           </thead>
           <tbody>
             {lines.map(line => {
               const t = lineTotals(line, taxRates);
               return (
-                <tr key={line.key} className="border-t border-outline-variant/20">
-                  <td className="p-1 relative z-0">
+                <tr key={line.key} className="border-t border-outline-variant/20 hover:bg-surface-container-high/30 transition-colors">
+                  <td className="p-2 relative z-0">
                     <div className="relative">
                       <div className="flex items-center gap-1">
                         <input
@@ -143,36 +143,36 @@ export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChang
                       )}
                     </div>
                   </td>
-                  <td className="p-1">
+                  <td className="p-2">
                     <input
                       value={line.description}
                       onChange={(e) => update(line.key, { description: e.target.value })}
-                      className={`${inputClass} py-1.5 text-xs`}
+                      className={`${inputClass} py-2 px-2.5 text-xs font-medium`}
                       placeholder="Description"
                       required
                     />
                   </td>
-                  <td className="p-1">
+                  <td className="p-2">
                     <input
                       type="number" min={0.01} step="0.01"
                       value={line.quantity}
                       onChange={(e) => update(line.key, { quantity: parseFloat(e.target.value) || 0 })}
-                      className={`${inputClass} py-1.5 text-xs text-right`}
+                      className={`${inputClass} py-2 px-2.5 text-xs text-center font-medium`}
                     />
                   </td>
-                  <td className="p-1">
+                  <td className="p-2">
                     <input
                       type="number" min={0} step="0.01"
                       value={line.unitPrice}
                       onChange={(e) => update(line.key, { unitPrice: parseFloat(e.target.value) || 0 })}
-                      className={`${inputClass} py-1.5 text-xs text-right`}
+                      className={`${inputClass} py-2 px-2.5 text-xs text-right font-mono font-medium`}
                     />
                   </td>
-                  <td className="p-1">
+                  <td className="p-2">
                     <select
                       value={line.taxRateId ?? ''}
                       onChange={(e) => update(line.key, { taxRateId: e.target.value ? Number(e.target.value) : null })}
-                      className={`${selectClass} py-1.5 text-xs`}
+                      className={`${selectClass} py-2 px-2.5 text-xs font-medium`}
                       aria-label="Tax rate"
                     >
                       <option value="">No tax</option>
@@ -180,11 +180,11 @@ export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChang
                     </select>
                   </td>
                   {mode === 'PURCHASE' && accounts && (
-                    <td className="p-1">
+                    <td className="p-2">
                       <select
                         value={line.accountId ?? ''}
                         onChange={(e) => update(line.key, { accountId: e.target.value ? Number(e.target.value) : null })}
-                        className={`${selectClass} py-1.5 text-xs`}
+                        className={`${selectClass} py-2 px-2.5 text-xs font-medium`}
                         aria-label="Expense account"
                       >
                         <option value="">Default expense</option>
@@ -192,20 +192,20 @@ export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChang
                       </select>
                     </td>
                   )}
-                  <td className="p-1 text-right font-mono font-bold text-on-surface">{fmtMoney(t.lineTotal, currency)}</td>
-                  <td className="p-1 text-center">
+                  <td className="p-2 text-right font-mono font-bold text-primary">{fmtMoney(t.lineTotal, currency)}</td>
+                  <td className="p-2 text-center">
                     <input
                       type="checkbox"
                       checked={mode === 'SALES' ? !!line.deductStock : !!line.receiveStock}
                       disabled={!line.partNumber}
                       onChange={(e) => update(line.key, mode === 'SALES' ? { deductStock: e.target.checked } : { receiveStock: e.target.checked })}
-                      className="w-3.5 h-3.5"
+                      className="w-4 h-4 cursor-pointer"
                       title={line.partNumber ? 'Sync this line with inventory stock' : 'Set a part number to enable'}
                     />
                   </td>
-                  <td className="p-1 text-center">
-                    <button type="button" onClick={() => remove(line.key)} className="text-error/70 hover:text-error p-1" aria-label="Remove line">
-                      <Trash2 className="w-3.5 h-3.5" />
+                  <td className="p-2 text-center">
+                    <button type="button" onClick={() => remove(line.key)} className="text-error/60 hover:text-error hover:bg-error/10 p-2 rounded transition-colors" aria-label="Remove line">
+                      <Trash2 className="w-4 h-4" />
                     </button>
                   </td>
                 </tr>
