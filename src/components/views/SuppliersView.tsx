@@ -1,5 +1,5 @@
-import React from 'react';
-import { Plus, ExternalLink, Shield, Clock } from 'lucide-react';
+import React, { useState } from 'react';
+import { Plus, ExternalLink, Shield, Clock, ArrowUpDown } from 'lucide-react';
 import { Supplier } from '../../types';
 
 interface SuppliersViewProps {
@@ -13,6 +13,39 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
   setEditingSupplier,
   setShowSupplierModal
 }) => {
+  const [sortBy, setSortBy] = useState<'name' | 'leadTime' | 'responseTime'>('name');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
+
+  const toggleSort = (field: 'name' | 'leadTime' | 'responseTime') => {
+    if (sortBy === field) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortBy(field);
+      setSortDirection('desc');
+    }
+  };
+
+  const sortedSuppliers = [...suppliers].sort((a, b) => {
+    let aVal: any = a.name;
+    let bVal: any = b.name;
+
+    if (sortBy === 'leadTime') {
+      aVal = a.leadTime || 0;
+      bVal = b.leadTime || 0;
+    } else if (sortBy === 'responseTime') {
+      aVal = a.responseTime || 0;
+      bVal = b.responseTime || 0;
+    }
+
+    if (typeof aVal === 'string') {
+      aVal = aVal.toLowerCase();
+      bVal = bVal.toLowerCase();
+    }
+
+    const comparison = aVal > bVal ? 1 : aVal < bVal ? -1 : 0;
+    return sortDirection === 'asc' ? comparison : -comparison;
+  });
+
   return (
     <div className="p-container-margin space-y-4 max-w-7xl mx-auto w-full">
       {/* Header view suppliers directory info */}
@@ -41,17 +74,41 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-surface-container-high/50 font-label-caps text-[10px] text-outline border-b border-outline-variant">
-                <th className="px-lg py-sm">Supplier Entity</th>
+                <th
+                  className="px-lg py-sm cursor-pointer hover:text-primary transition-colors flex items-center gap-1"
+                  onClick={() => toggleSort('name')}
+                >
+                  Supplier Entity
+                  {sortBy === 'name' && (
+                    <ArrowUpDown className={`w-3 h-3 ${sortDirection === 'desc' ? 'rotate-180' : ''}`} />
+                  )}
+                </th>
                 <th className="px-lg py-sm">Website</th>
-                <th className="px-lg py-sm text-center">Avg Lead Time</th>
-                <th className="px-lg py-sm text-center">Avg Response</th>
+                <th
+                  className="px-lg py-sm text-center cursor-pointer hover:text-primary transition-colors flex items-center justify-center gap-1"
+                  onClick={() => toggleSort('leadTime')}
+                >
+                  Avg Lead Time
+                  {sortBy === 'leadTime' && (
+                    <ArrowUpDown className={`w-3 h-3 ${sortDirection === 'desc' ? 'rotate-180' : ''}`} />
+                  )}
+                </th>
+                <th
+                  className="px-lg py-sm text-center cursor-pointer hover:text-primary transition-colors flex items-center justify-center gap-1"
+                  onClick={() => toggleSort('responseTime')}
+                >
+                  Avg Response
+                  {sortBy === 'responseTime' && (
+                    <ArrowUpDown className={`w-3 h-3 ${sortDirection === 'desc' ? 'rotate-180' : ''}`} />
+                  )}
+                </th>
                 <th className="px-lg py-sm">Contact Email</th>
                 <th className="px-lg py-sm">Notes</th>
                 <th className="px-lg py-sm text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-outline-variant/30 text-xs text-on-surface">
-              {suppliers.map(s => (
+              {sortedSuppliers.map(s => (
                 <tr key={s.id} className="hover:bg-surface-variant/20 transition-all duration-150">
                   <td className="px-lg py-sm font-bold text-sm">
                     {s.name}
