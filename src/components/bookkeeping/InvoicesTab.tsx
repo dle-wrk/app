@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Plus, Send, Ban, Eye, Wallet, FileText } from 'lucide-react';
+import { Plus, Printer, Ban, Eye, Wallet, FileText } from 'lucide-react';
 import { Invoice, InvoiceItem } from '../../types';
 import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, addDaysISO, apiPost, apiPut, apiDelete, apiGet, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
 import { LineItemsEditor, EditableLine, newEditableLine, lineTotals } from './LineItemsEditor';
@@ -353,7 +353,7 @@ const InvoiceEditorModal: React.FC<ModuleDataProps & { initial: Invoice | null; 
       <div className="flex justify-end gap-2 pt-md mt-md border-t border-outline-variant/20">
         <SecondaryButton onClick={onClose}>Cancel</SecondaryButton>
         <SecondaryButton onClick={() => submit('DRAFT')} disabled={!!saving}>{saving === 'DRAFT' ? 'Saving...' : 'Save Draft'}</SecondaryButton>
-        <PrimaryButton icon={<Send className="w-3.5 h-3.5" />} onClick={() => submit('SENT')} disabled={!!saving}>{saving === 'SENT' ? 'Posting...' : 'Finalize & Send'}</PrimaryButton>
+        <PrimaryButton icon={<Printer className="w-3.5 h-3.5" />} onClick={() => submit('SENT')} disabled={!!saving}>{saving === 'SENT' ? 'Printing...' : 'Finalize & Print'}</PrimaryButton>
       </div>
     </Modal>
   );
