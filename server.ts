@@ -1175,7 +1175,23 @@ app.post('/api/login', async (req, res) => {
 app.post('/api/activity-log', async (req, res) => {
   try {
     const { userEmail, action, entityType, entityId, details, status } = req.body;
-    const ipAddress = (req.headers['x-forwarded-for'] as string || req.socket.remoteAddress || '').split(',')[0].trim();
+
+    // Detect real client IP from proxy headers (try multiple common headers)
+    let ipAddress = '';
+    const xForwardedFor = req.headers['x-forwarded-for'] as string;
+    const cfConnectingIp = req.headers['cf-connecting-ip'] as string;
+    const xRealIp = req.headers['x-real-ip'] as string;
+
+    if (xForwardedFor) {
+      ipAddress = xForwardedFor.split(',')[0].trim();
+    } else if (cfConnectingIp) {
+      ipAddress = cfConnectingIp.trim();
+    } else if (xRealIp) {
+      ipAddress = xRealIp.trim();
+    } else {
+      ipAddress = (req.socket.remoteAddress || '').split(':').pop() || '';
+    }
+
     const userAgent = req.headers['user-agent'] || '';
 
     if (!userEmail || !action) {

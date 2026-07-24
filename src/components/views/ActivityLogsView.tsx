@@ -248,7 +248,14 @@ export const ActivityLogsView: React.FC<ActivityLogsViewProps> = ({ currentUserE
                             <div>
                               <span className="font-bold text-outline">Details:</span>
                               <pre className="bg-surface-container rounded p-2 mt-1 text-[10px] overflow-x-auto font-mono">
-                                {JSON.stringify(log.details ? JSON.parse(log.details) : {}, null, 2)}
+                                {(() => {
+                                  try {
+                                    const parsed = typeof log.details === 'string' ? JSON.parse(log.details) : log.details;
+                                    return JSON.stringify(parsed || {}, null, 2);
+                                  } catch (e) {
+                                    return log.details ? String(log.details) : '{}';
+                                  }
+                                })()}
                               </pre>
                             </div>
                             <div>
