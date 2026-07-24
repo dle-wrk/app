@@ -74,33 +74,30 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-surface-container-high/50 font-label-caps text-[10px] text-outline border-b border-outline-variant">
-                <th
-                  className="px-lg py-sm cursor-pointer hover:text-primary transition-colors flex items-center gap-1"
-                  onClick={() => toggleSort('name')}
-                >
-                  Supplier Entity
-                  {sortBy === 'name' && (
-                    <ArrowUpDown className={`w-3 h-3 ${sortDirection === 'desc' ? 'rotate-180' : ''}`} />
-                  )}
+                <th className="px-lg py-sm cursor-pointer hover:text-primary transition-colors" onClick={() => toggleSort('name')}>
+                  <div className="flex items-center gap-1">
+                    Supplier Entity
+                    {sortBy === 'name' && (
+                      <ArrowUpDown className={`w-3 h-3 ${sortDirection === 'desc' ? 'rotate-180' : ''}`} />
+                    )}
+                  </div>
                 </th>
                 <th className="px-lg py-sm">Website</th>
-                <th
-                  className="px-lg py-sm text-center cursor-pointer hover:text-primary transition-colors flex items-center justify-center gap-1"
-                  onClick={() => toggleSort('leadTime')}
-                >
-                  Avg Lead Time
-                  {sortBy === 'leadTime' && (
-                    <ArrowUpDown className={`w-3 h-3 ${sortDirection === 'desc' ? 'rotate-180' : ''}`} />
-                  )}
+                <th className="px-lg py-sm text-center cursor-pointer hover:text-primary transition-colors" onClick={() => toggleSort('leadTime')}>
+                  <div className="flex items-center justify-center gap-1">
+                    Avg Lead Time
+                    {sortBy === 'leadTime' && (
+                      <ArrowUpDown className={`w-3 h-3 ${sortDirection === 'desc' ? 'rotate-180' : ''}`} />
+                    )}
+                  </div>
                 </th>
-                <th
-                  className="px-lg py-sm text-center cursor-pointer hover:text-primary transition-colors flex items-center justify-center gap-1"
-                  onClick={() => toggleSort('responseTime')}
-                >
-                  Avg Response
-                  {sortBy === 'responseTime' && (
-                    <ArrowUpDown className={`w-3 h-3 ${sortDirection === 'desc' ? 'rotate-180' : ''}`} />
-                  )}
+                <th className="px-lg py-sm text-center cursor-pointer hover:text-primary transition-colors" onClick={() => toggleSort('responseTime')}>
+                  <div className="flex items-center justify-center gap-1">
+                    Avg Response
+                    {sortBy === 'responseTime' && (
+                      <ArrowUpDown className={`w-3 h-3 ${sortDirection === 'desc' ? 'rotate-180' : ''}`} />
+                    )}
+                  </div>
                 </th>
                 <th className="px-lg py-sm">Contact Email</th>
                 <th className="px-lg py-sm">Notes</th>
