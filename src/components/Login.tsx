@@ -145,20 +145,6 @@ export default function Login({ onLogin, isLoading = false }: LoginProps) {
             </button>
           </form>
 
-          {/* Demo Credentials */}
-          <div className="pt-6 border-t border-outline-variant/30">
-            <p className="text-xs font-bold text-on-surface-variant uppercase mb-3 tracking-wide">Demo Account</p>
-            <div className="space-y-2 text-xs font-mono bg-primary/5 border border-primary/20 p-4 rounded-lg">
-              <div className="flex items-center justify-between">
-                <span className="text-on-surface-variant">Email:</span>
-                <code className="text-primary font-semibold">dedw13@gmail.com</code>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-on-surface-variant">Password:</span>
-                <code className="text-primary font-semibold">password123</code>
-              </div>
-            </div>
-          </div>
         </div>
 
         {/* Footer */}
