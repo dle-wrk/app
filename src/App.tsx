@@ -1318,14 +1318,14 @@ export default function App() {
 
   // Group items by stock code prefix and sum stock levels
   const prefixGroups = Array.from(
-    new Set(items.map(i => getStockPrefix(i.stockCode)))
+    new Set(items.map(i => getStockPrefix(i.partNumber)))
   ).sort();
 
   const categoryCounts = prefixGroups.map(prefix => {
     const count = items
-      .filter(i => getStockPrefix(i.stockCode) === prefix)
+      .filter(i => getStockPrefix(i.partNumber) === prefix)
       .reduce((sum, item) => sum + (item.stockLevel || 0), 0);
-    const skuCount = items.filter(i => getStockPrefix(i.stockCode) === prefix).length;
+    const skuCount = items.filter(i => getStockPrefix(i.partNumber) === prefix).length;
     return { cat: prefix, count, skuCount };
   }).sort((a, b) => b.count - a.count);
 
