@@ -169,8 +169,10 @@ async function ensureInventoryTable() {
     status TEXT CHECK (status IN ('ACTIVE', 'INACTIVE', 'BOOKED OUT', 'DISCONTINUED')) DEFAULT 'ACTIVE',
     man_pn_1 TEXT, man_pn_2 TEXT, man_pn_3 TEXT, man_pn_4 TEXT, man_pn_5 TEXT,
     sup_pn_1 TEXT, sup_pn_2 TEXT, sup_pn_3 TEXT, sup_pn_4 TEXT, sup_pn_5 TEXT,
-    weblink_1 TEXT, weblink_2 TEXT, weblink_3 TEXT, weblink_4 TEXT, weblink_5 TEXT
+    weblink_1 TEXT, weblink_2 TEXT, weblink_3 TEXT, weblink_4 TEXT, weblink_5 TEXT,
+    supplier TEXT DEFAULT 'N/A'
   )`);
+  await exec(`ALTER TABLE inventory ADD COLUMN IF NOT EXISTS supplier TEXT DEFAULT 'N/A'`).catch(() => {});
 }
 
 async function ensureSuppliersTable() {
