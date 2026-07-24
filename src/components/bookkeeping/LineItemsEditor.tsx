@@ -41,21 +41,41 @@ export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChang
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   const update = (key: string, patch: Partial<EditableLine>) => {
-    onChange(lines.map(l => (l.key === key ? { ...l, ...patch } : l)));
+    try {
+      onChange(lines.map(l => (l.key === key ? { ...l, ...patch } : l)));
+    } catch (err) {
+      console.error('Error in update:', err);
+    }
   };
-  const remove = (key: string) => onChange(lines.filter(l => l.key !== key));
-  const add = () => onChange([...lines, newEditableLine()]);
+  const remove = (key: string) => {
+    try {
+      onChange(lines.filter(l => l.key !== key));
+    } catch (err) {
+      console.error('Error in remove:', err);
+    }
+  };
+  const add = () => {
+    try {
+      onChange([...lines, newEditableLine()]);
+    } catch (err) {
+      console.error('Error in add:', err);
+    }
+  };
 
   const onPickPart = (key: string, partNumber: string) => {
-    const item = items?.find(i => i.partNumber === partNumber);
-    if (item) {
-      update(key, {
-        partNumber: item.partNumber,
-        description: item.name || item.description || item.partNumber,
-        unitPrice: item.price || 0,
-      });
-    } else {
-      update(key, { partNumber });
+    try {
+      const item = items?.find(i => i?.partNumber === partNumber);
+      if (item) {
+        update(key, {
+          partNumber: item.partNumber,
+          description: item.name || item.description || item.partNumber,
+          unitPrice: item.price || 0,
+        });
+      } else {
+        update(key, { partNumber });
+      }
+    } catch (err) {
+      console.error('Error in onPickPart:', err);
     }
   };
 
@@ -114,42 +134,49 @@ export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChang
                         />
                         <ChevronDown className="w-4 h-4 text-on-surface-variant pointer-events-none" />
                       </div>
-                      {openDropdown === line.key && items && (
+                      {openDropdown === line.key && items && Array.isArray(items) && (
                         <div className="absolute top-full left-0 right-0 mt-2 bg-surface-container-high border border-outline-variant/40 rounded-lg shadow-lg z-50 max-h-64 overflow-y-auto">
-                          {items
-                            .filter(i =>
-                              !searchQuery ||
-                              i.partNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                              (i.name || i.description || '').toLowerCase().includes(searchQuery.toLowerCase())
-                            )
-                            .slice(0, 12)
-                            .map(item => (
-                              <button
-                                key={item.partNumber}
-                                type="button"
-                                onMouseDown={(e) => {
-                                  e.preventDefault();
-                                  onPickPart(line.key, item.partNumber);
-                                  setOpenDropdown(null);
-                                  setSearchQuery('');
-                                }}
-                                className="w-full text-left px-3.5 py-3 hover:bg-primary/10 border-b border-outline-variant/10 last:border-0 transition-colors"
-                              >
-                                <div className="flex items-center justify-between mb-1">
-                                  <span className="font-mono font-bold text-primary text-sm">{item.partNumber}</span>
-                                  <span className="text-xs text-on-surface-variant/60">${(item.price || 0).toFixed(2)}</span>
-                                </div>
-                                <div className="text-sm text-on-surface-variant truncate">{item.name || item.description || 'No description'}</div>
-                                <div className="text-xs text-on-surface-variant/60 mt-1">Stock: {item.stockLevel}</div>
-                              </button>
-                            ))}
-                          {items.filter(i =>
-                            !searchQuery ||
-                            i.partNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                            (i.name || i.description || '').toLowerCase().includes(searchQuery.toLowerCase())
-                          ).length === 0 && (
-                            <div className="px-3.5 py-3 text-on-surface-variant/60 italic text-sm">No components found</div>
-                          )}
+                          {(() => {
+                            try {
+                              const filtered = items
+                                .filter((i: any) =>
+                                  !searchQuery ||
+                                  (i?.partNumber?.toLowerCase?.().includes(searchQuery.toLowerCase())) ||
+                                  ((i?.name || i?.description || '').toLowerCase().includes(searchQuery.toLowerCase()))
+                                )
+                                .slice(0, 12);
+
+                              return filtered.length > 0 ? (
+                                filtered.map((item: any) => (
+                                  <button
+                                    key={item?.partNumber || Math.random()}
+                                    type="button"
+                                    onMouseDown={(e) => {
+                                      e.preventDefault();
+                                      if (item?.partNumber) {
+                                        onPickPart(line.key, item.partNumber);
+                                      }
+                                      setOpenDropdown(null);
+                                      setSearchQuery('');
+                                    }}
+                                    className="w-full text-left px-3.5 py-3 hover:bg-primary/10 border-b border-outline-variant/10 last:border-0 transition-colors"
+                                  >
+                                    <div className="flex items-center justify-between mb-1">
+                                      <span className="font-mono font-bold text-primary text-sm">{item?.partNumber || 'N/A'}</span>
+                                      <span className="text-xs text-on-surface-variant/60">${(item?.price || 0).toFixed(2)}</span>
+                                    </div>
+                                    <div className="text-sm text-on-surface-variant truncate">{item?.name || item?.description || 'No description'}</div>
+                                    <div className="text-xs text-on-surface-variant/60 mt-1">Stock: {item?.stockLevel || 0}</div>
+                                  </button>
+                                ))
+                              ) : (
+                                <div className="px-3.5 py-3 text-on-surface-variant/60 italic text-sm">No components found</div>
+                              );
+                            } catch (err) {
+                              console.error('Error filtering items:', err);
+                              return <div className="px-3.5 py-3 text-error text-sm">Error loading items</div>;
+                            }
+                          })()}
                         </div>
                       )}
                     </div>
