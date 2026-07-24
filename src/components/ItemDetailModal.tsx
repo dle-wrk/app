@@ -289,6 +289,18 @@ export default function ItemDetailModal({ item, onClose, onSave }: ItemDetailMod
                   </div>
 
                   <div className="bg-surface-container-high/40 p-sm rounded-lg border border-outline-variant/50">
+                    <span className="text-[10px] text-outline font-label-caps uppercase block mb-1">Total Holding Value</span>
+                    <div className="flex flex-col">
+                      <span className="text-base font-black font-mono text-primary leading-none">
+                        ${(item.price * item.stockLevel).toFixed(2)}
+                      </span>
+                      <span className="text-[10px] font-mono text-outline mt-1 block">
+                        R{((item.bulkPriceZar || item.price * 19) * item.stockLevel).toFixed(2)} ZAR
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="bg-surface-container-high/40 p-sm rounded-lg border border-outline-variant/50">
                     <span className="text-[10px] text-outline font-label-caps uppercase block mb-1">Status</span>
                     <span className={`inline-flex items-center gap-1 px-2 py-0.5 mt-0.5 rounded text-[9px] font-bold font-mono border ${
                       item.status === 'ACTIVE' ? 'bg-green-500/10 text-green-400 border-green-500/20' : 
