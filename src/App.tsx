@@ -1757,6 +1757,13 @@ if (currentView === 'alternates') {
                    jobCards={jobCards}
                    triggerToast={triggerToast}
                    onProjectCreated={(project) => {
+                     setProjects(prev => [...prev, project]);
+                     const isTestEnv = window.navigator.webdriver || window.location.search.includes('test');
+                     if (!isTestEnv) {
+                       fetchProjectReadiness(project.id);
+                     }
+
+                     // Log activity asynchronously without blocking creation
                      if (currentUser?.email) {
                        logActivity({
                          userEmail: currentUser.email,
@@ -1764,16 +1771,14 @@ if (currentView === 'alternates') {
                          entityType: 'Project',
                          entityId: String(project.id),
                          details: { projectName: project.projectName, status: project.status }
-                       });
-                     }
-                     setProjects(prev => [...prev, project]);
-                     const isTestEnv = window.navigator.webdriver || window.location.search.includes('test');
-                     if (!isTestEnv) {
-                       fetchProjectReadiness(project.id);
+                       }).catch(err => console.error('Failed to log project creation:', err));
                      }
                    }}
                    onProjectDeleted={(id) => {
                      const deletedProject = projects.find(p => p.id === id);
+                     setProjects(prev => prev.filter(p => p.id !== id));
+
+                     // Log activity asynchronously without blocking deletion
                      if (deletedProject && currentUser?.email) {
                        logActivity({
                          userEmail: currentUser.email,
@@ -1781,11 +1786,17 @@ if (currentView === 'alternates') {
                          entityType: 'Project',
                          entityId: String(id),
                          details: { projectName: deletedProject.projectName }
-                       });
+                       }).catch(err => console.error('Failed to log project deletion:', err));
                      }
-                     setProjects(prev => prev.filter(p => p.id !== id));
                    }}
                    onProjectUpdated={(project) => {
+                     setProjects(prev => prev.map(p => p.id === project.id ? project : p));
+                     const isTestEnv = window.navigator.webdriver || window.location.search.includes('test');
+                     if (!isTestEnv) {
+                       fetchProjectReadiness(project.id);
+                     }
+
+                     // Log activity asynchronously without blocking update
                      if (currentUser?.email) {
                        logActivity({
                          userEmail: currentUser.email,
@@ -1793,12 +1804,7 @@ if (currentView === 'alternates') {
                          entityType: 'Project',
                          entityId: String(project.id),
                          details: { projectName: project.projectName, status: project.status }
-                       });
-                     }
-                     setProjects(prev => prev.map(p => p.id === project.id ? project : p));
-                     const isTestEnv = window.navigator.webdriver || window.location.search.includes('test');
-                     if (!isTestEnv) {
-                       fetchProjectReadiness(project.id);
+                       }).catch(err => console.error('Failed to log project update:', err));
                      }
                    }}
                  />
