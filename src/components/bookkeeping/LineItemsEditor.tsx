@@ -79,9 +79,31 @@ export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChang
     }
   };
 
-  const subtotal = lines.reduce((s, l) => s + lineTotals(l, taxRates).base, 0);
-  const taxTotal = lines.reduce((s, l) => s + lineTotals(l, taxRates).taxAmount, 0);
-  const total = subtotal + taxTotal;
+  let subtotal = 0, taxTotal = 0, total = 0;
+  try {
+    subtotal = (Array.isArray(lines) ? lines : []).reduce((s, l) => {
+      try {
+        return s + (lineTotals(l, taxRates)?.base || 0);
+      } catch (err) {
+        console.warn('Error calculating line totals:', err);
+        return s;
+      }
+    }, 0);
+    taxTotal = (Array.isArray(lines) ? lines : []).reduce((s, l) => {
+      try {
+        return s + (lineTotals(l, taxRates)?.taxAmount || 0);
+      } catch (err) {
+        console.warn('Error calculating tax:', err);
+        return s;
+      }
+    }, 0);
+    total = subtotal + taxTotal;
+  } catch (err) {
+    console.error('Error in totals calculation:', err);
+    subtotal = 0;
+    taxTotal = 0;
+    total = 0;
+  }
 
   return (
     <div className="space-y-4">
@@ -93,8 +115,13 @@ export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChang
             <p className="text-xs text-on-surface-variant/60 mt-1">Click "Add line" to get started</p>
           </div>
         ) : (
-          lines.map((line, idx) => {
-            const t = lineTotals(line, taxRates);
+          (Array.isArray(lines) ? lines : []).map((line, idx) => {
+            let t = { base: 0, taxAmount: 0, lineTotal: 0 };
+            try {
+              t = lineTotals(line, taxRates);
+            } catch (err) {
+              console.warn('Error in line totals:', err);
+            }
             return (
               <div key={line.key} className="bg-surface-container border border-outline-variant/40 rounded-lg p-4 space-y-4 hover:border-outline-variant/60 transition-colors">
                 {/* Header with index and remove button */}
