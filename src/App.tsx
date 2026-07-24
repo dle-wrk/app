@@ -1315,9 +1315,11 @@ export default function App() {
     )
   ).sort(); // Sorts alphabetically
 
-  // Count how many unique SKUs fall under each dynamically discovered category
+  // Sum total stock quantity for each category
   const categoryCounts = targetCategories.map(cat => {
-    const count = items.filter(i => i.category === cat).length;
+    const count = items
+      .filter(i => i.category === cat)
+      .reduce((sum, item) => sum + (item.stockLevel || 0), 0);
     return { cat, count };
   });
 
