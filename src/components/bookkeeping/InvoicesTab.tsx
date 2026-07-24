@@ -213,7 +213,7 @@ export const InvoicesTab: React.FC<ModuleDataProps> = (props) => {
               <>
                 <SecondaryButton onClick={() => { openEdit(viewingInvoice); setViewingInvoice(null); }}>Edit</SecondaryButton>
                 <DangerButton onClick={() => handleDeleteDraft(viewingInvoice.id)} disabled={busy}>Delete</DangerButton>
-                <PrimaryButton icon={<Send className="w-3.5 h-3.5" />} onClick={() => handleFinalize(viewingInvoice.id)} disabled={busy}>Finalize & Send</PrimaryButton>
+                <PrimaryButton icon={<Printer className="w-3.5 h-3.5" />} onClick={() => handleFinalize(viewingInvoice.id)} disabled={busy}>Finalize & Print</PrimaryButton>
               </>
             )}
             {['SENT', 'PARTIAL', 'OVERDUE'].includes(viewingInvoice.status) && (
