@@ -104,16 +104,27 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
 
   const handleDeleteProject = async (projectId: number) => {
     if (!confirm('Are you sure you want to delete this project? All associated BOM and P&P data will be removed.')) return;
-    
+
     try {
       const res = await fetch(`/api/projects/${projectId}`, {
         method: 'DELETE'
       });
       if (!res.ok) throw new Error('Failed to delete project');
+
+      // Reset all project-related state
+      if (selectedProject?.id === projectId) {
+        setSelectedProject(null);
+      }
+      if (editingProject?.id === projectId) {
+        setEditingProject(null);
+      }
+      setShowLinkModal(false);
+
       onProjectDeleted(projectId);
       triggerToast('Project deleted successfully');
-    } catch (err) {
-      triggerToast('Failed to delete project');
+    } catch (err: any) {
+      console.error('Error deleting project:', err);
+      triggerToast(err.message || 'Failed to delete project');
     }
   };
 
