@@ -53,6 +53,7 @@ import { SuppliersView } from './components/views/SuppliersView';
 import { SettingsView } from './components/views/SettingsView';
 import { ProfileView } from './components/views/ProfileView';
 import { SearchView } from './components/views/SearchView';
+import { ActivityLogsView } from './components/views/ActivityLogsView';
 import KitBookingView from './components/views/KitBookingView';
 import { ProjectsView } from './components/views/ProjectsView';
 import { BookkeepingView } from './components/views/BookkeepingView';
@@ -1704,6 +1705,10 @@ export default function App() {
                   handleStockSync={handleStockSync}
                 />
               );
+            }
+
+            if (currentView === 'activity-logs') {
+              return <ActivityLogsView currentUserEmail={currentUser?.email} />;
             }
 
             if (currentView === 'bom_manager') {

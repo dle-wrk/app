@@ -17,7 +17,8 @@ import {
   Zap,
   Brain,
   Shield,
-  ChevronDown
+  ChevronDown,
+  Activity
 } from 'lucide-react';
 import { ViewType, UserProfile } from '../types';
 
@@ -232,6 +233,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
         >
           <Settings className="w-3.5 h-3.5 mr-2" />
           <span>System Config</span>
+        </button>
+
+        <button
+          onClick={() => handleNavClick('activity-logs')}
+          className={`w-full flex items-center px-2.5 py-1.5 rounded text-left transition-all text-[12px] ${currentView === 'activity-logs'
+            ? 'text-primary font-bold border-l-4 border-primary bg-primary/10'
+            : 'text-on-surface-variant/80 hover:text-on-surface hover:bg-surface-variant/40'
+            }`}
+        >
+          <Activity className="w-3.5 h-3.5 mr-2" />
+          <span>Activity Logs</span>
         </button>
       </nav>
 

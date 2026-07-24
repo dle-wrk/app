@@ -549,6 +549,7 @@ export type ViewType =
   | 'settings'
   | 'search'
   | 'profile'
+  | 'activity-logs'
   | 'bom_manager'
   | 'pick_place'
   | 'alternates'
