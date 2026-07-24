@@ -168,7 +168,7 @@ export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChang
                               const filtered = items
                                 .filter((i: any) =>
                                   !searchQuery ||
-                                  (i?.partNumber?.toLowerCase?.().includes(searchQuery.toLowerCase())) ||
+                                  (String(i?.partNumber || '').toLowerCase().includes(searchQuery.toLowerCase())) ||
                                   ((i?.name || i?.description || '').toLowerCase().includes(searchQuery.toLowerCase()))
                                 )
                                 .slice(0, 12);
