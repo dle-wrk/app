@@ -1306,30 +1306,14 @@ export default function App() {
   const okPercent = totalItemsCount > 0 ? Math.round((okCount / totalItemsCount) * 100) : 0;
   const lowPercent = totalItemsCount > 0 ? Math.round((lowStockCount / totalItemsCount) * 100) : 0;
 
-  // Mapping of stock code prefixes to friendly category names
-  const prefixMap: Record<string, string> = {
-    'RES': 'Resistors',
-    'CAP': 'Capacitors',
-    'ANT': 'Antennas',
-    'ZEN': 'Zenner Diode',
-    'COM': 'Components',
-    'MIC': 'Micro-ctrl',
-    'PRD': 'Product',
-    'SUB': 'Sub-Assembly',
-    'TOL': 'Tool',
-    'CON': 'Consumable'
-  };
-
-  // Extract prefix from stock code (3 letters + dash pattern)
+  // Dynamically extract stock code prefixes from actual data
   const getStockPrefix = (stockCode?: string): string => {
     if (!stockCode) return 'Other';
-    const match = stockCode.match(/^([A-Z]{3})-/);
-    return match ? match[1] : 'Other';
-  };
-
-  // Get friendly category name from prefix
-  const getCategoryName = (prefix: string): string => {
-    return prefixMap[prefix] || prefix;
+    // Try 3-letter prefix pattern first
+    let match = stockCode.match(/^([A-Z]{2,4})-/);
+    if (match) return match[1];
+    // Fallback to first 3 characters
+    return stockCode.substring(0, 3);
   };
 
   // Group items by stock code prefix and sum stock levels
@@ -1338,12 +1322,12 @@ export default function App() {
   ).sort();
 
   const categoryCounts = prefixGroups.map(prefix => {
-    const displayName = getCategoryName(prefix);
     const count = items
       .filter(i => getStockPrefix(i.stockCode) === prefix)
       .reduce((sum, item) => sum + (item.stockLevel || 0), 0);
-    return { cat: displayName, count };
-  });
+    const skuCount = items.filter(i => getStockPrefix(i.stockCode) === prefix).length;
+    return { cat: prefix, count, skuCount };
+  }).sort((a, b) => b.count - a.count);
 
   // Determine the maximum count value to safely scale heights proportionally
   const maxCategoryCount = Math.max(...categoryCounts.map(c => c.count), 1);

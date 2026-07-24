@@ -189,13 +189,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
 
-        {/* Category Breakdown Table - Right */}
+        {/* Category Breakdown Grid - Right */}
         <div className="col-span-12 lg:col-span-8 bg-surface-container p-lg rounded-xl border border-outline-variant">
-          <h4 className="font-headline-sm text-lg font-black tracking-tighter leading-none mb-lg">Inventory by Category</h4>
+          <h4 className="font-headline-sm text-lg font-black tracking-tighter leading-none mb-lg">Qty per Type</h4>
 
-          <div className="space-y-2 max-h-96 overflow-y-auto custom-scrollbar">
-            {categoryCounts.map(({ cat, count }, idx) => {
-              const percentage = Math.round((count / totalItemsCount) * 100);
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-md max-h-96 overflow-y-auto custom-scrollbar">
+            {categoryCounts.map(({ cat, count, skuCount }, idx) => {
               const themeColors = [
                 'var(--primary)',
                 '#7c3aed', // violet
@@ -206,20 +205,25 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 '#0891b2', // cyan
                 '#8b5cf6'  // purple
               ];
-              const barColor = themeColors[idx % themeColors.length];
+              const cardColor = themeColors[idx % themeColors.length];
 
               return (
-                <div key={cat} className="group">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-sm font-bold text-on-surface flex-1 truncate">{cat}</span>
-                    <span className="text-xs font-mono text-on-surface-variant">{count} SKUs</span>
-                    <span className="text-xs font-bold text-primary ml-2 w-8 text-right">{percentage}%</span>
+                <div
+                  key={cat}
+                  className="bg-surface-container-high/50 border border-outline-variant/50 rounded-lg p-md hover:border-outline-variant hover:bg-surface-container-high transition-all duration-200 group cursor-pointer"
+                  style={{ borderLeftColor: cardColor, borderLeftWidth: '3px' }}
+                >
+                  <div className="text-[11px] font-bold text-on-surface-variant uppercase tracking-tight truncate mb-2">
+                    {cat}
                   </div>
-                  <div className="w-full bg-surface-container-high rounded-lg h-2 overflow-hidden">
-                    <div
-                      className="h-full rounded-lg transition-all duration-500 group-hover:brightness-110"
-                      style={{ width: `${percentage}%`, backgroundColor: barColor }}
-                    ></div>
+                  <div className="mb-2">
+                    <span className="text-2xl font-black" style={{ color: cardColor }}>
+                      {count.toLocaleString()}
+                    </span>
+                    <span className="text-[10px] text-on-surface-variant block">units</span>
+                  </div>
+                  <div className="text-[9px] text-outline">
+                    {skuCount} {skuCount === 1 ? 'SKU' : 'SKUs'}
                   </div>
                 </div>
               );
