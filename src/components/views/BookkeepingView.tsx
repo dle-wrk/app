@@ -87,6 +87,7 @@ export const BookkeepingView: React.FC<BookkeepingViewProps> = ({
   const [bills, setBills] = useState<Bill[]>([]);
   const [paymentsMade, setPaymentsMade] = useState<PaymentMade[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [productionItems, setProductionItems] = useState<Item[]>([]);
 
   const [prefillFromPO, setPrefillFromPO] = useState<PurchaseOrder | null>(null);
 
@@ -101,6 +102,10 @@ export const BookkeepingView: React.FC<BookkeepingViewProps> = ({
       setBills(data.bills);
       setPaymentsMade(data.paymentsMade);
       setExpenses(data.expenses);
+
+      // Load production items for invoicing
+      const prodItems = await apiGet('/api/items/products');
+      setProductionItems(prodItems);
     } catch (err: any) {
       triggerToast(err.message || 'Failed to load bookkeeping data', 'ERROR');
     } finally {
@@ -112,7 +117,7 @@ export const BookkeepingView: React.FC<BookkeepingViewProps> = ({
 
   const moduleData = {
     accounts, taxRates, invoices, paymentsReceived, purchaseOrders, bills, paymentsMade, expenses,
-    clients, suppliers, items, clientOrders, triggerToast, refresh,
+    clients, suppliers, items: productionItems.length > 0 ? productionItems : items, clientOrders, triggerToast, refresh,
   };
 
   if (loading) {

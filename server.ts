@@ -868,6 +868,27 @@ app.get('/api/items', async (req, res) => {
   }
 });
 
+app.get('/api/items/products', async (req, res) => {
+  try {
+    const { rows } = await query(sql('SELECT * FROM production_products ORDER BY model_number'));
+    const items = rows.map((r: any) => ({
+      partNumber: r.model_number,
+      name: r.description,
+      description: r.description,
+      manufacturer: '',
+      stockLevel: 999999,
+      price: r.selling_price || 0,
+      category: r.category || 'Product',
+      status: 'ACTIVE',
+      supplier: 'Internal Production'
+    }));
+    res.json(items);
+  } catch (err: any) {
+    console.error('ERROR IN GET /api/items/products:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.patch('/api/items/:serial_number', async (req, res) => {
   const serial_number = decodeURIComponent(req.params.serial_number);
   console.log(`[PATCH ITEM] req received for serial_number: ${serial_number}, body:`, JSON.stringify(req.body));
