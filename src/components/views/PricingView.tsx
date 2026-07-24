@@ -112,7 +112,26 @@ export const PricingView: React.FC<PricingViewProps> = ({
   const [stockCodeFilter, setStockCodeFilter] = useState('');
   const [supplierFilter, setSupplierFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [enriching, setEnriching] = useState(false);
+  const [enrichmentStatus, setEnrichmentStatus] = useState<{itemsProcessed: number; lastRun: string | null}>({itemsProcessed: 0, lastRun: null});
   const ITEMS_PER_PAGE = 50;
+
+  const triggerEnrichment = async () => {
+    setEnriching(true);
+    try {
+      const res = await fetch('/api/automation/enrich-missing-suppliers', { method: 'POST' });
+      const result = await res.json();
+      setEnrichmentStatus({
+        itemsProcessed: result.itemsProcessed || 0,
+        lastRun: new Date().toLocaleString()
+      });
+      triggerToast(`✓ Enriched ${result.itemsProcessed} items with supplier data`, 'success');
+    } catch (err: any) {
+      triggerToast(`Error: ${err.message}`, 'error');
+    } finally {
+      setEnriching(false);
+    }
+  };
 
   const loadUsage = async () => {
     try {
@@ -280,8 +299,40 @@ export const PricingView: React.FC<PricingViewProps> = ({
           <div className="flex items-center gap-md">
             <span className="font-bold text-sm">Inventory Price List</span>
             <span className="text-xs text-on-surface-variant">({filteredItems.length} items)</span>
+
+            {/* Enrichment Status */}
+            {enrichmentStatus.lastRun && (
+              <div className="flex items-center gap-1 bg-green-500/10 border border-green-500/20 rounded px-2 py-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-green-400"></span>
+                <span className="text-[10px] font-mono text-green-400">
+                  {enrichmentStatus.itemsProcessed} enriched • {enrichmentStatus.lastRun}
+                </span>
+              </div>
+            )}
           </div>
-          <div className="flex gap-sm select-none text-xs">
+          <div className="flex gap-sm select-none text-xs items-center">
+            <button
+              onClick={triggerEnrichment}
+              disabled={enriching}
+              className={`px-3 py-1.5 rounded font-bold transition flex items-center gap-2 ${
+                enriching
+                  ? 'bg-primary/50 text-on-primary cursor-wait'
+                  : 'bg-primary text-on-primary hover:brightness-110'
+              }`}
+            >
+              {enriching ? (
+                <>
+                  <div className="w-3 h-3 border-2 border-on-primary/30 border-t-on-primary rounded-full animate-spin"></div>
+                  Enriching...
+                </>
+              ) : (
+                '🔍 Enrich N/A Suppliers'
+              )}
+            </button>
+          </div>
+        </div>
+
+        <div className="px-lg py-sm border-b border-outline-variant bg-surface-container-high/10 flex gap-sm select-none text-xs">
             <button
               onClick={() => setPricingFilter('ALL')}
               className={`px-2.5 py-1 rounded border ${pricingFilter === 'ALL' ? 'bg-primary text-on-primary border-primary' : 'bg-surface-container-high text-on-surface-variant'}`}
