@@ -120,7 +120,7 @@ export const PurchaseOrdersTab: React.FC<ModuleDataProps & { onConvertToBill?: (
   );
 };
 
-const POEditorModal: React.FC<ModuleDataProps & { onClose: () => void; onSaved: () => void }> = ({ suppliers, items, taxRates, onClose, onSaved, triggerToast }) => {
+const POEditorModal: React.FC<ModuleDataProps & { onClose: () => void; onSaved: () => void }> = ({ suppliers, clients, items, taxRates, onClose, onSaved, triggerToast }) => {
   const [poType, setPoType] = useState<'SUPPLIER' | 'CLIENT'>('SUPPLIER');
   const [supplierId, setSupplierId] = useState('');
   const [orderDate, setOrderDate] = useState(todayISO());
@@ -170,10 +170,12 @@ const POEditorModal: React.FC<ModuleDataProps & { onClose: () => void; onSaved: 
 
       <div className="grid md:grid-cols-4 gap-3 mb-md">
         <div className="md:col-span-2">
-          <FieldLabel>Supplier</FieldLabel>
+          <FieldLabel>{poType === 'SUPPLIER' ? 'Supplier' : 'Client'}</FieldLabel>
           <select className={selectClass} value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
-            <option value="">Select supplier</option>
-            {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            <option value="">{poType === 'SUPPLIER' ? 'Select supplier' : 'Select client'}</option>
+            {poType === 'SUPPLIER'
+              ? suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)
+              : clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </div>
         <div>
