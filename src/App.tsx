@@ -1306,21 +1306,43 @@ export default function App() {
   const okPercent = totalItemsCount > 0 ? Math.round((okCount / totalItemsCount) * 100) : 0;
   const lowPercent = totalItemsCount > 0 ? Math.round((lowStockCount / totalItemsCount) * 100) : 0;
 
-  // Dynamically pull every unique category present in your dataset
-  const targetCategories = Array.from(
-    new Set(
-      items
-        .map(i => i.category?.trim())
-        .filter((cat): cat is string => !!cat) // Removes null, undefined, or empty values
-    )
-  ).sort(); // Sorts alphabetically
+  // Mapping of stock code prefixes to friendly category names
+  const prefixMap: Record<string, string> = {
+    'RES': 'Resistors',
+    'CAP': 'Capacitors',
+    'ANT': 'Antennas',
+    'ZEN': 'Zenner Diode',
+    'COM': 'Components',
+    'MIC': 'Micro-ctrl',
+    'PRD': 'Product',
+    'SUB': 'Sub-Assembly',
+    'TOL': 'Tool',
+    'CON': 'Consumable'
+  };
 
-  // Sum total stock quantity for each category
-  const categoryCounts = targetCategories.map(cat => {
+  // Extract prefix from stock code (3 letters + dash pattern)
+  const getStockPrefix = (stockCode?: string): string => {
+    if (!stockCode) return 'Other';
+    const match = stockCode.match(/^([A-Z]{3})-/);
+    return match ? match[1] : 'Other';
+  };
+
+  // Get friendly category name from prefix
+  const getCategoryName = (prefix: string): string => {
+    return prefixMap[prefix] || prefix;
+  };
+
+  // Group items by stock code prefix and sum stock levels
+  const prefixGroups = Array.from(
+    new Set(items.map(i => getStockPrefix(i.stockCode)))
+  ).sort();
+
+  const categoryCounts = prefixGroups.map(prefix => {
+    const displayName = getCategoryName(prefix);
     const count = items
-      .filter(i => i.category === cat)
+      .filter(i => getStockPrefix(i.stockCode) === prefix)
       .reduce((sum, item) => sum + (item.stockLevel || 0), 0);
-    return { cat, count };
+    return { cat: displayName, count };
   });
 
   // Determine the maximum count value to safely scale heights proportionally
