@@ -2,6 +2,8 @@ import React from 'react';
 import { Upload, Plus, Search } from 'lucide-react';
 import { Item } from '../../types';
 
+const USD_TO_ZAR_RATE = 18.50;
+
 interface InventoryViewProps {
   items: Item[];
   filteredItems: Item[];
@@ -172,9 +174,14 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               </div>
               <div className="text-right">
                 <span className="text-[9px] text-outline uppercase font-label-caps block">Price</span>
-                <span className="font-mono text-sm font-bold text-green-400">
-                  ${(Number(item.price ?? 0)).toFixed(2)}
-                </span>
+                <div className="flex flex-col gap-0.5">
+                  <span className="font-mono text-sm font-bold text-green-400">
+                    ${(Number(item.price ?? 0)).toFixed(2)}
+                  </span>
+                  <span className="font-mono text-[10px] font-bold text-green-400/70">
+                    R{((Number(item.price ?? 0)) * USD_TO_ZAR_RATE).toFixed(2)}
+                  </span>
+                </div>
               </div>
             </div>
           </div>
