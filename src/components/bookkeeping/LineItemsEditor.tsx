@@ -47,7 +47,7 @@ export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChang
   const add = () => onChange([...lines, newEditableLine()]);
 
   const onPickPart = (key: string, partNumber: string) => {
-    const item = items.find(i => i.partNumber === partNumber);
+    const item = items?.find(i => i.partNumber === partNumber);
     if (item) {
       update(key, {
         partNumber: item.partNumber,
@@ -114,7 +114,7 @@ export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChang
                         />
                         <ChevronDown className="w-4 h-4 text-on-surface-variant pointer-events-none" />
                       </div>
-                      {openDropdown === line.key && (
+                      {openDropdown === line.key && items && (
                         <div className="absolute top-full left-0 right-0 mt-2 bg-surface-container-high border border-outline-variant/40 rounded-lg shadow-lg z-50 max-h-64 overflow-y-auto">
                           {items
                             .filter(i =>
