@@ -284,6 +284,10 @@ const InvoiceEditorModal: React.FC<ModuleDataProps & { initial: Invoice | null; 
     }
   };
 
+  // Ensure required data exists
+  const safeItems = Array.isArray(items) ? items : [];
+  const safeTaxRates = Array.isArray(taxRates) ? taxRates : [];
+
   return (
     <Modal title={initial ? `Edit ${initial.invoiceNumber}` : 'New Invoice'} subtitle="Draft first, then finalize to post to the ledger and (optionally) deduct stock." onClose={onClose} maxWidth="max-w-4xl">
       <div className="grid md:grid-cols-4 gap-3 mb-md">
@@ -339,7 +343,7 @@ const InvoiceEditorModal: React.FC<ModuleDataProps & { initial: Invoice | null; 
       </div>
 
       <ErrorBoundary>
-        <LineItemsEditor lines={lines} onChange={setLines} items={items} taxRates={taxRates} mode="SALES" currency={currency} />
+        <LineItemsEditor lines={lines} onChange={setLines} items={safeItems} taxRates={safeTaxRates} mode="SALES" currency={currency} />
       </ErrorBoundary>
 
       <div className="grid md:grid-cols-2 gap-3 mt-md">
