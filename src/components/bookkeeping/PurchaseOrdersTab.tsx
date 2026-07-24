@@ -173,9 +173,19 @@ const POEditorModal: React.FC<ModuleDataProps & { onClose: () => void; onSaved: 
           <FieldLabel>{poType === 'SUPPLIER' ? 'Supplier' : 'Client'}</FieldLabel>
           <select className={selectClass} value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
             <option value="">{poType === 'SUPPLIER' ? 'Select supplier' : 'Select client'}</option>
-            {poType === 'SUPPLIER'
-              ? suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)
-              : clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            {poType === 'SUPPLIER' ? (
+              suppliers && suppliers.length > 0 ? (
+                suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)
+              ) : (
+                <option disabled>No suppliers available</option>
+              )
+            ) : (
+              clients && clients.length > 0 ? (
+                clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)
+              ) : (
+                <option disabled>No clients available</option>
+              )
+            )}
           </select>
         </div>
         <div>
