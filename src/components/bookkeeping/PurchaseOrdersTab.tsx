@@ -121,6 +121,7 @@ export const PurchaseOrdersTab: React.FC<ModuleDataProps & { onConvertToBill?: (
 };
 
 const POEditorModal: React.FC<ModuleDataProps & { onClose: () => void; onSaved: () => void }> = ({ suppliers, items, taxRates, onClose, onSaved, triggerToast }) => {
+  const [poType, setPoType] = useState<'SUPPLIER' | 'CLIENT'>('SUPPLIER');
   const [supplierId, setSupplierId] = useState('');
   const [orderDate, setOrderDate] = useState(todayISO());
   const [expectedDate, setExpectedDate] = useState('');
@@ -128,6 +129,10 @@ const POEditorModal: React.FC<ModuleDataProps & { onClose: () => void; onSaved: 
   const [notes, setNotes] = useState('');
   const [lines, setLines] = useState<EditableLine[]>([newEditableLine()]);
   const [saving, setSaving] = useState<'DRAFT' | 'SENT' | null>(null);
+
+  const filteredItems = poType === 'SUPPLIER'
+    ? items.filter(i => !i.isProduction)
+    : items.filter(i => i.isProduction);
 
   const submit = async (status: 'DRAFT' | 'SENT') => {
     const validLines = lines.filter(l => l.description.trim() && l.quantity > 0);
@@ -149,6 +154,20 @@ const POEditorModal: React.FC<ModuleDataProps & { onClose: () => void; onSaved: 
 
   return (
     <Modal title="New Purchase Order" subtitle="Purchase orders don't hit the ledger until they become a Bill." onClose={onClose} maxWidth="max-w-4xl">
+      <div className="flex items-center gap-4 mb-md rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2.5">
+        <span className="text-sm font-bold text-on-surface">Order Type:</span>
+        <div className="flex gap-3">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="radio" name="poType" value="SUPPLIER" checked={poType === 'SUPPLIER'} onChange={(e) => setPoType('SUPPLIER')} className="w-4 h-4" />
+            <span className="text-sm">Supplier (Inventory Stock)</span>
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="radio" name="poType" value="CLIENT" checked={poType === 'CLIENT'} onChange={(e) => setPoType('CLIENT')} className="w-4 h-4" />
+            <span className="text-sm">Client (Production Stock)</span>
+          </label>
+        </div>
+      </div>
+
       <div className="grid md:grid-cols-4 gap-3 mb-md">
         <div className="md:col-span-2">
           <FieldLabel>Supplier</FieldLabel>
@@ -168,7 +187,7 @@ const POEditorModal: React.FC<ModuleDataProps & { onClose: () => void; onSaved: 
       </div>
 
       <ErrorBoundary>
-        <LineItemsEditor lines={lines} onChange={setLines} items={items} taxRates={taxRates} mode="PURCHASE" currency={currency} />
+        <LineItemsEditor lines={lines} onChange={setLines} items={filteredItems} taxRates={taxRates} mode="PURCHASE" currency={currency} />
       </ErrorBoundary>
 
       <div className="mt-md">
