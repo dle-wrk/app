@@ -346,6 +346,7 @@ function AutomationRulesSection({ triggerToast }: any) {
                   <option>LOW_STOCK</option>
                   <option>CRITICAL_STOCK</option>
                   <option>OUT_OF_STOCK</option>
+                  <option>MISSING_SUPPLIER</option>
                   <option>SCHEDULED</option>
                 </select>
               </div>
@@ -357,6 +358,7 @@ function AutomationRulesSection({ triggerToast }: any) {
                   className="w-full bg-surface-container-high border border-outline-variant rounded px-2 py-1.5 text-xs text-on-surface"
                 >
                   <option>AUTO_PO</option>
+                  <option>MPN_ENRICHMENT</option>
                   <option>NOTIFICATION</option>
                   <option>CUSTOM</option>
                 </select>
