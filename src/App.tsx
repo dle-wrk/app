@@ -1752,14 +1752,44 @@ if (currentView === 'alternates') {
                    jobCards={jobCards}
                    triggerToast={triggerToast}
                    onProjectCreated={(project) => {
+                     if (currentUser?.email) {
+                       logActivity({
+                         userEmail: currentUser.email,
+                         action: 'CREATE_PROJECT',
+                         entityType: 'Project',
+                         entityId: String(project.id),
+                         details: { projectName: project.projectName, status: project.status }
+                       });
+                     }
                      setProjects(prev => [...prev, project]);
                      const isTestEnv = window.navigator.webdriver || window.location.search.includes('test');
                      if (!isTestEnv) {
                        fetchProjectReadiness(project.id);
                      }
                    }}
-                   onProjectDeleted={(id) => setProjects(prev => prev.filter(p => p.id !== id))}
+                   onProjectDeleted={(id) => {
+                     const deletedProject = projects.find(p => p.id === id);
+                     if (deletedProject && currentUser?.email) {
+                       logActivity({
+                         userEmail: currentUser.email,
+                         action: 'DELETE_PROJECT',
+                         entityType: 'Project',
+                         entityId: String(id),
+                         details: { projectName: deletedProject.projectName }
+                       });
+                     }
+                     setProjects(prev => prev.filter(p => p.id !== id));
+                   }}
                    onProjectUpdated={(project) => {
+                     if (currentUser?.email) {
+                       logActivity({
+                         userEmail: currentUser.email,
+                         action: 'UPDATE_PROJECT',
+                         entityType: 'Project',
+                         entityId: String(project.id),
+                         details: { projectName: project.projectName, status: project.status }
+                       });
+                     }
                      setProjects(prev => prev.map(p => p.id === project.id ? project : p));
                      const isTestEnv = window.navigator.webdriver || window.location.search.includes('test');
                      if (!isTestEnv) {
