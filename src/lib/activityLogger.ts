@@ -9,10 +9,20 @@ export interface ActivityLog {
 
 export async function logActivity(log: ActivityLog): Promise<void> {
   try {
-    await fetch('/api/activity-log', {
+    const res = await fetch('/api/activity-log', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(log),
+    });
+
+    if (!res.ok) {
+      console.error('Activity log API error:', res.status, res.statusText);
+      return;
+    }
+
+    await res.json().catch(() => {
+      // Ignore response parsing errors
+      console.warn('Could not parse activity log response');
     });
   } catch (err) {
     console.error('Failed to log activity:', err);
