@@ -2705,16 +2705,30 @@ app.get('/api/automation-rules', async (req, res) => {
 });
 
 app.post('/api/automation-rules', async (req, res) => {
-  const { ruleName, ruleType, description, triggerEvent, conditions, actions, priority, createdBy } = req.body;
-  if (!ruleName || !ruleType || !triggerEvent || !actions) {
-    return res.status(400).json({ error: 'ruleName, ruleType, triggerEvent, and actions are required' });
+  const { ruleName, ruleType, description, triggerEvent, conditions, actions, priority, createdBy, isActive } = req.body;
+  if (!ruleName || !ruleType || !triggerEvent) {
+    return res.status(400).json({ error: 'ruleName, ruleType, and triggerEvent are required' });
   }
 
   try {
+    // Generate default actions based on rule type
+    let defaultActions = actions;
+    if (!defaultActions) {
+      if (ruleType === 'AUTO_PO') {
+        defaultActions = JSON.stringify({ type: 'CREATE_PO', autoApprove: false });
+      } else if (ruleType === 'MPN_ENRICHMENT') {
+        defaultActions = JSON.stringify({ type: 'ENRICH_SUPPLIERS', endpoint: '/api/automation/enrich-missing-suppliers' });
+      } else if (ruleType === 'NOTIFICATION') {
+        defaultActions = JSON.stringify({ type: 'SEND_ALERT', channel: 'email' });
+      } else {
+        defaultActions = JSON.stringify({ type: ruleType });
+      }
+    }
+
     const row = await queryOne(
-      `INSERT INTO automation_rules (rule_name, rule_type, description, trigger_event, conditions, actions, priority, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-      [ruleName, ruleType, description || null, triggerEvent, conditions || null, actions, priority || 0, createdBy || null]
+      `INSERT INTO automation_rules (rule_name, rule_type, description, trigger_event, conditions, actions, priority, created_by, is_active)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+      [ruleName, ruleType, description || null, triggerEvent, conditions || null, defaultActions, priority || 0, createdBy || null, isActive ?? true]
     );
     res.status(201).json({
       id: row?.id,

@@ -284,21 +284,34 @@ function AutomationRulesSection({ triggerToast }: any) {
       return;
     }
     try {
+      const payload = {
+        ...formData,
+        // Provide default actions based on rule type if not already provided
+        actions: formData.ruleType === 'AUTO_PO'
+          ? { type: 'CREATE_PO', autoApprove: false }
+          : formData.ruleType === 'MPN_ENRICHMENT'
+          ? { type: 'ENRICH_SUPPLIERS', endpoint: '/api/automation/enrich-missing-suppliers' }
+          : formData.ruleType === 'NOTIFICATION'
+          ? { type: 'SEND_ALERT', channel: 'email' }
+          : { type: formData.ruleType }
+      };
+
       const res = await fetch('/api/automation-rules', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
+        body: JSON.stringify(payload),
       });
       if (res.ok) {
-        triggerToast('Automation rule created', 'success');
+        triggerToast('✅ Automation rule created successfully', 'success');
         setShowCreateForm(false);
         setFormData({ ruleName: '', description: '', triggerEvent: 'LOW_STOCK', ruleType: 'AUTO_PO', isActive: true });
         fetchRules();
       } else {
-        triggerToast('Failed to create rule', 'error');
+        const error = await res.json();
+        triggerToast(`Failed: ${error.error || 'Unknown error'}`, 'error');
       }
     } catch (err: any) {
-      triggerToast('Error creating rule', 'error');
+      triggerToast(`Error: ${err.message}`, 'error');
     }
   };
 
