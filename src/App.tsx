@@ -35,6 +35,7 @@ import {
 } from 'lucide-react';
 import { Item, Transaction, Supplier, ProductionKit, SystemConfig, ViewType, Project, BOMItem, PickPlaceItem, UserProfile, JobCard, Client, ClientOrder, ClientOrderItem, BuildJob, BomStructure, SubAssembly, FieldedAsset, StockLedgerEntry } from './types';
 import { INITIAL_TRANSACTIONS, INITIAL_PRODUCTION_KITS, INITIAL_SYSTEM_CONFIG, INITIAL_BOM_ITEMS, INITIAL_PP_BOM_ITEMS, generateCSVFromItems, CSV_HEADER } from './mockData';
+import { logActivity } from './lib/activityLogger';
 import BOMManager from './components/BOMManager';
 import PickPlaceManager from './components/PickPlaceManager';
 import AlternatesManager from './components/AlternatesManager';
@@ -103,6 +104,7 @@ export default function App() {
 
       if (!response.ok) {
         const error = await response.json();
+        await logActivity({ userEmail: email, action: 'LOGIN', status: 'ERROR', details: { reason: error.error } });
         throw new Error(error.error || 'Login failed');
       }
 
@@ -111,6 +113,7 @@ export default function App() {
       localStorage.setItem('currentUser', JSON.stringify(user));
       setCurrentUser(user);
       setIsAuthenticated(true);
+      await logActivity({ userEmail: email, action: 'LOGIN', details: { role: user.role } });
       triggerToast('Login successful', 'success');
     } catch (err: any) {
       throw new Error(err.message || 'Login failed');
@@ -120,10 +123,12 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    const email = currentUser?.email;
     localStorage.removeItem('userLoggedIn');
     localStorage.removeItem('currentUser');
     setCurrentUser(null);
     setIsAuthenticated(false);
+    if (email) logActivity({ userEmail: email, action: 'LOGOUT' });
     triggerToast('Logged out successfully', 'success');
   };
 
@@ -681,6 +686,14 @@ export default function App() {
       if (!res.ok) {
         const text = await res.text().catch(() => 'unknown error');
         console.error('Failed to create item in DB:', res.status, text);
+        await logActivity({
+          userEmail: currentUser?.email || 'unknown',
+          action: 'CREATE_ITEM',
+          entityType: 'Item',
+          entityId: createdItem.partNumber,
+          status: 'ERROR',
+          details: { error: text }
+        });
         triggerToast("Failed to sync new item to database.");
         return;
       }
@@ -693,9 +706,24 @@ export default function App() {
 
       setItems(prev => [createdItem, ...prev]);
       setTransactions(prev => [newTrx, ...prev]);
+      await logActivity({
+        userEmail: currentUser?.email || 'unknown',
+        action: 'CREATE_ITEM',
+        entityType: 'Item',
+        entityId: createdItem.partNumber,
+        details: { name: createdItem.name, price: createdItem.price, stockLevel: createdItem.stockLevel }
+      });
       triggerToast(`Created component SKU: ${createdItem.partNumber}`);
     } catch (err) {
       console.error('Error syncing changes to DB:', err);
+      await logActivity({
+        userEmail: currentUser?.email || 'unknown',
+        action: 'CREATE_ITEM',
+        entityType: 'Item',
+        entityId: createdItem.partNumber,
+        status: 'ERROR',
+        details: { error: (err as any).message }
+      });
       triggerToast("Network error: Failed to sync changes.", "ERROR");
     } finally {
       setSyncRotated(false);
@@ -903,6 +931,7 @@ export default function App() {
   const handleSaveSupplier = async (supplier: Supplier) => {
     try {
       setSyncRotated(true);
+      const isNew = !suppliers.find(s => s.id === supplier.id);
       const payload = {
         id: supplier.id,
         name: supplier.name,
@@ -926,10 +955,25 @@ export default function App() {
         }
         return [supplier, ...prev];
       });
+      await logActivity({
+        userEmail: currentUser?.email || 'unknown',
+        action: isNew ? 'CREATE_SUPPLIER' : 'UPDATE_SUPPLIER',
+        entityType: 'Supplier',
+        entityId: supplier.id,
+        details: { name: supplier.name, website: supplier.website }
+      });
       triggerToast(`Supplier ${supplier.name} saved successfully.`);
       setShowSupplierModal(false);
     } catch (err) {
       console.error('Error saving supplier:', err);
+      await logActivity({
+        userEmail: currentUser?.email || 'unknown',
+        action: 'CREATE_SUPPLIER',
+        entityType: 'Supplier',
+        entityId: supplier.id,
+        status: 'ERROR',
+        details: { error: (err as any).message }
+      });
       triggerToast('Failed to save supplier', 'ERROR');
     } finally {
       setSyncRotated(false);
@@ -942,9 +986,24 @@ export default function App() {
       setSyncRotated(true);
       await saveItemToDB(updatedItem);
       setItems(prev => prev.map(i => i.partNumber === updatedItem.partNumber ? updatedItem : i));
+      await logActivity({
+        userEmail: currentUser?.email || 'unknown',
+        action: 'UPDATE_ITEM',
+        entityType: 'Item',
+        entityId: updatedItem.partNumber,
+        details: { name: updatedItem.name, price: updatedItem.price, status: updatedItem.status }
+      });
       triggerToast(`Successfully saved parameters for SKU: ${updatedItem.partNumber}`);
     } catch (err) {
       console.error('Failed to save item detail:', err);
+      await logActivity({
+        userEmail: currentUser?.email || 'unknown',
+        action: 'UPDATE_ITEM',
+        entityType: 'Item',
+        entityId: updatedItem.partNumber,
+        status: 'ERROR',
+        details: { error: (err as any).message }
+      });
       triggerToast("Error: Failed to save changes to database.", "ERROR");
     } finally {
       setSyncRotated(false);

@@ -1172,6 +1172,58 @@ app.post('/api/login', async (req, res) => {
 
 // ============================================================================
 
+app.post('/api/activity-log', async (req, res) => {
+  try {
+    const { userEmail, action, entityType, entityId, details, status } = req.body;
+    const ipAddress = (req.headers['x-forwarded-for'] as string || req.socket.remoteAddress || '').split(',')[0].trim();
+    const userAgent = req.headers['user-agent'] || '';
+
+    if (!userEmail || !action) {
+      return res.status(400).json({ error: 'userEmail and action are required' });
+    }
+
+    const logResult = await query(
+      `INSERT INTO user_activity_logs (user_email, action, entity_type, entity_id, details, ip_address, user_agent, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id, created_at`,
+      [userEmail, action, entityType || null, entityId || null, JSON.stringify(details || {}), ipAddress, userAgent, status || 'SUCCESS']
+    );
+
+    res.json({ success: true, logId: logResult.rows[0].id });
+  } catch (err) {
+    console.error('Activity log error:', err);
+    res.status(500).json({ error: 'Failed to log activity' });
+  }
+});
+
+app.get('/api/activity-logs', async (req, res) => {
+  try {
+    const { userEmail, action, limit = '100', offset = '0' } = req.query;
+    let sql = 'SELECT * FROM user_activity_logs WHERE 1=1';
+    const params: any[] = [];
+
+    if (userEmail) {
+      sql += ` AND user_email = $${params.length + 1}`;
+      params.push(userEmail);
+    }
+    if (action) {
+      sql += ` AND action = $${params.length + 1}`;
+      params.push(action);
+    }
+
+    sql += ` ORDER BY created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+    params.push(parseInt(limit as string) || 100, parseInt(offset as string) || 0);
+
+    const result = await query(sql, params);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching activity logs:', err);
+    res.status(500).json({ error: 'Failed to fetch activity logs' });
+  }
+});
+
+// ============================================================================
+
 app.post('/api/users/init-roles', async (_req, res) => {
   try {
     // Initialize default roles and permissions
@@ -4183,6 +4235,23 @@ async function runSchemaBootstrap() {
        primary_part_number TEXT,
        alternative_part_number TEXT
      )`).catch(() => {});
+    await exec(`CREATE TABLE IF NOT EXISTS user_activity_logs (
+      id SERIAL PRIMARY KEY,
+      user_email TEXT NOT NULL,
+      action TEXT NOT NULL,
+      entity_type TEXT,
+      entity_id TEXT,
+      details JSONB,
+      ip_address TEXT,
+      user_agent TEXT,
+      status TEXT DEFAULT 'SUCCESS',
+      error_message TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_email) REFERENCES users(email) ON DELETE SET NULL
+    )`).catch(() => {});
+    await exec(`CREATE INDEX IF NOT EXISTS idx_activity_logs_user_email ON user_activity_logs(user_email)`).catch(() => {});
+    await exec(`CREATE INDEX IF NOT EXISTS idx_activity_logs_created_at ON user_activity_logs(created_at)`).catch(() => {});
+    await exec(`CREATE INDEX IF NOT EXISTS idx_activity_logs_action ON user_activity_logs(action)`).catch(() => {});
     await exec(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS lead_time INTEGER`).catch(() => {});
     await exec(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS response_time INTEGER`).catch(() => {});
     await exec(`ALTER TABLE production_kits ADD COLUMN IF NOT EXISTS projectId INTEGER`).catch(() => {});
