@@ -174,11 +174,11 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               </div>
               <div className="text-right">
                 <span className="text-[9px] text-outline uppercase font-label-caps block">Price</span>
-                <div className="flex flex-col gap-0.5">
+                <div className="flex flex-col gap-1">
                   <span className="font-mono text-sm font-bold text-green-400">
                     ${(Number(item.price ?? 0)).toFixed(2)}
                   </span>
-                  <span className="font-mono text-[10px] font-bold text-green-400/70">
+                  <span className="font-mono text-xs font-bold text-green-400">
                     R{((Number(item.price ?? 0)) * USD_TO_ZAR_RATE).toFixed(2)}
                   </span>
                 </div>
