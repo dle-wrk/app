@@ -1771,7 +1771,10 @@ if (currentView === 'alternates') {
                          entityType: 'Project',
                          entityId: String(project.id),
                          details: { projectName: project.projectName, status: project.status }
-                       }).catch(err => console.error('Failed to log project creation:', err));
+                       }).catch(err => {
+                         console.error('Failed to log project creation:', err);
+                         // Silently ignore activity log errors - don't let them break project creation
+                       });
                      }
                    }}
                    onProjectDeleted={(id) => {

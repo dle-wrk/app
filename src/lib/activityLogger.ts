@@ -16,14 +16,12 @@ export async function logActivity(log: ActivityLog): Promise<void> {
     });
 
     if (!res.ok) {
-      console.error('Activity log API error:', res.status, res.statusText);
+      console.error('Activity log API error:', res.status);
       return;
     }
 
-    await res.json().catch(() => {
-      // Ignore response parsing errors
-      console.warn('Could not parse activity log response');
-    });
+    // Don't await the response parsing - fire and forget
+    // This prevents any response parsing errors from blocking the main flow
   } catch (err) {
     console.error('Failed to log activity:', err);
   }
