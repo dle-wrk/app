@@ -250,10 +250,28 @@ export const ActivityLogsView: React.FC<ActivityLogsViewProps> = ({ currentUserE
                               <pre className="bg-surface-container rounded p-2 mt-1 text-[10px] overflow-x-auto font-mono">
                                 {(() => {
                                   try {
-                                    const parsed = typeof log.details === 'string' ? JSON.parse(log.details) : log.details;
-                                    return JSON.stringify(parsed || {}, null, 2);
+                                    // Handle both string and object formats
+                                    let details = log.details;
+
+                                    // If it's a string, try to parse it
+                                    if (typeof details === 'string') {
+                                      try {
+                                        details = JSON.parse(details);
+                                      } catch {
+                                        // If parsing fails, treat as plain string
+                                        return details || '{}';
+                                      }
+                                    }
+
+                                    // If we have an object, stringify it
+                                    if (details && typeof details === 'object') {
+                                      return JSON.stringify(details, null, 2);
+                                    }
+
+                                    return '{}';
                                   } catch (e) {
-                                    return log.details ? String(log.details) : '{}';
+                                    console.error('Error displaying activity details:', e);
+                                    return '{}';
                                   }
                                 })()}
                               </pre>
