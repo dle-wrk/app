@@ -2,13 +2,7 @@ import React from 'react';
 import {
   Boxes,
   AlertTriangle,
-  TrendingUp,
-  PlusCircle,
-  RefreshCw,
-  FileDown,
-  ChevronRight,
-  Check,
-  AlertCircle
+  TrendingUp
 } from 'lucide-react';
 import { Item, ViewType } from '../../types';
 
@@ -26,11 +20,6 @@ interface DashboardViewProps {
   lowPercent: number;
   criticalPercent: number;
   setView: (view: ViewType) => void;
-  handleStockSync: () => void;
-  setShowAddModal: (show: boolean) => void;
-  handleExportCSV: (name: string) => void;
-  syncRotated: boolean;
-  triggerToast: (msg: string) => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -46,12 +35,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   okPercent,
   lowPercent,
   criticalPercent,
-  setView,
-  handleStockSync,
-  setShowAddModal,
-  handleExportCSV,
-  syncRotated,
-  triggerToast
+  setView
 }) => {
   return (
     <div className="p-container-margin space-y-4 max-w-7xl mx-auto w-full">
@@ -268,37 +252,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <span className="text-on-surface-variant">Status: Critical</span>
               </div>
               <span className="font-mono font-bold text-on-surface">{criticalPercent}%</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Quick operations panel widgets */}
-        <div className="col-span-12 lg:col-span-3 space-y-4">
-          <div className="bg-surface-container p-lg rounded-xl border border-outline-variant min-h-76 flex flex-col justify-between">
-            <div>
-              <h4 className="text-outline text-[11px] font-bold mb-md">Quick Operations</h4>
-              <div className="space-y-sm">
-                <button onClick={() => setShowAddModal(true)} className="w-full flex items-center justify-between p-sm rounded-lg bg-surface-container-high hover:bg-surface-variant border border-outline-variant transition-all duration-150 group">
-                  <span className="flex items-center gap-sm font-bold text-xs select-none text-primary"><PlusCircle className="w-4 h-4" />Add New Component</span>
-                  <ChevronRight className="w-4 h-4 text-outline group-hover:translate-x-1 transition-transform" />
-                </button>
-                <button onClick={handleStockSync} className="w-full flex items-center justify-between p-sm rounded-lg bg-surface-container-high hover:bg-surface-variant border border-outline-variant transition-all duration-150 group">
-                  <span className="flex items-center gap-sm font-bold text-xs select-none text-secondary"><RefreshCw className="w-4 h-4" />Run Stock Sync</span>
-                  <ChevronRight className="w-4 h-4 text-outline group-hover:translate-x-1 transition-transform" />
-                </button>
-                <button onClick={() => handleExportCSV('BOM_Export')} className="w-full flex items-center justify-between p-sm rounded-lg bg-surface-container-high hover:bg-surface-variant border border-outline-variant transition-all duration-150 group">
-                  <span className="flex items-center gap-sm font-bold text-xs select-none text-tertiary"><FileDown className="w-4 h-4" />Export BOM</span>
-                  <ChevronRight className="w-4 h-4 text-outline group-hover:translate-x-1 transition-transform" />
-                </button>
-              </div>
-            </div>
-            <div className="mt-xl p-3 rounded-lg bg-primary-container/5 border border-primary/20 text-[11px] font-mono select-none">
-              <span className="text-[10px] text-outline font-bold block mb-1">SYSTEM HEALTH</span>
-              <div className="flex items-center gap-1.5 text-on-surface">
-                <span className="w-2 h-2 rounded-full bg-green-500"></span>
-                <span>Database in Sync</span>
-              </div>
-              <p className="text-[9px] text-outline mt-1 font-normal block">Last backup backup: 14 mins ago</p>
             </div>
           </div>
         </div>

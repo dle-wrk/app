@@ -1474,11 +1474,6 @@ export default function App() {
                   lowStockCount={lowStockCount}
                   criticalCount={criticalCount}
                   setView={setView}
-                  handleStockSync={handleStockSync}
-                  setShowAddModal={setShowAddModal}
-                  handleExportCSV={handleExportCSV}
-                  syncRotated={syncRotated}
-                  triggerToast={triggerToast}
                   totalItemsCount={totalItemsCount}
                   totalValuation={totalValuation}
                   okPercent={okPercent}
