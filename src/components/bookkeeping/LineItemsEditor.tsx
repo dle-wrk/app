@@ -34,9 +34,10 @@ interface LineItemsEditorProps {
   accounts?: Account[];
   mode: 'SALES' | 'PURCHASE';
   currency: string;
+  isWarrantyClaim?: boolean;
 }
 
-export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChange, items, taxRates, accounts, mode, currency }) => {
+export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChange, items, taxRates, accounts, mode, currency, isWarrantyClaim }) => {
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
@@ -322,16 +323,17 @@ export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChang
         <div className="bg-surface-container-high rounded-lg p-4 space-y-2 border border-outline-variant/40">
           <div className="flex justify-between items-center text-sm">
             <span className="text-on-surface-variant">Subtotal</span>
-            <span className="font-mono font-semibold">{fmtMoney(subtotal, currency)}</span>
+            <span className="font-mono font-semibold">{fmtMoney(isWarrantyClaim ? 0 : subtotal, currency)}</span>
           </div>
           <div className="flex justify-between items-center text-sm">
             <span className="text-on-surface-variant">Tax</span>
-            <span className="font-mono font-semibold text-primary">{fmtMoney(taxTotal, currency)}</span>
+            <span className="font-mono font-semibold text-primary">{fmtMoney(isWarrantyClaim ? 0 : taxTotal, currency)}</span>
           </div>
           <div className="flex justify-between items-center text-base border-t border-outline-variant/20 pt-2">
             <span className="font-bold text-on-surface">Total</span>
-            <span className="font-mono font-bold text-lg text-primary">{fmtMoney(total, currency)}</span>
+            <span className="font-mono font-bold text-lg text-primary">{fmtMoney(isWarrantyClaim ? 0 : total, currency)}</span>
           </div>
+          {isWarrantyClaim && <div className="text-xs text-on-surface-variant/60 italic pt-2">Warranty claim - pricing voided</div>}
         </div>
       )}
     </div>

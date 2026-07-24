@@ -343,7 +343,7 @@ const InvoiceEditorModal: React.FC<ModuleDataProps & { initial: Invoice | null; 
       </div>
 
       <ErrorBoundary>
-        <LineItemsEditor lines={lines} onChange={setLines} items={safeItems} taxRates={safeTaxRates} mode="SALES" currency={currency} />
+        <LineItemsEditor lines={lines} onChange={setLines} items={safeItems} taxRates={safeTaxRates} mode="SALES" currency={currency} isWarrantyClaim={isWarrantyClaim} />
       </ErrorBoundary>
 
       <div className="grid md:grid-cols-2 gap-3 mt-md">
