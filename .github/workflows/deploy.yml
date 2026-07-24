@@ -14,8 +14,6 @@ jobs:
 
       - name: Setup flyctl
         uses: superfly/flyctl-actions@v1
-        with:
-          channel: v0
 
       - name: Deploy to Fly.io
         run: flyctl deploy --remote-only
