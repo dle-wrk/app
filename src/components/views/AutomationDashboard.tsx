@@ -432,28 +432,152 @@ function AutomationRulesSection({ triggerToast }: any) {
 }
 
 function ScheduledJobsSection({ triggerToast }: any) {
+  const [jobs, setJobs] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchJobs();
+  }, []);
+
+  const fetchJobs = async () => {
+    try {
+      const res = await fetch('/api/scheduled-jobs');
+      setJobs(await res.json());
+    } catch (err: any) {
+      triggerToast('Failed to load scheduled jobs', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) return <div className="text-center py-4 text-outline text-xs">Loading...</div>;
+
   return (
-    <div className="bg-surface-container border border-outline-variant rounded-lg p-lg">
-      <h4 className="text-sm font-bold text-primary mb-md">Scheduled Jobs</h4>
-      <p className="text-xs text-on-surface-variant">Background job management coming soon...</p>
+    <div className="space-y-md">
+      <div className="flex items-center justify-between mb-md">
+        <h4 className="text-sm font-bold text-on-surface">Scheduled Jobs ({jobs.length})</h4>
+        <button onClick={fetchJobs} className="text-xs text-primary hover:text-primary/80 transition">Refresh</button>
+      </div>
+      {jobs.length === 0 ? (
+        <p className="text-xs text-on-surface-variant italic">No scheduled jobs configured</p>
+      ) : (
+        <div className="space-y-sm">
+          {jobs.map((job: any) => (
+            <div key={job.id} className="bg-surface-container-high/30 p-sm rounded border border-outline-variant/30">
+              <div className="flex items-start justify-between">
+                <div className="flex-1">
+                  <p className="text-xs font-bold text-on-surface">{job.jobName}</p>
+                  <p className="text-[10px] text-on-surface-variant mt-1">Type: {job.jobType} | Schedule: {job.scheduleType}</p>
+                  <p className="text-[10px] text-outline mt-1">Next run: {new Date(job.nextRun).toLocaleString()}</p>
+                </div>
+                <span className={`px-2 py-0.5 rounded text-[9px] font-bold ${job.isActive ? 'bg-green-500/10 text-green-400' : 'bg-gray-500/10 text-gray-400'}`}>
+                  {job.isActive ? 'ACTIVE' : 'INACTIVE'}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
 function NotificationsSection({ triggerToast }: any) {
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchNotifications();
+  }, []);
+
+  const fetchNotifications = async () => {
+    try {
+      const res = await fetch('/api/notifications?status=PENDING');
+      setNotifications(await res.json());
+    } catch (err: any) {
+      triggerToast('Failed to load notifications', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) return <div className="text-center py-4 text-outline text-xs">Loading...</div>;
+
   return (
-    <div className="bg-surface-container border border-outline-variant rounded-lg p-lg">
-      <h4 className="text-sm font-bold text-primary mb-md">Notifications</h4>
-      <p className="text-xs text-on-surface-variant">Notification queue viewer coming soon...</p>
+    <div className="space-y-md">
+      <div className="flex items-center justify-between mb-md">
+        <h4 className="text-sm font-bold text-on-surface">Pending Notifications ({notifications.length})</h4>
+        <button onClick={fetchNotifications} className="text-xs text-primary hover:text-primary/80 transition">Refresh</button>
+      </div>
+      {notifications.length === 0 ? (
+        <p className="text-xs text-on-surface-variant italic">No pending notifications</p>
+      ) : (
+        <div className="space-y-sm max-h-72 overflow-y-auto">
+          {notifications.map((notif: any) => (
+            <div key={notif.id} className="bg-surface-container-high/30 p-sm rounded border-l-2 border-primary">
+              <p className="text-xs font-bold text-on-surface">{notif.subject || notif.message}</p>
+              <p className="text-[10px] text-on-surface-variant mt-1">{notif.message}</p>
+              <p className="text-[9px] text-outline mt-2">{new Date(notif.createdAt).toLocaleString()}</p>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
 function AutoPOConfigSection({ triggerToast }: any) {
+  const [config, setConfig] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(false);
+
+  useEffect(() => {
+    fetchConfig();
+  }, []);
+
+  const fetchConfig = async () => {
+    try {
+      const res = await fetch('/api/auto-po-config');
+      const data = await res.json();
+      setConfig(data[0] || { enabled: false, minStockLevel: 50, preferredSupplier: 'digikey', autoApprove: false });
+    } catch (err: any) {
+      triggerToast('Failed to load auto-PO config', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) return <div className="text-center py-4 text-outline text-xs">Loading...</div>;
+
   return (
-    <div className="bg-surface-container border border-outline-variant rounded-lg p-lg">
-      <h4 className="text-sm font-bold text-primary mb-md">Auto-PO Configuration</h4>
-      <p className="text-xs text-on-surface-variant">Auto-purchase order settings coming soon...</p>
+    <div className="space-y-md">
+      <div className="flex items-center justify-between mb-md">
+        <h4 className="text-sm font-bold text-on-surface">Auto-PO Settings</h4>
+        <button onClick={() => setEditing(!editing)} className="text-xs text-primary hover:text-primary/80 transition">
+          {editing ? 'Done' : 'Edit'}
+        </button>
+      </div>
+      <div className="bg-surface-container-high/30 p-md rounded space-y-2">
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-on-surface-variant">Auto-PO Enabled:</span>
+          <span className="text-xs font-bold text-on-surface">{config?.enabled ? '✓ Yes' : '✗ No'}</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-on-surface-variant">Min Stock Level:</span>
+          <span className="text-xs font-bold text-on-surface">{config?.minStockLevel || 50} units</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-on-surface-variant">Preferred Supplier:</span>
+          <span className="text-xs font-bold text-on-surface">{config?.preferredSupplier || 'digikey'}</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-on-surface-variant">Auto-Approve:</span>
+          <span className="text-xs font-bold text-on-surface">{config?.autoApprove ? '✓ Yes' : '✗ No'}</span>
+        </div>
+      </div>
+      {editing && (
+        <p className="text-[10px] text-outline italic">Configuration editor coming soon...</p>
+      )}
     </div>
   );
 }
