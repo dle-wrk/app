@@ -190,7 +190,7 @@ export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChang
                                   >
                                     <div className="flex items-center justify-between mb-1">
                                       <span className="font-mono font-bold text-primary text-sm">{item?.partNumber || 'N/A'}</span>
-                                      <span className="text-xs text-on-surface-variant/60">${(item?.price || 0).toFixed(2)}</span>
+                                      <span className="text-xs text-on-surface-variant/60">${(Number(item?.price) || 0).toFixed(2)}</span>
                                     </div>
                                     <div className="text-sm text-on-surface-variant truncate">{item?.name || item?.description || 'No description'}</div>
                                     <div className="text-xs text-on-surface-variant/60 mt-1">Stock: {item?.stockLevel || 0}</div>
