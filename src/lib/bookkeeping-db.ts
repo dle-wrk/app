@@ -30,10 +30,10 @@ export async function ensureBookkeepingSchema() {
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   )`).catch(() => {});
 
-  // --- Clients & Suppliers -------------------------------------------------------
-  await exec(`CREATE TABLE IF NOT EXISTS clients (
+  // --- Customers & Suppliers -------------------------------------------------------
+  await exec(`CREATE TABLE IF NOT EXISTS customers (
     id SERIAL PRIMARY KEY,
-    client_name TEXT NOT NULL UNIQUE,
+    customer_name TEXT NOT NULL UNIQUE,
     contact_name TEXT,
     email TEXT,
     phone TEXT,
@@ -360,23 +360,23 @@ export async function ensureBookkeepingSchema() {
     console.log('Seeded default tax rates.');
   }
 
-  // --- Default Clients (seeded once) -------------------------------------------
-  const clientCount = await queryOne<{ count: string }>(`SELECT COUNT(*) as count FROM clients`);
-  if (parseInt(clientCount?.count || '0', 10) === 0) {
-    const defaultClients = [
+  // --- Default Customers (seeded once) -------------------------------------------
+  const customerCount = await queryOne<{ count: string }>(`SELECT COUNT(*) as count FROM customers`);
+  if (parseInt(customerCount?.count || '0', 10) === 0) {
+    const defaultCustomers = [
       ['DEWA', 'Ahmed Hassan', 'ahmed@dewa.ae', '+971-4-XXX-XXXX', 'Dubai, UAE', 'AE-123456', 'ACTIVE'],
       ['SASOL', 'Thembi Ntuli', 'thembi@sasol.com', '+27-11-XXX-XXXX', 'Johannesburg, SA', 'ZA-654321', 'ACTIVE'],
       ['BOKPOORT', 'Jan de Villiers', 'jan@bokpoort.co.za', '+27-54-XXX-XXXX', 'Northern Cape, SA', 'ZA-789012', 'ACTIVE'],
       ['ESKOM', 'Lindiwe Khumalo', 'lindiwe@eskom.co.za', '+27-11-XXX-XXXX', 'Pretoria, SA', 'ZA-345678', 'ACTIVE'],
       ['ARAMCO', 'Mohammed Al-Saud', 'mohammed@aramco.com.sa', '+966-1-XXX-XXXX', 'Riyadh, SA', 'SA-111111', 'ACTIVE'],
     ];
-    for (const [clientName, contactName, email, phone, address, vatNum, status] of defaultClients) {
+    for (const [customerName, contactName, email, phone, address, vatNum, status] of defaultCustomers) {
       await pool.query(
-        `INSERT INTO clients (client_name, contact_name, email, phone, address, vat_number, status) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (client_name) DO NOTHING`,
-        [clientName, contactName, email, phone, address, vatNum, status]
+        `INSERT INTO customers (customer_name, contact_name, email, phone, address, vat_number, status) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (customer_name) DO NOTHING`,
+        [customerName, contactName, email, phone, address, vatNum, status]
       );
     }
-    console.log('Seeded default clients.');
+    console.log('Seeded default customers.');
   }
 
   // --- Default Suppliers (seeded once) -----------------------------------------

@@ -163,16 +163,16 @@ const POEditorModal: React.FC<ModuleDataProps & { onClose: () => void; onSaved: 
           </label>
           <label className="flex items-center gap-2 cursor-pointer">
             <input type="radio" name="poType" value="CLIENT" checked={poType === 'CLIENT'} onChange={(e) => setPoType('CLIENT')} className="w-4 h-4" />
-            <span className="text-sm">Client (Production Stock)</span>
+            <span className="text-sm">Customer (Production Stock)</span>
           </label>
         </div>
       </div>
 
       <div className="grid md:grid-cols-4 gap-3 mb-md">
         <div className="md:col-span-2">
-          <FieldLabel>{poType === 'SUPPLIER' ? 'Supplier' : 'Client'}</FieldLabel>
+          <FieldLabel>{poType === 'SUPPLIER' ? 'Supplier' : 'Customer'}</FieldLabel>
           <select className={selectClass} value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
-            <option value="">{poType === 'SUPPLIER' ? 'Select supplier' : 'Select client'}</option>
+            <option value="">{poType === 'SUPPLIER' ? 'Select supplier' : 'Select customer'}</option>
             {poType === 'SUPPLIER' ? (
               suppliers && suppliers.length > 0 ? (
                 suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)
@@ -183,7 +183,7 @@ const POEditorModal: React.FC<ModuleDataProps & { onClose: () => void; onSaved: 
               clients && clients.length > 0 ? (
                 clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)
               ) : (
-                <option disabled>No clients available</option>
+                <option disabled>No customers available</option>
               )
             )}
           </select>
