@@ -278,20 +278,6 @@ export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChang
                       </select>
                     </div>
                   )}
-
-                  <div className="flex items-end">
-                    <label className="flex items-center gap-2 cursor-pointer select-none">
-                      <input
-                        type="checkbox"
-                        checked={mode === 'SALES' ? !!line.deductStock : !!line.receiveStock}
-                        disabled={!line.partNumber}
-                        onChange={(e) => update(line.key, mode === 'SALES' ? { deductStock: e.target.checked } : { receiveStock: e.target.checked })}
-                        className="w-4 h-4"
-                        title={line.partNumber ? 'Sync inventory' : 'Set a part number first'}
-                      />
-                      <span className="text-xs text-on-surface-variant">{mode === 'SALES' ? 'Deduct stock' : 'Receive stock'}</span>
-                    </label>
-                  </div>
                 </div>
 
                 {/* Line Total */}
