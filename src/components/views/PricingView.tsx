@@ -109,6 +109,9 @@ export const PricingView: React.FC<PricingViewProps> = ({
   const [searchResult, setSearchResult] = useState<SearchResponse | null>(null);
   const [usage, setUsage] = useState<UsageResponse | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
+  const [stockCodeFilter, setStockCodeFilter] = useState('');
+  const [supplierFilter, setSupplierFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
   const ITEMS_PER_PAGE = 50;
 
   const loadUsage = async () => {
@@ -141,8 +144,14 @@ export const PricingView: React.FC<PricingViewProps> = ({
     }
   };
 
-  // Pagination logic
-  const filteredItems = items.filter(i => pricingFilter === 'ALL' || i.category === pricingFilter);
+  // Pagination logic with multiple filters
+  const filteredItems = items.filter(i => {
+    const categoryMatch = pricingFilter === 'ALL' || i.category === pricingFilter;
+    const stockCodeMatch = !stockCodeFilter || i.partNumber.toLowerCase().includes(stockCodeFilter.toLowerCase());
+    const supplierMatch = !supplierFilter || i.supplier.toLowerCase().includes(supplierFilter.toLowerCase());
+    const statusMatch = !statusFilter || i.status === statusFilter;
+    return categoryMatch && stockCodeMatch && supplierMatch && statusMatch;
+  });
   const totalPages = Math.ceil(filteredItems.length / ITEMS_PER_PAGE);
   const startIdx = (currentPage - 1) * ITEMS_PER_PAGE;
   const endIdx = startIdx + ITEMS_PER_PAGE;
@@ -151,7 +160,7 @@ export const PricingView: React.FC<PricingViewProps> = ({
   // Reset to page 1 when filter changes
   React.useEffect(() => {
     setCurrentPage(1);
-  }, [pricingFilter]);
+  }, [pricingFilter, stockCodeFilter, supplierFilter, statusFilter]);
 
   return (
     <div className="p-container-margin space-y-lg max-w-7xl mx-auto w-full">
@@ -297,19 +306,57 @@ export const PricingView: React.FC<PricingViewProps> = ({
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="bg-surface-container-high/50 font-label-caps text-[10px] text-outline border-b border-outline-variant">
-                <th className="px-lg py-sm">Product specification</th>
-                <th className="px-lg py-sm">Preferred Supplier</th>
-                <th className="px-lg py-sm text-right">Base unit price</th>
-                <th className="px-lg py-sm">Status</th>
+              <tr className="bg-surface-container-high/50 border-b border-outline-variant">
+                <th className="px-lg py-sm">
+                  <div className="flex flex-col gap-1">
+                    <span className="font-label-caps text-[10px] text-outline">Stock Code</span>
+                    <input
+                      type="text"
+                      placeholder="Filter..."
+                      value={stockCodeFilter}
+                      onChange={(e) => setStockCodeFilter(e.target.value)}
+                      className="bg-surface-container-high border border-outline-variant rounded px-2 py-1 text-xs text-on-surface placeholder-on-surface-variant/50 w-full"
+                    />
+                  </div>
+                </th>
+                <th className="px-lg py-sm">
+                  <div className="flex flex-col gap-1">
+                    <span className="font-label-caps text-[10px] text-outline">Supplier</span>
+                    <input
+                      type="text"
+                      placeholder="Filter..."
+                      value={supplierFilter}
+                      onChange={(e) => setSupplierFilter(e.target.value)}
+                      className="bg-surface-container-high border border-outline-variant rounded px-2 py-1 text-xs text-on-surface placeholder-on-surface-variant/50 w-full"
+                    />
+                  </div>
+                </th>
+                <th className="px-lg py-sm text-right">
+                  <span className="font-label-caps text-[10px] text-outline block">Base unit price</span>
+                </th>
+                <th className="px-lg py-sm">
+                  <div className="flex flex-col gap-1">
+                    <span className="font-label-caps text-[10px] text-outline">Status</span>
+                    <select
+                      value={statusFilter}
+                      onChange={(e) => setStatusFilter(e.target.value)}
+                      className="bg-surface-container-high border border-outline-variant rounded px-2 py-1 text-xs text-on-surface w-full"
+                    >
+                      <option value="">All</option>
+                      <option value="ACTIVE">ACTIVE</option>
+                      <option value="INACTIVE">INACTIVE</option>
+                      <option value="BOOKED OUT">BOOKED OUT</option>
+                    </select>
+                  </div>
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-outline-variant/30 text-xs">
               {pageItems.map(i => (
                   <tr key={i.partNumber} className="hover:bg-surface-variant/20 transition-all duration-150">
-                    <td className="px-lg py-sm font-bold text-on-surface">
-                      {i.name}
-                      <span className="text-[10px] text-outline block font-normal font-mono">{i.partNumber} &bull; {i.category}</span>
+                    <td className="px-lg py-sm font-mono font-bold text-primary">
+                      {i.partNumber}
+                      <span className="text-[10px] text-on-surface block font-normal font-sans">{i.name}</span>
                     </td>
                     <td className="px-lg py-sm">
                       <span className="bg-surface-container-high border border-outline-variant px-sm py-0.5 rounded text-xs select-none">
