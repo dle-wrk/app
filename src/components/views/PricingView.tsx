@@ -330,9 +330,7 @@ export const PricingView: React.FC<PricingViewProps> = ({
               )}
             </button>
           </div>
-        </div>
-
-        <div className="px-lg py-sm border-b border-outline-variant bg-surface-container-high/10 flex gap-sm select-none text-xs">
+          <div className="flex gap-sm select-none text-xs">
             <button
               onClick={() => setPricingFilter('ALL')}
               className={`px-2.5 py-1 rounded border ${pricingFilter === 'ALL' ? 'bg-primary text-on-primary border-primary' : 'bg-surface-container-high text-on-surface-variant'}`}
