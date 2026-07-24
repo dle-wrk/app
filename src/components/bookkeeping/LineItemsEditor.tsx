@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, Trash2, ChevronDown } from 'lucide-react';
+import { Plus, Trash2, ChevronDown, Copy } from 'lucide-react';
 import { Item, TaxRate, Account } from '../../types';
 import { fmtMoney, inputClass, selectClass } from './shared';
 
@@ -64,30 +64,38 @@ export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChang
   const total = subtotal + taxTotal;
 
   return (
-    <div className="space-y-3">
-      <div className="overflow-x-auto rounded-lg border border-outline-variant/40 bg-surface-container">
-        <table className="w-full text-left text-xs min-w-[820px]">
-          <thead>
-            <tr className="bg-surface-container-high/60 text-[11px] uppercase text-outline font-semibold">
-              <th className="py-3 px-3 w-40">Part # (optional)</th>
-              <th className="py-3 px-3 flex-1">Description</th>
-              <th className="py-3 px-3 w-24 text-center">Qty</th>
-              <th className="py-3 px-3 w-32 text-right">Unit Price</th>
-              <th className="py-3 px-3 w-36">Tax</th>
-              {mode === 'PURCHASE' && accounts && <th className="py-3 px-3 w-40">Account</th>}
-              <th className="py-3 px-3 w-28 text-right">Line Total</th>
-              <th className="py-3 px-3 w-32 text-center">{mode === 'SALES' ? 'Deduct Stock' : 'Receive Stock'}</th>
-              <th className="py-3 px-3 w-10"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {lines.map(line => {
-              const t = lineTotals(line, taxRates);
-              return (
-                <tr key={line.key} className="border-t border-outline-variant/20 hover:bg-surface-container-high/30 transition-colors">
-                  <td className="p-2 relative z-0">
+    <div className="space-y-4">
+      {/* Line Items */}
+      <div className="space-y-3">
+        {lines.length === 0 ? (
+          <div className="text-center py-8 rounded-lg border-2 border-dashed border-outline-variant/40">
+            <p className="text-sm text-on-surface-variant">No line items yet</p>
+            <p className="text-xs text-on-surface-variant/60 mt-1">Click "Add line" to get started</p>
+          </div>
+        ) : (
+          lines.map((line, idx) => {
+            const t = lineTotals(line, taxRates);
+            return (
+              <div key={line.key} className="bg-surface-container border border-outline-variant/40 rounded-lg p-4 space-y-4 hover:border-outline-variant/60 transition-colors">
+                {/* Header with index and remove button */}
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs font-semibold text-outline uppercase tracking-wide">Line {idx + 1}</span>
+                  <button
+                    type="button"
+                    onClick={() => remove(line.key)}
+                    className="text-error/60 hover:text-error hover:bg-error/10 p-2 rounded transition-colors"
+                    title="Remove line"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Part Number & Description Row */}
+                <div className="grid md:grid-cols-2 gap-3">
+                  <div className="relative">
+                    <label className="block text-xs font-semibold text-outline mb-1.5 uppercase tracking-wide">SKU / Part #</label>
                     <div className="relative">
-                      <div className="flex items-center gap-1">
+                      <div className="flex items-center gap-2">
                         <input
                           type="text"
                           value={openDropdown === line.key ? searchQuery : line.partNumber || ''}
@@ -100,21 +108,21 @@ export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChang
                             setSearchQuery(line.partNumber || '');
                           }}
                           onBlur={() => setTimeout(() => setOpenDropdown(null), 200)}
-                          className={`${inputClass} py-1.5 text-xs font-mono flex-1`}
-                          placeholder="SKU or name"
+                          className={`${inputClass} py-2.5 px-3 text-sm font-mono flex-1`}
+                          placeholder="Type to search..."
                           autoComplete="off"
                         />
-                        <ChevronDown className="w-3.5 h-3.5 text-on-surface-variant pointer-events-none flex-shrink-0" />
+                        <ChevronDown className="w-4 h-4 text-on-surface-variant pointer-events-none" />
                       </div>
                       {openDropdown === line.key && (
-                        <div className="fixed bg-surface-container-high border border-outline-variant/40 rounded shadow-lg z-50 max-h-56 overflow-y-auto text-xs min-w-80 max-w-md">
+                        <div className="absolute top-full left-0 right-0 mt-2 bg-surface-container-high border border-outline-variant/40 rounded-lg shadow-lg z-50 max-h-64 overflow-y-auto">
                           {items
                             .filter(i =>
                               !searchQuery ||
                               i.partNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
                               (i.name || i.description || '').toLowerCase().includes(searchQuery.toLowerCase())
                             )
-                            .slice(0, 10)
+                            .slice(0, 12)
                             .map(item => (
                               <button
                                 key={item.partNumber}
@@ -125,11 +133,14 @@ export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChang
                                   setOpenDropdown(null);
                                   setSearchQuery('');
                                 }}
-                                className="w-full text-left px-3 py-2.5 hover:bg-primary/10 border-b border-outline-variant/10 last:border-0 transition-colors"
+                                className="w-full text-left px-3.5 py-3 hover:bg-primary/10 border-b border-outline-variant/10 last:border-0 transition-colors"
                               >
-                                <div className="font-mono font-bold text-primary text-sm">{item.partNumber}</div>
-                                <div className="text-on-surface-variant truncate text-xs">{item.name || item.description || 'No description'}</div>
-                                <div className="text-[10px] text-on-surface-variant/60 mt-0.5">Stock: {item.stockLevel} • ${(item.price || 0).toFixed(2)}</div>
+                                <div className="flex items-center justify-between mb-1">
+                                  <span className="font-mono font-bold text-primary text-sm">{item.partNumber}</span>
+                                  <span className="text-xs text-on-surface-variant/60">${(item.price || 0).toFixed(2)}</span>
+                                </div>
+                                <div className="text-sm text-on-surface-variant truncate">{item.name || item.description || 'No description'}</div>
+                                <div className="text-xs text-on-surface-variant/60 mt-1">Stock: {item.stockLevel}</div>
                               </button>
                             ))}
                           {items.filter(i =>
@@ -137,98 +148,138 @@ export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChang
                             i.partNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
                             (i.name || i.description || '').toLowerCase().includes(searchQuery.toLowerCase())
                           ).length === 0 && (
-                            <div className="px-3 py-2.5 text-on-surface-variant/60 italic">No components found</div>
+                            <div className="px-3.5 py-3 text-on-surface-variant/60 italic text-sm">No components found</div>
                           )}
                         </div>
                       )}
                     </div>
-                  </td>
-                  <td className="p-2">
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-outline mb-1.5 uppercase tracking-wide">Description</label>
                     <input
                       value={line.description}
                       onChange={(e) => update(line.key, { description: e.target.value })}
-                      className={`${inputClass} py-2 px-2.5 text-xs font-medium`}
-                      placeholder="Description"
+                      className={`${inputClass} py-2.5 px-3 text-sm w-full`}
+                      placeholder="Item description..."
                       required
                     />
-                  </td>
-                  <td className="p-2">
+                  </div>
+                </div>
+
+                {/* Quantity, Price, Tax Row */}
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-outline mb-1.5 uppercase tracking-wide">Qty</label>
                     <input
-                      type="number" min={0.01} step="0.01"
+                      type="number"
+                      min={0.01}
+                      step="0.01"
                       value={line.quantity}
                       onChange={(e) => update(line.key, { quantity: parseFloat(e.target.value) || 0 })}
-                      className={`${inputClass} py-2 px-2.5 text-xs text-center font-medium`}
+                      className={`${inputClass} py-2.5 px-3 text-sm text-center w-full`}
                     />
-                  </td>
-                  <td className="p-2">
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-outline mb-1.5 uppercase tracking-wide">Unit Price</label>
                     <input
-                      type="number" min={0} step="0.01"
+                      type="number"
+                      min={0}
+                      step="0.01"
                       value={line.unitPrice}
                       onChange={(e) => update(line.key, { unitPrice: parseFloat(e.target.value) || 0 })}
-                      className={`${inputClass} py-2 px-2.5 text-xs text-right font-mono font-medium`}
+                      className={`${inputClass} py-2.5 px-3 text-sm text-right font-mono w-full`}
                     />
-                  </td>
-                  <td className="p-2">
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-outline mb-1.5 uppercase tracking-wide">Tax</label>
                     <select
                       value={line.taxRateId ?? ''}
                       onChange={(e) => update(line.key, { taxRateId: e.target.value ? Number(e.target.value) : null })}
-                      className={`${selectClass} py-2 px-2.5 text-xs font-medium`}
-                      aria-label="Tax rate"
+                      className={`${selectClass} py-2.5 px-3 text-sm w-full`}
                     >
                       <option value="">No tax</option>
                       {taxRates.map(tr => <option key={tr.id} value={tr.id}>{tr.name}</option>)}
                     </select>
-                  </td>
+                  </div>
+                </div>
+
+                {/* Additional Options */}
+                <div className="grid grid-cols-2 gap-3 pt-2 border-t border-outline-variant/20">
                   {mode === 'PURCHASE' && accounts && (
-                    <td className="p-2">
+                    <div>
+                      <label className="block text-xs font-semibold text-outline mb-1.5 uppercase tracking-wide">Account</label>
                       <select
                         value={line.accountId ?? ''}
                         onChange={(e) => update(line.key, { accountId: e.target.value ? Number(e.target.value) : null })}
-                        className={`${selectClass} py-2 px-2.5 text-xs font-medium`}
-                        aria-label="Expense account"
+                        className={`${selectClass} py-2.5 px-3 text-xs w-full`}
                       >
                         <option value="">Default expense</option>
-                        {accounts.filter(a => a.type === 'EXPENSE' || a.type === 'ASSET').map(a => <option key={a.id} value={a.id}>{a.code} {a.name}</option>)}
+                        {accounts.filter(a => a.type === 'EXPENSE' || a.type === 'ASSET').map(a => (
+                          <option key={a.id} value={a.id}>{a.code} {a.name}</option>
+                        ))}
                       </select>
-                    </td>
+                    </div>
                   )}
-                  <td className="p-2 text-right font-mono font-bold text-primary">{fmtMoney(t.lineTotal, currency)}</td>
-                  <td className="p-2 text-center">
-                    <input
-                      type="checkbox"
-                      checked={mode === 'SALES' ? !!line.deductStock : !!line.receiveStock}
-                      disabled={!line.partNumber}
-                      onChange={(e) => update(line.key, mode === 'SALES' ? { deductStock: e.target.checked } : { receiveStock: e.target.checked })}
-                      className="w-4 h-4 cursor-pointer"
-                      title={line.partNumber ? 'Sync this line with inventory stock' : 'Set a part number to enable'}
-                    />
-                  </td>
-                  <td className="p-2 text-center">
-                    <button type="button" onClick={() => remove(line.key)} className="text-error/60 hover:text-error hover:bg-error/10 p-2 rounded transition-colors" aria-label="Remove line">
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      <datalist id="bk-part-numbers">
-        {items.map(i => <option key={i.partNumber} value={i.partNumber}>{i.name}</option>)}
-      </datalist>
 
-      <button type="button" onClick={add} className="flex items-center gap-1.5 text-xs font-bold text-primary hover:underline">
-        <Plus className="w-3.5 h-3.5" /> Add line
+                  <div className="flex items-end">
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={mode === 'SALES' ? !!line.deductStock : !!line.receiveStock}
+                        disabled={!line.partNumber}
+                        onChange={(e) => update(line.key, mode === 'SALES' ? { deductStock: e.target.checked } : { receiveStock: e.target.checked })}
+                        className="w-4 h-4"
+                        title={line.partNumber ? 'Sync inventory' : 'Set a part number first'}
+                      />
+                      <span className="text-xs text-on-surface-variant">{mode === 'SALES' ? 'Deduct stock' : 'Receive stock'}</span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Line Total */}
+                <div className="flex items-center justify-between p-3 bg-primary/5 rounded-lg border border-primary/10">
+                  <div className="text-sm text-on-surface-variant">Subtotal + Tax</div>
+                  <div className="text-right">
+                    <div className="text-xs text-on-surface-variant/60">{fmtMoney(t.base, currency)} + {fmtMoney(t.taxAmount, currency)}</div>
+                    <div className="text-lg font-bold text-primary font-mono">{fmtMoney(t.lineTotal, currency)}</div>
+                  </div>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {/* Add Line Button */}
+      <button
+        type="button"
+        onClick={add}
+        className="w-full py-3 px-4 rounded-lg border-2 border-dashed border-outline-variant/40 hover:border-primary/60 hover:bg-primary/5 text-primary font-semibold text-sm transition-all flex items-center justify-center gap-2"
+      >
+        <Plus className="w-4 h-4" />
+        Add line
       </button>
 
-      <div className="flex justify-end">
-        <div className="w-64 space-y-1 text-xs bg-surface-container-low rounded-lg p-3 border border-outline-variant/30">
-          <div className="flex justify-between"><span className="text-on-surface-variant">Subtotal</span><span className="font-mono">{fmtMoney(subtotal, currency)}</span></div>
-          <div className="flex justify-between"><span className="text-on-surface-variant">Tax</span><span className="font-mono">{fmtMoney(taxTotal, currency)}</span></div>
-          <div className="flex justify-between font-bold text-sm pt-1 border-t border-outline-variant/30"><span>Total</span><span className="font-mono text-primary">{fmtMoney(total, currency)}</span></div>
+      {/* Summary */}
+      {lines.length > 0 && (
+        <div className="bg-surface-container-high rounded-lg p-4 space-y-2 border border-outline-variant/40">
+          <div className="flex justify-between items-center text-sm">
+            <span className="text-on-surface-variant">Subtotal</span>
+            <span className="font-mono font-semibold">{fmtMoney(subtotal, currency)}</span>
+          </div>
+          <div className="flex justify-between items-center text-sm">
+            <span className="text-on-surface-variant">Tax</span>
+            <span className="font-mono font-semibold text-primary">{fmtMoney(taxTotal, currency)}</span>
+          </div>
+          <div className="flex justify-between items-center text-base border-t border-outline-variant/20 pt-2">
+            <span className="font-bold text-on-surface">Total</span>
+            <span className="font-mono font-bold text-lg text-primary">{fmtMoney(total, currency)}</span>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };
