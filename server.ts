@@ -680,11 +680,11 @@ app.get('/api/bootstrap', async (_req, res) => {
       assignedTeam: r.assigned_team
     }));
 
-    // 10. Clients
-    const { rows: clientsRows } = await query('SELECT * FROM clients ORDER BY id');
+    // 10. Customers
+    const { rows: clientsRows } = await query('SELECT * FROM customers ORDER BY id');
     const clients = clientsRows.map((row: any) => ({
       id: row.id,
-      clientName: row.client_name,
+      clientName: row.customer_name,
       contactName: row.contact_name,
       email: row.email,
       phone: row.phone,
