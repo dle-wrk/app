@@ -5,6 +5,7 @@ import { spawn } from 'child_process';
 import path from 'path';
 import { existsSync } from 'fs';
 import { fileURLToPath } from 'url';
+import cron from 'node-cron';
 import { pool, query, queryOne, exec, ensureSchema, close } from './src/lib/db';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -4323,12 +4324,84 @@ async function runSchemaBootstrap() {
     console.log('Database bootstrapping complete.');
 }
 
+// Exchange Rate Management
+async function updateExchangeRate() {
+  try {
+    // Fetch current ZAR to USD exchange rate from API
+    const response = await fetch('https://api.exchangerate-api.com/v4/latest/ZAR');
+    if (!response.ok) throw new Error('Failed to fetch exchange rate');
+
+    const data = await response.json();
+    const usdRate = data.rates?.USD || 0.053; // Fallback rate (1 ZAR ≈ 0.053 USD, or 1 USD = 18.87 ZAR)
+    const zarToUsd = parseFloat(usdRate.toFixed(4));
+
+    // Store in settings table
+    await exec(`INSERT INTO settings (key, value, updated_at)
+      VALUES ('exchange_rate_zar_usd', $1, datetime('now'))
+      ON CONFLICT(key) DO UPDATE SET value = $1, updated_at = datetime('now')`,
+      [zarToUsd.toString()]);
+
+    console.log(`Exchange rate updated: 1 ZAR = ${zarToUsd} USD (1 USD = ${(1/zarToUsd).toFixed(2)} ZAR)`);
+  } catch (err) {
+    console.error('Failed to update exchange rate:', (err as any).message);
+    // Use default rate on failure
+    try {
+      await exec(`INSERT INTO settings (key, value, updated_at)
+        VALUES ('exchange_rate_zar_usd', '0.0526', datetime('now'))
+        ON CONFLICT(key) DO UPDATE SET value = '0.0526'`);
+    } catch (e) {
+      console.error('Failed to set default exchange rate:', (e as any).message);
+    }
+  }
+}
+
+// API endpoint to get current exchange rate
+app.get('/api/exchange-rate', async (_req, res) => {
+  try {
+    const row = await queryOne<{ value: string }>(`SELECT value FROM settings WHERE key = 'exchange_rate_zar_usd'`);
+    const rate = row ? parseFloat(row.value) : 0.0526;
+    // Return both ZAR to USD and USD to ZAR rates
+    res.json({
+      zarToUsd: rate,
+      usdToZar: parseFloat((1 / rate).toFixed(2)),
+      lastUpdated: new Date().toISOString()
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// API endpoint to manually trigger exchange rate update
+app.post('/api/exchange-rate/update', async (_req, res) => {
+  await updateExchangeRate();
+  try {
+    const row = await queryOne<{ value: string }>(`SELECT value FROM settings WHERE key = 'exchange_rate_zar_usd'`);
+    const rate = row ? parseFloat(row.value) : 0.0526;
+    res.json({
+      zarToUsd: rate,
+      usdToZar: parseFloat((1 / rate).toFixed(2)),
+      message: 'Exchange rate updated successfully'
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 async function bootstrap() {
   const PORT = parseInt(process.env.PORT || '3001', 10);
 
   const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`Tracklab API listening on http://localhost:${PORT}`);
   });
+
+  // Schedule exchange rate update every day at 06:00 (UTC)
+  cron.schedule('0 6 * * *', () => {
+    console.log('[CRON] Updating exchange rate at 06:00...');
+    updateExchangeRate();
+  });
+
+  // Also update on startup
+  await updateExchangeRate();
 
   // Neon serverless databases sleep when idle and can take several seconds to wake, so the
   // first connection often times out. Retry the (idempotent) schema bootstrap with backoff,
