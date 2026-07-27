@@ -915,16 +915,25 @@ app.patch('/api/items/:serial_number', async (req, res) => {
   const sqlText = `UPDATE inventory SET ${sets.join(', ')} WHERE serial_number = $${sets.length + 1}`;
   vals.push(serial_number);
   console.log(`[PATCH ITEM] executing update query: ${sqlText} with vals:`, JSON.stringify(vals));
-  const { rowCount } = await query(sqlText, vals);
-  console.log(`[PATCH ITEM] update complete. rowCount: ${rowCount}`);
-  if (rowCount === 0) {
-    console.warn(`[PATCH ITEM] item not found: ${serial_number}`);
-    return res.status(404).json({ error: 'item not found' });
+  try {
+    const { rowCount } = await query(sqlText, vals);
+    console.log(`[PATCH ITEM] update complete. rowCount: ${rowCount}`);
+    if (rowCount === 0) {
+      console.warn(`[PATCH ITEM] item not found: ${serial_number}`);
+      return res.status(404).json({ error: 'item not found' });
+    }
+
+    // FIX: Add delay to ensure database propagation in serverless Neon environment
+    await new Promise(resolve => setTimeout(resolve, 150));
+
+    console.log(`[PATCH ITEM] fetching updated item: ${serial_number}...`);
+    const row = await queryOne(`SELECT * FROM inventory WHERE serial_number = $1`, [serial_number]);
+    console.log(`[PATCH ITEM] fetch complete. returning item with status: ${row?.status}`);
+    res.json(row);
+  } catch (err: any) {
+    console.error(`[PATCH ITEM] ERROR during update:`, err.message);
+    res.status(500).json({ error: 'Failed to update item', details: err.message });
   }
-  console.log(`[PATCH ITEM] fetching updated item: ${serial_number}...`);
-  const row = await queryOne(`SELECT * FROM inventory WHERE serial_number = $1`, [serial_number]);
-  console.log(`[PATCH ITEM] fetch complete. returning updated item.`);
-  res.json(row);
 });
 
 app.put('/api/items/:serial_number', async (req, res) => {
