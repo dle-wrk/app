@@ -1015,6 +1015,11 @@ export default function App() {
     }
   };
 
+  // Open item detail modal from search results
+  const handleOpenItemDetail = (item: Item) => {
+    setSelectedDetailPartNumber(item.partNumber);
+  };
+
   // Wholesale 1000-unit bulk pricing state updater
   const handleUpdateBulkPrices = async (updatedPrices: { partNumber: string; price: number }[]) => {
     const priceMap = new Map(updatedPrices.map(u => [u.partNumber, u.price]));
@@ -1679,6 +1684,7 @@ export default function App() {
                   filteredTrx={filteredTrx}
                   filteredSuppliers={filteredSuppliers}
                   setShowAddModal={setShowAddModal}
+                  onItemClick={handleOpenItemDetail}
                 />
               );
             }

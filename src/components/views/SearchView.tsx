@@ -9,6 +9,7 @@ interface SearchViewProps {
   filteredTrx: Transaction[];
   filteredSuppliers: Supplier[];
   setShowAddModal: (show: boolean) => void;
+  onItemClick?: (item: Item) => void;
 }
 
 export const SearchView: React.FC<SearchViewProps> = ({
@@ -17,7 +18,8 @@ export const SearchView: React.FC<SearchViewProps> = ({
   filteredItems,
   filteredTrx,
   filteredSuppliers,
-  setShowAddModal
+  setShowAddModal,
+  onItemClick
 }) => {
   return (
     <div className="p-container-margin space-y-4 max-w-7xl mx-auto w-full">
@@ -77,7 +79,12 @@ export const SearchView: React.FC<SearchViewProps> = ({
               <tbody className="divide-y divide-outline-variant/30 text-sm">
                 {filteredItems.map(item => (
                   <tr key={item.partNumber} className="hover:bg-surface-variant/20">
-                    <td className="px-lg py-sm font-mono text-xs text-primary font-bold">{item.partNumber}</td>
+                    <td
+                      className="px-lg py-sm font-mono text-xs text-primary font-bold cursor-pointer hover:underline"
+                      onClick={() => onItemClick?.(item)}
+                    >
+                      {item.partNumber}
+                    </td>
                     <td className="px-lg py-sm font-semibold">{item.name} <span className="text-[10px] font-normal text-on-surface-variant block">{item.description}</span></td>
                     <td className="px-lg py-sm font-mono text-xs text-on-surface-variant">{item.category}</td>
                     <td className="px-lg py-sm font-mono text-xs text-right text-on-surface font-black">{(item.stockLevel ?? 0).toLocaleString()}</td>
