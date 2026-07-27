@@ -990,7 +990,18 @@ export default function App() {
     try {
       setSyncRotated(true);
       await saveItemToDB(updatedItem);
-      setItems(prev => prev.map(i => i.partNumber === updatedItem.partNumber ? updatedItem : i));
+
+      // DATABASE PULL WORKAROUND: After saving, refetch all items from database
+      // to ensure we have the authoritative state (handles Neon consistency issues)
+      const response = await fetch('/api/items');
+      if (response.ok) {
+        const freshItems = await response.json();
+        setItems(freshItems);
+      } else {
+        // Fallback: use the updated item if refetch fails
+        setItems(prev => prev.map(i => i.partNumber === updatedItem.partNumber ? updatedItem : i));
+      }
+
       await logActivity({
         userEmail: currentUser?.email || 'unknown',
         action: 'UPDATE_ITEM',
@@ -1010,6 +1021,54 @@ export default function App() {
         details: { error: (err as any).message }
       });
       triggerToast("Error: Failed to save changes to database.", "ERROR");
+    } finally {
+      setSyncRotated(false);
+    }
+  };
+
+  const handleDeleteItem = async (deletedItem: Item) => {
+    try {
+      setSyncRotated(true);
+      setItems(prev => prev.filter(i => i.partNumber !== deletedItem.partNumber));
+      setSelectedDetailPartNumber(null);
+
+      // Log the deletion
+      await logActivity({
+        userEmail: currentUser?.email || 'unknown',
+        action: 'DELETE_ITEM',
+        entityType: 'Item',
+        entityId: deletedItem.partNumber,
+        details: {
+          name: deletedItem.name,
+          sku: deletedItem.partNumber,
+          itemSnapshot: JSON.stringify(deletedItem)
+        }
+      });
+
+      // Database-pull workaround: Refetch all items to ensure deletion persists
+      try {
+        const response = await fetch('/api/items');
+        if (response.ok) {
+          const freshItems = await response.json();
+          setItems(freshItems);
+        }
+      } catch (refetchErr) {
+        console.error('Failed to refetch items after delete:', refetchErr);
+        // Fall back to local removal which we already did
+      }
+
+      triggerToast(`Successfully deleted SKU: ${deletedItem.partNumber}`);
+    } catch (err) {
+      console.error('Failed to delete item:', err);
+      await logActivity({
+        userEmail: currentUser?.email || 'unknown',
+        action: 'DELETE_ITEM',
+        entityType: 'Item',
+        entityId: deletedItem.partNumber,
+        status: 'ERROR',
+        details: { error: (err as any).message }
+      });
+      triggerToast("Error: Failed to delete item from database.", "ERROR");
     } finally {
       setSyncRotated(false);
     }
@@ -1798,7 +1857,10 @@ if (currentView === 'alternates') {
                          action: 'DELETE_PROJECT',
                          entityType: 'Project',
                          entityId: String(id),
-                         details: { projectName: deletedProject.projectName }
+                         details: {
+                           projectName: deletedProject.projectName,
+                           projectSnapshot: JSON.stringify(deletedProject)
+                         }
                        }).catch(err => console.error('Failed to log project deletion:', err));
                      }
                    }}
@@ -2537,6 +2599,7 @@ if (currentView === 'alternates') {
             item={detailItem}
             onClose={() => setSelectedDetailPartNumber(null)}
             onSave={handleSaveItemDetail}
+            onDelete={handleDeleteItem}
           />
         )}
 

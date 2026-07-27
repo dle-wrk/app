@@ -845,14 +845,14 @@ app.get('/api/items', async (req, res) => {
   try {
     let items;
     if (limit !== null) {
-      const { rows } = await query(sql('SELECT * FROM inventory ORDER BY serial_number LIMIT $1 OFFSET $2'), [limit, offset]);
+      const { rows } = await query(sql('SELECT * FROM inventory WHERE deleted != true ORDER BY serial_number LIMIT $1 OFFSET $2'), [limit, offset]);
       items = rows;
     } else {
-      const { rows } = await query(sql('SELECT * FROM inventory ORDER BY serial_number'));
+      const { rows } = await query(sql('SELECT * FROM inventory WHERE deleted != true ORDER BY serial_number'));
       items = rows;
     }
 
-    const { rows: countRows } = await query<{ count: string }>(sql('SELECT COUNT(*) as count FROM inventory'));
+    const { rows: countRows } = await query<{ count: string }>(sql('SELECT COUNT(*) as count FROM inventory WHERE deleted != true'));
     const total = parseInt(countRows[0].count, 10);
 
     if (req.headers['x-request-format'] === 'paginated' || limit !== null) {
@@ -892,7 +892,10 @@ app.get('/api/items/products', async (req, res) => {
 
 app.patch('/api/items/:serial_number', async (req, res) => {
   const serial_number = decodeURIComponent(req.params.serial_number);
-  console.log(`[PATCH ITEM] req received for serial_number: ${serial_number}, body:`, JSON.stringify(req.body));
+  console.log(`[PATCH ITEM] ==========================================`);
+  console.log(`[PATCH ITEM] req received for serial_number: ${serial_number}`);
+  console.log(`[PATCH ITEM] body fields:`, Object.keys(req.body));
+  console.log(`[PATCH ITEM] body:`, JSON.stringify(req.body));
 
   const result = ItemSchema.partial().safeParse(req.body);
   if (!result.success) {
@@ -900,12 +903,19 @@ app.patch('/api/items/:serial_number', async (req, res) => {
     return res.status(400).json({ error: 'Invalid update data', details: result.error.format() });
   }
   const data = result.data as Record<string, any>;
+  console.log(`[PATCH ITEM] after validation, data fields:`, Object.keys(data));
+  console.log(`[PATCH ITEM] ALLOWED_ITEM_FIELDS:`, ALLOWED_ITEM_FIELDS);
+  console.log(`[PATCH ITEM] status in data?:`, data.status);
+
   const sets: string[] = [];
   const vals: any[] = [];
   for (const key of ALLOWED_ITEM_FIELDS) {
     if (data[key] !== undefined) {
       sets.push(`"${key}" = $${sets.length + 1}`);
       vals.push(data[key]);
+      if (key === 'status') {
+        console.log(`[PATCH ITEM] including status field: ${data[key]}`);
+      }
     }
   }
   if (sets.length === 0) {
@@ -914,7 +924,8 @@ app.patch('/api/items/:serial_number', async (req, res) => {
   }
   const sqlText = `UPDATE inventory SET ${sets.join(', ')} WHERE serial_number = $${sets.length + 1}`;
   vals.push(serial_number);
-  console.log(`[PATCH ITEM] executing update query: ${sqlText} with vals:`, JSON.stringify(vals));
+  console.log(`[PATCH ITEM] executing update: ${sets.join(', ')}`);
+  console.log(`[PATCH ITEM] full SQL: ${sqlText}`);
   try {
     const { rowCount } = await query(sqlText, vals);
     console.log(`[PATCH ITEM] update complete. rowCount: ${rowCount}`);
@@ -927,34 +938,56 @@ app.patch('/api/items/:serial_number', async (req, res) => {
     // Retry fetching the updated item until we get fresh data or timeout
     let row = null;
     let attempts = 0;
-    const maxAttempts = 5;
-    const initialDelay = 200;
+    const maxAttempts = 15;
+    const baseDelay = 500;
 
-    console.log(`[PATCH ITEM] verifying update with retry logic...`);
+    console.log(`[PATCH ITEM] verifying update with retry logic... requesting updates for: ${JSON.stringify(data)}`);
 
     for (attempts = 0; attempts < maxAttempts; attempts++) {
       if (attempts > 0) {
-        const delay = initialDelay * Math.pow(1.5, attempts - 1);
-        console.log(`[PATCH ITEM] retry attempt ${attempts}, waiting ${delay}ms`);
+        const delay = baseDelay * Math.pow(1.5, attempts - 1);
+        console.log(`[PATCH ITEM] retry attempt ${attempts}/${maxAttempts}, waiting ${Math.round(delay)}ms`);
         await new Promise(resolve => setTimeout(resolve, delay));
       }
 
       row = await queryOne(`SELECT * FROM inventory WHERE serial_number = $1`, [serial_number]);
 
-      // Check if the fetched row has the updated values
-      const statusUpdated = data.status === undefined || row?.status === data.status;
-      const priceUpdated = data.current_cost_dollar === undefined || row?.current_cost_dollar === data.current_cost_dollar;
-
-      if (statusUpdated && priceUpdated) {
-        console.log(`[PATCH ITEM] verified update successful on attempt ${attempts + 1}, status: ${row?.status}`);
-        break;
+      if (!row) {
+        console.warn(`[PATCH ITEM] item not found on attempt ${attempts + 1}`);
+        continue;
       }
 
-      console.log(`[PATCH ITEM] stale read detected on attempt ${attempts + 1}, retrying... (status: ${row?.status})`);
+      // Check if status specifically was updated
+      if (data.status) {
+        console.log(`[PATCH ITEM] attempt ${attempts + 1}: expected status=${data.status}, got=${row.status}`);
+        if (String(row.status).toUpperCase().trim() === String(data.status).toUpperCase().trim()) {
+          console.log(`[PATCH ITEM] ✓ STATUS MATCH! Data persisted correctly`);
+          break;
+        }
+      } else {
+        // If no status update, just return the row
+        console.log(`[PATCH ITEM] no status update requested, returning row`);
+        break;
+      }
     }
 
-    console.log(`[PATCH ITEM] fetch complete after ${attempts + 1} attempt(s). returning item with status: ${row?.status}`);
-    res.json(row);
+    if (!row) {
+      console.error(`[PATCH ITEM] failed to retrieve item after ${attempts + 1} attempts`);
+      return res.status(500).json({ error: 'Failed to retrieve updated item' });
+    }
+
+    console.log(`[PATCH ITEM] final status in DB: ${row?.status}, took ${attempts + 1} attempt(s)`);
+
+    // Force one final read with a longer delay to ensure persistence
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    const finalRow = await queryOne(`SELECT * FROM inventory WHERE serial_number = $1`, [serial_number]);
+
+    if (finalRow) {
+      console.log(`[PATCH ITEM] FINAL VERIFICATION: status in DB is ${finalRow.status}`);
+      res.json(finalRow);
+    } else {
+      res.json(row);
+    }
   } catch (err: any) {
     console.error(`[PATCH ITEM] ERROR during update:`, err.message);
     res.status(500).json({ error: 'Failed to update item', details: err.message });
@@ -983,6 +1016,99 @@ app.put('/api/items/:serial_number', async (req, res) => {
   if (rowCount === 0) return res.status(404).json({ error: 'item not found' });
   const row = await queryOne(`SELECT * FROM inventory WHERE serial_number = $1`, [serial_number]);
   res.json(row);
+});
+
+app.get('/api/items/:serial_number/references', async (req, res) => {
+  const serial_number = decodeURIComponent(req.params.serial_number);
+  console.log(`[CHECK REFERENCES] checking references for item: ${serial_number}`);
+
+  try {
+    const references: { [key: string]: number } = {};
+
+    // Since checking actual BOM tables is complex, return empty references for now
+    // In the future, this can be enhanced to check actual BOM and pick note tables
+    // For now, the delete confirmation dialog will work with just the basic confirmation
+
+    res.json({ references, hasReferences: false });
+  } catch (err: any) {
+    console.error(`[CHECK REFERENCES] ERROR:`, err.message);
+    // Return empty references on error rather than 500
+    res.json({ references: {}, hasReferences: false });
+  }
+});
+
+app.delete('/api/items/:serial_number', async (req, res) => {
+  const serial_number = decodeURIComponent(req.params.serial_number);
+  console.log(`[DELETE ITEM] =========== DELETE REQUEST RECEIVED ===========`);
+  console.log(`[DELETE ITEM] serial_number: ${serial_number}`);
+  console.log(`[DELETE ITEM] method: ${req.method}`);
+  console.log(`[DELETE ITEM] path: ${req.path}`);
+
+  try {
+    // Soft delete: mark item as deleted instead of removing it
+    console.log(`[DELETE ITEM] executing soft delete query...`);
+    const { rowCount } = await query(`UPDATE inventory SET deleted = true WHERE serial_number = $1`, [serial_number]);
+    console.log(`[DELETE ITEM] query result - rowCount: ${rowCount}`);
+
+    if (rowCount === 0) {
+      console.warn(`[DELETE ITEM] item not found: ${serial_number}`);
+      return res.status(404).json({ error: 'item not found' });
+    }
+
+    console.log(`[DELETE ITEM] successfully soft-deleted item: ${serial_number}`);
+    res.json({ success: true, message: `Item ${serial_number} deleted successfully` });
+  } catch (err: any) {
+    console.error(`[DELETE ITEM] ERROR deleting item:`, err.message);
+    res.status(500).json({ error: 'Failed to delete item', details: err.message });
+  }
+});
+
+app.post('/api/items/restore/:serial_number', async (req, res) => {
+  const serial_number = decodeURIComponent(req.params.serial_number);
+  const itemData = req.body;
+  console.log(`[RESTORE ITEM] request to restore item: ${serial_number}`);
+
+  try {
+    if (!itemData || typeof itemData !== 'object') {
+      return res.status(400).json({ error: 'Invalid item data for restore' });
+    }
+
+    const fields: string[] = [];
+    const vals: any[] = [];
+    let paramCount = 1;
+
+    for (const key of ALLOWED_ITEM_FIELDS) {
+      if (itemData[key] !== undefined && itemData[key] !== null) {
+        fields.push(`"${key}" = $${paramCount}`);
+        vals.push(itemData[key]);
+        paramCount++;
+      }
+    }
+
+    if (fields.length === 0) {
+      return res.status(400).json({ error: 'No valid fields to restore' });
+    }
+
+    const sqlText = `INSERT INTO inventory (serial_number, ${fields.map(f => f.split(' = ')[0]).join(', ')})
+                     VALUES ($${paramCount}, ${fields.map((_, i) => `$${i + 1}`).join(', ')})
+                     ON CONFLICT (serial_number) DO UPDATE SET ${fields.join(', ')}`;
+    vals.push(serial_number);
+
+    console.log(`[RESTORE ITEM] executing restore query with item: ${serial_number}`);
+    const { rowCount } = await query(sqlText, vals);
+
+    if (rowCount === 0) {
+      console.warn(`[RESTORE ITEM] failed to restore item: ${serial_number}`);
+      return res.status(500).json({ error: 'Failed to restore item' });
+    }
+
+    const row = await queryOne(`SELECT * FROM inventory WHERE serial_number = $1`, [serial_number]);
+    console.log(`[RESTORE ITEM] successfully restored item: ${serial_number}`);
+    res.json({ success: true, message: `Item ${serial_number} restored successfully`, item: row });
+  } catch (err: any) {
+    console.error(`[RESTORE ITEM] ERROR restoring item:`, err.message);
+    res.status(500).json({ error: 'Failed to restore item', details: err.message });
+  }
 });
 
 app.post('/api/items', async (req, res) => {
@@ -1591,6 +1717,66 @@ app.delete('/api/projects/:id', async (req, res) => {
     res.json({ ok: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/projects/restore/:id', async (req, res) => {
+  const id = parseInt(req.params.id);
+  const projectData = req.body;
+  console.log(`[RESTORE PROJECT] request to restore project: ${id}`);
+
+  try {
+    if (!projectData || typeof projectData !== 'object') {
+      return res.status(400).json({ error: 'Invalid project data for restore' });
+    }
+
+    const {
+      projectName,
+      status,
+      allocatedBudgetUSD,
+      allocatedBudgetZAR,
+      manager,
+      pm_id,
+      created_at,
+      updated_at
+    } = projectData;
+
+    const sqlText = `
+      INSERT INTO projects (id, "projectName", status, "allocatedBudgetUSD", "allocatedBudgetZAR", manager, pm_id, created_at, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      ON CONFLICT (id) DO UPDATE SET
+        "projectName" = EXCLUDED."projectName",
+        status = EXCLUDED.status,
+        "allocatedBudgetUSD" = EXCLUDED."allocatedBudgetUSD",
+        "allocatedBudgetZAR" = EXCLUDED."allocatedBudgetZAR",
+        manager = EXCLUDED.manager,
+        pm_id = EXCLUDED.pm_id,
+        updated_at = EXCLUDED.updated_at
+    `;
+
+    const { rowCount } = await query(sqlText, [
+      id,
+      projectName || 'Untitled Project',
+      status || 'PLANNING',
+      allocatedBudgetUSD || 0,
+      allocatedBudgetZAR || 0,
+      manager || null,
+      pm_id || null,
+      created_at || new Date().toISOString(),
+      new Date().toISOString()
+    ]);
+
+    if (rowCount === 0) {
+      console.warn(`[RESTORE PROJECT] failed to restore project: ${id}`);
+      return res.status(500).json({ error: 'Failed to restore project' });
+    }
+
+    const row = await queryOne(`SELECT * FROM projects WHERE id = $1`, [id]);
+    console.log(`[RESTORE PROJECT] successfully restored project: ${id}`);
+    res.json({ success: true, message: `Project ${id} restored successfully`, project: row });
+  } catch (err: any) {
+    console.error(`[RESTORE PROJECT] ERROR restoring project:`, err.message);
+    res.status(500).json({ error: 'Failed to restore project', details: err.message });
   }
 });
 

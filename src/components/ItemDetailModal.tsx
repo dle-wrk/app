@@ -1,18 +1,19 @@
 import React, { useState } from 'react';
 import { Item } from '../types';
-import { 
-  X, 
-  Edit3, 
-  Save, 
-  FileText, 
-  Tag, 
-  Layers, 
-  AlertTriangle, 
+import {
+  X,
+  Edit3,
+  Save,
+  FileText,
+  Tag,
+  Layers,
+  AlertTriangle,
   ExternalLink,
   DollarSign,
   Package,
   Boxes,
-  HelpCircle
+  HelpCircle,
+  Trash2
 } from 'lucide-react';
 
 const IMP_TO_METRIC: Record<string, string> = {
@@ -67,10 +68,16 @@ interface ItemDetailModalProps {
   item: Item;
   onClose: () => void;
   onSave: (updatedItem: Item) => void;
+  onDelete?: (item: Item) => void;
 }
 
-export default function ItemDetailModal({ item, onClose, onSave }: ItemDetailModalProps) {
+export default function ItemDetailModal({ item, onClose, onSave, onDelete }: ItemDetailModalProps) {
   const [isEditing, setIsEditing] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteReferences, setDeleteReferences] = useState<{ [key: string]: number }>({});
+  const [cascadeDelete, setCascadeDelete] = useState(false);
+  const [checkingReferences, setCheckingReferences] = useState(false);
   const [edited, setEdited] = useState<Item>(() => {
     const enriched = { ...item };
     if (!enriched.sizeMetric && enriched.size) {
@@ -215,6 +222,49 @@ export default function ItemDetailModal({ item, onClose, onSave }: ItemDetailMod
     setIsEditing(false);
   };
 
+  const handleDeleteClick = async () => {
+    setCheckingReferences(true);
+    try {
+      const response = await fetch(`/api/items/${item.partNumber}/references`);
+      if (response.ok) {
+        const data = await response.json();
+        setDeleteReferences(data.references || {});
+        setCascadeDelete(false);
+      }
+    } catch (error) {
+      console.error('Error checking references:', error);
+    } finally {
+      setCheckingReferences(false);
+      setShowDeleteConfirm(true);
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    setIsDeleting(true);
+    try {
+      const response = await fetch(`/api/items/${item.partNumber}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cascadeDelete }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to delete item');
+      }
+
+      if (onDelete) {
+        onDelete(item);
+      }
+      onClose();
+    } catch (error) {
+      console.error('Error deleting item:', error);
+      alert('Failed to delete item. Please try again.');
+    } finally {
+      setIsDeleting(false);
+      setShowDeleteConfirm(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center z-110 p-md">
       <div className="bg-surface-container rounded-xl border border-outline-variant max-w-[768px] w-full max-h-[90vh] flex flex-col shadow-2xl relative animate-in fade-in duration-200">
@@ -232,18 +282,32 @@ export default function ItemDetailModal({ item, onClose, onSave }: ItemDetailMod
 
           <div className="flex items-center gap-2">
             {!isEditing ? (
-              <button
-                onClick={() => setIsEditing(true)}
-                className="bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 px-md py-1.5 rounded-lg text-xs font-bold transition-all duration-150 flex items-center gap-1"
-                type="button"
-                id="btn-edit-item"
-              >
-                <Edit3 className="w-3.5 h-3.5" />
-                Edit Parameters
-              </button>
+              <>
+                <button
+                  onClick={() => setIsEditing(true)}
+                  className="bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 px-md py-1.5 rounded-lg text-xs font-bold transition-all duration-150 flex items-center gap-1"
+                  type="button"
+                  id="btn-edit-item"
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                  Edit Parameters
+                </button>
+
+                <button
+                  onClick={handleDeleteClick}
+                  disabled={isDeleting || checkingReferences}
+                  className="bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/30 px-md py-1.5 rounded-lg text-xs font-bold transition-all duration-150 flex items-center gap-1 disabled:opacity-50"
+                  type="button"
+                  id="btn-delete-item"
+                  title="Delete this item"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Delete
+                </button>
+              </>
             ) : null}
 
-            <button 
+            <button
               onClick={onClose}
               className="text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high p-1.5 rounded-lg transition-colors border border-transparent hover:border-outline-variant"
               type="button"
@@ -867,6 +931,72 @@ export default function ItemDetailModal({ item, onClose, onSave }: ItemDetailMod
             )}
           </form>
         </div>
+
+        {/* Delete Confirmation Dialog */}
+        {showDeleteConfirm && (
+          <div className="fixed inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center z-111 p-md">
+            <div className="bg-surface-container rounded-xl border border-outline-variant max-w-[512px] w-full shadow-2xl animate-in fade-in duration-200">
+              <div className="px-lg py-md border-b border-outline-variant/60 flex items-center justify-between bg-surface-container-high/40">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-5 h-5 text-red-500" />
+                  <h3 className="font-bold text-base text-on-surface">Delete Item</h3>
+                </div>
+              </div>
+
+              <div className="px-lg py-md space-y-4">
+                <p className="text-on-surface text-sm">
+                  Are you sure you want to delete <span className="font-bold text-primary">{item.partNumber} - {item.name}</span>? This action cannot be undone.
+                </p>
+
+                {Object.keys(deleteReferences).length > 0 && (
+                  <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-md">
+                    <p className="text-xs font-bold text-red-500 mb-2 flex items-center gap-1">
+                      <AlertTriangle className="w-4 h-4" />
+                      This item is referenced in:
+                    </p>
+                    <div className="space-y-1 text-xs text-on-surface-variant">
+                      {Object.entries(deleteReferences).map(([table, count]) => (
+                        <div key={table} className="flex justify-between">
+                          <span>{table}</span>
+                          <span className="font-bold text-on-surface">{count} entry/entries</span>
+                        </div>
+                      ))}
+                    </div>
+                    <label className="flex items-center gap-2 mt-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={cascadeDelete}
+                        onChange={(e) => setCascadeDelete(e.target.checked)}
+                        className="w-4 h-4"
+                      />
+                      <span className="text-xs text-on-surface font-semibold">Also remove from BOMs and pick notes</span>
+                    </label>
+                  </div>
+                )}
+              </div>
+
+              <div className="px-lg py-md border-t border-outline-variant/60 flex justify-end gap-2">
+                <button
+                  onClick={() => setShowDeleteConfirm(false)}
+                  disabled={isDeleting}
+                  className="px-md py-2 rounded-lg text-xs font-bold border border-outline hover:bg-surface-variant transition-colors"
+                  type="button"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleConfirmDelete}
+                  disabled={isDeleting}
+                  className="bg-red-500 text-on-primary hover:bg-red-600 active:scale-95 transition-all duration-150 px-md py-2 rounded-lg font-bold text-xs flex items-center gap-1 disabled:opacity-50"
+                  type="button"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  {isDeleting ? 'Deleting...' : 'Delete Item'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

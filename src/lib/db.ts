@@ -170,9 +170,11 @@ async function ensureInventoryTable() {
     man_pn_1 TEXT, man_pn_2 TEXT, man_pn_3 TEXT, man_pn_4 TEXT, man_pn_5 TEXT,
     sup_pn_1 TEXT, sup_pn_2 TEXT, sup_pn_3 TEXT, sup_pn_4 TEXT, sup_pn_5 TEXT,
     weblink_1 TEXT, weblink_2 TEXT, weblink_3 TEXT, weblink_4 TEXT, weblink_5 TEXT,
-    supplier TEXT DEFAULT 'N/A'
+    supplier TEXT DEFAULT 'N/A',
+    deleted BOOLEAN DEFAULT FALSE
   )`);
   await exec(`ALTER TABLE inventory ADD COLUMN IF NOT EXISTS supplier TEXT DEFAULT 'N/A'`).catch(() => {});
+  await exec(`ALTER TABLE inventory ADD COLUMN IF NOT EXISTS deleted BOOLEAN DEFAULT FALSE`).catch(() => {});
 }
 
 async function ensureSuppliersTable() {
@@ -571,6 +573,7 @@ export async function ensureSchema() {
   if (exists?.exists) {
     await exec(`ALTER TABLE inventory ADD COLUMN IF NOT EXISTS status TEXT CHECK (status IN ('ACTIVE', 'INACTIVE', 'BOOKED OUT', 'DISCONTINUED'))`).catch(() => {});
     await exec(`UPDATE inventory SET status = 'ACTIVE' WHERE status IS NULL`).catch(() => {});
+    await exec(`ALTER TABLE inventory ADD COLUMN IF NOT EXISTS deleted BOOLEAN DEFAULT FALSE`).catch(() => {});
     // Belt-and-braces: make sure sibling tables exist too, in case of a partially-provisioned
     // database. CREATE TABLE IF NOT EXISTS is a no-op (and never touches data) when they're
     // already there, so this is safe to run on every boot against a live database.

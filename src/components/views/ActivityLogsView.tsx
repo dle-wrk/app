@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Filter, Download, RefreshCw, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Search, Filter, Download, RefreshCw, AlertCircle, CheckCircle2, RotateCcw } from 'lucide-react';
 import { fetchActivityLogs } from '../../lib/activityLogger';
 
 interface ActivityLog {
@@ -30,6 +30,7 @@ export const ActivityLogsView: React.FC<ActivityLogsViewProps> = ({ currentUserE
   const [uniqueActions, setUniqueActions] = useState<string[]>([]);
   const [uniqueUsers, setUniqueUsers] = useState<string[]>([]);
   const [expandedLogId, setExpandedLogId] = useState<number | null>(null);
+  const [restoringId, setRestoringId] = useState<string | null>(null);
 
   const fetchLogs = async () => {
     setIsLoading(true);
@@ -84,6 +85,78 @@ export const ActivityLogsView: React.FC<ActivityLogsViewProps> = ({ currentUserE
       minute: '2-digit',
       second: '2-digit'
     });
+  };
+
+  const handleRestoreItem = async (log: ActivityLog) => {
+    try {
+      const details = typeof log.details === 'string' ? JSON.parse(log.details) : log.details;
+      const itemSnapshot = details?.itemSnapshot ? JSON.parse(details.itemSnapshot) : null;
+
+      if (!itemSnapshot) {
+        alert('Item snapshot not found. Cannot restore.');
+        return;
+      }
+
+      if (!window.confirm(`Restore ${log.entity_id}? This will add it back to inventory.`)) {
+        return;
+      }
+
+      setRestoringId(log.id.toString());
+
+      const response = await fetch(`/api/items/restore/${encodeURIComponent(log.entity_id)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(itemSnapshot)
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to restore item');
+      }
+
+      alert(`Successfully restored ${log.entity_id}`);
+      setRestoringId(null);
+      await fetchLogs();
+    } catch (error) {
+      console.error('Error restoring item:', error);
+      alert(`Failed to restore item: ${(error as any).message}`);
+      setRestoringId(null);
+    }
+  };
+
+  const handleRestoreProject = async (log: ActivityLog) => {
+    try {
+      const details = typeof log.details === 'string' ? JSON.parse(log.details) : log.details;
+      const projectSnapshot = details?.projectSnapshot ? JSON.parse(details.projectSnapshot) : null;
+
+      if (!projectSnapshot) {
+        alert('Project snapshot not found. Cannot restore.');
+        return;
+      }
+
+      if (!window.confirm(`Restore project "${details?.projectName}"? This will restore the project with all its data.`)) {
+        return;
+      }
+
+      setRestoringId(log.id.toString());
+
+      const response = await fetch(`/api/projects/restore/${log.entity_id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(projectSnapshot)
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to restore project');
+      }
+
+      alert(`Successfully restored project "${details?.projectName}"`);
+      setRestoringId(null);
+      await fetchLogs();
+    } catch (error) {
+      console.error('Error restoring project:', error);
+      alert(`Failed to restore project: ${(error as any).message}`);
+      setRestoringId(null);
+    }
   };
 
   return (
@@ -285,6 +358,34 @@ export const ActivityLogsView: React.FC<ActivityLogsViewProps> = ({ currentUserE
                                 <span className="font-bold text-error">Error:</span>
                                 <p className="text-error/80 mt-1">{log.error_message}</p>
                               </div>
+                            )}
+                            {log.status === 'SUCCESS' && (
+                              <>
+                                {log.action === 'DELETE_ITEM' && (
+                                  <div className="pt-3 border-t border-outline-variant/30">
+                                    <button
+                                      onClick={() => handleRestoreItem(log)}
+                                      disabled={restoringId === log.id.toString()}
+                                      className="bg-green-500/10 hover:bg-green-500/20 text-green-400 border border-green-500/30 px-3 py-1.5 rounded-lg text-xs font-bold transition-all duration-150 flex items-center gap-1.5 disabled:opacity-50"
+                                    >
+                                      <RotateCcw className="w-3 h-3" />
+                                      {restoringId === log.id.toString() ? 'Restoring...' : 'Restore Item'}
+                                    </button>
+                                  </div>
+                                )}
+                                {log.action === 'DELETE_PROJECT' && (
+                                  <div className="pt-3 border-t border-outline-variant/30">
+                                    <button
+                                      onClick={() => handleRestoreProject(log)}
+                                      disabled={restoringId === log.id.toString()}
+                                      className="bg-green-500/10 hover:bg-green-500/20 text-green-400 border border-green-500/30 px-3 py-1.5 rounded-lg text-xs font-bold transition-all duration-150 flex items-center gap-1.5 disabled:opacity-50"
+                                    >
+                                      <RotateCcw className="w-3 h-3" />
+                                      {restoringId === log.id.toString() ? 'Restoring...' : 'Restore Project'}
+                                    </button>
+                                  </div>
+                                )}
+                              </>
                             )}
                           </div>
                         </td>
