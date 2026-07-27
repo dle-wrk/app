@@ -923,12 +923,37 @@ app.patch('/api/items/:serial_number', async (req, res) => {
       return res.status(404).json({ error: 'item not found' });
     }
 
-    // FIX: Add delay to ensure database propagation in serverless Neon environment
-    await new Promise(resolve => setTimeout(resolve, 150));
+    // FIX: Neon serverless may have read-after-write consistency issues
+    // Retry fetching the updated item until we get fresh data or timeout
+    let row = null;
+    let attempts = 0;
+    const maxAttempts = 5;
+    const initialDelay = 200;
 
-    console.log(`[PATCH ITEM] fetching updated item: ${serial_number}...`);
-    const row = await queryOne(`SELECT * FROM inventory WHERE serial_number = $1`, [serial_number]);
-    console.log(`[PATCH ITEM] fetch complete. returning item with status: ${row?.status}`);
+    console.log(`[PATCH ITEM] verifying update with retry logic...`);
+
+    for (attempts = 0; attempts < maxAttempts; attempts++) {
+      if (attempts > 0) {
+        const delay = initialDelay * Math.pow(1.5, attempts - 1);
+        console.log(`[PATCH ITEM] retry attempt ${attempts}, waiting ${delay}ms`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+
+      row = await queryOne(`SELECT * FROM inventory WHERE serial_number = $1`, [serial_number]);
+
+      // Check if the fetched row has the updated values
+      const statusUpdated = data.status === undefined || row?.status === data.status;
+      const priceUpdated = data.current_cost_dollar === undefined || row?.current_cost_dollar === data.current_cost_dollar;
+
+      if (statusUpdated && priceUpdated) {
+        console.log(`[PATCH ITEM] verified update successful on attempt ${attempts + 1}, status: ${row?.status}`);
+        break;
+      }
+
+      console.log(`[PATCH ITEM] stale read detected on attempt ${attempts + 1}, retrying... (status: ${row?.status})`);
+    }
+
+    console.log(`[PATCH ITEM] fetch complete after ${attempts + 1} attempt(s). returning item with status: ${row?.status}`);
     res.json(row);
   } catch (err: any) {
     console.error(`[PATCH ITEM] ERROR during update:`, err.message);
