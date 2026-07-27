@@ -248,6 +248,7 @@ const DispatchEditorModal: React.FC<ModuleDataProps & { type: DispatchNoteType; 
   };
 
   const submit = async (status: 'DRAFT' | 'ISSUED') => {
+    if (!clientId) { triggerToast('Select a client.', 'ERROR'); return; }
     const validLines = lines.filter(l => l.description.trim() && l.quantity > 0);
     if (!validLines.length) { triggerToast('Add at least one item.', 'ERROR'); return; }
     setSaving(status);
@@ -275,9 +276,9 @@ const DispatchEditorModal: React.FC<ModuleDataProps & { type: DispatchNoteType; 
     <Modal title={initial ? `Edit ${initial.noteNumber}` : `New ${meta.label}`} subtitle={`Fulfillment document for final project products — no ledger or stock impact.`} onClose={onClose} maxWidth="max-w-4xl">
       <div className="grid md:grid-cols-4 gap-3 mb-md">
         <div className="md:col-span-2">
-          <FieldLabel>Client</FieldLabel>
+          <FieldLabel>Client *</FieldLabel>
           <select className={selectClass} value={clientId} onChange={(e) => { setClientId(e.target.value); setClientOrderId(''); }}>
-            <option value="">Unassigned</option>
+            <option value="" disabled>— Select a client —</option>
             {clients.map(c => <option key={c.id} value={c.id}>{c.clientName}</option>)}
           </select>
         </div>
