@@ -8,7 +8,7 @@ export interface Item {
   category: string; // type/category
   status: 'ACTIVE' | 'INACTIVE' | 'BOOKED OUT' | 'DISCONTINUED';
   supplier?: string;
-  
+
   // Rich CSV properties
   value?: string;
   size?: string;
@@ -21,6 +21,8 @@ export interface Item {
   datasheet?: string;
   project?: string;
   packaging?: string;
+  packagingQuantity?: number; // e.g. 1, 5, 10, 50
+  packagingType?: string; // packet, reel, tray, box, pallet, tube, strip, bulk
   lowStockLvl?: number;
   bulkPriceUsd?: number;
   bulkPriceZar?: number;

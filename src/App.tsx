@@ -375,7 +375,9 @@ export default function App() {
     status: 'ACTIVE' as 'ACTIVE' | 'INACTIVE' | 'BOOKED OUT' | 'DISCONTINUED',
     size: '',
     sizeMetric: '',
-    bulkPriceZar: 0.00
+    bulkPriceZar: 0.00,
+    packagingQuantity: 1,
+    packagingType: 'packet'
   });
 
   // Live Feed Category filters
@@ -660,7 +662,9 @@ export default function App() {
       status: newItem.status as any,
       size: newItem.size,
       sizeMetric: newItem.sizeMetric,
-      bulkPriceZar: newItem.bulkPriceZar || Number((newItem.price * 19).toFixed(5))
+      bulkPriceZar: newItem.bulkPriceZar || Number((newItem.price * 19).toFixed(5)),
+      packagingQuantity: newItem.packagingQuantity,
+      packagingType: newItem.packagingType
     };
 
     const now = new Date();
@@ -2050,6 +2054,38 @@ if (currentView === 'alternates') {
                       value={newItem.sizeMetric}
                       onChange={(e) => handleNewItemSizeMetricChange(e.target.value)}
                     />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-sm">
+                  <div className="flex flex-col gap-1">
+                    <label className="font-bold text-outline">Packaging Quantity</label>
+                    <input
+                      placeholder="e.g. 1, 5, 10"
+                      className="bg-surface-container-high border border-outline-variant rounded p-2 text-on-surface outline-none font-mono text-xs"
+                      type="number"
+                      min="1"
+                      value={newItem.packagingQuantity}
+                      onChange={(e) => setNewItem({ ...newItem, packagingQuantity: Number(e.target.value) })}
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <label className="font-bold text-outline">Packaging Type</label>
+                    <select
+                      className="bg-surface-container-high border border-outline-variant rounded p-2 text-on-surface outline-none"
+                      value={newItem.packagingType}
+                      onChange={(e) => setNewItem({ ...newItem, packagingType: e.target.value })}
+                    >
+                      <option value="packet">Packet</option>
+                      <option value="reel">Reel</option>
+                      <option value="tray">Tray</option>
+                      <option value="box">Box</option>
+                      <option value="pallet">Pallet</option>
+                      <option value="tube">Tube</option>
+                      <option value="strip">Strip</option>
+                      <option value="bulk">Bulk</option>
+                    </select>
                   </div>
                 </div>
 
