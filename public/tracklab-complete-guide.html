@@ -708,11 +708,13 @@
                         <ul>
                             <li>Overview</li>
                             <li>Chart of Accounts</li>
-                            <li>Invoices</li>
-                            <li>Bills</li>
-                            <li>Purchase Orders</li>
-                            <li>Payments Received</li>
-                            <li>Payments Made</li>
+                            <li>Customers - Manage customer information</li>
+                            <li>Vendors - Manage supplier information</li>
+                            <li>Invoices - Customer invoices with smart autocomplete</li>
+                            <li>Bills - Supplier bills</li>
+                            <li>Purchase Orders - Supplier or Customer orders (with mode switching)</li>
+                            <li>Payments Received - Customer payments</li>
+                            <li>Payments Made - Supplier payments</li>
                             <li>Expenses</li>
                             <li>Reports</li>
                         </ul>
@@ -722,28 +724,60 @@
 
             <h3>Creating Invoices</h3>
             <div class="step">
-                <h4>Invoice Creation Process</h4>
+                <h4>Invoice Creation Process (Enhanced UI)</h4>
                 <ol>
                     <li>Click <strong>Invoices</strong> tab</li>
                     <li>Click <strong>Create Invoice</strong></li>
                     <li>Fill invoice details:
                         <ul>
-                            <li>Select customer/client</li>
+                            <li>Select customer</li>
                             <li>Set invoice date and due date</li>
-                            <li>Choose currency</li>
+                            <li>Choose currency (ZAR, USD, EUR, GBP)</li>
+                            <li>Enable <strong>Warranty Claim</strong> if this is a warranty replacement (voids all pricing)</li>
                         </ul>
                     </li>
-                    <li>Add line items:
+                    <li>Add line items using <strong>Smart Autocomplete</strong>:
                         <ul>
-                            <li>Part number or description</li>
-                            <li>Quantity</li>
-                            <li>Unit price</li>
-                            <li>Tax rate (optional)</li>
+                            <li>Type SKU/Part # in autocomplete field</li>
+                            <li>System searches inventory and production products in real-time</li>
+                            <li>Click to select - automatically fills description and unit price</li>
+                            <li>Quantity and tax rate populated per item</li>
+                            <li>Line total updates automatically</li>
+                        </ul>
+                    </li>
+                    <li><strong>Modern Card-Based UI:</strong>
+                        <ul>
+                            <li>Each line item displayed as spacious card</li>
+                            <li>Clear visual hierarchy with line number and remove button</li>
+                            <li>Subtotal + Tax summary automatically calculated</li>
+                            <li>If warranty claim enabled, shows "Warranty claim - pricing voided"</li>
                         </ul>
                     </li>
                     <li>Review subtotal, taxes, and total</li>
-                    <li>Send to customer or save as draft</li>
+                    <li>Click <strong>Finalize & Print</strong> (changed from "Finalize & Send")</li>
+                    <li>Generates print-ready PDF for delivery or email</li>
                 </ol>
+            </div>
+
+            <h3>Invoice Features</h3>
+            <div class="step">
+                <h4>Smart Item Autocomplete</h4>
+                <ul>
+                    <li><strong>Search Inventory & Production Items:</strong> Type part number to search both regular and production stock</li>
+                    <li><strong>Auto-populate Details:</strong> Selecting item fills description, unit price, and stock level</li>
+                    <li><strong>Dynamic Filtering:</strong> Results update as you type</li>
+                    <li><strong>Production Products:</strong> Invoices can include manufacturing items with selling prices</li>
+                </ul>
+            </div>
+
+            <div class="step">
+                <h4>Warranty Claims</h4>
+                <ul>
+                    <li>Enable toggle on invoice to mark as warranty claim</li>
+                    <li><strong>Effect:</strong> All line item pricing shows R0.00</li>
+                    <li><strong>Display:</strong> Shows "Warranty claim - pricing voided" indicator</li>
+                    <li><strong>Use Case:</strong> For warranty replacement orders with no charge</li>
+                </ul>
             </div>
 
             <h3>Managing Bills (Purchase Invoices)</h3>
@@ -759,18 +793,80 @@
                 </ol>
             </div>
 
-            <h3>Purchase Orders</h3>
+            <h3>Purchase Orders (New: Supplier/Customer Modes)</h3>
             <div class="step">
-                <h4>Create Purchase Orders</h4>
+                <h4>Create Purchase Orders with Mode Selection</h4>
                 <ol>
                     <li>Click <strong>Purchase Orders</strong> tab</li>
                     <li>Click <strong>Create PO</strong></li>
-                    <li>Select supplier</li>
-                    <li>Set expected delivery date</li>
-                    <li>Add ordered items with quantities and prices</li>
-                    <li>System calculates totals automatically</li>
-                    <li>Send PO to supplier via email</li>
+                    <li><strong>Select Order Type (NEW!):</strong>
+                        <ul>
+                            <li><strong>Supplier Mode:</strong> For ordering regular inventory/components
+                                <ul>
+                                    <li>Shows inventory items (non-production stock)</li>
+                                    <li>Select from suppliers list (Mouser, Digikey, LCSC, etc.)</li>
+                                    <li>Use for component sourcing and inventory replenishment</li>
+                                </ul>
+                            </li>
+                            <li><strong>Customer Mode:</strong> For customer production orders
+                                <ul>
+                                    <li>Shows production stock items only</li>
+                                    <li>Select from customers list (Bokpoort, Damlaagte, DEWA, Sasol, etc.)</li>
+                                    <li>Use for custom manufacturing and special orders</li>
+                                </ul>
+                            </li>
+                        </ul>
+                    </li>
+                    <li><strong>Dropdown automatically updates:</strong> Shows suppliers or customers based on selected mode</li>
+                    <li>Set order date and expected delivery date</li>
+                    <li>Add line items using smart autocomplete:
+                        <ul>
+                            <li>Items filtered based on selected mode (inventory vs production)</li>
+                            <li>Auto-populate unit price and description</li>
+                            <li>Select tax rate</li>
+                        </ul>
+                    </li>
+                    <li>System calculates subtotal, tax, and total automatically</li>
+                    <li>Click <strong>Save Draft</strong> to save without sending</li>
+                    <li>Click <strong>Save & Send</strong> to submit to supplier/customer</li>
                 </ol>
+            </div>
+
+            <h3>Purchase Order Modes Explained</h3>
+            <div class="step">
+                <h4>Supplier Mode vs Customer Mode</h4>
+                <table>
+                    <tr>
+                        <th>Feature</th>
+                        <th>Supplier Mode</th>
+                        <th>Customer Mode</th>
+                    </tr>
+                    <tr>
+                        <td><strong>Partner Type</strong></td>
+                        <td>External Suppliers</td>
+                        <td>Customers/Clients</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Item Filter</strong></td>
+                        <td>Regular Inventory Items</td>
+                        <td>Production Stock Items</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Use Case</strong></td>
+                        <td>Component Ordering</td>
+                        <td>Custom Manufacturing</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Status Flow</strong></td>
+                        <td>DRAFT → SENT → RECEIVED</td>
+                        <td>DRAFT → SENT → RECEIVED</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Convert to Bill</strong></td>
+                        <td>Yes (from supplier)</td>
+                        <td>Yes (bill to customer)</td>
+                    </tr>
+                </table>
             </div>
 
             <h3>Recording Payments</h3>
@@ -779,10 +875,11 @@
                 <ol>
                     <li>Click <strong>Payments Received</strong> tab</li>
                     <li>Click <strong>Record Payment</strong></li>
-                    <li>Select customer and invoice(s)</li>
-                    <li>Enter payment method and amount</li>
+                    <li>Select customer from the customer list (Bokpoort, Damlaagte, DEWA, Sasol, etc.)</li>
+                    <li>Select invoice(s) to allocate payment against</li>
+                    <li>Enter payment method (EFT, Check, Cash, etc.) and amount</li>
                     <li>Allocate payment to invoices</li>
-                    <li>System updates customer balance automatically</li>
+                    <li>System updates customer balance and invoice status automatically</li>
                 </ol>
             </div>
 
