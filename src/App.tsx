@@ -1940,11 +1940,34 @@ if (currentView === 'alternates') {
                       value={newItem.category}
                       onChange={(e) => setNewItem({ ...newItem, category: e.target.value })}
                     >
-                      <option>Micro-ctrl</option>
-                      <option>Capacitors</option>
-                      <option>Resistors</option>
-                      <option>ICs</option>
-                      <option>Connectors</option>
+                      <option value="">Select Category</option>
+                      <option>Resistor</option>
+                      <option>Capacitor</option>
+                      <option>IC (Integrated Circuit)</option>
+                      <option>Diode</option>
+                      <option>Transistor</option>
+                      <option>Connector</option>
+                      <option>LED</option>
+                      <option>Inductor</option>
+                      <option>Crystal / Oscillator</option>
+                      <option>Button / Tactile Switch</option>
+                      <option>Sensors</option>
+                      <option>Hardware / Other</option>
+                      <option>Antenna</option>
+                      <option>Sub-Assembly</option>
+                      <option>Battery</option>
+                      <option>Box</option>
+                      <option>Bracket</option>
+                      <option>Kit</option>
+                      <option>Buzzer</option>
+                      <option>Cable / Flylead</option>
+                      <option>Coax</option>
+                      <option>Jumper</option>
+                      <option>Fibre</option>
+                      <option>Ethernet</option>
+                      <option>Product</option>
+                      <option>Consumable</option>
+                      <option>Tool</option>
                     </select>
                   </div>
 
@@ -1955,11 +1978,10 @@ if (currentView === 'alternates') {
                       value={newItem.supplier}
                       onChange={(e) => setNewItem({ ...newItem, supplier: e.target.value })}
                     >
-                      <option>Digi-Key Corp</option>
-                      <option>Mouser Electronics</option>
-                      <option>Avnet Global</option>
-                      <option>Future Electronics</option>
-                      <option>OmniDynamics Ltd.</option>
+                      <option value="">Select Supplier</option>
+                      {suppliers.map(sup => (
+                        <option key={sup.id} value={sup.name}>{sup.name}</option>
+                      ))}
                     </select>
                   </div>
                 </div>
