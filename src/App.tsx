@@ -568,7 +568,10 @@ export default function App() {
             responseTime: s.response_time,
           })));
         }
-        if (Array.isArray(projects)) setProjects(projects);
+        // Normalize ids to numbers: the projects table stores TEXT ids, but Project.id
+        // is typed as number and BOM/PP rows carry numeric projectId — a string id here
+        // breaks every strict-equality filter downstream (e.g. blank BOM Manager).
+        if (Array.isArray(projects)) setProjects(projects.map((p: any) => ({ ...p, id: Number(p.id) })));
         if (settingsRaw && Object.keys(settingsRaw).length > 0) {
           setSystemConfig(prev => ({ ...prev, ...settingsRaw }));
         }
@@ -1826,6 +1829,7 @@ if (currentView === 'alternates') {
                    jobCards={jobCards}
                    triggerToast={triggerToast}
                    onProjectCreated={(project) => {
+                     project = { ...project, id: Number(project.id) };
                      setProjects(prev => [...prev, project]);
                      const isTestEnv = window.navigator.webdriver || window.location.search.includes('test');
                      if (!isTestEnv) {

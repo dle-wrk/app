@@ -125,20 +125,23 @@ export default function BOMManager({
 
   const totalShortagesCount = auditResults.filter(r => r.isShortage).length;
 
-  // Handles booking out the entire BOM using the unified kit-booking API
-  const handleBookOutEntireBOM = async () => {
+  const [showBookOutConfirm, setShowBookOutConfirm] = useState(false);
+
+  const requestBookOut = () => {
     if (pcbQty <= 0) {
-      alert('Please enter a valid PCB quantity of 1 or more.');
+      triggerToast('Please enter a valid PCB quantity of 1 or more.', 'ERROR');
       return;
     }
-
-    if (totalShortagesCount > 0) {
-      const confirmForze = window.confirm(
-        `Warning: There are ${totalShortagesCount} hardware item shortages. Would you like to proceed with booking out remaining items and exhausting stock?`
-      );
-      if (!confirmForze) return;
+    if (auditResults.length === 0) {
+      triggerToast('No BOM lines to book out for this project.', 'ERROR');
+      return;
     }
+    setShowBookOutConfirm(true);
+  };
 
+  // Handles booking out the entire BOM using the unified kit-booking API
+  const handleBookOutEntireBOM = async () => {
+    setShowBookOutConfirm(false);
     try {
       // Use the unified kit-booking API for atomic execution
       const res = await fetch('/api/kit-booking/execute', {
@@ -333,7 +336,7 @@ export default function BOMManager({
             )}
 
             <button
-              onClick={handleBookOutEntireBOM}
+              onClick={requestBookOut}
               className={`w-full font-bold px-lg py-sm rounded-lg flex items-center justify-center gap-xs shadow text-xs uppercase tracking-wider transition-all duration-150 ${
                 totalShortagesCount > 0 
                   ? 'bg-surface-container-highest hover:brightness-110 border border-outline-variant text-on-surface'
@@ -481,6 +484,45 @@ export default function BOMManager({
           </div>
         </div>
       </div>
+
+      {showBookOutConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowBookOutConfirm(false)}>
+          <div className="bg-surface-container border border-outline-variant rounded-xl shadow-2xl max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+            <div className="px-lg py-md border-b border-outline-variant flex items-center gap-xs">
+              <ShoppingBag className="w-4 h-4 text-primary" />
+              <h4 className="font-bold text-sm text-on-surface">Confirm BOM Book-Out</h4>
+            </div>
+            <div className="px-lg py-md text-xs text-on-surface-variant space-y-2">
+              <p>
+                Book out the entire BOM ({auditResults.length} line{auditResults.length === 1 ? '' : 's'}) for{' '}
+                <span className="font-bold text-on-surface">{pcbQty} PCB{pcbQty === 1 ? '' : 's'}</span> of{' '}
+                <span className="font-bold text-primary">{activeProject?.projectName || 'selected project'}</span>?
+              </p>
+              {totalShortagesCount > 0 && (
+                <p className="flex items-start gap-1.5 text-red-400 font-semibold">
+                  <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" />
+                  {totalShortagesCount} line{totalShortagesCount === 1 ? ' has' : 's have'} stock shortages — proceeding will exhaust remaining stock on those lines.
+                </p>
+              )}
+            </div>
+            <div className="px-lg py-md border-t border-outline-variant flex justify-end gap-sm">
+              <button
+                onClick={() => setShowBookOutConfirm(false)}
+                className="px-md py-1.5 rounded-lg text-xs font-bold border border-outline-variant text-on-surface hover:bg-surface-variant/40 transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleBookOutEntireBOM}
+                className="px-md py-1.5 rounded-lg text-xs font-bold bg-primary text-on-primary hover:brightness-110 active:scale-95 transition-all flex items-center gap-xs"
+              >
+                <ShoppingBag className="w-3 h-3" />
+                Book Out BOM
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
