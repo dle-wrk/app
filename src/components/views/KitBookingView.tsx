@@ -38,6 +38,7 @@ export default function KitBookingView({ projects, triggerToast }: KitBookingVie
   const [loading, setLoading] = useState(false);
   const [executing, setExecuting] = useState(false);
   const [showShortagePOModal, setShowShortagePOModal] = useState(false);
+  const [showConfirmBooking, setShowConfirmBooking] = useState(false);
 
   useEffect(() => {
     if (projects.length > 0 && !projects.find(p => p.id === selectedProjectId)) {
@@ -69,7 +70,7 @@ export default function KitBookingView({ projects, triggerToast }: KitBookingVie
   };
 
   const handleExecute = async () => {
-    if (!confirm(`Are you sure you want to book out parts for ${buildQty} units?`)) return;
+    setShowConfirmBooking(false);
     setExecuting(true);
     try {
       const res = await fetch('/api/kit-booking/execute', {
@@ -140,10 +141,11 @@ export default function KitBookingView({ projects, triggerToast }: KitBookingVie
           )}
 
           <button
-            onClick={handleExecute}
-            disabled={totalShortages > 0 || loading || executing}
+            onClick={() => setShowConfirmBooking(true)}
+            disabled={totalShortages > 0 || loading || executing || auditResults.length === 0}
+            title={totalShortages > 0 ? `Booking blocked: ${totalShortages} component shortage(s). Resolve shortages or generate a PO first.` : auditResults.length === 0 ? 'No BOM data for this project.' : undefined}
             className={`mt-auto h-9 px-lg rounded-lg flex items-center gap-xs text-xs font-bold uppercase tracking-wider transition-all ${
-              totalShortages > 0
+              totalShortages > 0 || auditResults.length === 0
                 ? 'bg-surface-container-highest text-outline cursor-not-allowed border border-outline-variant'
                 : 'bg-primary text-on-primary hover:brightness-110 active:scale-95'
             }`}
@@ -254,6 +256,39 @@ export default function KitBookingView({ projects, triggerToast }: KitBookingVie
           </table>
         </div>
       </div>
+
+      {showConfirmBooking && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowConfirmBooking(false)}>
+          <div className="bg-surface-container border border-outline-variant rounded-xl shadow-2xl max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+            <div className="px-lg py-md border-b border-outline-variant flex items-center gap-xs">
+              <Play className="w-4 h-4 text-primary" />
+              <h4 className="font-bold text-sm text-on-surface">Confirm Kit Booking</h4>
+            </div>
+            <div className="px-lg py-md text-xs text-on-surface-variant space-y-1">
+              <p>
+                Book out parts for <span className="font-bold text-on-surface">{buildQty} unit{buildQty === 1 ? '' : 's'}</span> of{' '}
+                <span className="font-bold text-primary">{projects.find(p => p.id === selectedProjectId)?.projectName || 'selected project'}</span>?
+              </p>
+              <p>This will deduct stock for {auditResults.length} component line{auditResults.length === 1 ? '' : 's'} and log the transactions.</p>
+            </div>
+            <div className="px-lg py-md border-t border-outline-variant flex justify-end gap-sm">
+              <button
+                onClick={() => setShowConfirmBooking(false)}
+                className="px-md py-1.5 rounded-lg text-xs font-bold border border-outline-variant text-on-surface hover:bg-surface-variant/40 transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleExecute}
+                className="px-md py-1.5 rounded-lg text-xs font-bold bg-primary text-on-primary hover:brightness-110 active:scale-95 transition-all flex items-center gap-xs"
+              >
+                <Play className="w-3 h-3" />
+                Book Out Parts
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showShortagePOModal && (
         <ShortageToPOModal
