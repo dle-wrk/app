@@ -52,8 +52,33 @@ export default function PickPlaceManager({
   const totalPlacementsCount = filteredBoms.reduce((acc, curr) => acc + curr.quantity, 0);
   const totalUniqueRows = filteredBoms.length;
 
+  // Feeder audit derived from the live placement list: IC packages load from trays,
+  // everything else loads from tape reels (one feeder lane per unique stock row).
+  const trayRegex = /SOIC|QFP|QFN|TSSOP|SSOP|SOP|BGA|DFN|SON|TRAY|DIP/i;
+  const trayCount = filteredBoms.filter(b => trayRegex.test(b.footprint || '')).length;
+  const reelCount = totalUniqueRows - trayCount;
+  const reelPct = totalUniqueRows > 0 ? Math.round((reelCount / totalUniqueRows) * 100) : 0;
+  const trayPct = totalUniqueRows > 0 ? 100 - reelPct : 0;
+
   const handleExportCADManifest = () => {
-    triggerToast(`Exported SMT CPL Pick & Place CSV file for Project ${selectedProjectId} PCB Assembly.`);
+    if (filteredBoms.length === 0) {
+      triggerToast('No placement rows to export for this board.');
+      return;
+    }
+    const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const header = ['Stock Code', 'Comment', 'Description', 'Designators', 'Footprint', 'Quantity'];
+    const lines = filteredBoms.map(b => [b.stockCode, b.comment, b.description, b.designator, b.footprint, b.quantity].map(esc).join(','));
+    const csv = [header.join(','), ...lines].join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `SMT_CPL_${(activeProject?.projectName || `Project_${selectedProjectId}`).replace(/[^\w-]+/g, '_')}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    triggerToast(`Exported SMT CPL Pick & Place CSV file for ${activeProject?.projectName || `Project ${selectedProjectId}`} PCB Assembly.`);
   };
 
   return (
@@ -161,19 +186,19 @@ export default function PickPlaceManager({
             </p>
             <div className="space-y-sm text-xs font-mono pt-sm">
               <div className="flex justify-between items-center text-[10px]">
-                <span className="text-on-surface-variant">0603 Tape Feeders (12mm)</span>
-                <span className="font-bold text-primary">12 Reels</span>
+                <span className="text-on-surface-variant">Tape Feeders (Reels)</span>
+                <span className="font-bold text-primary">{reelCount} Reels</span>
               </div>
               <div className="w-full bg-outline-variant/30 h-1.5 rounded-full overflow-hidden">
-                <div className="bg-primary h-full w-[65%]"></div>
+                <div className="bg-primary h-full" style={{ width: `${reelPct}%` }}></div>
               </div>
 
               <div className="flex justify-between items-center text-[10px]">
-                <span className="text-on-surface-variant">SOIC & QFP Tray Feeders</span>
-                <span className="font-bold text-secondary">4 Trays</span>
+                <span className="text-on-surface-variant">IC Tray Feeders (SOIC/QFP)</span>
+                <span className="font-bold text-secondary">{trayCount} Trays</span>
               </div>
               <div className="w-full bg-outline-variant/30 h-1.5 rounded-full overflow-hidden">
-                <div className="bg-secondary h-full w-[25%]"></div>
+                <div className="bg-secondary h-full" style={{ width: `${trayPct}%` }}></div>
               </div>
             </div>
           </div>
