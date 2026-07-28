@@ -38,6 +38,7 @@ import { INITIAL_TRANSACTIONS, INITIAL_PRODUCTION_KITS, INITIAL_SYSTEM_CONFIG, I
 import { logActivity } from './lib/activityLogger';
 import BOMManager from './components/BOMManager';
 import { mapDbRowsToItems } from './lib/mapDbItem';
+import { mapDbRowsToTransactions, formatTrxDateTime } from './lib/mapDbTransaction';
 import PickPlaceManager from './components/PickPlaceManager';
 import AlternatesManager from './components/AlternatesManager';
 import BulkPricingWizard from './components/BulkPricingWizard';
@@ -529,7 +530,9 @@ export default function App() {
         if (Array.isArray(fieldedAssetsRaw)) setFieldedAssets(fieldedAssetsRaw);
         if (Array.isArray(stockLedgerRaw)) setStockLedgerEntries(stockLedgerRaw);
         if (Array.isArray(transactionsRaw) && transactionsRaw.length > 0) {
-          setTransactions(transactionsRaw);
+          // Rows come back lower-cased from Postgres — normalize before they hit
+          // state or the ledger renders half its columns blank.
+          setTransactions(mapDbRowsToTransactions(transactionsRaw));
         } else {
           setTransactions(INITIAL_TRANSACTIONS);
         }
@@ -1298,9 +1301,30 @@ export default function App() {
     }
   };
 
-  // Export CSV Simulated Action
+  // Export the transaction ledger as a real CSV download (was previously a
+  // toast-only stub that produced no file).
   const handleExportCSV = (fileName: string) => {
-    triggerToast(`Exported ledger data to ${fileName}.csv`);
+    if (!transactions.length) {
+      triggerToast('No ledger entries to export.', 'ERROR');
+      return;
+    }
+    const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const header = ['TRX ID', 'Part Number', 'Item Name', 'Type', 'Qty Change', 'Reference', 'Performed By', 'Date & Time', 'New Cost'];
+    const rows = transactions.map(t => [
+      t.id, t.itemPartNumber, t.itemName, t.type, t.qtyChange,
+      t.reference, t.performedBy, formatTrxDateTime(t.dateTime), t.newCost ?? '',
+    ].map(esc).join(','));
+    const csv = [header.join(','), ...rows].join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${fileName}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    triggerToast(`Exported ${transactions.length} ledger entries to ${fileName}.csv`);
   };
 
   // Dynamic STM32 Search Routing
