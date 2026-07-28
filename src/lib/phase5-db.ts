@@ -95,7 +95,7 @@ export async function ensurePhase5Tables() {
     model_name TEXT NOT NULL UNIQUE,
     model_type TEXT NOT NULL,
     model_version TEXT NOT NULL,
-    status TEXT CHECK (status IN ('TRAINING', 'ACTIVE', 'ARCHIVED')) DEFAULT 'TRAINING',
+    status TEXT CHECK (status IN ('TRAINING', 'ACTIVE', 'ARCHIVED', 'NEEDS_DATA')) DEFAULT 'TRAINING',
     accuracy NUMERIC(5, 4),
     last_trained_at TIMESTAMP,
     last_used_at TIMESTAMP,
@@ -103,6 +103,13 @@ export async function ensurePhase5Tables() {
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   )`);
+
+  // NEEDS_DATA lets a training run record "the ledger cannot support a score"
+  // instead of writing an unearned accuracy. Widen the constraint on databases
+  // created before that status existed.
+  await exec(`ALTER TABLE ml_models DROP CONSTRAINT IF EXISTS ml_models_status_check`).catch(() => {});
+  await exec(`ALTER TABLE ml_models ADD CONSTRAINT ml_models_status_check
+    CHECK (status IN ('TRAINING', 'ACTIVE', 'ARCHIVED', 'NEEDS_DATA'))`).catch(() => {});
 
   await exec(`CREATE TABLE IF NOT EXISTS predictive_orders (
     id SERIAL PRIMARY KEY,

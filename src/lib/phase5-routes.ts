@@ -1,7 +1,24 @@
 import { Router } from 'express';
 import { query, queryOne } from './db';
+import {
+  computeConsumptionStats,
+  forecastDemand,
+  detectAnomalies,
+  computeReorderRecommendations,
+  backtestForecast,
+} from './analytics-engine';
 
 const router = Router();
+
+// Shared loaders for the analytics endpoints below.
+async function loadInventory() {
+  const { rows } = await query(`SELECT serial_number, name, stock, low_stock_lvl, current_cost_dollar FROM inventory WHERE deleted != true`);
+  return rows;
+}
+async function loadTransactions() {
+  const { rows } = await query(`SELECT itempartnumber, itemname, qtychange, datetime, type FROM transactions`);
+  return rows;
+}
 
 // ============================================================================
 // QUALITY & COMPLIANCE ENDPOINTS
@@ -431,6 +448,209 @@ router.post('/api/quality-gates', async (req, res) => {
       [process_stage, gate_name, JSON.stringify(auto_trigger_condition || {}), required_approvals]
     );
     res.status(201).json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================================
+// ANALYTICS ENGINE ENDPOINTS
+//
+// These compute from live inventory + ledger data. Previously the ML tables
+// only held hand-entered rows, so nothing in this area produced a result.
+// Where the data cannot support a conclusion these endpoints report that
+// explicitly instead of emitting a fabricated number.
+// ============================================================================
+
+// Anomaly scan — writes findings to detected_anomalies and returns them.
+router.post('/api/analytics/scan-anomalies', async (req, res) => {
+  try {
+    const persist = req.body?.persist !== false;
+    const [items, transactions] = await Promise.all([loadInventory(), loadTransactions()]);
+    const findings = detectAnomalies(items, transactions);
+
+    let persisted = 0;
+    if (persist && findings.length) {
+      // Clear prior open machine-generated findings so a rescan reflects
+      // current state rather than stacking duplicates. Anything a human has
+      // acknowledged or resolved is preserved.
+      await query(`DELETE FROM detected_anomalies WHERE status = 'DETECTED' AND rule_id IS NULL`);
+      for (const f of findings) {
+        await query(
+          `INSERT INTO detected_anomalies (entity_type, entity_id, anomaly_value, severity, status, description)
+           VALUES ($1, $2, $3, $4, 'DETECTED', $5)`,
+          [f.entityType, f.entityId, f.value, f.severity, `[${f.anomalyType}] ${f.description}`]
+        );
+        persisted++;
+      }
+    }
+
+    const bySeverity = findings.reduce((acc: Record<string, number>, f) => {
+      acc[f.severity] = (acc[f.severity] || 0) + 1; return acc;
+    }, {});
+    const byType = findings.reduce((acc: Record<string, number>, f) => {
+      acc[f.anomalyType] = (acc[f.anomalyType] || 0) + 1; return acc;
+    }, {});
+
+    res.json({
+      scanned: items.length,
+      found: findings.length,
+      persisted,
+      bySeverity,
+      byType,
+      findings: findings.slice(0, 200),
+    });
+  } catch (err: any) {
+    console.error('[ANALYTICS] anomaly scan failed:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Demand forecast generation. Parts without enough history are reported as
+// skipped rather than being given an invented forecast.
+router.post('/api/analytics/generate-forecasts', async (req, res) => {
+  try {
+    const horizonDays = Math.max(1, parseInt(String(req.body?.horizonDays ?? 30), 10) || 30);
+    const modelId = req.body?.modelId ?? null;
+    const transactions = await loadTransactions();
+    const stats = computeConsumptionStats(transactions);
+
+    const generated: any[] = [];
+    const skipped: any[] = [];
+    const forecastDate = new Date(Date.now() + horizonDays * 86_400_000).toISOString().slice(0, 10);
+
+    for (const stat of stats.values()) {
+      const f = forecastDemand(stat, horizonDays);
+      if (f.insufficientData) {
+        skipped.push({ partNumber: f.partNumber, reason: f.note });
+        continue;
+      }
+      await query(
+        `INSERT INTO demand_forecasts (component_id, forecast_date, forecast_quantity, confidence_level, forecast_method, model_id)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (component_id, forecast_date) DO UPDATE
+           SET forecast_quantity = EXCLUDED.forecast_quantity,
+               confidence_level = EXCLUDED.confidence_level,
+               forecast_method = EXCLUDED.forecast_method`,
+        [f.partNumber, forecastDate, f.forecastQuantity, f.confidence, f.method, modelId]
+      );
+      generated.push(f);
+    }
+
+    res.json({
+      horizonDays,
+      forecastDate,
+      generated: generated.length,
+      skipped: skipped.length,
+      forecasts: generated,
+      skippedDetail: skipped,
+      note: generated.length === 0
+        ? 'No part has enough movement history to support a forecast yet. Forecasts need at least 3 outbound movements spanning 7+ days.'
+        : undefined,
+    });
+  } catch (err: any) {
+    console.error('[ANALYTICS] forecast generation failed:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Reorder recommendations, computed live (demand-based where history allows,
+// threshold-based otherwise — each row states which basis was used).
+router.get('/api/analytics/reorder-recommendations', async (req, res) => {
+  try {
+    const leadTimeDays = parseInt(String(req.query.leadTimeDays ?? 14), 10) || 14;
+    const safetyDays = parseInt(String(req.query.safetyDays ?? 7), 10) || 7;
+    const [items, transactions] = await Promise.all([loadInventory(), loadTransactions()]);
+    const recs = computeReorderRecommendations(items, transactions, { leadTimeDays, safetyDays });
+    res.json({
+      leadTimeDays,
+      safetyDays,
+      count: recs.length,
+      demandBased: recs.filter(r => r.dailyRate > 0).length,
+      recommendations: recs.slice(0, 200),
+    });
+  } catch (err: any) {
+    console.error('[ANALYTICS] reorder recommendations failed:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Train a model: runs a real walk-forward backtest over the ledger and records
+// the measured accuracy. If the data cannot support a test the model is marked
+// NEEDS_DATA rather than being stamped with an unearned score.
+router.post('/api/ml-models/:id/train', async (req, res) => {
+  try {
+    const model = await queryOne(`SELECT * FROM ml_models WHERE id = $1`, [req.params.id]);
+    if (!model) return res.status(404).json({ error: 'model not found' });
+
+    const transactions = await loadTransactions();
+    const result = backtestForecast(transactions);
+
+    if (result.accuracy === null) {
+      await query(
+        `UPDATE ml_models SET status = 'NEEDS_DATA', accuracy = NULL, updated_at = CURRENT_TIMESTAMP,
+           model_metadata = $1 WHERE id = $2`,
+        [JSON.stringify({ lastAttempt: new Date().toISOString(), method: result.method, note: result.note }), req.params.id]
+      );
+      return res.json({ trained: false, accuracy: null, samples: 0, method: result.method, note: result.note });
+    }
+
+    await query(
+      `UPDATE ml_models SET status = 'ACTIVE', accuracy = $1, last_trained_at = CURRENT_TIMESTAMP,
+         updated_at = CURRENT_TIMESTAMP, model_metadata = $2 WHERE id = $3`,
+      [result.accuracy, JSON.stringify({ method: result.method, samples: result.samples, note: result.note }), req.params.id]
+    );
+    res.json({ trained: true, accuracy: result.accuracy, samples: result.samples, method: result.method, note: result.note });
+  } catch (err: any) {
+    console.error('[ANALYTICS] training failed:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// True anomaly totals. GET /api/anomalies caps at 100 rows, so counting
+// severities from that response under-reports whenever more exist.
+router.get('/api/analytics/anomaly-summary', async (_req, res) => {
+  try {
+    const { rows } = await query(
+      `SELECT status, severity, COUNT(*)::int AS count
+         FROM detected_anomalies GROUP BY status, severity`
+    );
+    const bySeverity: Record<string, number> = {};
+    const byStatus: Record<string, number> = {};
+    let total = 0;
+    let open = 0;
+    for (const r of rows as any[]) {
+      total += r.count;
+      byStatus[r.status] = (byStatus[r.status] || 0) + r.count;
+      if (r.status === 'DETECTED') {
+        open += r.count;
+        bySeverity[r.severity] = (bySeverity[r.severity] || 0) + r.count;
+      }
+    }
+    res.json({ total, open, bySeverity, byStatus });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Consumption summary used by the dashboard's overview cards.
+router.get('/api/analytics/consumption-summary', async (_req, res) => {
+  try {
+    const transactions = await loadTransactions();
+    const stats = [...computeConsumptionStats(transactions).values()];
+    res.json({
+      partsWithHistory: stats.length,
+      partsForecastable: stats.filter(s => !s.insufficientData).length,
+      totalConsumed: stats.reduce((a, s) => a + s.totalConsumed, 0),
+      parts: stats
+        .sort((a, b) => b.totalConsumed - a.totalConsumed)
+        .slice(0, 50)
+        .map(s => ({
+          partNumber: s.partNumber, itemName: s.itemName, totalConsumed: s.totalConsumed,
+          movements: s.movements, dailyRate: Number(s.dailyRate.toFixed(4)),
+          forecastable: !s.insufficientData, note: s.dataNote,
+        })),
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
