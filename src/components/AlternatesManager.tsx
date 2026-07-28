@@ -81,8 +81,9 @@ export default function AlternatesManager({
     return matchesSearch && g.alternates.some(a => a.partNumber.startsWith(selectedPrefix));
   });
 
-  // Dynamic extract prefix filters
-  const uniquePrefixes = Array.from(new Set(items.map(i => i.partNumber.split('-')[0]))).filter(Boolean);
+  // Dynamic extract prefix filters (trimmed + uppercased so stray whitespace in
+  // part numbers doesn't produce duplicate entries like "LED" and "LED ")
+  const uniquePrefixes = Array.from(new Set(items.map(i => i.partNumber.split('-')[0].trim().toUpperCase()))).filter(Boolean).sort();
 
   return (
     <div className="space-y-4 animate-fade-in text-on-surface">
