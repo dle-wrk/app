@@ -620,8 +620,8 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
                   {items
                     .filter(item =>
                       searchQuery === '' ||
-                      item.partNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                      item.name.toLowerCase().includes(searchQuery.toLowerCase())
+                      (item.partNumber || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+                      (item.name || '').toLowerCase().includes(searchQuery.toLowerCase())
                     )
                     .map(item => {
                       const isSelected = selectedComponents[item.partNumber] !== undefined;

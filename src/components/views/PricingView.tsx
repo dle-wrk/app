@@ -166,8 +166,8 @@ export const PricingView: React.FC<PricingViewProps> = ({
   // Pagination logic with multiple filters
   const filteredItems = items.filter(i => {
     const categoryMatch = pricingFilter === 'ALL' || i.category === pricingFilter;
-    const stockCodeMatch = !stockCodeFilter || i.partNumber.toLowerCase().includes(stockCodeFilter.toLowerCase());
-    const supplierMatch = !supplierFilter || i.supplier.toLowerCase().includes(supplierFilter.toLowerCase());
+    const stockCodeMatch = !stockCodeFilter || (i.partNumber || '').toLowerCase().includes(stockCodeFilter.toLowerCase());
+    const supplierMatch = !supplierFilter || (i.supplier || '').toLowerCase().includes(supplierFilter.toLowerCase());
     const statusMatch = !statusFilter || i.status === statusFilter;
     return categoryMatch && stockCodeMatch && supplierMatch && statusMatch;
   });

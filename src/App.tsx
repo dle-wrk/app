@@ -37,6 +37,7 @@ import { Item, Transaction, Supplier, ProductionKit, SystemConfig, ViewType, Pro
 import { INITIAL_TRANSACTIONS, INITIAL_PRODUCTION_KITS, INITIAL_SYSTEM_CONFIG, INITIAL_BOM_ITEMS, INITIAL_PP_BOM_ITEMS, generateCSVFromItems, CSV_HEADER } from './mockData';
 import { logActivity } from './lib/activityLogger';
 import BOMManager from './components/BOMManager';
+import { mapDbRowsToItems } from './lib/mapDbItem';
 import PickPlaceManager from './components/PickPlaceManager';
 import AlternatesManager from './components/AlternatesManager';
 import BulkPricingWizard from './components/BulkPricingWizard';
@@ -491,69 +492,7 @@ export default function App() {
         }
 
         if (Array.isArray(itemsRaw)) {
-          const mappedItems: Item[] = itemsRaw.map((record: any) => {
-            const partNumber = record['serial_number'];
-            const stockLevel = parseInt(record['stock'] || '0', 10) || 0;
-            const lowStockLvl = parseInt(record['low_stock_lvl'] || '50', 10) || 50;
-            const price = parseFloat(record['current_cost_dollar'] || record['bulk_price_usd'] || '0') || 0.05;
-
-            // Use the database 'type' as primary category, fallback to SKU prefix only if missing
-            let category = record['type'];
-            if (!category || category === 'Components' || category === 'Unknown') {
-              if (partNumber.startsWith('ANT-')) category = 'Antennas';
-              else if (partNumber.startsWith('CAP-')) category = 'Capacitors';
-              else if (partNumber.startsWith('RES-')) category = 'Resistors';
-              else if (partNumber.startsWith('CHP-')) category = 'ICs';
-              else if (partNumber.startsWith('CON-')) category = 'Connectors';
-              else if (partNumber.startsWith('LED')) category = 'LEDs';
-              else if (partNumber.startsWith('TRA-')) category = 'Transistors';
-              else if (partNumber.startsWith('ZEN-')) category = 'Zeners';
-              else if (partNumber.startsWith('DIO-')) category = 'Diodes';
-              else if (partNumber.startsWith('TUL-')) category = 'Tools';
-              else if (partNumber.startsWith('ASS-')) category = 'Sub-Assemblies';
-              else if (partNumber.startsWith('BAT-')) category = 'Batteries';
-              else category = category || 'Components';
-            }
-
-            let status: any = 'ACTIVE';
-            if (stockLevel === 0) status = 'BOOKED OUT';
-            else if (stockLevel < lowStockLvl) status = 'INACTIVE';
-            if (record['description']?.toLowerCase().includes('discontinued')) status = 'DISCONTINUED';
-
-            const manPns = [record['man_pn_1'], record['man_pn_2'], record['man_pn_3'], record['man_pn_4'], record['man_pn_5']].filter(v => !!v && String(v).trim() !== '');
-            const supPns = [record['sup_pn_1'], record['sup_pn_2'], record['sup_pn_3'], record['sup_pn_4'], record['sup_pn_5']].filter(v => !!v && String(v).trim() !== '');
-            const weblinks = [record['weblink_1'], record['weblink_2'], record['weblink_3'], record['weblink_4'], record['weblink_5']].filter(v => !!v && String(v).trim() !== '');
-
-            return {
-              partNumber,
-              name: record['name'] || 'Unnamed Item',
-              description: record['description'] || '',
-              manufacturer: manPns[0] || record['manufacturer'] || 'Generic',
-              supplier: supPns[0] || record['supplier'] || 'N/A',
-              stockLevel,
-              price,
-              category,
-              status,
-              value: record['value'] || '',
-              size: record['size'] || '',
-              packageName: record['package'] || '',
-              tolerance: record['tolerance'] || '',
-              itemType: record['type'] || '',
-              footprint: record['footprint'] || '',
-              comment: record['comment'] || '',
-              datasheet: record['datasheet'] || '',
-              project: record['project'] || '',
-              packaging: record['packaging'] || '',
-              lowStockLvl,
-              bulkPriceUsd: parseFloat(record['bulk_price_usd'] || '0') || undefined,
-              bulkPriceZar: parseFloat(record['bulk_price_zar'] || '0') || undefined,
-              lastOrderQty: parseInt(record['last_order_qty'] || '0', 10) || undefined,
-              lastOrderDate: record['last_order_date'] || '',
-              manPns: manPns.length ? manPns : undefined,
-              supPns: supPns.length ? supPns : undefined,
-              weblinks: weblinks.length ? weblinks : undefined,
-            };
-          });
+          const mappedItems: Item[] = mapDbRowsToItems(itemsRaw);
           setItems(mappedItems);
           setCsvFileContent(generateCSVFromItems(mappedItems));
         }
@@ -999,8 +938,14 @@ export default function App() {
       // to ensure we have the authoritative state (handles Neon consistency issues)
       const response = await fetch('/api/items');
       if (response.ok) {
-        const freshItems = await response.json();
-        setItems(freshItems);
+        // Raw rows MUST be mapped to the Item shape — setItems(rawRows) renders
+        // the whole app with undefined partNumber/price/stockLevel fields.
+        const freshItems = mapDbRowsToItems(await response.json());
+        if (freshItems.length > 0) {
+          setItems(freshItems);
+        } else {
+          setItems(prev => prev.map(i => i.partNumber === updatedItem.partNumber ? updatedItem : i));
+        }
       } else {
         // Fallback: use the updated item if refetch fails
         setItems(prev => prev.map(i => i.partNumber === updatedItem.partNumber ? updatedItem : i));
@@ -1053,8 +998,9 @@ export default function App() {
       try {
         const response = await fetch('/api/items');
         if (response.ok) {
-          const freshItems = await response.json();
-          setItems(freshItems);
+          // Map raw rows to the Item shape — raw rows in state break every view.
+          const freshItems = mapDbRowsToItems(await response.json());
+          if (freshItems.length > 0) setItems(freshItems);
         }
       } catch (refetchErr) {
         console.error('Failed to refetch items after delete:', refetchErr);

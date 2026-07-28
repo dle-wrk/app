@@ -112,15 +112,15 @@ export default function BulkPricingWizard({ items, onUpdatePrices, onShowNotific
       };
     });
 
-    return scored.sort((a, b) => (b.score !== a.score ? b.score - a.score : a.item.partNumber.localeCompare(b.item.partNumber)));
+    return scored.sort((a, b) => (b.score !== a.score ? b.score - a.score : (a.item.partNumber || '').localeCompare(b.item.partNumber || '')));
   }, [mfnItems]);
 
   const filteredClassified = useMemo(() => {
     const cleanSearch = searchTerm.toLowerCase().trim();
     if (!cleanSearch) return classifiedItems;
     return classifiedItems.filter(entry =>
-      entry.item.partNumber.toLowerCase().includes(cleanSearch) ||
-      entry.item.name.toLowerCase().includes(cleanSearch) ||
+      (entry.item.partNumber || '').toLowerCase().includes(cleanSearch) ||
+      (entry.item.name || '').toLowerCase().includes(cleanSearch) ||
       entry.mfnPn.toLowerCase().includes(cleanSearch) ||
       entry.supplierName.toLowerCase().includes(cleanSearch)
     );

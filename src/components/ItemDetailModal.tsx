@@ -77,6 +77,7 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete }: Ite
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteReferences, setDeleteReferences] = useState<{ [key: string]: number }>({});
   const [cascadeDelete, setCascadeDelete] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [checkingReferences, setCheckingReferences] = useState(false);
   const [edited, setEdited] = useState<Item>(() => {
     const enriched = { ...item };
@@ -224,6 +225,7 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete }: Ite
 
   const handleDeleteClick = async () => {
     setCheckingReferences(true);
+    setDeleteError(null);
     try {
       const response = await fetch(`/api/items/${item.partNumber}/references`);
       if (response.ok) {
@@ -252,16 +254,19 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete }: Ite
         throw new Error('Failed to delete item');
       }
 
+      // Close before handing off: onDelete triggers the parent's refetch, and
+      // any state we set after unmount is a no-op React warns about.
+      setIsDeleting(false);
+      setShowDeleteConfirm(false);
+      onClose();
       if (onDelete) {
         onDelete(item);
       }
-      onClose();
     } catch (error) {
       console.error('Error deleting item:', error);
-      alert('Failed to delete item. Please try again.');
-    } finally {
       setIsDeleting(false);
       setShowDeleteConfirm(false);
+      setDeleteError(error instanceof Error ? error.message : 'Failed to delete item. Please try again.');
     }
   };
 
@@ -947,6 +952,15 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete }: Ite
                 <p className="text-on-surface text-sm">
                   Are you sure you want to delete <span className="font-bold text-primary">{item.partNumber} - {item.name}</span>? This action cannot be undone.
                 </p>
+
+                {deleteError && (
+                  <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-md">
+                    <p className="text-xs font-bold text-red-500 flex items-center gap-1">
+                      <AlertTriangle className="w-4 h-4" />
+                      {deleteError}
+                    </p>
+                  </div>
+                )}
 
                 {Object.keys(deleteReferences).length > 0 && (
                   <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-md">

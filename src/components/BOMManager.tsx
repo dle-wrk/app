@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Item, Transaction, Project, BOMItem } from '../types';
+import { mapDbRowsToItems } from '../lib/mapDbItem';
 import { 
   ClipboardCheck, 
   Layers, 
@@ -169,33 +170,12 @@ export default function BOMManager({
         trxRes.json()
       ]);
 
-      // Map backend inventory to frontend Item interface
-      const mappedItems: Item[] = newItems.map((record: any) => {
-        const partNumber = record['serial_number'];
-        const stockLevel = parseInt(record['stock'] || '0', 10) || 0;
-        const lowStockLvl = parseInt(record['low_stock_lvl'] || '50', 10) || 50;
-        const price = parseFloat(record['current_cost_dollar'] || record['bulk_price_usd'] || '0') || 0.05;
+      // Map backend inventory to the frontend Item interface via the shared
+      // mapper — a partial mapping here strips fields (value/footprint/weblinks)
+      // that other views rely on for spec matching.
+      const mappedItems: Item[] = mapDbRowsToItems(newItems);
 
-        let status: any = 'ACTIVE';
-        if (stockLevel === 0) status = 'BOOKED OUT';
-        else if (stockLevel < lowStockLvl) status = 'INACTIVE';
-        if (record['description']?.toLowerCase().includes('discontinued')) status = 'DISCONTINUED';
-
-        return {
-          partNumber,
-          name: record['name'] || 'Unnamed Item',
-          description: record['description'] || '',
-          manufacturer: record['man_pn_1'] || record['manufacturer'] || 'Generic',
-          supplier: record['sup_pn_1'] || record['supplier'] || 'N/A',
-          stockLevel,
-          price,
-          category: record['type'] || 'Components',
-          status,
-          lowStockLvl
-        };
-      });
-
-      setItems(mappedItems);
+      if (mappedItems.length > 0) setItems(mappedItems);
       setTransactions(newTrx);
       setSubstitutions({});
       triggerToast(`Unified Workflow: Successfully booked out stock for ${pcbQty} x ${activeProject?.projectName}.`);
