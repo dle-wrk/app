@@ -585,9 +585,9 @@ async function ensureProductionCostsSchema() {
 
 app.get('/api/bootstrap', async (_req, res) => {
   try {
-    // 1. Items
-    const { rows: itemsRows } = await query(sql('SELECT * FROM inventory ORDER BY serial_number'));
-    const { rows: countRows } = await query<{ count: string }>(sql('SELECT COUNT(*) as count FROM inventory'));
+    // 1. Items (exclude soft-deleted rows, same as GET /api/items)
+    const { rows: itemsRows } = await query(sql('SELECT * FROM inventory WHERE deleted != true ORDER BY serial_number'));
+    const { rows: countRows } = await query<{ count: string }>(sql('SELECT COUNT(*) as count FROM inventory WHERE deleted != true'));
     const totalItems = parseInt(countRows[0]?.count || '0', 10);
 
     // 2. Suppliers
@@ -596,7 +596,10 @@ app.get('/api/bootstrap', async (_req, res) => {
     // 3. Projects
     const { rows: projectsRows } = await query('SELECT * FROM projects ORDER BY id');
     const projects = projectsRows.map((r: any) => ({
-      id: String(r.id),
+      // Numeric id: BOM/PP rows carry numeric projectId and the frontend Project
+      // type declares id: number — emitting strings here broke strict-equality
+      // filters (blank BOM manager) before App.tsx normalization was added.
+      id: parseInt(r.id),
       projectName: r.project_name,
       description: r.description,
       status: r.status,
@@ -1714,6 +1717,12 @@ app.delete('/api/projects/:id', async (req, res) => {
   try {
     const { rowCount } = await query(`DELETE FROM projects WHERE id = $1`, [id]);
     if (rowCount === 0) return res.status(404).json({ error: 'project not found' });
+    // Cascade: drop this project's BOM/P&P tables and job cards. Ids are allocated
+    // as MAX(id)+1, so a freed id gets reused — orphaned data would silently attach
+    // itself to the next project created with the same id.
+    await exec(`DROP TABLE IF EXISTS "db_bom_project_${id}"`).catch(() => {});
+    await exec(`DROP TABLE IF EXISTS "pp_bom_project_${id}"`).catch(() => {});
+    await query(`DELETE FROM job_cards WHERE project_id = $1`, [id]).catch(() => {});
     res.json({ ok: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -1730,40 +1739,43 @@ app.post('/api/projects/restore/:id', async (req, res) => {
       return res.status(400).json({ error: 'Invalid project data for restore' });
     }
 
+    // The snapshot is the frontend Project shape logged at delete time:
+    // { id, projectName, description, status, createdDate, startDate, endDate, assignedTeam, designSpecs }
     const {
       projectName,
+      description,
       status,
-      allocatedBudgetUSD,
-      allocatedBudgetZAR,
-      manager,
-      pm_id,
-      created_at,
-      updated_at
+      createdDate,
+      startDate,
+      endDate,
+      assignedTeam,
+      designSpecs
     } = projectData;
 
     const sqlText = `
-      INSERT INTO projects (id, "projectName", status, "allocatedBudgetUSD", "allocatedBudgetZAR", manager, pm_id, created_at, updated_at)
+      INSERT INTO projects (id, project_name, description, status, created_date, start_date, end_date, assigned_team, design_specs)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       ON CONFLICT (id) DO UPDATE SET
-        "projectName" = EXCLUDED."projectName",
+        project_name = EXCLUDED.project_name,
+        description = EXCLUDED.description,
         status = EXCLUDED.status,
-        "allocatedBudgetUSD" = EXCLUDED."allocatedBudgetUSD",
-        "allocatedBudgetZAR" = EXCLUDED."allocatedBudgetZAR",
-        manager = EXCLUDED.manager,
-        pm_id = EXCLUDED.pm_id,
-        updated_at = EXCLUDED.updated_at
+        created_date = EXCLUDED.created_date,
+        start_date = EXCLUDED.start_date,
+        end_date = EXCLUDED.end_date,
+        assigned_team = EXCLUDED.assigned_team,
+        design_specs = EXCLUDED.design_specs
     `;
 
     const { rowCount } = await query(sqlText, [
       id,
       projectName || 'Untitled Project',
-      status || 'PLANNING',
-      allocatedBudgetUSD || 0,
-      allocatedBudgetZAR || 0,
-      manager || null,
-      pm_id || null,
-      created_at || new Date().toISOString(),
-      new Date().toISOString()
+      description || '',
+      status || 'Active',
+      createdDate || new Date().toISOString().split('T')[0],
+      startDate || null,
+      endDate || null,
+      assignedTeam || '',
+      designSpecs || ''
     ]);
 
     if (rowCount === 0) {

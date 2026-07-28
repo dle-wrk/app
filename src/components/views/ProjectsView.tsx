@@ -37,7 +37,8 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  
+  const [deletingProject, setDeletingProject] = useState<Project | null>(null);
+
   const [newProject, setNewProject] = useState({
     projectName: '',
     description: '',
@@ -103,8 +104,7 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
   };
 
   const handleDeleteProject = async (projectId: number) => {
-    if (!confirm('Are you sure you want to delete this project? All associated BOM and P&P data will be removed.')) return;
-
+    setDeletingProject(null);
     try {
       const res = await fetch(`/api/projects/${projectId}`, {
         method: 'DELETE'
@@ -276,9 +276,10 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-md">
         {projects.map(project => {
-          const readiness = projectReadiness[project.id];
-          const hasShortages = readiness && readiness.some((r: any) => r.shortage_qty > 0);
-          const isReady = readiness && readiness.length > 0 && !hasShortages;
+          const readinessRaw = projectReadiness[project.id];
+          const readiness = Array.isArray(readinessRaw) ? readinessRaw : null;
+          const hasShortages = !!readiness && readiness.some((r: any) => r.shortage_qty > 0);
+          const isReady = !!readiness && readiness.length > 0 && !hasShortages;
 
           // Enhanced progress calculation based on dates AND job cards
           let dateProgress = 0;
@@ -400,7 +401,7 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
                 <Edit className="w-3.5 h-3.5" />
               </button>
               <button
-                onClick={() => handleDeleteProject(project.id)}
+                onClick={() => setDeletingProject(project)}
                 className="bg-surface-container-high hover:bg-red-500/10 text-red-400 p-1.5 rounded cursor-pointer"
               >
                 <Trash2 className="w-3.5 h-3.5" />
@@ -750,6 +751,36 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
                 className="flex-1 bg-primary text-on-primary py-2.5 rounded text-xs font-bold uppercase tracking-wider cursor-pointer"
               >
                 Sync
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deletingProject && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setDeletingProject(null)}>
+          <div className="bg-surface-container border border-outline-variant rounded-xl shadow-2xl max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+            <div className="px-lg py-md border-b border-outline-variant flex items-center gap-xs">
+              <AlertTriangle className="w-4 h-4 text-red-400" />
+              <h4 className="font-bold text-sm text-on-surface">Delete Project</h4>
+            </div>
+            <div className="px-lg py-md text-xs text-on-surface-variant">
+              Are you sure you want to delete <span className="font-bold text-primary">{deletingProject.projectName}</span>?
+              All associated BOM, Pick &amp; Place, and job card data will be removed. This action cannot be undone.
+            </div>
+            <div className="px-lg py-md border-t border-outline-variant flex justify-end gap-sm">
+              <button
+                onClick={() => setDeletingProject(null)}
+                className="px-md py-1.5 rounded-lg text-xs font-bold border border-outline-variant text-on-surface hover:bg-surface-variant/40 transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleDeleteProject(deletingProject.id)}
+                className="px-md py-1.5 rounded-lg text-xs font-bold bg-red-500 text-white hover:brightness-110 active:scale-95 transition-all flex items-center gap-xs"
+              >
+                <Trash2 className="w-3 h-3" />
+                Delete Project
               </button>
             </div>
           </div>

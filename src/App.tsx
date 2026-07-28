@@ -256,14 +256,15 @@ export default function App() {
     while (readinessQueue.current.length > 0) {
       const projectId = readinessQueue.current.shift()!;
       try {
-        setProjectReadiness(prev => ({ ...prev, [projectId]: { loading: true } }));
+        // NOTE: never seed a non-array placeholder here — consumers call
+        // readiness.some(...), so anything but an array crashes ProjectsView.
         const res = await fetch('/api/kit-booking/validate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ projectId, buildQty: 1 })
         });
-        if (res.ok) {
-          const data = await res.json();
+        const data = res.ok ? await res.json() : null;
+        if (Array.isArray(data)) {
           setProjectReadiness(prev => ({ ...prev, [projectId]: data }));
         } else {
           setProjectReadiness(prev => {
