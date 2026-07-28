@@ -1117,7 +1117,10 @@ export default function App() {
         price = 0.50;
       }
 
-      const manufacturer = cols[21] || cols[22] || 'Generic';
+      // CSV_HEADER order: ... last_order_date(20); status(21); man_pn_1(22); man_pn_2(23) ...
+      // cols[21] is the status column, not a manufacturer part number — reading it
+      // here stamped every imported item's manufacturer as "ACTIVE".
+      const manufacturer = cols[22] || cols[23] || 'Generic';
 
       // Category classifier - prioritize CSV type column, fallback to SKU prefix
       let category = itemType;
@@ -1137,16 +1140,13 @@ export default function App() {
         else category = category || 'Components';
       }
 
-      let status: 'ACTIVE' | 'INACTIVE' | 'BOOKED OUT' | 'DISCONTINUED' = 'ACTIVE';
-      if (stockLevel === 0) {
-        status = 'BOOKED OUT';
-      } else if (stockLevel < lowStockLvl) {
-        status = 'INACTIVE';
-      }
-
-      if (description?.toLowerCase().includes('discontinued') || description?.toLowerCase().includes('not used')) {
-        status = 'DISCONTINUED';
-      }
+      // Take status from the CSV's own status column (index 21) rather than
+      // deriving it from stock — see the note in src/lib/mapDbItem.ts.
+      const rawCsvStatus = (cols[21] || '').trim().toUpperCase();
+      const status: 'ACTIVE' | 'INACTIVE' | 'BOOKED OUT' | 'DISCONTINUED' =
+        rawCsvStatus === 'ACTIVE' || rawCsvStatus === 'INACTIVE' || rawCsvStatus === 'BOOKED OUT' || rawCsvStatus === 'DISCONTINUED'
+          ? rawCsvStatus
+          : 'ACTIVE';
 
       parsed.push({
         partNumber,

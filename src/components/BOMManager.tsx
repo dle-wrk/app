@@ -467,7 +467,8 @@ export default function BOMManager({
 
       {showBookOutConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowBookOutConfirm(false)}>
-          <div className="bg-surface-container border border-outline-variant rounded-xl shadow-2xl max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+          {/* Explicit width: max-w-md would resolve to --spacing-md (16px) here. */}
+          <div className="bg-surface-container border border-outline-variant rounded-xl shadow-2xl max-w-[448px] w-full mx-4" onClick={(e) => e.stopPropagation()}>
             <div className="px-lg py-md border-b border-outline-variant flex items-center gap-xs">
               <ShoppingBag className="w-4 h-4 text-primary" />
               <h4 className="font-bold text-sm text-on-surface">Confirm BOM Book-Out</h4>

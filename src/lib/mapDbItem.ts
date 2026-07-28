@@ -28,10 +28,15 @@ export function mapDbRowToItem(record: any): Item {
     else category = category || 'Components';
   }
 
-  let status: any = 'ACTIVE';
-  if (stockLevel === 0) status = 'BOOKED OUT';
-  else if (stockLevel < lowStockLvl) status = 'INACTIVE';
-  if (record['description']?.toLowerCase().includes('discontinued')) status = 'DISCONTINUED';
+  // Status is a user-controlled lifecycle flag that lives in the DB — it must NOT
+  // be derived from stock. Deriving it here silently discarded whatever the user
+  // saved (every item below its low-stock level reappeared as INACTIVE on reload).
+  // Stock health is a separate dimension with its own filter; keep them separate.
+  const rawStatus = String(record['status'] ?? '').trim().toUpperCase();
+  const status: Item['status'] =
+    rawStatus === 'ACTIVE' || rawStatus === 'INACTIVE' || rawStatus === 'BOOKED OUT' || rawStatus === 'DISCONTINUED'
+      ? rawStatus
+      : 'ACTIVE';
 
   const manPns = [record['man_pn_1'], record['man_pn_2'], record['man_pn_3'], record['man_pn_4'], record['man_pn_5']].filter(v => !!v && String(v).trim() !== '');
   const supPns = [record['sup_pn_1'], record['sup_pn_2'], record['sup_pn_3'], record['sup_pn_4'], record['sup_pn_5']].filter(v => !!v && String(v).trim() !== '');

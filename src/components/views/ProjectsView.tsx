@@ -759,7 +759,10 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
 
       {deletingProject && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setDeletingProject(null)}>
-          <div className="bg-surface-container border border-outline-variant rounded-xl shadow-2xl max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+          {/* NB: use an explicit width, not max-w-md — this app's @theme defines
+              --spacing-md: 16px, which Tailwind resolves for max-w-md, collapsing
+              the panel to 16px wide. */}
+          <div className="bg-surface-container border border-outline-variant rounded-xl shadow-2xl max-w-[448px] w-full mx-4" onClick={(e) => e.stopPropagation()}>
             <div className="px-lg py-md border-b border-outline-variant flex items-center gap-xs">
               <AlertTriangle className="w-4 h-4 text-red-400" />
               <h4 className="font-bold text-sm text-on-surface">Delete Project</h4>
