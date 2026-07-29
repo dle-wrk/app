@@ -579,7 +579,11 @@ export const mapJournalLine = (r: any) => ({
 export const mapInvoice = (r: any) => ({
   id: r.id,
   invoiceNumber: r.invoice_number,
-  customerId: r.customer_id,
+  // Column is client_id and the UI reads clientId. Mapping r.customer_id (a
+  // column that does not exist on these tables) emitted undefined under the
+  // wrong key, so invoices, payments and dispatch notes all showed
+  // "Unassigned" even when a client was set.
+  clientId: r.client_id,
   clientOrderId: r.client_order_id,
   invoiceDate: r.invoice_date,
   dueDate: r.due_date,
@@ -616,7 +620,11 @@ export const mapInvoiceItem = (r: any) => ({
 export const mapPaymentReceived = (r: any) => ({
   id: r.id,
   paymentNumber: r.payment_number,
-  customerId: r.customer_id,
+  // Column is client_id and the UI reads clientId. Mapping r.customer_id (a
+  // column that does not exist on these tables) emitted undefined under the
+  // wrong key, so invoices, payments and dispatch notes all showed
+  // "Unassigned" even when a client was set.
+  clientId: r.client_id,
   paymentDate: r.payment_date,
   amount: parseFloat(r.amount) || 0,
   unallocatedAmount: parseFloat(r.unallocated_amount) || 0,
@@ -750,7 +758,11 @@ export const mapDispatchNote = (r: any) => ({
   id: r.id,
   noteNumber: r.note_number,
   noteType: r.note_type,
-  customerId: r.customer_id,
+  // Column is client_id and the UI reads clientId. Mapping r.customer_id (a
+  // column that does not exist on these tables) emitted undefined under the
+  // wrong key, so invoices, payments and dispatch notes all showed
+  // "Unassigned" even when a client was set.
+  clientId: r.client_id,
   clientOrderId: r.client_order_id,
   invoiceId: r.invoice_id,
   noteDate: r.note_date,

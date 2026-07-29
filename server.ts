@@ -685,10 +685,12 @@ app.get('/api/bootstrap', async (_req, res) => {
     }));
 
     // 10. Customers
-    const { rows: clientsRows } = await query('SELECT * FROM customers ORDER BY id');
+    // Must match GET /api/clients — see the note there. The bookkeeping UI
+    // resolves client_id against this list.
+    const { rows: clientsRows } = await query('SELECT * FROM clients ORDER BY id');
     const clients = clientsRows.map((row: any) => ({
       id: row.id,
-      clientName: row.customer_name,
+      clientName: row.client_name,
       contactName: row.contact_name,
       email: row.email,
       phone: row.phone,
@@ -2080,10 +2082,14 @@ app.post('/api/settings', async (req, res) => {
 
 app.get('/api/clients', async (_req, res) => {
   try {
-    const { rows } = await query('SELECT * FROM customers ORDER BY id');
+    // Read the `clients` table, not `customers`: every bookkeeping foreign key
+    // (invoices.client_id, payments_received.client_id, dispatch_notes.client_id)
+    // points at `clients`. Serving `customers` here meant a note pointing at
+    // clients.id = 5 could not be resolved and rendered as "Unassigned".
+    const { rows } = await query('SELECT * FROM clients ORDER BY id');
     res.json(rows.map((row: any) => ({
       id: row.id,
-      clientName: row.customer_name,
+      clientName: row.client_name,
       contactName: row.contact_name,
       email: row.email,
       phone: row.phone,
@@ -2102,12 +2108,15 @@ app.post('/api/clients', async (req, res) => {
   if (!clientName) return res.status(400).json({ error: 'clientName is required' });
 
   try {
-    const row = await queryOne(`INSERT INTO customers (customer_name, contact_name, email, phone, address, vat_number, status)
+    // Writes must target the same table the reads and foreign keys use, or a
+    // newly created client would not appear in the list and could not be
+    // referenced by an invoice or dispatch note.
+    const row = await queryOne(`INSERT INTO clients (client_name, contact_name, email, phone, address, vat_number, status)
       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
       [clientName, contactName || null, email || null, phone || null, address || null, vatNumber || null, status || 'ACTIVE']);
     res.status(201).json({
       id: row?.id,
-      clientName: row?.customer_name,
+      clientName: row?.client_name,
       contactName: row?.contact_name,
       email: row?.email,
       phone: row?.phone,
@@ -2125,8 +2134,8 @@ app.put('/api/clients/:id', async (req, res) => {
   const id = parseInt(req.params.id);
   const { clientName, contactName, email, phone, address, vatNumber, status } = req.body;
   try {
-    const row = await queryOne(`UPDATE customers SET
-      customer_name = COALESCE($1, customer_name),
+    const row = await queryOne(`UPDATE clients SET
+      client_name = COALESCE($1, client_name),
       contact_name = COALESCE($2, contact_name),
       email = COALESCE($3, email),
       phone = COALESCE($4, phone),
@@ -2135,10 +2144,10 @@ app.put('/api/clients/:id', async (req, res) => {
       status = COALESCE($7, status)
       WHERE id = $8 RETURNING *`,
       [clientName ?? null, contactName ?? null, email ?? null, phone ?? null, address ?? null, vatNumber ?? null, status ?? null, id]);
-    if (!row) return res.status(404).json({ error: 'customer not found' });
+    if (!row) return res.status(404).json({ error: 'client not found' });
     res.json({
       id: row.id,
-      clientName: row.customer_name,
+      clientName: row.client_name,
       contactName: row.contact_name,
       email: row.email,
       phone: row.phone,
@@ -2155,8 +2164,8 @@ app.put('/api/clients/:id', async (req, res) => {
 app.delete('/api/clients/:id', async (req, res) => {
   const id = parseInt(req.params.id);
   try {
-    const { rowCount } = await query('DELETE FROM customers WHERE id = $1', [id]);
-    if (rowCount === 0) return res.status(404).json({ error: 'customer not found' });
+    const { rowCount } = await query('DELETE FROM clients WHERE id = $1', [id]);
+    if (rowCount === 0) return res.status(404).json({ error: 'client not found' });
     res.json({ ok: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
