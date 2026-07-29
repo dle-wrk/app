@@ -326,13 +326,18 @@ export function registerBookkeepingRoutes(app: Express) {
     }
   });
 
-  async function finalizeInvoiceInTx(client: any, invoiceId: number, invoiceNumber: string, invoiceDate: string, total: number, subtotal: number, taxTotal: number, items: any[]) {
+  async function finalizeInvoiceInTx(client: any, invoiceId: number, invoiceNumber: string, invoiceDate: string, total: number, subtotal: number, taxTotal: number, discountTotal: number, items: any[]) {
     const arAccountId = await getAccountIdByCode(SYSTEM_ACCOUNT_CODES.AR);
     const salesAccountId = await getAccountIdByCode(SYSTEM_ACCOUNT_CODES.SALES);
     const vatAccountId = await getAccountIdByCode(SYSTEM_ACCOUNT_CODES.VAT);
 
+    // Net sales = subtotal - discount.  Without this adjustment the credit side
+    // (subtotal + taxTotal) would exceed the debit side (total = subtotal - discount
+    // + taxTotal) whenever a discount is applied, and postJournalEntry would throw.
+    const salesCredit = Math.round((subtotal - discountTotal) * 100) / 100;
+
     const lines = [{ accountId: arAccountId, debit: total, credit: 0, description: `Invoice ${invoiceNumber}` }];
-    if (subtotal > 0) lines.push({ accountId: salesAccountId, debit: 0, credit: subtotal, description: `Invoice ${invoiceNumber}` });
+    if (salesCredit > 0) lines.push({ accountId: salesAccountId, debit: 0, credit: salesCredit, description: `Invoice ${invoiceNumber}` });
     if (taxTotal > 0) lines.push({ accountId: vatAccountId, debit: 0, credit: taxTotal, description: `VAT on ${invoiceNumber}` });
 
     const journalEntryId = await postJournalEntry(client, {
@@ -390,7 +395,7 @@ export function registerBookkeepingRoutes(app: Express) {
       }
 
       if (status === 'SENT') {
-        await finalizeInvoiceInTx(client, invoiceId, invoiceNumber, invoiceDate, total, subtotal, taxTotal, insertedItems);
+        await finalizeInvoiceInTx(client, invoiceId, invoiceNumber, invoiceDate, total, subtotal, taxTotal, body.discountTotal || 0, insertedItems);
       }
 
       await client.query('COMMIT');
@@ -441,7 +446,7 @@ export function registerBookkeepingRoutes(app: Express) {
       if (body.status === 'SENT') {
         const invoiceDate = body.invoiceDate || new Date().toISOString().slice(0, 10);
         const invNumRow = await client.query(`SELECT invoice_number FROM invoices WHERE id = $1`, [id]);
-        await finalizeInvoiceInTx(client, id, invNumRow.rows[0].invoice_number, invoiceDate, total, subtotal, taxTotal, insertedItems);
+        await finalizeInvoiceInTx(client, id, invNumRow.rows[0].invoice_number, invoiceDate, total, subtotal, taxTotal, body.discountTotal || 0, insertedItems);
       }
 
       await client.query('COMMIT');
@@ -467,7 +472,7 @@ export function registerBookkeepingRoutes(app: Express) {
       const items = (await client.query(`SELECT * FROM invoice_items WHERE invoice_id = $1`, [id])).rows;
       if (!items.length) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Cannot finalize an invoice with no line items.' }); }
 
-      await finalizeInvoiceInTx(client, id, invoice.invoice_number, invoice.invoice_date, parseFloat(invoice.total), parseFloat(invoice.subtotal), parseFloat(invoice.tax_total), items);
+      await finalizeInvoiceInTx(client, id, invoice.invoice_number, invoice.invoice_date, parseFloat(invoice.total), parseFloat(invoice.subtotal), parseFloat(invoice.tax_total), parseFloat(invoice.discount_total) || 0, items);
       await client.query('COMMIT');
       const finalRow = await queryOne(`SELECT i.*, c.client_name FROM invoices i LEFT JOIN clients c ON c.id = i.client_id WHERE i.id = $1`, [id]);
       res.json(mapInvoice(finalRow));
@@ -1218,8 +1223,16 @@ export function registerBookkeepingRoutes(app: Express) {
                COALESCE(SUM(jl.debit),0) as total_debit,
                COALESCE(SUM(jl.credit),0) as total_credit
         FROM accounts a
-        LEFT JOIN journal_lines jl ON jl.account_id = a.id
-        LEFT JOIN journal_entries je ON je.id = jl.journal_entry_id AND je.status = 'POSTED' AND je.entry_date <= $1
+        -- The POSTED / as-of filters must restrict which LINES are summed. Putting
+        -- them in a LEFT JOIN ON clause against journal_entries only nulls out je;
+        -- the journal_lines row survives and its debit/credit are still summed, so
+        -- voided and future-dated entries leaked into the totals.
+        LEFT JOIN (
+          SELECT jl.account_id, jl.debit, jl.credit
+          FROM journal_lines jl
+          JOIN journal_entries je ON je.id = jl.journal_entry_id
+          WHERE je.status = 'POSTED' AND je.entry_date <= $1
+        ) jl ON jl.account_id = a.id
         GROUP BY a.id, a.code, a.name, a.type
         HAVING COALESCE(SUM(jl.debit),0) != 0 OR COALESCE(SUM(jl.credit),0) != 0
         ORDER BY a.code`, [asOf]);
@@ -1281,8 +1294,14 @@ export function registerBookkeepingRoutes(app: Express) {
                COALESCE(SUM(jl.debit),0) as total_debit,
                COALESCE(SUM(jl.credit),0) as total_credit
         FROM accounts a
-        LEFT JOIN journal_lines jl ON jl.account_id = a.id
-        LEFT JOIN journal_entries je ON je.id = jl.journal_entry_id AND je.status = 'POSTED' AND je.entry_date <= $1
+        -- Same fix as the trial balance: filter the lines, not the joined entry,
+        -- or voided/future-dated entries stay in the balance sheet.
+        LEFT JOIN (
+          SELECT jl.account_id, jl.debit, jl.credit
+          FROM journal_lines jl
+          JOIN journal_entries je ON je.id = jl.journal_entry_id
+          WHERE je.status = 'POSTED' AND je.entry_date <= $1
+        ) jl ON jl.account_id = a.id
         WHERE a.type IN ('ASSET','LIABILITY','EQUITY')
         GROUP BY a.id, a.code, a.name, a.type
         HAVING COALESCE(SUM(jl.debit),0) != 0 OR COALESCE(SUM(jl.credit),0) != 0

@@ -100,7 +100,7 @@ const CreateExpenseModal: React.FC<ModuleDataProps & { onClose: () => void; onSa
 
   const taxPct = taxRates.find(t => String(t.id) === taxRateId)?.rate || 0;
   const taxAmount = Math.round(amount * (taxPct / 100) * 100) / 100;
-  const total = amount + taxAmount;
+  const total = Math.round((amount + taxAmount) * 100) / 100;
 
   const submit = async () => {
     if (!categoryAccountId || !paidFromAccountId) { triggerToast('Choose a category and a paid-from account.', 'ERROR'); return; }

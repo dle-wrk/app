@@ -3,6 +3,20 @@ import { Plus, Trash2, ChevronDown, Copy } from 'lucide-react';
 import { Item, TaxRate, Account } from '../../types';
 import { fmtMoney, inputClass, selectClass } from './shared';
 
+// Toggle switch for boolean line-item options (deductStock / receiveStock)
+const LineToggle: React.FC<{ checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string }> = ({ checked, onChange, label, hint }) => (
+  <button
+    type="button"
+    role="switch"
+    aria-checked={checked}
+    onClick={() => onChange(!checked)}
+    className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${checked ? 'bg-primary' : 'bg-outline-variant'}`}
+  >
+    <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${checked ? 'translate-x-4.5' : 'translate-x-1'}`} />
+    <span className="sr-only">{label}</span>
+  </button>
+);
+
 export interface EditableLine {
   key: string;
   partNumber?: string;
@@ -125,17 +139,27 @@ export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChang
             }
             return (
               <div key={line.key} className="bg-surface-container border border-outline-variant/40 rounded-lg p-4 space-y-4 hover:border-outline-variant/60 transition-colors">
-                {/* Header with index and remove button */}
+                {/* Header with index, copy and remove buttons */}
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-xs font-semibold text-outline uppercase tracking-wide">Line {idx + 1}</span>
-                  <button
-                    type="button"
-                    onClick={() => remove(line.key)}
-                    className="text-error/60 hover:text-error hover:bg-error/10 p-2 rounded transition-colors"
-                    title="Remove line"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => onChange([...lines, { ...line, key: `L${Date.now()}${Math.random().toString(36).slice(2, 6)}` }])}
+                      className="text-on-surface-variant/60 hover:text-primary hover:bg-primary/10 p-2 rounded transition-colors"
+                      title="Duplicate line"
+                    >
+                      <Copy className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => remove(line.key)}
+                      className="text-error/60 hover:text-error hover:bg-error/10 p-2 rounded transition-colors"
+                      title="Remove line"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
 
                 {/* Part Number & Description Row */}
@@ -191,7 +215,7 @@ export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChang
                                   >
                                     <div className="flex items-center justify-between mb-1">
                                       <span className="font-mono font-bold text-primary text-sm">{item?.partNumber || 'N/A'}</span>
-                                      <span className="text-xs text-on-surface-variant/60">${(Number(item?.price) || 0).toFixed(2)}</span>
+                                      <span className="text-xs text-on-surface-variant/60">{fmtMoney(Number(item?.price) || 0, currency)}</span>
                                     </div>
                                     <div className="text-sm text-on-surface-variant truncate">{item?.name || item?.description || 'No description'}</div>
                                     <div className="text-xs text-on-surface-variant/60 mt-1">Stock: {item?.stockLevel || 0}</div>
@@ -261,7 +285,7 @@ export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChang
                   </div>
                 </div>
 
-                {/* Additional Options */}
+                {/* Additional Options: Account selector (PURCHASE) + Stock toggles */}
                 <div className="grid grid-cols-2 gap-3 pt-2 border-t border-outline-variant/20">
                   {mode === 'PURCHASE' && accounts && (
                     <div>
@@ -278,13 +302,31 @@ export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChang
                       </select>
                     </div>
                   )}
+                  {mode === 'SALES' && line.partNumber && (
+                    <div className="flex items-center justify-between gap-2 rounded-lg border border-outline-variant/40 bg-surface-container-low px-3 py-2.5">
+                      <div>
+                        <span className="block text-xs font-bold text-on-surface">Deduct stock</span>
+                        <span className="block text-[10px] text-outline">Remove from inventory on finalize</span>
+                      </div>
+                      <LineToggle checked={!!line.deductStock} onChange={(v) => update(line.key, { deductStock: v })} label="Deduct stock" />
+                    </div>
+                  )}
+                  {mode === 'PURCHASE' && line.partNumber && (
+                    <div className="flex items-center justify-between gap-2 rounded-lg border border-outline-variant/40 bg-surface-container-low px-3 py-2.5">
+                      <div>
+                        <span className="block text-xs font-bold text-on-surface">Receive stock</span>
+                        <span className="block text-[10px] text-outline">Add to inventory on finalize</span>
+                      </div>
+                      <LineToggle checked={!!line.receiveStock} onChange={(v) => update(line.key, { receiveStock: v })} label="Receive stock" />
+                    </div>
+                  )}
                 </div>
 
                 {/* Line Total */}
                 <div className="flex items-center justify-between p-3 bg-primary/5 rounded-lg border border-primary/10">
-                  <div className="text-sm text-on-surface-variant">Subtotal + Tax</div>
+                  <div className="text-sm text-on-surface-variant">Line Total</div>
                   <div className="text-right">
-                    <div className="text-xs text-on-surface-variant/60">{fmtMoney(t.base, currency)} + {fmtMoney(t.taxAmount, currency)}</div>
+                    <div className="text-xs text-on-surface-variant/60">{fmtMoney(t.base, currency)} + {fmtMoney(t.taxAmount, currency)} tax</div>
                     <div className="text-lg font-bold text-primary font-mono">{fmtMoney(t.lineTotal, currency)}</div>
                   </div>
                 </div>
@@ -309,17 +351,17 @@ export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChang
         <div className="bg-surface-container-high rounded-lg p-4 space-y-2 border border-outline-variant/40">
           <div className="flex justify-between items-center text-sm">
             <span className="text-on-surface-variant">Subtotal</span>
-            <span className="font-mono font-semibold">{fmtMoney(isWarrantyClaim ? 0 : subtotal, currency)}</span>
+            <span className="font-mono font-semibold">{fmtMoney(subtotal, currency)}</span>
           </div>
           <div className="flex justify-between items-center text-sm">
             <span className="text-on-surface-variant">Tax</span>
-            <span className="font-mono font-semibold text-primary">{fmtMoney(isWarrantyClaim ? 0 : taxTotal, currency)}</span>
+            <span className="font-mono font-semibold text-primary">{fmtMoney(taxTotal, currency)}</span>
           </div>
           <div className="flex justify-between items-center text-base border-t border-outline-variant/20 pt-2">
             <span className="font-bold text-on-surface">Total</span>
-            <span className="font-mono font-bold text-lg text-primary">{fmtMoney(isWarrantyClaim ? 0 : total, currency)}</span>
+            <span className="font-mono font-bold text-lg text-primary">{fmtMoney(total, currency)}</span>
           </div>
-          {isWarrantyClaim && <div className="text-xs text-on-surface-variant/60 italic pt-2">Warranty claim - pricing voided</div>}
+          {isWarrantyClaim && <div className="text-xs text-tertiary italic pt-2">Warranty claim — values are posted to the ledger normally; this flag is for reporting metadata only.</div>}
         </div>
       )}
     </div>
