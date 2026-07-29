@@ -48,12 +48,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
   });
 
   const toggleSection = (section: string) => {
-    setExpandedSections(prev => {
+    setExpandedSections((prev): Record<string, boolean> => {
       const isCurrentlyOpen = prev[section];
+      // Manufacturing is a sub-toggle nested within Projects — toggle independently
+      if (section === 'manufacturing') {
+        return { ...prev, manufacturing: !isCurrentlyOpen };
+      }
+      // Main sections: close all others, open the clicked one
       return {
         main: true,
-        manufacturing: section === 'manufacturing' && !isCurrentlyOpen,
         projects: section === 'projects' && !isCurrentlyOpen,
+        manufacturing: false,
         automation: section === 'automation' && !isCurrentlyOpen,
         quality: section === 'quality' && !isCurrentlyOpen,
       };
@@ -137,46 +142,50 @@ export const Sidebar: React.FC<SidebarProps> = ({
         ))}
 
         <button
-          onClick={() => toggleSection('manufacturing')}
-          className="w-full flex items-center justify-between px-2.5 py-1.5 mt-3 text-[10px] text-outline font-bold opacity-60 hover:opacity-100 transition-opacity"
-        >
-          <span>MANUFACTURING</span>
-          <ChevronDown className={`w-3 h-3 transition-transform ${expandedSections.manufacturing ? '' : '-rotate-90'}`} />
-        </button>
-        {expandedSections.manufacturing && manufacturingItems.map((item) => (
-          <button
-            key={item.id}
-            onClick={() => handleNavClick(item.id as ViewType)}
-            className={`w-full flex items-center px-2.5 py-1.5 rounded text-left transition-all text-[12px] ${currentView === item.id
-              ? 'text-primary font-bold border-l-4 border-primary bg-primary/10'
-              : 'text-on-surface-variant/80 hover:text-on-surface hover:bg-surface-variant/40'
-              }`}
-          >
-            <item.icon className="w-3.5 h-3.5 mr-2" />
-            <span>{item.label}</span>
-          </button>
-        ))}
-
-        <button
           onClick={() => toggleSection('projects')}
           className="w-full flex items-center justify-between px-2.5 py-1.5 mt-3 text-[10px] text-outline font-bold opacity-60 hover:opacity-100 transition-opacity"
         >
           <span>PROJECTS</span>
           <ChevronDown className={`w-3 h-3 transition-transform ${expandedSections.projects ? '' : '-rotate-90'}`} />
         </button>
-        {expandedSections.projects && projectItems.map((item) => (
-          <button
-            key={item.id}
-            onClick={() => handleNavClick(item.id as ViewType)}
-            className={`w-full flex items-center px-2.5 py-1.5 rounded text-left transition-all text-[12px] ${currentView === item.id
-              ? 'text-primary font-bold border-l-4 border-primary bg-primary/10'
-              : 'text-on-surface-variant/80 hover:text-on-surface hover:bg-surface-variant/40'
-              }`}
-          >
-            <item.icon className="w-3.5 h-3.5 mr-2" />
-            <span>{item.label}</span>
-          </button>
-        ))}
+        {expandedSections.projects && (
+          <>
+            {projectItems.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => handleNavClick(item.id as ViewType)}
+                className={`w-full flex items-center px-2.5 py-1.5 rounded text-left transition-all text-[12px] ${currentView === item.id
+                  ? 'text-primary font-bold border-l-4 border-primary bg-primary/10'
+                  : 'text-on-surface-variant/80 hover:text-on-surface hover:bg-surface-variant/40'
+                  }`}
+              >
+                <item.icon className="w-3.5 h-3.5 mr-2" />
+                <span>{item.label}</span>
+              </button>
+            ))}
+
+            <button
+              onClick={() => toggleSection('manufacturing')}
+              className="w-full flex items-center justify-between pl-5 pr-2.5 py-1.5 mt-1 text-[10px] text-outline font-bold opacity-60 hover:opacity-100 transition-opacity"
+            >
+              <span>MANUFACTURING</span>
+              <ChevronDown className={`w-3 h-3 transition-transform ${expandedSections.manufacturing ? '' : '-rotate-90'}`} />
+            </button>
+            {expandedSections.manufacturing && manufacturingItems.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => handleNavClick(item.id as ViewType)}
+                className={`w-full flex items-center pl-7 pr-2.5 py-1.5 rounded text-left transition-all text-[12px] ${currentView === item.id
+                  ? 'text-primary font-bold border-l-4 border-primary bg-primary/10'
+                  : 'text-on-surface-variant/80 hover:text-on-surface hover:bg-surface-variant/40'
+                  }`}
+              >
+                <item.icon className="w-3.5 h-3.5 mr-2" />
+                <span>{item.label}</span>
+              </button>
+            ))}
+          </>
+        )}
 
         <button
           onClick={() => toggleSection('automation')}
