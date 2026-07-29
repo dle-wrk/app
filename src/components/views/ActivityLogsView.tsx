@@ -292,7 +292,8 @@ export const ActivityLogsView: React.FC<ActivityLogsViewProps> = ({ currentUserE
                       <td className="px-lg py-sm font-mono text-[10px]">
                         {log.entity_type || '—'}
                       </td>
-                      <td className="px-lg py-sm font-mono text-[10px] truncate max-w-xs">
+                      {/* max-w-xs would resolve to --spacing-xs (4px) here — see index.css */}
+                      <td className="px-lg py-sm font-mono text-[10px] truncate max-w-[320px]">
                         {log.entity_id || '—'}
                       </td>
                       <td className="px-lg py-sm text-center">

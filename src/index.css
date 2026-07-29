@@ -343,6 +343,16 @@
   --spacing-lg: 24px;
   --spacing-xl: 32px;
 
+  /* WARNING: the five spacing keys above shadow Tailwind's size scale, and the
+     spacing value wins for width utilities. Measured in-app:
+         max-w-xs = 4px    max-w-sm = 8px    max-w-md = 16px
+         max-w-lg = 24px   max-w-xl = 32px
+     (max-w-2xl and larger are unaffected — those are not spacing keys.)
+     Defining --container-xs..xl here does NOT override it; Tailwind never emits
+     those vars because the utility already resolves against --spacing-*.
+     So never write max-w-md / min-w-lg / w-xl and expect a container width —
+     use an arbitrary value such as max-w-[448px], or an inline style. */
+
   /* Tailwind Core Injection Links */
   --color-on-primary-fixed: var(--on-primary-fixed);
   --color-on-tertiary-container: var(--on-tertiary-container);

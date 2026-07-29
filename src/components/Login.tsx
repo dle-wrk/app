@@ -31,7 +31,10 @@ export default function Login({ onLogin, isLoading = false }: LoginProps) {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-primary via-surface to-surface-container flex items-center justify-center p-4">
-      <div className="w-full max-w-sm md:max-w-md" style={{ maxWidth: '448px' }}>
+      {/* Arbitrary values, not max-w-sm/md: those resolve to --spacing-sm/md
+          (8px/16px) in this theme. The previous inline style masked that but
+          also forced 448px at every breakpoint, defeating the responsive step. */}
+      <div className="w-full max-w-[384px] md:max-w-[448px]">
         {/* Logo/Header */}
         <div className="text-center mb-12">
           <div className="flex items-center justify-center mb-6">

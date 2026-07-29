@@ -117,7 +117,7 @@ export default function App() {
       setCurrentUser(user);
       setIsAuthenticated(true);
       await logActivity({ userEmail: email, action: 'LOGIN', details: { role: user.role } });
-      triggerToast('Login successful', 'success');
+      triggerToast('Login successful', 'SUCCESS');
     } catch (err: any) {
       throw new Error(err.message || 'Login failed');
     } finally {
@@ -132,7 +132,7 @@ export default function App() {
     setCurrentUser(null);
     setIsAuthenticated(false);
     if (email) logActivity({ userEmail: email, action: 'LOGOUT' });
-    triggerToast('Logged out successfully', 'success');
+    triggerToast('Logged out successfully', 'SUCCESS');
   };
 
   // Advanced Filtering State Management
@@ -171,12 +171,19 @@ export default function App() {
   const [toastType, setToastType] = useState<'SUCCESS' | 'ERROR' | 'INFO'>('SUCCESS');
 
   /**
-   * Universal Toast trigger for system-wide notifications
+   * Universal Toast trigger for system-wide notifications.
+   * Accepts a loose string type (so callers may pass 'error'/'success'/'info'
+   * in any case) and normalizes it to the strict union the toast UI expects.
    */
-  const triggerToast = (message: string, type: 'SUCCESS' | 'ERROR' | 'INFO' = 'SUCCESS') => {
-    console.log('FRONTEND TOAST TRIGGERED:', message, type);
+  const triggerToast = (message: string, type: string = 'SUCCESS') => {
+    const normalized = type.toUpperCase();
+    const toastType: 'SUCCESS' | 'ERROR' | 'INFO' =
+      normalized === 'ERROR' ? 'ERROR' :
+      normalized === 'INFO' ? 'INFO' :
+      'SUCCESS';
+    console.log('FRONTEND TOAST TRIGGERED:', message, toastType);
     setToastMessage(message);
-    setToastType(type);
+    setToastType(toastType);
     setShowToast(true);
     setTimeout(() => setShowToast(false), 4000);
   };
@@ -693,7 +700,9 @@ export default function App() {
       status: 'ACTIVE',
       size: '',
       sizeMetric: '',
-      bulkPriceZar: 0.00
+      bulkPriceZar: 0.00,
+      packagingQuantity: 1,
+      packagingType: 'packet'
     });
     setShowAddModal(false);
 
