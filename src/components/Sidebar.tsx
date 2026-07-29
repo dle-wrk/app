@@ -41,6 +41,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     main: true,
+    stock: false,
     manufacturing: false,
     projects: false,
     automation: false,
@@ -58,6 +59,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       // Main sections: close all others, open the clicked one
       return {
         main: true,
+        stock: section === 'stock' && !isCurrentlyOpen,
         projects: section === 'projects' && !isCurrentlyOpen,
         manufacturing: false,
         automation: section === 'automation' && !isCurrentlyOpen,
@@ -68,12 +70,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'items', label: 'Items & Inventory', icon: Boxes },
     { id: 'stock_kits', label: 'Stock Tables', icon: TableProperties },
-    { id: 'reports_ledger', label: 'Reports & Ledger', icon: ArrowLeftRight },
     { id: 'pricing', label: 'Pricing Directory', icon: Tag },
     { id: 'suppliers', label: 'Suppliers', icon: Factory },
     { id: 'bookkeeping', label: 'Bookkeeping', icon: Receipt },
+  ] as const;
+
+  const stockItems = [
+    { id: 'items', label: 'Items & Inventory', icon: Boxes },
     { id: 'production_costs', label: 'Production Costs', icon: Calculator },
   ] as const;
 
@@ -140,6 +144,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
           >
             <item.icon className={`w-4 h-4 mr-2.5 transition-transform group-hover:scale-110 ${currentView === item.id ? 'text-primary' : 'text-on-surface-variant/50'}`} />
             <span className="text-[12px] tracking-tight">{item.label}</span>
+          </button>
+        ))}
+
+        <button
+          onClick={() => toggleSection('stock')}
+          className="w-full flex items-center justify-between px-2.5 py-1.5 mt-3 text-[10px] text-outline font-bold opacity-60 hover:opacity-100 transition-opacity"
+        >
+          <span>STOCK</span>
+          <ChevronDown className={`w-3 h-3 transition-transform ${expandedSections.stock ? '' : '-rotate-90'}`} />
+        </button>
+        {expandedSections.stock && stockItems.map((item) => (
+          <button
+            key={item.id}
+            onClick={() => handleNavClick(item.id as ViewType)}
+            className={`w-full flex items-center px-2.5 py-1.5 rounded text-left transition-all text-[12px] ${currentView === item.id
+              ? 'text-primary font-bold border-l-4 border-primary bg-primary/10'
+              : 'text-on-surface-variant/80 hover:text-on-surface hover:bg-surface-variant/40'
+              }`}
+          >
+            <item.icon className="w-3.5 h-3.5 mr-2" />
+            <span>{item.label}</span>
           </button>
         ))}
 
@@ -260,6 +285,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
             >
               <Activity className="w-3.5 h-3.5 mr-2" />
               <span>Activity Logs</span>
+            </button>
+
+            <button
+              onClick={() => handleNavClick('reports_ledger')}
+              className={`w-full flex items-center px-2.5 py-1.5 rounded text-left transition-all text-[12px] ${currentView === 'reports_ledger'
+                ? 'text-primary font-bold border-l-4 border-primary bg-primary/10'
+                : 'text-on-surface-variant/80 hover:text-on-surface hover:bg-surface-variant/40'
+                }`}
+            >
+              <ArrowLeftRight className="w-3.5 h-3.5 mr-2" />
+              <span>Reports & Ledger</span>
             </button>
           </>
         )}
