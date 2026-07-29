@@ -1241,7 +1241,11 @@ export function registerBookkeepingRoutes(app: Express) {
         const credit = parseFloat(r.total_credit) || 0;
         const net = Math.round((debit - credit) * 100) / 100;
         return { accountId: r.account_id, code: r.code, name: r.name, type: r.type, debit: net > 0 ? net : 0, credit: net < 0 ? -net : 0 };
-      });
+      })
+        // Drop accounts whose debits and credits cancel out. The SQL HAVING
+        // cannot exclude them because the net is only known after this mapping,
+        // so they reached the table as rows with both cells rendered blank.
+        .filter(r => r.debit !== 0 || r.credit !== 0);
       const totalDebit = Math.round(mapped.reduce((s, r) => s + r.debit, 0) * 100) / 100;
       const totalCredit = Math.round(mapped.reduce((s, r) => s + r.credit, 0) * 100) / 100;
       res.json({ asOf, rows: mapped, totalDebit, totalCredit, balanced: Math.abs(totalDebit - totalCredit) < 0.01 });
@@ -1317,6 +1321,13 @@ export function registerBookkeepingRoutes(app: Express) {
         else if (r.type === 'LIABILITY') liabilities.push({ accountId: r.account_id, code: r.code, name: r.name, amount: Math.round((credit - debit) * 100) / 100 });
         else equity.push({ accountId: r.account_id, code: r.code, name: r.name, amount: Math.round((credit - debit) * 100) / 100 });
       }
+
+      // Same reasoning as the trial balance: an account whose debits and credits
+      // cancel contributes nothing to the sheet and would render as a R0.00 row.
+      const dropZero = (arr: any[]) => arr.filter(r => Math.abs(r.amount) > 0.005);
+      assets.splice(0, assets.length, ...dropZero(assets));
+      liabilities.splice(0, liabilities.length, ...dropZero(liabilities));
+      equity.splice(0, equity.length, ...dropZero(equity));
 
       // Fold current year-to-date net income into equity as "Current Year Earnings" so the
       // sheet balances without requiring a formal period-close journal entry.
