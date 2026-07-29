@@ -8,7 +8,7 @@ export function mapDbRowToItem(record: any): Item {
   const partNumber = record['serial_number'] || '';
   const stockLevel = parseInt(record['stock'] || '0', 10) || 0;
   const lowStockLvl = parseInt(record['low_stock_lvl'] || '50', 10) || 50;
-  const price = parseFloat(record['current_cost_dollar'] || record['bulk_price_usd'] || '0') || 0.05;
+  const price = parseFloat(record['current_cost_dollar'] || record['bulk_price_usd'] || '0') || 0;
 
   // Use the database 'type' as primary category, fallback to SKU prefix only if missing
   let category = record['type'];

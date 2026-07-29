@@ -367,7 +367,7 @@ export default function App() {
   const [showBookInModal, setShowBookInModal] = useState<boolean>(false);
   const [bookInPartNumber, setBookInPartNumber] = useState<string>('');
   const [bookInDescription, setBookInDescription] = useState<string>('');
-  const [bookInCost, setBookInCost] = useState<number>(0.05);
+  const [bookInCost, setBookInCost] = useState<number>(0);
   const [bookInQty, setBookInQty] = useState<number>(100);
   const [bookInDiscontinued, setBookInDiscontinued] = useState<boolean>(false);
   const [bookInUpdateStandardCost, setBookInUpdateStandardCost] = useState<boolean>(false);
@@ -1125,9 +1125,8 @@ export default function App() {
       if (!price && cols[18]) {
         price = (parseFloat(cols[18]) || 0.0) / 18.0;
       }
-      if (price <= 0) {
-        price = 0.50;
-      }
+      // No phantom default — an item with no recorded cost contributes $0 to
+      // asset valuation, not a made-up $0.50 that inflates the total.
 
       // CSV_HEADER order: ... last_order_date(20); status(21); man_pn_1(22); man_pn_2(23) ...
       // cols[21] is the status column, not a manufacturer part number — reading it
@@ -1406,7 +1405,15 @@ export default function App() {
 
   // Totals calculations
   const totalItemsCount = items.length;
-  const totalValuation = items.reduce((acc, curr) => acc + (curr.stockLevel * curr.price), 0);
+  // Asset valuation: sum of (stock × unit cost) for items that are actually
+  // current assets — positive stock and not discontinued/booked-out. Negative
+  // stock indicates an over-issue (a data fault, not a negative asset), and
+  // DISCONTINUED/BOOKED OUT items are no longer held for use or sale.
+  const totalValuation = Math.round(
+    items
+      .filter(i => i.stockLevel > 0 && i.status !== 'DISCONTINUED' && i.status !== 'BOOKED OUT')
+      .reduce((acc, curr) => acc + curr.stockLevel * curr.price, 0) * 100
+  ) / 100;
 
   // Explicitly isolate warning levels (between 19 and 48 inclusive)
   const lowStockCount = items.filter(i => i.stockLevel >= 19 && i.stockLevel < 49).length;
