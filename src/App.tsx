@@ -1658,6 +1658,8 @@ export default function App() {
                     setEditingKit(kit);
                     setIsKitModalOpen(true);
                   }}
+                  items={items}
+                  transactions={transactions}
                 />
               );
             }
