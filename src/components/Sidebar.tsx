@@ -45,6 +45,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     projects: false,
     automation: false,
     quality: false,
+    admin: false,
   });
 
   const toggleSection = (section: string) => {
@@ -61,6 +62,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         manufacturing: false,
         automation: section === 'automation' && !isCurrentlyOpen,
         quality: section === 'quality' && !isCurrentlyOpen,
+        admin: section === 'admin' && !isCurrentlyOpen,
       };
     });
   };
@@ -229,31 +231,38 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </button>
         ))}
 
-        <div className="pt-3 px-2.5 mb-1 text-[10px] text-outline font-bold opacity-40">
-          ADMIN
-        </div>
-
         <button
-          onClick={() => handleNavClick('settings')}
-          className={`w-full flex items-center px-2.5 py-1.5 rounded text-left transition-all text-[12px] ${currentView === 'settings'
-            ? 'text-primary font-bold border-l-4 border-primary bg-primary/10'
-            : 'text-on-surface-variant/80 hover:text-on-surface hover:bg-surface-variant/40'
-            }`}
+          onClick={() => toggleSection('admin')}
+          className="w-full flex items-center justify-between px-2.5 py-1.5 mt-3 text-[10px] text-outline font-bold opacity-60 hover:opacity-100 transition-opacity"
         >
-          <Settings className="w-3.5 h-3.5 mr-2" />
-          <span>System Config</span>
+          <span>ADMIN</span>
+          <ChevronDown className={`w-3 h-3 transition-transform ${expandedSections.admin ? '' : '-rotate-90'}`} />
         </button>
+        {expandedSections.admin && (
+          <>
+            <button
+              onClick={() => handleNavClick('settings')}
+              className={`w-full flex items-center px-2.5 py-1.5 rounded text-left transition-all text-[12px] ${currentView === 'settings'
+                ? 'text-primary font-bold border-l-4 border-primary bg-primary/10'
+                : 'text-on-surface-variant/80 hover:text-on-surface hover:bg-surface-variant/40'
+                }`}
+            >
+              <Settings className="w-3.5 h-3.5 mr-2" />
+              <span>System Config</span>
+            </button>
 
-        <button
-          onClick={() => handleNavClick('activity-logs')}
-          className={`w-full flex items-center px-2.5 py-1.5 rounded text-left transition-all text-[12px] ${currentView === 'activity-logs'
-            ? 'text-primary font-bold border-l-4 border-primary bg-primary/10'
-            : 'text-on-surface-variant/80 hover:text-on-surface hover:bg-surface-variant/40'
-            }`}
-        >
-          <Activity className="w-3.5 h-3.5 mr-2" />
-          <span>Activity Logs</span>
-        </button>
+            <button
+              onClick={() => handleNavClick('activity-logs')}
+              className={`w-full flex items-center px-2.5 py-1.5 rounded text-left transition-all text-[12px] ${currentView === 'activity-logs'
+                ? 'text-primary font-bold border-l-4 border-primary bg-primary/10'
+                : 'text-on-surface-variant/80 hover:text-on-surface hover:bg-surface-variant/40'
+                }`}
+            >
+              <Activity className="w-3.5 h-3.5 mr-2" />
+              <span>Activity Logs</span>
+            </button>
+          </>
+        )}
       </nav>
 
       <div className="mt-auto px-sm pt-md border-t border-outline-variant/30 space-y-md">
