@@ -124,7 +124,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
         <div className="flex items-center gap-2">
           <span className="text-[10px] bg-primary/10 border border-primary/20 text-primary px-1.5 py-0.5 rounded-full font-black">
-            v2.5.0-PRO
+            v{__APP_VERSION__}-PRO
           </span>
           <span className="text-[10px] text-[#8c909f] font-bold">
             Data Captuiring

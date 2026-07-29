@@ -2,10 +2,19 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import path from 'path';
+import { readFileSync } from 'fs';
 import { spawn, execSync } from 'child_process';
+
+// Single source of truth for the app version: package.json. The sidebar badge
+// used to hard-code "v2.5.0-PRO" while package.json said 0.0.0, so the two
+// could (and did) drift apart.
+const pkgVersion = JSON.parse(readFileSync(path.resolve(__dirname, 'package.json'), 'utf8')).version;
 
 export default defineConfig(() => {
   return {
+    define: {
+      __APP_VERSION__: JSON.stringify(pkgVersion),
+    },
     plugins: [
       react(),
       tailwindcss(),
