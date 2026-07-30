@@ -10,6 +10,7 @@ import {
   AlertTriangle,
   Package,
   DollarSign,
+  Banknote,
   Activity,
   Boxes,
   Table2,
@@ -98,9 +99,18 @@ export const StockTablesView: React.FC<StockTablesViewProps> = ({
       0
     );
 
+    // Coverage for the bulk-pricing figure: it only sums items that actually
+    // carry a bulk_price_zar, so the card states how much of the stock it spans.
+    const stockedCount = items.filter(i => (i.stockLevel || 0) > 0).length;
+    const bulkPricedCount = items.filter(
+      i => (i.stockLevel || 0) > 0 && (i.bulkPriceZar || 0) > 0
+    ).length;
+
     return {
       totalInventoryValue,
       zarValue,
+      stockedCount,
+      bulkPricedCount,
       totalSkus,
       lowStockCount: lowStockItems.length,
       criticalCount: criticalStock.length,
@@ -239,13 +249,25 @@ export const StockTablesView: React.FC<StockTablesViewProps> = ({
           {/* ZAR Value */}
           <div className="bg-surface-container p-4 flex flex-col gap-1.5">
             <div className="flex items-center justify-between">
-              <DollarSign className="w-4 h-4 text-amber-400" />
+              {/* Not DollarSign — this card is rand. */}
+              <Banknote className="w-4 h-4 text-amber-400" />
               <span className="text-[9px] font-mono text-on-surface-variant/50 uppercase">ZAR</span>
             </div>
             <span className="text-lg font-black text-on-surface tracking-tight">
               R{formatCurrency(analytics.zarValue)}
             </span>
             <span className="text-[10px] text-on-surface-variant/60">Bulk Pricing Value</span>
+            {/* This sums bulk_price_zar, which most items do not have. Without
+                stating coverage it reads as a whole-inventory figure sitting
+                next to one, and looks wrong for being far smaller. */}
+            {analytics.bulkPricedCount < analytics.stockedCount && (
+              <span
+                className="text-[9px] text-amber-400/80"
+                title={`${analytics.stockedCount - analytics.bulkPricedCount} stocked items have no bulk price and contribute R0`}
+              >
+                {analytics.bulkPricedCount} of {analytics.stockedCount} stocked items priced
+              </span>
+            )}
           </div>
 
           {/* Total SKUs */}
