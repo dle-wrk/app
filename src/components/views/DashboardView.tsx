@@ -19,6 +19,8 @@ interface DashboardViewProps {
   okPercent: number;
   lowPercent: number;
   criticalPercent: number;
+  /** USD→ZAR conversion for the valuation card; null until loaded or if unset. */
+  fxRate?: { usdToZar: number | null; lastUpdated: string | null; ageDays: number | null; stale: boolean } | null;
   setView: (view: ViewType) => void;
 }
 
@@ -35,6 +37,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   okPercent,
   lowPercent,
   criticalPercent,
+  fxRate,
   setView
 }) => {
   return (
@@ -126,6 +129,32 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 ${Math.round(totalValuation).toLocaleString()}
               </span>
             </div>
+            {/* ZAR equivalent. Costs are stored in USD, so USD stays the primary
+                figure and the rand value is shown as a conversion with the rate
+                it used — a stale rate is flagged rather than quietly applied. */}
+            {fxRate?.usdToZar ? (
+              <div className="mt-1 flex items-baseline gap-1.5 flex-wrap">
+                <span className="text-sm font-bold text-tertiary">
+                  R{Math.round(totalValuation * fxRate.usdToZar).toLocaleString()}
+                </span>
+                <span className="text-[10px] text-outline">
+                  @ {fxRate.usdToZar.toFixed(2)}/USD
+                  {fxRate.lastUpdated ? ` · ${fxRate.lastUpdated}` : ''}
+                </span>
+                {fxRate.stale && (
+                  <span
+                    className="text-[9px] font-bold uppercase text-orange-400 bg-orange-500/10 border border-orange-500/20 px-1.5 py-0.5 rounded"
+                    title={fxRate.ageDays !== null ? `Rate is ${fxRate.ageDays} days old` : 'Rate age unknown'}
+                  >
+                    Stale rate
+                  </span>
+                )}
+              </div>
+            ) : (
+              <div className="mt-1 text-[10px] text-outline italic">
+                ZAR equivalent unavailable — no exchange rate stored.
+              </div>
+            )}
             <div className="mt-4">
               <svg className="w-full h-8 opacity-40 text-primary group-hover:opacity-80 transition-opacity" viewBox="0 0 60 20" preserveAspectRatio="none">
                 <path d={sparklineCoords} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />

@@ -594,6 +594,17 @@ export default function App() {
 
   // Sync animation handler
   const [syncRotated, setSyncRotated] = useState<boolean>(false);
+  // USD→ZAR rate for the dashboard valuation card. Loaded once; the endpoint
+  // reports the rate's age so a stale rate is shown as such rather than applied
+  // silently.
+  const [fxRate, setFxRate] = useState<{ usdToZar: number | null; lastUpdated: string | null; ageDays: number | null; stale: boolean } | null>(null);
+
+  useEffect(() => {
+    fetch('/api/exchange-rate')
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (d && !d.error) setFxRate(d); })
+      .catch(() => { /* card falls back to USD-only */ });
+  }, []);
 
   // Add Item handler
   const handleAddItem = async (e: React.FormEvent) => {
@@ -1602,6 +1613,7 @@ export default function App() {
                   setView={setView}
                   totalItemsCount={totalItemsCount}
                   totalValuation={totalValuation}
+                  fxRate={fxRate}
                   okPercent={okPercent}
                   lowPercent={lowPercent}
                   criticalPercent={criticalPercent}

@@ -4347,6 +4347,33 @@ app.get('/api/suppliers/performance', async (req, res) => {
   }
 });
 
+// Exchange rate. MUST be registered before the app.get('*') catch-all below —
+// Express matches in registration order, and these previously sat ~300 lines
+// after it, so every request was answered with index.html instead.
+app.get('/api/exchange-rate', async (_req, res) => {
+  try {
+    res.json(await readExchangeRate());
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/exchange-rate/update', async (_req, res) => {
+  try {
+    const refreshed = await updateExchangeRate();
+    const current = await readExchangeRate();
+    res.json({
+      ...current,
+      refreshed,
+      message: refreshed
+        ? 'Exchange rate refreshed.'
+        : 'Could not reach the rate provider; showing the last stored rate.',
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Serve index.html for all non-API routes (client-side routing)
 app.get('*', (_req, res) => {
   const indexPath = path.join(DIST_DIR, 'index.html');
@@ -4565,68 +4592,89 @@ async function runSchemaBootstrap() {
     console.log('Database bootstrapping complete.');
 }
 
-// Exchange Rate Management
-async function updateExchangeRate() {
+// ---------------------------------------------------------------------------
+// Exchange rate management
+//
+// Previously this wrote to a key ('exchange_rate_zar_usd') using SQLite's
+// datetime('now') and an updated_at column that does not exist on `settings`
+// (which is just key/value). Both the fetch path and its fallback therefore
+// threw on every boot, and the app silently fell back to a hard-coded 0.0526.
+// The rate the app actually uses lives under 'usd_to_zar_rate', so consolidate
+// on that pair of keys and store the fetch date alongside it.
+// ---------------------------------------------------------------------------
+const RATE_KEY = 'usd_to_zar_rate';
+const RATE_UPDATED_KEY = 'usd_to_zar_rate_updated';
+
+async function putSetting(key: string, value: string) {
+  await query(
+    `INSERT INTO settings (key, value) VALUES ($1, $2)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+    [key, value]
+  );
+}
+
+// Historic values were written JSON-encoded (e.g. "\"2026-07-15\""), so unwrap.
+function readSettingString(raw: string | undefined | null): string | null {
+  if (raw === undefined || raw === null || raw === '') return null;
   try {
-    // Fetch current ZAR to USD exchange rate from API
-    const response = await fetch('https://api.exchangerate-api.com/v4/latest/ZAR');
-    if (!response.ok) throw new Error('Failed to fetch exchange rate');
-
-    const data = await response.json();
-    const usdRate = data.rates?.USD || 0.053; // Fallback rate (1 ZAR ≈ 0.053 USD, or 1 USD = 18.87 ZAR)
-    const zarToUsd = parseFloat(usdRate.toFixed(4));
-
-    // Store in settings table
-    await exec(`INSERT INTO settings (key, value, updated_at)
-      VALUES ('exchange_rate_zar_usd', $1, datetime('now'))
-      ON CONFLICT(key) DO UPDATE SET value = $1, updated_at = datetime('now')`,
-      [zarToUsd.toString()]);
-
-    console.log(`Exchange rate updated: 1 ZAR = ${zarToUsd} USD (1 USD = ${(1/zarToUsd).toFixed(2)} ZAR)`);
-  } catch (err) {
-    console.error('Failed to update exchange rate:', (err as any).message);
-    // Use default rate on failure
-    try {
-      await exec(`INSERT INTO settings (key, value, updated_at)
-        VALUES ('exchange_rate_zar_usd', '0.0526', datetime('now'))
-        ON CONFLICT(key) DO UPDATE SET value = '0.0526'`);
-    } catch (e) {
-      console.error('Failed to set default exchange rate:', (e as any).message);
-    }
+    const parsed = JSON.parse(raw);
+    return typeof parsed === 'string' ? parsed : String(raw);
+  } catch {
+    return String(raw);
   }
 }
 
-// API endpoint to get current exchange rate
-app.get('/api/exchange-rate', async (_req, res) => {
-  try {
-    const row = await queryOne<{ value: string }>(`SELECT value FROM settings WHERE key = 'exchange_rate_zar_usd'`);
-    const rate = row ? parseFloat(row.value) : 0.0526;
-    // Return both ZAR to USD and USD to ZAR rates
-    res.json({
-      zarToUsd: rate,
-      usdToZar: parseFloat((1 / rate).toFixed(2)),
-      lastUpdated: new Date().toISOString()
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
+async function readExchangeRate() {
+  const rateRow = await queryOne<{ value: string }>(`SELECT value FROM settings WHERE key = $1`, [RATE_KEY]);
+  const dateRow = await queryOne<{ value: string }>(`SELECT value FROM settings WHERE key = $1`, [RATE_UPDATED_KEY]);
+  const usdToZar = rateRow ? parseFloat(readSettingString(rateRow.value) || '') : NaN;
+  const lastUpdated = dateRow ? readSettingString(dateRow.value) : null;
 
-// API endpoint to manually trigger exchange rate update
-app.post('/api/exchange-rate/update', async (_req, res) => {
-  await updateExchangeRate();
-  try {
-    const row = await queryOne<{ value: string }>(`SELECT value FROM settings WHERE key = 'exchange_rate_zar_usd'`);
-    const rate = row ? parseFloat(row.value) : 0.0526;
-    res.json({
-      zarToUsd: rate,
-      usdToZar: parseFloat((1 / rate).toFixed(2)),
-      message: 'Exchange rate updated successfully'
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
+  let ageDays: number | null = null;
+  if (lastUpdated) {
+    const t = new Date(lastUpdated).getTime();
+    if (Number.isFinite(t)) ageDays = Math.floor((Date.now() - t) / 86400000);
   }
-});
+
+  return {
+    usdToZar: Number.isFinite(usdToZar) ? usdToZar : null,
+    zarToUsd: Number.isFinite(usdToZar) && usdToZar !== 0 ? Number((1 / usdToZar).toFixed(6)) : null,
+    lastUpdated,
+    ageDays,
+    // Surfaced so the UI can warn instead of presenting a stale rate as current.
+    stale: ageDays === null || ageDays > 7,
+  };
+}
+
+async function updateExchangeRate() {
+  try {
+    const response = await fetch('https://api.exchangerate-api.com/v4/latest/ZAR');
+    if (!response.ok) throw new Error(`exchange rate API returned ${response.status}`);
+
+    const data = await response.json();
+    const zarToUsd = data.rates?.USD;
+    if (!zarToUsd || !Number.isFinite(zarToUsd) || zarToUsd <= 0) {
+      throw new Error('exchange rate API returned no usable USD rate');
+    }
+
+    const usdToZar = Number((1 / zarToUsd).toFixed(5));
+    await putSetting(RATE_KEY, String(usdToZar));
+    await putSetting(RATE_UPDATED_KEY, new Date().toISOString().slice(0, 10));
+    console.log(`Exchange rate updated: 1 USD = ${usdToZar} ZAR`);
+    return true;
+  } catch (err) {
+    // Deliberately do NOT overwrite a previously good rate with a hard-coded
+    // guess — a stale real rate beats a fabricated one, and readExchangeRate
+    // reports its age so the UI can flag it.
+    console.warn('Exchange rate refresh failed, keeping the stored rate:', (err as any).message);
+    return false;
+  }
+}
+
+// NOTE: the /api/exchange-rate routes are registered earlier in the file,
+// above the app.get('*') SPA catch-all. Registering them here (after it) meant
+// Express matched the catch-all first and served index.html instead, so the
+// endpoint returned HTML and the UI could never read a rate.
 
 async function bootstrap() {
   const PORT = parseInt(process.env.PORT || '3001', 10);
