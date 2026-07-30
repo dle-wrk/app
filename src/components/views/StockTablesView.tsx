@@ -35,6 +35,8 @@ interface StockTablesViewProps {
   onEditKit: (kit: ProductionKit) => void;
   items: Item[];
   transactions: Transaction[];
+  /** Same USD→ZAR rate the dashboard uses, so the two pages agree. */
+  fxRate?: { usdToZar: number | null; lastUpdated: string | null; ageDays: number | null; stale: boolean } | null;
 }
 
 // ── Schema definition for the visual explorer ──────────────────────────────
@@ -58,6 +60,7 @@ export const StockTablesView: React.FC<StockTablesViewProps> = ({
   onEditKit,
   items,
   transactions,
+  fxRate,
 }) => {
   const [tableSearch, setTableSearch] = useState('');
   const [showSchema, setShowSchema] = useState(false);
@@ -243,7 +246,15 @@ export const StockTablesView: React.FC<StockTablesViewProps> = ({
             <span className="text-lg font-black text-on-surface tracking-tight">
               ${formatCurrency(analytics.totalInventoryValue)}
             </span>
-            <span className="text-[10px] text-on-surface-variant/60">Total Inventory Value</span>
+            <span className="text-[10px] text-on-surface-variant/60">Total Inventory Value (at cost)</span>
+            {/* Same conversion the dashboard's Asset Valuation card shows, so the
+                two pages report the same rand figure for stock at cost. This is
+                distinct from Bulk Pricing Value, which is a resale measure. */}
+            {fxRate?.usdToZar ? (
+              <span className="text-[9px] text-on-surface-variant/50">
+                ≈ R{formatCurrency(analytics.totalInventoryValue * fxRate.usdToZar)} @ {fxRate.usdToZar.toFixed(2)}/USD
+              </span>
+            ) : null}
           </div>
 
           {/* ZAR Value */}
@@ -256,7 +267,7 @@ export const StockTablesView: React.FC<StockTablesViewProps> = ({
             <span className="text-lg font-black text-on-surface tracking-tight">
               R{formatCurrency(analytics.zarValue)}
             </span>
-            <span className="text-[10px] text-on-surface-variant/60">Bulk Pricing Value</span>
+            <span className="text-[10px] text-on-surface-variant/60">Bulk Pricing Value (resale)</span>
             {/* This sums bulk_price_zar, which most items do not have. Without
                 stating coverage it reads as a whole-inventory figure sitting
                 next to one, and looks wrong for being far smaller. */}

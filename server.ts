@@ -164,7 +164,19 @@ async function getDigikeyToken(): Promise<string> {
       grant_type: 'refresh_token',
     }),
   });
-  if (!res.ok) throw new Error(`DigiKey token refresh failed (${res.status}) — re-run "npm run digikey:authorize"`);
+  if (!res.ok) {
+    // A rejected refresh token is dead. getDigikeyRefreshToken prefers the
+    // pricing_tokens row over .env, so leaving the dead row in place shadowed
+    // any newly authorized token — re-running digikey:authorize appeared to do
+    // nothing. Drop the stored copy (and the in-process cache) so the next call
+    // re-seeds from .env.
+    if (res.status === 400 || res.status === 401) {
+      cachedDigikeyRefreshToken = null;
+      await query(`DELETE FROM pricing_tokens WHERE provider = 'digikey'`).catch(() => {});
+      console.warn('[DIGIKEY] refresh token rejected; cleared the stored copy so .env can re-seed it.');
+    }
+    throw new Error(`DigiKey token refresh failed (${res.status}) — re-run "npm run digikey:authorize"`);
+  }
   const data: any = await res.json();
   digikeyAccessToken = { token: data.access_token, expiresAt: Date.now() + data.expires_in * 1000 };
   if (data.refresh_token && data.refresh_token !== refreshToken) {

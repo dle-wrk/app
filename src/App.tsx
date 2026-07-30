@@ -1672,6 +1672,7 @@ export default function App() {
                   }}
                   items={items}
                   transactions={transactions}
+                  fxRate={fxRate}
                 />
               );
             }
