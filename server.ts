@@ -435,6 +435,38 @@ const LcscImportItemSchema = z.object({
   url: z.string().optional(),
 });
 
+// Which manufacturer part numbers already have a cached price at a given
+// quantity, and how old it is. The bulk wizard uses this to leave freshly
+// priced parts out of the next run instead of spending API calls re-asking.
+app.get('/api/pricing/cache-status', async (req, res) => {
+  const qty = Math.max(1, Math.min(1_000_000, parseInt(String(req.query.qty || '1000'), 10) || 1000));
+  const maxAgeDays = Math.max(0, parseFloat(String(req.query.maxAgeDays || '30')) || 30);
+  try {
+    const { rows } = await query(
+      `SELECT part_number,
+              MAX(created_at) AS cached_at,
+              EXTRACT(EPOCH FROM (now() - MAX(created_at))) / 86400 AS age_days
+         FROM pricing_cache
+        WHERE qty = $1
+        GROUP BY part_number`,
+      [qty]
+    );
+    const fresh: Record<string, { cachedAt: string; ageDays: number }> = {};
+    let stale = 0;
+    for (const r of rows as any[]) {
+      const ageDays = Number(r.age_days);
+      if (ageDays <= maxAgeDays) {
+        fresh[r.part_number] = { cachedAt: r.cached_at, ageDays: Number(ageDays.toFixed(2)) };
+      } else {
+        stale++;
+      }
+    }
+    res.json({ qty, maxAgeDays, freshCount: Object.keys(fresh).length, staleCount: stale, fresh });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/pricing/lcsc/import', async (req, res) => {
   const authHeader = req.headers.authorization || '';
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';

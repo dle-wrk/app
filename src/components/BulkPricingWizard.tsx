@@ -31,6 +31,10 @@ interface FetchedPrice {
 
 const QTY_OPTIONS = [1, 10, 100, 1000];
 
+// Supplier prices are held for 30 days. A part priced inside that window is not
+// re-queried and does not appear in the list — it only returns once stale.
+const CACHE_DAYS = 30;
+
 // Reads the live /api/pricing/search response and picks the best price for a given part,
 // preferring the supplier the part is classified under, then falling back to any provider
 // that returned a real unit price.
@@ -63,6 +67,24 @@ export default function BulkPricingWizard({ items, onUpdatePrices, onShowNotific
   const [progress, setProgress] = useState<{ done: number; total: number; current: string }>({ done: 0, total: 0, current: '' });
   const [fetched, setFetched] = useState<Record<string, FetchedPrice>>({});
   const [selectedItems, setSelectedItems] = useState<Record<string, boolean>>({});
+  // Parts already priced inside the 30-day cache window, keyed by MFN. These are
+  // hidden from the list and excluded from queries until the cache goes stale,
+  // so applying live rates does not mean re-paying for the same lookups.
+  const [cachedMfns, setCachedMfns] = useState<Record<string, { cachedAt: string; ageDays: number }>>({});
+  const [showCached, setShowCached] = useState(false);
+
+  const loadCacheStatus = React.useCallback(async () => {
+    try {
+      const res = await fetch(`/api/pricing/cache-status?qty=${targetQty}&maxAgeDays=${CACHE_DAYS}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      setCachedMfns(data.fresh || {});
+    } catch {
+      // Non-fatal: without cache status everything simply shows as unqueried.
+    }
+  }, [targetQty]);
+
+  React.useEffect(() => { loadCacheStatus(); }, [loadCacheStatus]);
 
   // 1. Identify parts with Manufacturer Part Numbers (MFN) — those are what the APIs can price.
   const mfnItems = useMemo(() => {
@@ -115,16 +137,31 @@ export default function BulkPricingWizard({ items, onUpdatePrices, onShowNotific
     return scored.sort((a, b) => (b.score !== a.score ? b.score - a.score : (a.item.partNumber || '').localeCompare(b.item.partNumber || '')));
   }, [mfnItems]);
 
+  // Parts whose price is still inside the cache window. Hidden by default so the
+  // list only shows work that actually needs doing.
+  const isCachedFresh = React.useCallback(
+    (mfnPn: string) => Boolean(cachedMfns[mfnPn]) && !fetched[mfnPn],
+    [cachedMfns, fetched]
+  );
+
   const filteredClassified = useMemo(() => {
     const cleanSearch = searchTerm.toLowerCase().trim();
-    if (!cleanSearch) return classifiedItems;
-    return classifiedItems.filter(entry =>
+    const bySearch = !cleanSearch ? classifiedItems : classifiedItems.filter(entry =>
       (entry.item.partNumber || '').toLowerCase().includes(cleanSearch) ||
       (entry.item.name || '').toLowerCase().includes(cleanSearch) ||
       entry.mfnPn.toLowerCase().includes(cleanSearch) ||
       entry.supplierName.toLowerCase().includes(cleanSearch)
     );
-  }, [classifiedItems, searchTerm]);
+    if (showCached) return bySearch;
+    // Keep a row visible if it was priced in this session, so results stay on
+    // screen after a query instead of vanishing as soon as they are cached.
+    return bySearch.filter(e => !cachedMfns[e.mfnPn] || fetched[e.item.partNumber]);
+  }, [classifiedItems, searchTerm, showCached, cachedMfns, fetched]);
+
+  const cachedHiddenCount = useMemo(
+    () => classifiedItems.filter(e => cachedMfns[e.mfnPn] && !fetched[e.item.partNumber]).length,
+    [classifiedItems, cachedMfns, fetched]
+  );
 
   const selectedCount = useMemo(() => Object.keys(selectedItems).filter(k => selectedItems[k]).length, [selectedItems]);
 
@@ -150,7 +187,9 @@ export default function BulkPricingWizard({ items, onUpdatePrices, onShowNotific
       const entry = targets[i];
       setProgress({ done: i, total: targets.length, current: entry.item.partNumber });
       try {
-        const res = await fetch(`/api/pricing/search?partNumber=${encodeURIComponent(entry.mfnPn)}&qty=${targetQty}`);
+        // 30-day window: a part priced recently is served from cache and costs
+        // no supplier API call.
+        const res = await fetch(`/api/pricing/search?partNumber=${encodeURIComponent(entry.mfnPn)}&qty=${targetQty}&maxAgeDays=${CACHE_DAYS}`);
         const data = await res.json();
         next[entry.item.partNumber] = pickProviderPrice(entry, data);
       } catch {
@@ -164,8 +203,10 @@ export default function BulkPricingWizard({ items, onUpdatePrices, onShowNotific
 
     setProgress({ done: targets.length, total: targets.length, current: '' });
     setIsQuerying(false);
+    // Newly cached parts drop out of the list on the next load of this status.
+    await loadCacheStatus();
     const priced = targets.filter(t => next[t.item.partNumber]?.price != null).length;
-    onShowNotification(`Live pricing complete — ${priced} of ${targets.length} parts priced from Mouser / DigiKey / LCSC.`);
+    onShowNotification(`Live pricing complete — ${priced} of ${targets.length} parts priced from Mouser / DigiKey / LCSC. Cached for ${CACHE_DAYS} days.`);
   };
 
   const handleApplySelectedBulkPrices = () => {
@@ -276,6 +317,24 @@ export default function BulkPricingWizard({ items, onUpdatePrices, onShowNotific
             className="w-full pl-lg pr-sm py-1.5 bg-surface-container-high border border-outline-variant rounded-lg text-xs outline-none focus:border-primary transition-all text-on-surface"
           />
         </div>
+
+        {/* Cached parts are hidden rather than silently dropped — say how many
+            and let the list be opened up again. */}
+        {cachedHiddenCount > 0 && (
+          <div className="flex items-center gap-2 text-[10px] text-on-surface-variant/70 -mt-1">
+            <span>
+              {cachedHiddenCount} part{cachedHiddenCount === 1 ? '' : 's'} hidden — priced within the last {CACHE_DAYS} days
+              {showCached ? ' (shown)' : ''}
+            </span>
+            <button
+              type="button"
+              onClick={() => setShowCached(v => !v)}
+              className="px-1.5 py-0.5 rounded border border-outline-variant hover:border-primary hover:text-primary transition-colors"
+            >
+              {showCached ? 'Hide cached' : 'Show cached'}
+            </button>
+          </div>
+        )}
 
         <div className="bg-primary/5 border border-primary/20 text-primary text-[11px] rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
           <Lock className="w-3.5 h-3.5 text-primary shrink-0" />
@@ -389,7 +448,14 @@ export default function BulkPricingWizard({ items, onUpdatePrices, onShowNotific
                       ) : f?.error ? (
                         <span className="inline-flex items-center gap-1 text-outline text-[10px] font-normal" title={f.error}><AlertCircle className="w-3 h-3 shrink-0" /> {f.error}</span>
                       ) : (
-                        <span className="text-outline text-[11px]">not queried</span>
+                        isCachedFresh(mfnPn) ? (
+                          <span
+                            className="text-[10px] text-green-400/80"
+                            title={`Priced ${cachedMfns[mfnPn].ageDays.toFixed(1)} days ago — re-queried after ${CACHE_DAYS} days`}
+                          >
+                            cached {Math.round(cachedMfns[mfnPn].ageDays)}d ago
+                          </span>
+                        ) : <span className="text-outline text-[11px]">not queried</span>
                       )}
                     </td>
                   </tr>
