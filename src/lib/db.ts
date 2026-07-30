@@ -196,6 +196,21 @@ async function ensurePricingTables() {
     count INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (provider, usage_date)
   )`);
+  // 24-hour response cache for the live DigiKey/Mouser lookups. This table was
+  // read and written by /api/pricing/search but never created anywhere, so every
+  // lookup failed with 'relation "pricing_cache" does not exist' before it ever
+  // reached the supplier API (the usage counter never even incremented).
+  // `data` is TEXT, not JSONB: the read path calls JSON.parse(cached.data), and
+  // a JSONB column comes back already-parsed, which would throw.
+  await exec(`CREATE TABLE IF NOT EXISTS pricing_cache (
+    provider TEXT NOT NULL,
+    part_number TEXT NOT NULL,
+    qty INTEGER NOT NULL DEFAULT 1,
+    data TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    PRIMARY KEY (provider, part_number, qty)
+  )`);
+  await exec(`CREATE INDEX IF NOT EXISTS pricing_cache_lookup_idx ON pricing_cache (provider, part_number, qty, created_at DESC)`).catch(() => {});
   await exec(`CREATE TABLE IF NOT EXISTS lcsc_price_cache (
     part_number TEXT PRIMARY KEY,
     mpn TEXT,
