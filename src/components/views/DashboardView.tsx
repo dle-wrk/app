@@ -14,7 +14,7 @@ interface DashboardViewProps {
   criticalCount: number;
   totalValuation: number;
   sparklineCoords: string;
-  categoryCounts: { cat: string; count: number }[];
+  categoryCounts: { cat: string; count: number, skuCount: any }[];
   maxCategoryCount: number;
   okPercent: number;
   lowPercent: number;
