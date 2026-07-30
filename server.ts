@@ -316,10 +316,20 @@ app.get('/api/pricing/usage', async (_req, res) => {
   }
 });
 
+// Cache lifetime for a supplier response. Interactive lookups want something
+// close to live; the bulk refresh deliberately reuses much older entries so a
+// re-run costs no API calls.
+const PRICING_CACHE_DEFAULT_MS = 24 * 60 * 60 * 1000;
+const PRICING_CACHE_BULK_MS = 30 * 24 * 60 * 60 * 1000;
+
 app.get('/api/pricing/search', async (req, res) => {
   const partNumber = String(req.query.partNumber || '').trim();
   if (!partNumber) return res.status(400).json({ error: 'partNumber is required' });
   const qty = Math.max(1, Math.min(1_000_000, parseInt(String(req.query.qty || '1'), 10) || 1));
+  const maxAgeDays = parseFloat(String(req.query.maxAgeDays || ''));
+  const maxAgeMs = Number.isFinite(maxAgeDays) && maxAgeDays > 0
+    ? maxAgeDays * 24 * 60 * 60 * 1000
+    : PRICING_CACHE_DEFAULT_MS;
 
   const results: any = { partNumber, qty };
 
@@ -333,8 +343,9 @@ app.get('/api/pricing/search', async (req, res) => {
         `SELECT * FROM pricing_cache WHERE provider = 'digikey' AND part_number = $1 AND qty = $2 ORDER BY created_at DESC LIMIT 1`,
         [partNumber, qty]
       );
-      if (cached && new Date().getTime() - new Date(cached.created_at).getTime() < 86400000) {
+      if (cached && new Date().getTime() - new Date(cached.created_at).getTime() < maxAgeMs) {
         results.digikey = JSON.parse(cached.data);
+        results.digikeyCached = true;
       } else if ((await getPricingUsage('digikey')) >= PRICING_DAILY_LIMIT) {
         results.digikey = { error: 'Daily limit reached' };
       } else {
@@ -361,8 +372,9 @@ app.get('/api/pricing/search', async (req, res) => {
         `SELECT * FROM pricing_cache WHERE provider = 'mouser' AND part_number = $1 AND qty = $2 ORDER BY created_at DESC LIMIT 1`,
         [partNumber, qty]
       );
-      if (cached && new Date().getTime() - new Date(cached.created_at).getTime() < 86400000) {
+      if (cached && new Date().getTime() - new Date(cached.created_at).getTime() < maxAgeMs) {
         results.mouser = JSON.parse(cached.data);
+        results.mouserCached = true;
       } else if ((await getPricingUsage('mouser')) >= PRICING_DAILY_LIMIT) {
         results.mouser = { error: 'Daily limit reached' };
       } else {
@@ -431,6 +443,200 @@ app.post('/api/pricing/lcsc/import', async (req, res) => {
     );
   }
   res.json({ ok: true, imported: parsed.data.length });
+});
+
+// ---------------------------------------------------------------------------
+// Bulk price refresh
+//
+// Populates inventory.bulk_price_zar from the supplier APIs. Results are cached
+// for 30 days (PRICING_CACHE_BULK_MS), so re-running costs no API calls for
+// parts already looked up — the cache is the point, not an optimisation.
+//
+// Only parts carrying a manufacturer/distributor part number can be searched;
+// the rest are reported as skipped rather than silently ignored. Defaults to a
+// dry run so a caller must opt in to writing to the inventory table.
+// ---------------------------------------------------------------------------
+async function cachedProviderLookup(
+  provider: 'digikey' | 'mouser',
+  partNumber: string,
+  qty: number,
+  maxAgeMs: number
+): Promise<{ result: any; fromCache: boolean; calledApi: boolean }> {
+  const cached = await queryOne<any>(
+    `SELECT * FROM pricing_cache WHERE provider = $1 AND part_number = $2 AND qty = $3 ORDER BY created_at DESC LIMIT 1`,
+    [provider, partNumber, qty]
+  );
+  if (cached && Date.now() - new Date(cached.created_at).getTime() < maxAgeMs) {
+    try {
+      return { result: JSON.parse(cached.data), fromCache: true, calledApi: false };
+    } catch {
+      // fall through and re-fetch on unparseable cache content
+    }
+  }
+
+  if ((await getPricingUsage(provider)) >= PRICING_DAILY_LIMIT) {
+    return { result: { error: 'Daily limit reached' }, fromCache: false, calledApi: false };
+  }
+
+  // Contain per-provider failures: an expired DigiKey token used to throw all
+  // the way out and abort the whole bulk run, losing the Mouser results too.
+  let result: any;
+  try {
+    result = provider === 'digikey'
+      ? (await searchDigikey(partNumber, qty)) ?? { error: 'No match found' }
+      : (await searchMouser(partNumber, qty)) ?? { error: 'No match found' };
+  } catch (err: any) {
+    // Don't cache a transport/auth failure — it is not a fact about the part.
+    return { result: { error: err.message }, fromCache: false, calledApi: false };
+  }
+
+  await incrementPricingUsage(provider);
+  await query(
+    `INSERT INTO pricing_cache (provider, part_number, qty, data, created_at)
+     VALUES ($1, $2, $3, $4, now())
+     ON CONFLICT (provider, part_number, qty) DO UPDATE SET data = EXCLUDED.data, created_at = now()`,
+    [provider, partNumber, qty, JSON.stringify(result)]
+  );
+  return { result, fromCache: false, calledApi: true };
+}
+
+app.post('/api/pricing/bulk-refresh', async (req, res) => {
+  const body = req.body || {};
+  const qty = Math.max(1, Math.min(1_000_000, parseInt(String(body.qty ?? 1000), 10) || 1000));
+  const limit = Math.max(1, Math.min(1000, parseInt(String(body.limit ?? 250), 10) || 250));
+  const dryRun = body.dryRun !== false; // write only when explicitly dryRun:false
+  const onlyMissing = body.onlyMissing !== false;
+  const maxAgeMs = PRICING_CACHE_BULK_MS;
+  // Above this USD unit price a result is held back for review rather than
+  // written. Most of this catalogue is passives costing well under a dollar.
+  const suspiciousAboveUsd = Number.isFinite(Number(body.suspiciousAboveUsd))
+    ? Number(body.suspiciousAboveUsd)
+    : 50;
+
+  try {
+    const fx = await readExchangeRate();
+    if (!fx.usdToZar) {
+      return res.status(400).json({ error: 'No USD→ZAR rate stored; refresh the exchange rate before running a bulk price check.' });
+    }
+
+    const hasMpn = `(COALESCE(NULLIF(TRIM(man_pn_1),''),'') <> '' AND UPPER(TRIM(man_pn_1)) <> 'N/A')`;
+    const noZar = `COALESCE(NULLIF(bulk_price_zar::text,'')::numeric,0) = 0`;
+    const { rows: candidates } = await query(
+      `SELECT serial_number, man_pn_1, stock FROM inventory
+       WHERE deleted != true AND stock > 0 ${onlyMissing ? `AND ${noZar}` : ''} AND ${hasMpn}
+       ORDER BY stock DESC LIMIT $1`,
+      [limit]
+    );
+
+    const { rows: skippedRows } = await query(
+      `SELECT COUNT(*)::int AS c FROM inventory
+       WHERE deleted != true AND stock > 0 ${onlyMissing ? `AND ${noZar}` : ''} AND NOT ${hasMpn}`
+    );
+
+    const updated: any[] = [];
+    const noPrice: any[] = [];
+    const flagged: any[] = [];
+    let apiCalls = 0;
+    let cacheHits = 0;
+
+    for (const item of candidates as any[]) {
+      const mpn = String(item.man_pn_1).trim();
+      const [dk, mo] = [
+        await cachedProviderLookup('digikey', mpn, qty, maxAgeMs),
+        await cachedProviderLookup('mouser', mpn, qty, maxAgeMs),
+      ];
+      apiCalls += (dk.calledApi ? 1 : 0) + (mo.calledApi ? 1 : 0);
+      cacheHits += (dk.fromCache ? 1 : 0) + (mo.fromCache ? 1 : 0);
+
+      // These suppliers do a KEYWORD search and return the first hit, which is
+      // not guaranteed to be the part asked for. String-matching the result
+      // against the stored code does not work either: the stored values are
+      // mangled distributor hybrids (e.g. '311-100KLRDKR-ND' carries Mouser's
+      // 311- prefix and DigiKey's -ND suffix) that legitimately resolve to a
+      // different manufacturer MPN. So always report what was matched, and flag
+      // implausible prices for review rather than trusting the string.
+      const toZar = (raw: any, provider: string) => {
+        const price = Number(raw?.unitPrice);
+        if (!Number.isFinite(price) || price <= 0) return null;
+        // The price string carries its own currency symbol; a ZAR-denominated
+        // account gets 'R' back, and converting that again would inflate it ~17x.
+        const sym = String(raw?.currency ?? '').toUpperCase();
+        const isZar = sym.includes('R') && !sym.includes('$');
+        const usdEquivalent = isZar ? price / fx.usdToZar! : price;
+        const zarValue = isZar ? price : price * fx.usdToZar!;
+        return {
+          provider,
+          native: price,
+          currency: isZar ? 'ZAR' : 'USD',
+          usdEquivalent: Number(usdEquivalent.toFixed(4)),
+          zar: Number(zarValue.toFixed(4)),
+          matchedPart: raw?.partNumber ?? null,
+          matchedManufacturer: raw?.manufacturer ?? null,
+        };
+      };
+
+      const offers = [toZar(dk.result, 'digikey'), toZar(mo.result, 'mouser')].filter(Boolean) as any[];
+
+      if (!offers.length) {
+        noPrice.push({
+          partNumber: item.serial_number,
+          mpn,
+          reason: dk.result?.error || mo.result?.error || 'No price returned',
+        });
+        continue;
+      }
+
+      const best = offers.reduce((a, b) => (b.zar < a.zar ? b : a));
+      // A passive component priced above this is almost certainly a bad keyword
+      // match rather than a real cost — surface it instead of writing silently.
+      const suspicious = best.usdEquivalent > suspiciousAboveUsd;
+
+      if (suspicious) {
+        flagged.push({
+          partNumber: item.serial_number, mpn,
+          matchedPart: best.matchedPart, matchedManufacturer: best.matchedManufacturer,
+          provider: best.provider, native: best.native, currency: best.currency,
+          usdEquivalent: best.usdEquivalent, zar: best.zar,
+          reason: `Unit price ${best.usdEquivalent} USD exceeds the ${suspiciousAboveUsd} USD review threshold — likely a keyword mismatch.`,
+        });
+        continue;
+      }
+
+      if (!dryRun) {
+        await query(`UPDATE inventory SET bulk_price_zar = $1 WHERE serial_number = $2`, [best.zar, item.serial_number]);
+      }
+      updated.push({
+        partNumber: item.serial_number, mpn, provider: best.provider,
+        matchedPart: best.matchedPart, matchedManufacturer: best.matchedManufacturer,
+        native: best.native, currency: best.currency, zar: best.zar,
+      });
+    }
+
+    res.json({
+      dryRun,
+      qty,
+      rateUsed: fx.usdToZar,
+      rateDate: fx.lastUpdated,
+      cacheDays: Math.round(maxAgeMs / 86400000),
+      candidates: candidates.length,
+      priced: updated.length,
+      flaggedForReview: flagged.length,
+      noPriceFound: noPrice.length,
+      skippedNoPartNumber: skippedRows[0]?.c ?? 0,
+      suspiciousAboveUsd,
+      apiCalls,
+      cacheHits,
+      updated: updated.slice(0, 100),
+      flagged: flagged.slice(0, 50),
+      noPrice: noPrice.slice(0, 50),
+      note: dryRun
+        ? 'Dry run — nothing written. Re-send with {"dryRun": false} to apply.'
+        : `Wrote bulk_price_zar for ${updated.length} item(s).`,
+    });
+  } catch (err: any) {
+    console.error('[BULK PRICING] failed:', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // --- Production Costs catalog (finished products: cost vs selling price vs margin) ---
