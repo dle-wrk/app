@@ -6,6 +6,7 @@ import path from 'path';
 import { existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 import cron from 'node-cron';
+import { createHmac } from 'node:crypto';
 import { pool, query, queryOne, exec, ensureSchema, close } from './src/lib/db';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -114,6 +115,135 @@ async function incrementPricingUsage(provider: string): Promise<number> {
   return row!.count;
 }
 
+// ---------------------------------------------------------------------------
+// Provider configuration & DB-backed API key management
+//
+// API keys live in the `pricing_api_keys` table so they can be managed from the
+// Pricing UI. The server reads from the DB first and falls back to process.env
+// (the .env file) for backwards compatibility — existing deployments keep working
+// without migrating, and the UI can override .env values at any time.
+// ---------------------------------------------------------------------------
+
+interface PricingFieldConfig {
+  name: string;
+  label: string;
+  envVar: string;
+  type: 'text' | 'password';
+  required?: boolean;
+  help?: string;
+}
+
+interface PricingProviderConfig {
+  provider: string;
+  label: string;
+  description: string;
+  fields: PricingFieldConfig[];
+}
+
+const PRICING_PROVIDERS: PricingProviderConfig[] = [
+  {
+    provider: 'digikey',
+    label: 'DigiKey',
+    description: 'OAuth2 client_credentials (falls back to 3-legged refresh token).',
+    fields: [
+      { name: 'client_id', label: 'Client ID', envVar: 'DIGIKEY_CLIENT_ID', type: 'text', required: true },
+      { name: 'client_secret', label: 'Client Secret', envVar: 'DIGIKEY_CLIENT_SECRET', type: 'password', required: true },
+      { name: 'redirect_uri', label: 'Redirect URI', envVar: 'DIGIKEY_REDIRECT_URI', type: 'text' },
+      { name: 'refresh_token', label: 'Refresh Token', envVar: 'DIGIKEY_REFRESH_TOKEN', type: 'password', help: 'Only needed for 3-legged OAuth. Run "npm run digikey:authorize" to mint one.' },
+      { name: 'locale_site', label: 'Locale Site', envVar: 'DIGIKEY_LOCALE_SITE', type: 'text' },
+      { name: 'locale_language', label: 'Locale Language', envVar: 'DIGIKEY_LOCALE_LANGUAGE', type: 'text' },
+      { name: 'locale_currency', label: 'Locale Currency', envVar: 'DIGIKEY_LOCALE_CURRENCY', type: 'text' },
+      { name: 'locale_ship_to_country', label: 'Ship-to Country', envVar: 'DIGIKEY_LOCALE_SHIP_TO_COUNTRY', type: 'text' },
+    ],
+  },
+  {
+    provider: 'mouser',
+    label: 'Mouser',
+    description: 'Simple API key authentication.',
+    fields: [
+      { name: 'api_key', label: 'API Key', envVar: 'MOUSER_API_KEY', type: 'password', required: true },
+    ],
+  },
+  {
+    provider: 'lcsc',
+    label: 'LCSC',
+    description: 'Live lookup needs no key. Import token protects the bulk-import endpoint.',
+    fields: [
+      { name: 'import_token', label: 'Import Token', envVar: 'LCSC_IMPORT_TOKEN', type: 'password' },
+    ],
+  },
+  {
+    provider: 'nexar',
+    label: 'Nexar (Octopart)',
+    description: 'Aggregator covering Arrow, Heilind, Avnet, TME, RS Components, and more.',
+    fields: [
+      { name: 'api_key', label: 'API Key (Client ID)', envVar: 'NEXAR_API_KEY', type: 'text', required: true },
+      { name: 'api_secret', label: 'API Secret', envVar: 'NEXAR_API_SECRET', type: 'password', required: true },
+    ],
+  },
+  {
+    provider: 'element14',
+    label: 'Element14 / Farnell',
+    description: 'Free API key from https://partner.element14.com/',
+    fields: [
+      { name: 'api_key', label: 'API Key', envVar: 'ELEMENT14_API_KEY', type: 'password', required: true },
+      { name: 'store_id', label: 'Store ID', envVar: 'ELEMENT14_STORE_ID', type: 'text', help: 'Full store domain, e.g. uk.farnell.com (default), us.newark.com, de.farnell.com. There is no ZA store — South Africa uses the UK catalogue, priced in GBP.' },
+    ],
+  },
+  {
+    provider: 'tme',
+    label: 'TME',
+    description: 'HMAC-SHA1 signed requests. Get credentials at https://developers.tme.eu/',
+    fields: [
+      { name: 'api_key', label: 'API Key', envVar: 'TME_API_KEY', type: 'text', required: true },
+      { name: 'api_secret', label: 'API Secret', envVar: 'TME_API_SECRET', type: 'password', required: true },
+    ],
+  },
+];
+
+// In-memory cache of DB-stored credentials, keyed by provider. Invalidated on write
+// so a key saved from the UI is visible immediately without a server restart.
+const pricingKeyCache = new Map<string, Record<string, string>>();
+
+function invalidatePricingKeyCache(provider?: string): void {
+  if (provider) {
+    pricingKeyCache.delete(provider);
+  } else {
+    pricingKeyCache.clear();
+  }
+}
+
+async function loadProviderCredentials(provider: string): Promise<Record<string, string>> {
+  if (pricingKeyCache.has(provider)) return pricingKeyCache.get(provider)!;
+  const row = await queryOne<{ credentials: Record<string, string> }>(
+    `SELECT credentials FROM pricing_api_keys WHERE provider = $1`,
+    [provider]
+  );
+  const creds = row?.credentials ?? {};
+  pricingKeyCache.set(provider, creds);
+  return creds;
+}
+
+// Read a single credential: DB first, then process.env fallback.
+async function getPricingCredential(provider: string, field: string, envVar: string): Promise<string | undefined> {
+  const dbCreds = await loadProviderCredentials(provider);
+  const val = dbCreds[field] || process.env[envVar];
+  return val || undefined;
+}
+
+// Check if a provider has all its required credentials configured (DB or .env).
+async function isProviderConfigured(provider: string): Promise<boolean> {
+  const config = PRICING_PROVIDERS.find(p => p.provider === provider);
+  if (!config) return false;
+  for (const field of config.fields) {
+    if (field.required) {
+      const val = await getPricingCredential(provider, field.name, field.envVar);
+      if (!val) return false;
+    }
+  }
+  return true;
+}
+
 // DigiKey's Product Information API (v4) requires 3-legged OAuth2 for this account (not
 // client_credentials) — confirmed by the working reference script. Run `npm run digikey:authorize`
 // once to mint a refresh token; after that, access tokens are silently refreshed server-side.
@@ -130,10 +260,13 @@ async function getDigikeyRefreshToken(): Promise<string | null> {
   );
   if (row?.refresh_token) {
     cachedDigikeyRefreshToken = row.refresh_token;
-  } else if (process.env.DIGIKEY_REFRESH_TOKEN) {
-    // First run after `npm run digikey:authorize`: seed the DB from .env, then never touch it again.
-    cachedDigikeyRefreshToken = process.env.DIGIKEY_REFRESH_TOKEN;
-    await setDigikeyRefreshToken(cachedDigikeyRefreshToken);
+  } else {
+    // Check pricing_api_keys table first, then fall back to .env
+    const token = await getPricingCredential('digikey', 'refresh_token', 'DIGIKEY_REFRESH_TOKEN');
+    if (token) {
+      cachedDigikeyRefreshToken = token;
+      await setDigikeyRefreshToken(cachedDigikeyRefreshToken);
+    }
   }
   return cachedDigikeyRefreshToken;
 }
@@ -161,8 +294,8 @@ async function getDigikeyToken(): Promise<string> {
 }
 
 async function refreshDigikeyToken(): Promise<string> {
-  const clientId = process.env.DIGIKEY_CLIENT_ID;
-  const clientSecret = process.env.DIGIKEY_CLIENT_SECRET;
+  const clientId = await getPricingCredential('digikey', 'client_id', 'DIGIKEY_CLIENT_ID');
+  const clientSecret = await getPricingCredential('digikey', 'client_secret', 'DIGIKEY_CLIENT_SECRET');
   if (!clientId || !clientSecret) throw new Error('DigiKey credentials not configured');
 
   // 2-legged client_credentials: verified working on this account against
@@ -209,7 +342,7 @@ async function refreshDigikeyToken(): Promise<string> {
     // consumed token) turns a recoverable failure into a permanent one. Only
     // reach for .env when it genuinely differs, i.e. after a re-authorization.
     if (res.status === 400 || res.status === 401) {
-      const envToken = process.env.DIGIKEY_REFRESH_TOKEN;
+      const envToken = await getPricingCredential('digikey', 'refresh_token', 'DIGIKEY_REFRESH_TOKEN');
       if (envToken && envToken !== refreshToken) {
         console.warn('[DIGIKEY] stored refresh token rejected; adopting the newer token from .env.');
         await setDigikeyRefreshToken(envToken);
@@ -288,11 +421,11 @@ async function searchDigikey(partNumber: string, qty = 1) {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${token}`,
-      'X-DIGIKEY-Client-Id': process.env.DIGIKEY_CLIENT_ID!,
-      'X-DIGIKEY-Locale-Site': process.env.DIGIKEY_LOCALE_SITE || 'ZA',
-      'X-DIGIKEY-Locale-Language': process.env.DIGIKEY_LOCALE_LANGUAGE || 'en',
-      'X-DIGIKEY-Locale-Currency': process.env.DIGIKEY_LOCALE_CURRENCY || 'ZAR',
-      'X-DIGIKEY-Locale-ShipToCountry': process.env.DIGIKEY_LOCALE_SHIP_TO_COUNTRY || 'ZA',
+      'X-DIGIKEY-Client-Id': (await getPricingCredential('digikey', 'client_id', 'DIGIKEY_CLIENT_ID'))!,
+      'X-DIGIKEY-Locale-Site': (await getPricingCredential('digikey', 'locale_site', 'DIGIKEY_LOCALE_SITE')) || 'ZA',
+      'X-DIGIKEY-Locale-Language': (await getPricingCredential('digikey', 'locale_language', 'DIGIKEY_LOCALE_LANGUAGE')) || 'en',
+      'X-DIGIKEY-Locale-Currency': (await getPricingCredential('digikey', 'locale_currency', 'DIGIKEY_LOCALE_CURRENCY')) || 'ZAR',
+      'X-DIGIKEY-Locale-ShipToCountry': (await getPricingCredential('digikey', 'locale_ship_to_country', 'DIGIKEY_LOCALE_SHIP_TO_COUNTRY')) || 'ZA',
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ Keywords: partNumber, Limit: 5 }),
@@ -312,14 +445,14 @@ async function searchDigikey(partNumber: string, qty = 1) {
     breakQuantity: chosen?.BreakQuantity ?? null,
     // Currency is whatever we requested via the locale header, not a fixed assumption —
     // DigiKey ZA/ZAR pricing is ~18x the USD figure, so mislabeling it is a real money mistake.
-    currency: process.env.DIGIKEY_LOCALE_CURRENCY || 'ZAR',
+    currency: (await getPricingCredential('digikey', 'locale_currency', 'DIGIKEY_LOCALE_CURRENCY')) || 'ZAR',
     stock: product.QuantityAvailable ?? null,
     productUrl: product.ProductUrl ?? null,
   };
 }
 
 async function searchMouser(partNumber: string, qty = 1) {
-  const apiKey = process.env.MOUSER_API_KEY;
+  const apiKey = await getPricingCredential('mouser', 'api_key', 'MOUSER_API_KEY');
   if (!apiKey) throw new Error('Mouser API key not configured');
   const res = await fetch(`https://api.mouser.com/api/v1/search/keyword?apiKey=${encodeURIComponent(apiKey)}`, {
     method: 'POST',
@@ -349,16 +482,367 @@ async function searchMouser(partNumber: string, qty = 1) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// LCSC live lookup — no official API, but their public search endpoint returns
+// JSON. Used as a fallback when the scrape cache doesn't have the part, so LCSC
+// goes from cache-only to live without needing an API key.
+// ---------------------------------------------------------------------------
+async function searchLcscLive(partNumber: string, _qty = 1) {
+  const res = await fetch(
+    `https://www.lcsc.com/api/products/search?q=${encodeURIComponent(partNumber)}&current_page=1&per_page=5`,
+    {
+      headers: {
+        'Accept': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      },
+    }
+  );
+  if (!res.ok) throw new Error(`LCSC search failed: ${res.status}`);
+  // LCSC answers 200 with the storefront HTML when the JSON API is unavailable
+  // to unauthenticated callers, which previously surfaced as a raw
+  // "Unexpected token '<'" parse error. Detect it and say what to do instead:
+  // the lcsc_price_cache table is fed by POST /api/pricing/lcsc/import.
+  const contentType = res.headers.get('content-type') || '';
+  if (!contentType.includes('json')) {
+    throw new Error('LCSC live lookup unavailable (returned HTML, not JSON) — feed prices via the LCSC import endpoint instead');
+  }
+  const data: any = await res.json();
+  // The response shape varies — try several known structures defensively.
+  const products: any[] = data?.result?.productList ?? data?.productList ?? data?.data?.productList ?? data?.result?.list ?? [];
+  const product = products[0];
+  if (!product) return null;
+
+  // Price can be a string ("0.1234"), a number, or nested in a priceList array.
+  let unitPrice: number | null = null;
+  if (typeof product.price === 'string' || typeof product.price === 'number') {
+    unitPrice = Number(product.price);
+  } else if (Array.isArray(product.priceList) && product.priceList.length > 0) {
+    // priceList is typically [{l: 1, p: "0.50"}, {l: 10, p: "0.40"}, ...]
+    const breaks = product.priceList;
+    const chosen = pickBreakForQty(breaks, _qty, (b: any) => Number(b.l) || 1);
+    unitPrice = chosen ? Number(chosen.p) : Number(breaks[0]?.p);
+  } else if (product.productPrice != null) {
+    unitPrice = Number(product.productPrice);
+  }
+
+  const stockRaw = product.stock ?? product.inStock ?? product.quantity;
+  const stockNum = stockRaw != null ? Number(String(stockRaw).replace(/[^0-9]/g, '')) : null;
+
+  const lcscPart = product.lcsc_part ?? product.productCode ?? product.lcscPartNumber;
+  const mpn = product.mfr_part ?? product.manufacturer_part ?? product.mfrPartNumber ?? product.mpn;
+  const manufacturer = product.mfr ?? product.manufacturer_name ?? product.manufacturerName;
+  const productUrl = product.product_url ?? product.url ?? (lcscPart ? `https://www.lcsc.com/product-detail/${lcscPart}.html` : null);
+
+  return {
+    partNumber: lcscPart ?? mpn,
+    manufacturer: manufacturer ?? null,
+    unitPrice: Number.isFinite(unitPrice) ? unitPrice : null,
+    breakQuantity: null,
+    currency: 'USD',
+    stock: Number.isFinite(stockNum) ? stockNum : null,
+    productUrl,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Nexar (formerly Octopart) — aggregator API that returns offers from many
+// suppliers at once (Arrow, Heilind, Avnet, TME, etc.). Requires an API key
+// pair; covers suppliers that have no direct integration of their own.
+// ---------------------------------------------------------------------------
+let nexarAccessToken: { token: string; expiresAt: number } | null = null;
+
+async function getNexarToken(): Promise<string> {
+  if (nexarAccessToken && nexarAccessToken.expiresAt > Date.now() + 5000) return nexarAccessToken.token;
+  const clientId = await getPricingCredential('nexar', 'api_key', 'NEXAR_API_KEY');
+  const clientSecret = await getPricingCredential('nexar', 'api_secret', 'NEXAR_API_SECRET');
+  if (!clientId || !clientSecret) throw new Error('Nexar credentials not configured');
+  const res = await fetch('https://identity.nexar.com/connect/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, grant_type: 'client_credentials' }),
+  });
+  if (!res.ok) throw new Error(`Nexar token failed: ${res.status}`);
+  const data: any = await res.json();
+  nexarAccessToken = { token: data.access_token, expiresAt: Date.now() + (data.expires_in ?? 600) * 1000 };
+  return nexarAccessToken.token;
+}
+
+async function searchNexar(partNumber: string, qty = 1) {
+  const token = await getNexarToken();
+  // Schema-verified against the live endpoint by introspection. The previous
+  // query used `items { ... offers { sku { name } inStockQuantity product { url } } }`,
+  // none of which exist: supSearch returns SupPartResultSet.results, each with a
+  // `part`, and offers hang off part.sellers[].offers with scalar `sku`,
+  // `inventoryLevel` and `clickUrl`. That mismatch was the hard 400.
+  const query = `query Search($q: String!) {
+    supSearch(q: $q, limit: 5) {
+      results {
+        part {
+          mpn
+          octopartUrl
+          manufacturer { name }
+          sellers {
+            company { name }
+            isAuthorized
+            offers {
+              sku
+              inventoryLevel
+              moq
+              clickUrl
+              prices { quantity price currency }
+            }
+          }
+        }
+      }
+    }
+  }`;
+  const res = await fetch('https://api.nexar.com/graphql', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, variables: { q: partNumber } }),
+  });
+  if (!res.ok) throw new Error(`Nexar search failed: ${res.status}`);
+  const data: any = await res.json();
+  // Nexar answers 200 with a GraphQL `errors` array for plan/quota problems, so
+  // surface that text instead of silently reporting "no match". A Supply plan
+  // with no part allowance returns "You have exceeded your part limit of 0".
+  if (Array.isArray(data?.errors) && data.errors.length) {
+    const msg = String(data.errors[0]?.message ?? 'Nexar returned an error');
+    throw new Error(/part limit/i.test(msg) ? `Nexar plan has no Supply API quota — ${msg}` : msg);
+  }
+  const items = (data?.data?.supSearch?.results ?? [])
+    .map((r: any) => r?.part)
+    .filter(Boolean);
+  if (!items.length) return null;
+
+  // Collect all offers across all distributors, pick the best price for qty.
+  let bestPrice: number | null = null;
+  let bestOffer: any = null;
+  let bestDistributor: string | null = null;
+  let bestStock: number | null = null;
+  let bestUrl: string | null = null;
+  let matchedMpn: string | null = null;
+  let matchedManufacturer: string | null = null;
+
+  let bestCurrency: string | null = null;
+  for (const item of items) {
+    matchedMpn = matchedMpn ?? item.mpn;
+    matchedManufacturer = matchedManufacturer ?? item.manufacturer?.name;
+    // Offers live under sellers[], not directly on the part.
+    for (const seller of item.sellers ?? []) {
+      for (const offer of seller.offers ?? []) {
+        const breaks: any[] = offer.prices ?? [];
+        const chosen = pickBreakForQty(breaks, qty, (b) => Number(b.quantity) || 1) ?? breaks[0];
+        const price = chosen ? Number(chosen.price) : null;
+        if (price != null && Number.isFinite(price) && (bestPrice == null || price < bestPrice)) {
+          bestPrice = price;
+          bestOffer = offer;
+          bestDistributor = seller.company?.name ?? offer.sku ?? null;
+          bestStock = offer.inventoryLevel != null ? Number(offer.inventoryLevel) : null;
+          bestUrl = offer.clickUrl ?? item.octopartUrl ?? null;
+          // Each price break carries its own currency; do not assume USD.
+          bestCurrency = chosen?.currency ?? bestCurrency;
+        }
+      }
+    }
+  }
+
+  if (bestPrice == null) return null;
+
+  return {
+    partNumber: matchedMpn,
+    manufacturer: matchedManufacturer,
+    unitPrice: bestPrice,
+    breakQuantity: null,
+    currency: bestCurrency ?? 'USD',
+    stock: bestStock,
+    productUrl: bestUrl,
+    // Extra metadata: which distributor had the best price.
+    distributor: bestDistributor,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Element14 / Farnell / Newark (Avnet) — free REST API with an API key.
+// storeInfo.id selects the regional store (e.g. "za" for South Africa).
+// ---------------------------------------------------------------------------
+// element14 has no ZA storefront on the API, so South African users read the UK
+// catalogue. Currency follows the store, and is reported rather than assumed —
+// converting a GBP figure as though it were USD would misprice by ~25%.
+// Providers report currency inconsistently: Mouser embeds a symbol in the price
+// string ("$0.47", "R12.50"), DigiKey follows the locale header, element14 the
+// store, and Nexar puts an ISO code on each price break. Normalise to ISO so
+// downstream conversion never has to guess from a glyph.
+function normaliseCurrency(raw: string | null | undefined): string {
+  const v = String(raw ?? '').trim().toUpperCase();
+  if (!v) return 'USD';
+  if (v.includes('ZAR') || v === 'R') return 'ZAR';
+  if (v.includes('GBP') || v.includes('£')) return 'GBP';
+  if (v.includes('EUR') || v.includes('€')) return 'EUR';
+  if (v.includes('USD') || v.includes('$')) return 'USD';
+  return v;
+}
+
+const ELEMENT14_DEFAULT_STORE = 'uk.farnell.com';
+
+// Earlier guidance told users to set a bare country code, so accept those and
+// map them to the real store domain rather than 400-ing on a value we suggested.
+// 'za' maps to the UK store: element14 serves South Africa from that catalogue.
+const ELEMENT14_STORE_ALIASES: Record<string, string> = {
+  za: 'uk.farnell.com',
+  uk: 'uk.farnell.com',
+  gb: 'uk.farnell.com',
+  us: 'us.newark.com',
+  ca: 'canada.newark.com',
+  au: 'au.element14.com',
+  sg: 'sg.element14.com',
+  de: 'de.farnell.com',
+  fr: 'fr.farnell.com',
+  it: 'it.farnell.com',
+  es: 'es.farnell.com',
+  nl: 'nl.farnell.com',
+  ie: 'ie.farnell.com',
+};
+
+function normaliseElement14Store(raw: string | undefined): string {
+  const v = String(raw ?? '').trim().toLowerCase();
+  if (!v) return ELEMENT14_DEFAULT_STORE;
+  if (ELEMENT14_STORE_ALIASES[v]) return ELEMENT14_STORE_ALIASES[v];
+  // Anything without a dot is not a store domain; fall back rather than 400.
+  return v.includes('.') ? v : ELEMENT14_DEFAULT_STORE;
+}
+const ELEMENT14_STORE_CURRENCY: Record<string, string> = {
+  'uk.farnell.com': 'GBP',
+  'us.newark.com': 'USD',
+  'canada.newark.com': 'CAD',
+  'au.element14.com': 'AUD',
+  'sg.element14.com': 'SGD',
+  'de.farnell.com': 'EUR',
+  'fr.farnell.com': 'EUR',
+  'it.farnell.com': 'EUR',
+  'es.farnell.com': 'EUR',
+  'nl.farnell.com': 'EUR',
+  'ie.farnell.com': 'EUR',
+};
+
+async function searchElement14(partNumber: string, qty = 1) {
+  const apiKey = await getPricingCredential('element14', 'api_key', 'ELEMENT14_API_KEY');
+  if (!apiKey) throw new Error('Element14 API key not configured');
+  // storeInfo.id must be a full store DOMAIN. Verified against the live API:
+  // 'uk.farnell.com' returns results, while 'za' and 'za.farnell.com' both 400 —
+  // element14 has no South African store, so ZA defaults to the UK catalogue.
+  const storeId = normaliseElement14Store(
+    await getPricingCredential('element14', 'store_id', 'ELEMENT14_STORE_ID')
+  );
+  const params = new URLSearchParams({
+    // Parameter names are case-sensitive: callInfo.* (capital I) and a
+    // term=manuPartNum:<mpn> search. The previous searchPart / callinfo.*
+    // spelling was rejected with a bare 400.
+    'term': `manuPartNum:${partNumber}`,
+    'storeInfo.id': storeId,
+    'resultsSettings.offset': '0',
+    'resultsSettings.numberOfResults': '5',
+    'resultsSettings.responseGroup': 'large',
+    'callInfo.omitXmlSchema': 'false',
+    'callInfo.apiKey': apiKey,
+    'callInfo.responseDataFormat': 'json',
+  });
+  const res = await fetch(`https://api.element14.com/catalog/products?${params.toString()}`, {
+    headers: { 'Accept': 'application/json' },
+  });
+  if (!res.ok) {
+    if (res.status === 403) throw new Error('Element14 rate limit reached (queries per second)');
+    throw new Error(`Element14 search failed: ${res.status}${res.status === 400 ? ` — check ELEMENT14_STORE_ID ("${storeId}"); it must be a store domain such as uk.farnell.com` : ''}`);
+  }
+  const data: any = await res.json();
+  // Results arrive under a search-specific root key, not a flat `products`.
+  const root: any = data?.manufacturerPartNumberSearchReturn ?? data?.premierFarnellPartNumberReturn ?? data?.keywordSearchReturn ?? data;
+  const products: any[] = root?.products ?? [];
+  const product = products[0];
+  if (!product) return null;
+
+  // Price breaks are {from, to, cost} — the amount field is `cost`, not `price`.
+  const breaks: any[] = product.prices ?? [];
+  const chosen = pickBreakForQty(breaks, qty, (b) => Number(b.from) || 1) ?? breaks[0];
+  const priceNum = chosen != null ? Number(chosen.cost) : null;
+  // stock is an object ({level, breakdown, ...}), not a scalar.
+  const stockNum = Number(product.stock?.level);
+
+  return {
+    partNumber: product.translatedManufacturerPartNumber ?? product.manufacturerPartNumber ?? product.sku,
+    manufacturer: product.brandName ?? product.vendorName ?? null,
+    unitPrice: Number.isFinite(priceNum) ? priceNum : null,
+    breakQuantity: chosen?.from ?? null,
+    currency: ELEMENT14_STORE_CURRENCY[storeId] ?? 'GBP',
+    stock: Number.isFinite(stockNum) ? stockNum : null,
+    productUrl: product.sku ? `https://${storeId}/${product.sku}` : null,
+    distributor: `element14 (${storeId})`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// TME (Transfer Multisort Elektronik) — REST API with HMAC-SHA1 signing.
+// The signature is HMAC-SHA1 of the sorted, URL-encoded query string, keyed
+// by the API secret. Covers a broad catalogue of European/Asian components.
+// ---------------------------------------------------------------------------
+async function searchTme(partNumber: string, qty = 1) {
+  const apiKey = await getPricingCredential('tme', 'api_key', 'TME_API_KEY');
+  const apiSecret = await getPricingCredential('tme', 'api_secret', 'TME_API_SECRET');
+  if (!apiKey || !apiSecret) throw new Error('TME credentials not configured');
+
+  // Build and sign the request. TME requires parameters sorted alphabetically,
+  // joined as key=value&key=value, then HMAC-SHA1 with the secret as the key.
+  const params: Record<string, string> = {
+    language: 'en',
+    search: partNumber,
+    api_key: apiKey,
+  };
+  const sortedKeys = Object.keys(params).sort();
+  const queryString = sortedKeys.map(k => `${k}=${encodeURIComponent(params[k])}`).join('&');
+  const signatureBase = `${queryString}`;
+  const signature = createHmac('sha1', apiSecret).update(signatureBase).digest('base64');
+
+  const url = `https://api.tme.eu/products/search.json?${queryString}&signature=${encodeURIComponent(signature)}`;
+  const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+  if (!res.ok) throw new Error(`TME search failed: ${res.status}`);
+  const data: any = await res.json();
+  const products: any[] = data?.data?.productList ?? data?.productList ?? [];
+  const product = products[0];
+  if (!product) return null;
+
+  // TME price breaks: [{amount, priceSymbol, price}] — pick for qty.
+  const breaks: any[] = product.priceList ?? product.prices ?? [];
+  const chosen = pickBreakForQty(breaks, qty, (b) => Number(b.amount ?? b.Quantity) || 1) ?? breaks[0];
+  const rawPrice = chosen ? String(chosen.price ?? chosen.priceSymbol ?? '') : '';
+  const priceNum = rawPrice ? Number(rawPrice.replace(/[^0-9.]/g, '')) : null;
+
+  const stockNum = product.amountInStock ?? product.stock;
+  const stock = stockNum != null ? Number(stockNum) : null;
+
+  return {
+    partNumber: product.manufacturerPartNumber ?? product.symbol,
+    manufacturer: product.producer ?? product.manufacturer,
+    unitPrice: Number.isFinite(priceNum) ? priceNum : null,
+    breakQuantity: chosen?.amount ?? null,
+    currency: chosen?.currency ?? 'EUR',
+    stock: Number.isFinite(stock) ? stock : null,
+    productUrl: product.productUrl ?? `https://www.tme.eu/en/details/${product.symbol}`,
+  };
+}
+
 app.get('/api/pricing/usage', async (_req, res) => {
   try {
-    const [digikey, mouser] = await Promise.all([getPricingUsage('digikey'), getPricingUsage('mouser')]);
+    const [digikey, mouser, nexar, element14, tme] = await Promise.all([
+      getPricingUsage('digikey'), getPricingUsage('mouser'),
+      getPricingUsage('nexar'), getPricingUsage('element14'), getPricingUsage('tme'),
+    ]);
     const lcscCount = await queryOne<{ count: string }>(`SELECT COUNT(*) as count FROM lcsc_price_cache`);
     const lcscLast = await queryOne<{ updated_at: string }>(`SELECT MAX(updated_at) as updated_at FROM lcsc_price_cache`);
     res.json({
       digikey: {
         used: digikey,
         limit: PRICING_DAILY_LIMIT,
-        configured: !!process.env.DIGIKEY_CLIENT_ID,
+        configured: await isProviderConfigured('digikey'),
         // Actually try to obtain a token rather than merely checking that some
         // refresh token exists — the old check reported authorized: true while
         // every lookup was failing with a rejected token. With
@@ -366,8 +850,11 @@ app.get('/api/pricing/usage', async (_req, res) => {
         authorized: await getDigikeyToken().then(() => true).catch(() => false),
         grant: 'client_credentials (falls back to refresh_token)',
       },
-      mouser: { used: mouser, limit: PRICING_DAILY_LIMIT, configured: !!process.env.MOUSER_API_KEY },
-      lcsc: { cached: Number(lcscCount?.count ?? 0), lastUpdated: lcscLast?.updated_at ?? null },
+      mouser: { used: mouser, limit: PRICING_DAILY_LIMIT, configured: await isProviderConfigured('mouser') },
+      lcsc: { cached: Number(lcscCount?.count ?? 0), lastUpdated: lcscLast?.updated_at ?? null, liveLookup: true },
+      nexar: { used: nexar, limit: PRICING_DAILY_LIMIT, configured: await isProviderConfigured('nexar') },
+      element14: { used: element14, limit: PRICING_DAILY_LIMIT, configured: await isProviderConfigured('element14') },
+      tme: { used: tme, limit: PRICING_DAILY_LIMIT, configured: await isProviderConfigured('tme') },
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -391,7 +878,7 @@ app.get('/api/pricing/search', async (req, res) => {
 
   const results: any = { partNumber, qty };
 
-  if (!process.env.DIGIKEY_CLIENT_ID || !process.env.DIGIKEY_CLIENT_SECRET) {
+  if (!(await isProviderConfigured('digikey'))) {
     results.digikey = { error: 'Not configured' };
   } else if (!(await getDigikeyRefreshToken())) {
     results.digikey = { error: 'Not authorized — run "npm run digikey:authorize"' };
@@ -422,7 +909,7 @@ app.get('/api/pricing/search', async (req, res) => {
     }
   }
 
-  if (!process.env.MOUSER_API_KEY) {
+  if (!(await isProviderConfigured('mouser'))) {
     results.mouser = { error: 'Not configured' };
   } else {
     try {
@@ -451,23 +938,139 @@ app.get('/api/pricing/search', async (req, res) => {
     }
   }
 
-  // LCSC has no official API — matched against whatever the scraper cached, by either its
-  // own LCSC catalog number (e.g. "C131443") or the manufacturer part number.
+  // LCSC: check the scrape cache first, then fall back to a live lookup via their public
+  // search endpoint. This upgrades LCSC from cache-only to live without needing an API key.
   const lcscRow = await queryOne<any>(
     `SELECT * FROM lcsc_price_cache WHERE part_number = $1 OR mpn = $1 ORDER BY updated_at DESC LIMIT 1`,
     [partNumber]
   );
-  results.lcsc = lcscRow
-    ? {
-        partNumber: lcscRow.part_number,
-        manufacturer: lcscRow.mpn,
-        unitPrice: lcscRow.price !== null ? Number(lcscRow.price) : null,
-        currency: lcscRow.currency,
-        stock: lcscRow.stock,
-        productUrl: lcscRow.url,
-        updatedAt: lcscRow.updated_at,
+  if (lcscRow) {
+    results.lcsc = {
+      partNumber: lcscRow.part_number,
+      manufacturer: lcscRow.mpn,
+      unitPrice: lcscRow.price !== null ? Number(lcscRow.price) : null,
+      currency: lcscRow.currency,
+      stock: lcscRow.stock,
+      productUrl: lcscRow.url,
+      updatedAt: lcscRow.updated_at,
+    };
+  } else {
+    try {
+      if ((await getPricingUsage('lcsc')) >= PRICING_DAILY_LIMIT) {
+        results.lcsc = { error: 'Daily limit reached' };
+      } else {
+        const lcscResult = await searchLcscLive(partNumber, qty);
+        if (lcscResult) {
+          results.lcsc = lcscResult;
+          await incrementPricingUsage('lcsc');
+          await query(
+            `INSERT INTO lcsc_price_cache (part_number, mpn, price, currency, stock, url, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, now())
+             ON CONFLICT (part_number) DO UPDATE SET
+               mpn = EXCLUDED.mpn, price = EXCLUDED.price, currency = EXCLUDED.currency,
+               stock = EXCLUDED.stock, url = EXCLUDED.url, updated_at = now()`,
+            [lcscResult.partNumber ?? partNumber, lcscResult.manufacturer ?? null,
+             lcscResult.unitPrice ?? null, lcscResult.currency ?? 'USD',
+             lcscResult.stock ?? null, lcscResult.productUrl ?? null]
+          );
+        } else {
+          results.lcsc = { error: 'No match found' };
+        }
       }
-    : { error: 'Not scraped yet' };
+    } catch (err: any) {
+      results.lcsc = { error: err.message };
+    }
+  }
+
+  // Nexar (Octopart aggregator) — covers Arrow, Heilind, Avnet, and many others.
+  if (!(await isProviderConfigured('nexar'))) {
+    results.nexar = { error: 'Not configured' };
+  } else {
+    try {
+      const cached = await queryOne<any>(
+        `SELECT * FROM pricing_cache WHERE provider = 'nexar' AND part_number = $1 AND qty = $2 ORDER BY created_at DESC LIMIT 1`,
+        [partNumber, qty]
+      );
+      if (cached && new Date().getTime() - new Date(cached.created_at).getTime() < maxAgeMs) {
+        results.nexar = JSON.parse(cached.data);
+        results.nexarCached = true;
+      } else if ((await getPricingUsage('nexar')) >= PRICING_DAILY_LIMIT) {
+        results.nexar = { error: 'Daily limit reached' };
+      } else {
+        const result = await searchNexar(partNumber, qty);
+        results.nexar = result ?? { error: 'No match found' };
+        await incrementPricingUsage('nexar');
+        await query(
+          `INSERT INTO pricing_cache (provider, part_number, qty, data, created_at)
+           VALUES ($1, $2, $3, $4, now())
+           ON CONFLICT (provider, part_number, qty) DO UPDATE SET data = EXCLUDED.data, created_at = now()`,
+          ['nexar', partNumber, qty, JSON.stringify(results.nexar)]
+        );
+      }
+    } catch (err: any) {
+      results.nexar = { error: err.message };
+    }
+  }
+
+  // Element14 / Farnell / Newark (Avnet)
+  if (!(await isProviderConfigured('element14'))) {
+    results.element14 = { error: 'Not configured' };
+  } else {
+    try {
+      const cached = await queryOne<any>(
+        `SELECT * FROM pricing_cache WHERE provider = 'element14' AND part_number = $1 AND qty = $2 ORDER BY created_at DESC LIMIT 1`,
+        [partNumber, qty]
+      );
+      if (cached && new Date().getTime() - new Date(cached.created_at).getTime() < maxAgeMs) {
+        results.element14 = JSON.parse(cached.data);
+        results.element14Cached = true;
+      } else if ((await getPricingUsage('element14')) >= PRICING_DAILY_LIMIT) {
+        results.element14 = { error: 'Daily limit reached' };
+      } else {
+        const result = await searchElement14(partNumber, qty);
+        results.element14 = result ?? { error: 'No match found' };
+        await incrementPricingUsage('element14');
+        await query(
+          `INSERT INTO pricing_cache (provider, part_number, qty, data, created_at)
+           VALUES ($1, $2, $3, $4, now())
+           ON CONFLICT (provider, part_number, qty) DO UPDATE SET data = EXCLUDED.data, created_at = now()`,
+          ['element14', partNumber, qty, JSON.stringify(results.element14)]
+        );
+      }
+    } catch (err: any) {
+      results.element14 = { error: err.message };
+    }
+  }
+
+  // TME (Transfer Multisort Elektronik)
+  if (!(await isProviderConfigured('tme'))) {
+    results.tme = { error: 'Not configured' };
+  } else {
+    try {
+      const cached = await queryOne<any>(
+        `SELECT * FROM pricing_cache WHERE provider = 'tme' AND part_number = $1 AND qty = $2 ORDER BY created_at DESC LIMIT 1`,
+        [partNumber, qty]
+      );
+      if (cached && new Date().getTime() - new Date(cached.created_at).getTime() < maxAgeMs) {
+        results.tme = JSON.parse(cached.data);
+        results.tmeCached = true;
+      } else if ((await getPricingUsage('tme')) >= PRICING_DAILY_LIMIT) {
+        results.tme = { error: 'Daily limit reached' };
+      } else {
+        const result = await searchTme(partNumber, qty);
+        results.tme = result ?? { error: 'No match found' };
+        await incrementPricingUsage('tme');
+        await query(
+          `INSERT INTO pricing_cache (provider, part_number, qty, data, created_at)
+           VALUES ($1, $2, $3, $4, now())
+           ON CONFLICT (provider, part_number, qty) DO UPDATE SET data = EXCLUDED.data, created_at = now()`,
+          ['tme', partNumber, qty, JSON.stringify(results.tme)]
+        );
+      }
+    } catch (err: any) {
+      results.tme = { error: err.message };
+    }
+  }
 
   res.json(results);
 });
@@ -516,7 +1119,8 @@ app.get('/api/pricing/cache-status', async (req, res) => {
 app.post('/api/pricing/lcsc/import', async (req, res) => {
   const authHeader = req.headers.authorization || '';
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
-  if (!process.env.LCSC_IMPORT_TOKEN || token !== process.env.LCSC_IMPORT_TOKEN) {
+  const importToken = await getPricingCredential('lcsc', 'import_token', 'LCSC_IMPORT_TOKEN');
+  if (!importToken || token !== importToken) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
   const parsed = z.array(LcscImportItemSchema).safeParse(req.body);
@@ -536,6 +1140,107 @@ app.post('/api/pricing/lcsc/import', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// API key management endpoints
+// GET  /api/pricing/keys       — list all providers, field definitions, and
+//                                whether each field has a value (DB or .env).
+// POST /api/pricing/keys       — save credentials for a provider to the DB.
+// POST /api/pricing/keys/test  — test a provider's credentials with a live search.
+// ---------------------------------------------------------------------------
+function maskValue(val: string | undefined): string {
+  if (!val) return '';
+  if (val.length <= 8) return '••••';
+  return val.slice(0, 4) + '••••' + val.slice(-4);
+}
+
+app.get('/api/pricing/keys', async (_req, res) => {
+  try {
+    const providers = await Promise.all(PRICING_PROVIDERS.map(async (cfg) => {
+      const dbCreds = await loadProviderCredentials(cfg.provider);
+      const fields = cfg.fields.map((f) => {
+        const dbVal = dbCreds[f.name];
+        const envVal = process.env[f.envVar];
+        const hasValue = !!(dbVal || envVal);
+        const source = dbVal ? 'db' : envVal ? 'env' : null;
+        return {
+          name: f.name, label: f.label, envVar: f.envVar, type: f.type,
+          required: f.required ?? false, help: f.help, hasValue, source,
+          masked: maskValue(dbVal || envVal),
+        };
+      });
+      return {
+        provider: cfg.provider, label: cfg.label, description: cfg.description,
+        configured: await isProviderConfigured(cfg.provider), fields,
+      };
+    }));
+    res.json(providers);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/pricing/keys', async (req, res) => {
+  const { provider, credentials } = req.body as { provider: string; credentials: Record<string, string> };
+  if (!provider || !credentials || typeof credentials !== 'object') {
+    return res.status(400).json({ error: 'provider and credentials are required' });
+  }
+  const config = PRICING_PROVIDERS.find(p => p.provider === provider);
+  if (!config) return res.status(400).json({ error: `Unknown provider: ${provider}` });
+  const allowedFields = new Set(config.fields.map(f => f.name));
+  const cleanCreds: Record<string, string> = {};
+  for (const [key, val] of Object.entries(credentials)) {
+    if (allowedFields.has(key) && typeof val === 'string' && val.trim() !== '') {
+      cleanCreds[key] = val.trim();
+    }
+  }
+  if (Object.keys(cleanCreds).length === 0) {
+    return res.status(400).json({ error: 'No valid credential fields provided' });
+  }
+  try {
+    const existing = await loadProviderCredentials(provider);
+    const merged = { ...existing, ...cleanCreds };
+    await query(
+      `INSERT INTO pricing_api_keys (provider, credentials, updated_at)
+       VALUES ($1, $2, now())
+       ON CONFLICT (provider) DO UPDATE SET credentials = EXCLUDED.credentials, updated_at = now()`,
+      [provider, JSON.stringify(merged)]
+    );
+    invalidatePricingKeyCache(provider);
+    if (provider === 'digikey') { digikeyAccessToken = null; cachedDigikeyRefreshToken = null; }
+    if (provider === 'nexar') { nexarAccessToken = null; }
+    res.json({ ok: true, provider, configured: await isProviderConfigured(provider) });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/pricing/keys/test', async (req, res) => {
+  const { provider } = req.body as { provider: string };
+  if (!provider) return res.status(400).json({ error: 'provider is required' });
+  const config = PRICING_PROVIDERS.find(p => p.provider === provider);
+  if (!config) return res.status(400).json({ error: `Unknown provider: ${provider}` });
+  const testPart = 'STM32F103C8T6';
+  try {
+    if (!(await isProviderConfigured(provider))) {
+      return res.json({ provider, success: false, error: 'Not all required credentials are set' });
+    }
+    const searchFn = provider === 'digikey' ? searchDigikey
+      : provider === 'mouser' ? searchMouser
+      : provider === 'nexar' ? searchNexar
+      : provider === 'element14' ? searchElement14
+      : provider === 'tme' ? searchTme : null;
+    if (!searchFn) return res.json({ provider, success: false, error: 'No search function for this provider' });
+    const result = await searchFn(testPart, 1);
+    if (result && (result.unitPrice != null || result.partNumber)) {
+      res.json({ provider, success: true, matchedPart: result.partNumber, unitPrice: result.unitPrice, currency: result.currency, stock: result.stock });
+    } else {
+      res.json({ provider, success: false, error: 'No match found — credentials may be valid but the test part was not found' });
+    }
+  } catch (err: any) {
+    res.json({ provider, success: false, error: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Bulk price refresh
 //
 // Populates inventory.bulk_price_zar from the supplier APIs. Results are cached
@@ -547,7 +1252,7 @@ app.post('/api/pricing/lcsc/import', async (req, res) => {
 // dry run so a caller must opt in to writing to the inventory table.
 // ---------------------------------------------------------------------------
 async function cachedProviderLookup(
-  provider: 'digikey' | 'mouser',
+  provider: 'digikey' | 'mouser' | 'nexar' | 'element14' | 'tme',
   partNumber: string,
   qty: number,
   maxAgeMs: number
@@ -572,9 +1277,12 @@ async function cachedProviderLookup(
   // the way out and abort the whole bulk run, losing the Mouser results too.
   let result: any;
   try {
-    result = provider === 'digikey'
-      ? (await searchDigikey(partNumber, qty)) ?? { error: 'No match found' }
-      : (await searchMouser(partNumber, qty)) ?? { error: 'No match found' };
+    const searchFn = provider === 'digikey' ? searchDigikey
+      : provider === 'mouser' ? searchMouser
+      : provider === 'nexar' ? searchNexar
+      : provider === 'element14' ? searchElement14
+      : searchTme;
+    result = (await searchFn(partNumber, qty)) ?? { error: 'No match found' };
   } catch (err: any) {
     // Don't cache a transport/auth failure — it is not a fact about the part.
     return { result: { error: err.message }, fromCache: false, calledApi: false };
@@ -631,12 +1339,15 @@ app.post('/api/pricing/bulk-refresh', async (req, res) => {
 
     for (const item of candidates as any[]) {
       const mpn = String(item.man_pn_1).trim();
-      const [dk, mo] = [
+      const [dk, mo, nx, e14, tme] = [
         await cachedProviderLookup('digikey', mpn, qty, maxAgeMs),
         await cachedProviderLookup('mouser', mpn, qty, maxAgeMs),
+        await cachedProviderLookup('nexar', mpn, qty, maxAgeMs),
+        await cachedProviderLookup('element14', mpn, qty, maxAgeMs),
+        await cachedProviderLookup('tme', mpn, qty, maxAgeMs),
       ];
-      apiCalls += (dk.calledApi ? 1 : 0) + (mo.calledApi ? 1 : 0);
-      cacheHits += (dk.fromCache ? 1 : 0) + (mo.fromCache ? 1 : 0);
+      apiCalls += (dk.calledApi ? 1 : 0) + (mo.calledApi ? 1 : 0) + (nx.calledApi ? 1 : 0) + (e14.calledApi ? 1 : 0) + (tme.calledApi ? 1 : 0);
+      cacheHits += (dk.fromCache ? 1 : 0) + (mo.fromCache ? 1 : 0) + (nx.fromCache ? 1 : 0) + (e14.fromCache ? 1 : 0) + (tme.fromCache ? 1 : 0);
 
       // These suppliers do a KEYWORD search and return the first hit, which is
       // not guaranteed to be the part asked for. String-matching the result
@@ -651,13 +1362,21 @@ app.post('/api/pricing/bulk-refresh', async (req, res) => {
         // The price string carries its own currency symbol; a ZAR-denominated
         // account gets 'R' back, and converting that again would inflate it ~17x.
         const sym = String(raw?.currency ?? '').toUpperCase();
-        const isZar = sym.includes('R') && !sym.includes('$');
+        const code = normaliseCurrency(sym);
+        // Only USD and ZAR can be converted: the app stores a single USD->ZAR
+        // rate. Element14 quotes GBP and the EU stores quote EUR, and treating
+        // those as USD would misprice them by ~30%. Report them instead of
+        // guessing — a wrong price is worse than a missing one.
+        if (code !== 'USD' && code !== 'ZAR') {
+          return { rejected: `${provider} quoted ${code}, which has no stored conversion rate` };
+        }
+        const isZar = code === 'ZAR';
         const usdEquivalent = isZar ? price / fx.usdToZar! : price;
         const zarValue = isZar ? price : price * fx.usdToZar!;
         return {
           provider,
           native: price,
-          currency: isZar ? 'ZAR' : 'USD',
+          currency: code,
           usdEquivalent: Number(usdEquivalent.toFixed(4)),
           zar: Number(zarValue.toFixed(4)),
           matchedPart: raw?.partNumber ?? null,
@@ -665,7 +1384,10 @@ app.post('/api/pricing/bulk-refresh', async (req, res) => {
         };
       };
 
-      const offers = [toZar(dk.result, 'digikey'), toZar(mo.result, 'mouser')].filter(Boolean) as any[];
+      const offers = [
+        toZar(dk.result, 'digikey'), toZar(mo.result, 'mouser'),
+        toZar(nx.result, 'nexar'), toZar(e14.result, 'element14'), toZar(tme.result, 'tme'),
+      ].filter(Boolean) as any[];
 
       if (!offers.length) {
         noPrice.push({
@@ -4528,7 +5250,7 @@ app.post('/api/suppliers/compare-prices', async (req, res) => {
       }
 
       // DigiKey: fetch live if no cache hit
-      if (!digikeyFromCache && process.env.DIGIKEY_CLIENT_ID && process.env.DIGIKEY_CLIENT_SECRET && await getDigikeyRefreshToken()) {
+      if (!digikeyFromCache && await isProviderConfigured('digikey') && await getDigikeyRefreshToken()) {
         if ((await getPricingUsage('digikey')) < PRICING_DAILY_LIMIT) {
           try {
             await incrementPricingUsage('digikey');
@@ -4557,7 +5279,7 @@ app.post('/api/suppliers/compare-prices', async (req, res) => {
       }
 
       // Mouser: fetch live if no cache hit
-      if (!mouserFromCache && process.env.MOUSER_API_KEY) {
+      if (!mouserFromCache && await isProviderConfigured('mouser')) {
         if ((await getPricingUsage('mouser')) < PRICING_DAILY_LIMIT) {
           try {
             await incrementPricingUsage('mouser');

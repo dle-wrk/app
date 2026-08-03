@@ -251,6 +251,16 @@ async function ensurePricingTables() {
     stock_availability_pct NUMERIC(5,2),
     last_updated TIMESTAMPTZ DEFAULT now()
   )`);
+  // API keys for each pricing provider (DigiKey, Mouser, Nexar, Element14, TME, LCSC).
+  // Stored in the DB so they can be managed from the Pricing UI without rewriting
+  // .env (which Vite watches and would trigger a dev-server restart mid-request).
+  // Each provider has a JSONB object of credential key/value pairs. The server
+  // reads from here first, then falls back to process.env for backwards compat.
+  await exec(`CREATE TABLE IF NOT EXISTS pricing_api_keys (
+    provider TEXT PRIMARY KEY,
+    credentials JSONB NOT NULL DEFAULT '{}',
+    updated_at TIMESTAMPTZ DEFAULT now()
+  )`);
 }
 
 async function ensureProductionTables() {

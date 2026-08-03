@@ -6,6 +6,11 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Ad-hoc API probe scripts. These tend to get written with credentials pasted
+# inline while debugging a provider — keep them out of the repo entirely.
+test-*.mjs
+scratch-*.mjs
 assets/
 *.db-shm
 *.db-wal

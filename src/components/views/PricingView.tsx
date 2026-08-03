@@ -22,6 +22,7 @@ interface ProviderResult {
   productUrl?: string | null;
   updatedAt?: string;
   error?: string;
+  distributor?: string;
 }
 
 interface SearchResponse {
@@ -29,12 +30,18 @@ interface SearchResponse {
   digikey?: ProviderResult;
   mouser?: ProviderResult;
   lcsc?: ProviderResult;
+  nexar?: ProviderResult;
+  element14?: ProviderResult;
+  tme?: ProviderResult;
 }
 
 interface UsageResponse {
   digikey: { used: number; limit: number; configured: boolean; authorized: boolean };
   mouser: { used: number; limit: number; configured: boolean };
-  lcsc: { cached: number; lastUpdated: string | null };
+  lcsc: { cached: number; lastUpdated: string | null; liveLookup?: boolean };
+  nexar: { used: number; limit: number; configured: boolean };
+  element14: { used: number; limit: number; configured: boolean };
+  tme: { used: number; limit: number; configured: boolean };
 }
 
 function UsageMeter({ label, used, limit }: { label: string; used: number; limit: number }) {
@@ -79,6 +86,9 @@ function ProviderResultCard({ name, result }: { name: string; result?: ProviderR
       <div className="text-[11px] text-on-surface-variant mt-1">
         {result.stock != null ? `${result.stock.toLocaleString()} in stock` : 'Stock unknown'}
       </div>
+      {result.distributor && (
+        <div className="text-[10px] text-secondary mt-1">via {result.distributor}</div>
+      )}
       {result.manufacturer && (
         <div className="text-[10px] text-outline mt-1">{result.manufacturer}</div>
       )}
@@ -245,15 +255,18 @@ export const PricingView: React.FC<PricingViewProps> = ({
         </div>
 
         {searchResult && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-sm mt-md">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-sm mt-md">
             <ProviderResultCard name="DigiKey" result={searchResult.digikey} />
             <ProviderResultCard name="Mouser" result={searchResult.mouser} />
-            <ProviderResultCard name="LCSC (scraped)" result={searchResult.lcsc} />
+            <ProviderResultCard name="LCSC (live + cache)" result={searchResult.lcsc} />
+            <ProviderResultCard name="Nexar / Octopart" result={searchResult.nexar} />
+            <ProviderResultCard name="Element14 / Farnell" result={searchResult.element14} />
+            <ProviderResultCard name="TME" result={searchResult.tme} />
           </div>
         )}
 
         {usage && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-md mt-lg pt-md border-t border-outline-variant">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-md mt-lg pt-md border-t border-outline-variant">
             <UsageMeter label="DigiKey API calls today" used={usage.digikey.used} limit={usage.digikey.limit} />
             <UsageMeter label="Mouser API calls today" used={usage.mouser.used} limit={usage.mouser.limit} />
             <div>
@@ -262,11 +275,15 @@ export const PricingView: React.FC<PricingViewProps> = ({
                 <span className="font-mono font-bold text-primary">{usage.lcsc.cached}</span>
               </div>
               <span className="text-[10px] text-outline block">
+                {usage.lcsc.liveLookup ? 'Live lookup enabled — ' : ''}
                 {usage.lcsc.lastUpdated
-                  ? `Last scrape sync ${new Date(usage.lcsc.lastUpdated).toLocaleString()}`
-                  : 'No scrape data imported yet'}
+                  ? `Last sync ${new Date(usage.lcsc.lastUpdated).toLocaleString()}`
+                  : 'No data yet — live lookup will populate'}
               </span>
             </div>
+            <UsageMeter label="Nexar API calls today" used={usage.nexar.used} limit={usage.nexar.limit} />
+            <UsageMeter label="Element14 API calls today" used={usage.element14.used} limit={usage.element14.limit} />
+            <UsageMeter label="TME API calls today" used={usage.tme.used} limit={usage.tme.limit} />
           </div>
         )}
         {!usage?.digikey.configured && (
@@ -277,6 +294,15 @@ export const PricingView: React.FC<PricingViewProps> = ({
         )}
         {!usage?.mouser.configured && (
           <div className="text-[10px] text-outline mt-sm">Mouser API key not configured — add MOUSER_API_KEY to .env.</div>
+        )}
+        {!usage?.nexar?.configured && (
+          <div className="text-[10px] text-outline mt-sm">Nexar (Octopart aggregator) not configured — add NEXAR_API_KEY/SECRET to .env for Arrow, Heilind, Avnet coverage.</div>
+        )}
+        {!usage?.element14?.configured && (
+          <div className="text-[10px] text-outline mt-sm">Element14/Farnell API not configured — add ELEMENT14_API_KEY to .env.</div>
+        )}
+        {!usage?.tme?.configured && (
+          <div className="text-[10px] text-outline mt-sm">TME API not configured — add TME_API_KEY/SECRET to .env.</div>
         )}
       </div>
       )}

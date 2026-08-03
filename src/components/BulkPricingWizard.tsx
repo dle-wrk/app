@@ -19,7 +19,7 @@ interface BulkPricingWizardProps {
   onClose?: () => void;
 }
 
-type ProviderLabel = 'Mouser' | 'DigiKey' | 'LCSC';
+type ProviderLabel = 'Mouser' | 'DigiKey' | 'LCSC' | 'Nexar' | 'Element14';
 
 interface FetchedPrice {
   price: number | null;
@@ -47,7 +47,11 @@ function pickProviderPrice(
   if (entry.isDigiKey) order.push(['DigiKey', 'digikey']);
   if (entry.isLcsc) order.push(['LCSC', 'lcsc']);
   // Fallbacks — classification is heuristic, so accept any provider that has a price.
-  order.push(['Mouser', 'mouser'], ['DigiKey', 'digikey'], ['LCSC', 'lcsc']);
+  // Includes the new aggregator/direct suppliers for broader coverage.
+  order.push(
+    ['Mouser', 'mouser'], ['DigiKey', 'digikey'], ['LCSC', 'lcsc'],
+    ['Nexar', 'nexar'], ['Element14', 'element14'],
+  );
 
   for (const [label, key] of order) {
     const p = data?.[key];
@@ -56,7 +60,7 @@ function pickProviderPrice(
     }
   }
   const errKey = entry.isMouser ? 'mouser' : entry.isDigiKey ? 'digikey' : entry.isLcsc ? 'lcsc' : 'mouser';
-  const err = data?.[errKey]?.error || data?.digikey?.error || data?.mouser?.error || data?.lcsc?.error || 'No price found';
+  const err = data?.[errKey]?.error || data?.digikey?.error || data?.mouser?.error || data?.lcsc?.error || data?.nexar?.error || data?.element14?.error || data?.tme?.error || 'No price found';
   return { price: null, currency: null, provider: null, breakQty: null, error: err };
 }
 
@@ -206,7 +210,7 @@ export default function BulkPricingWizard({ items, onUpdatePrices, onShowNotific
     // Newly cached parts drop out of the list on the next load of this status.
     await loadCacheStatus();
     const priced = targets.filter(t => next[t.item.partNumber]?.price != null).length;
-    onShowNotification(`Live pricing complete — ${priced} of ${targets.length} parts priced from Mouser / DigiKey / LCSC. Cached for ${CACHE_DAYS} days.`);
+    onShowNotification(`Live pricing complete — ${priced} of ${targets.length} parts priced from Mouser / DigiKey / LCSC / Nexar / Element14 / TME. Cached for ${CACHE_DAYS} days.`);
   };
 
   const handleApplySelectedBulkPrices = () => {
@@ -249,7 +253,7 @@ export default function BulkPricingWizard({ items, onUpdatePrices, onShowNotific
           </div>
           <h4 className="text-base font-bold text-on-surface">Live Wholesale Bulk Pricing</h4>
           <p className="text-xs text-on-surface-variant max-w-[672px] mt-0.5 leading-relaxed">
-            Pulls live unit pricing at your target quantity from Mouser, DigiKey and LCSC for each part's manufacturer number.
+            Pulls live unit pricing at your target quantity from Mouser, DigiKey, LCSC, Nexar (Octopart), Element14 and TME for each part's manufacturer number.
             Select rows to price just those, or query the whole filtered list. <span className="font-semibold text-primary">Stock levels are never changed.</span>
           </p>
         </div>
