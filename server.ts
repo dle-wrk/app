@@ -164,8 +164,34 @@ async function refreshDigikeyToken(): Promise<string> {
   const clientId = process.env.DIGIKEY_CLIENT_ID;
   const clientSecret = process.env.DIGIKEY_CLIENT_SECRET;
   if (!clientId || !clientSecret) throw new Error('DigiKey credentials not configured');
+
+  // 2-legged client_credentials: verified working on this account against
+  // /products/v4/search/keyword. No browser, no user consent, no refresh token
+  // to rotate or expire — which removes the whole class of failures that made
+  // this need re-authorizing. The 3-legged refresh flow is kept below purely as
+  // a fallback for accounts where client_credentials is not enabled.
+  const ccRes = await fetch('https://api.digikey.com/v1/oauth2/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      grant_type: 'client_credentials',
+    }),
+  });
+  if (ccRes.ok) {
+    const cc: any = await ccRes.json();
+    if (cc.access_token) {
+      digikeyAccessToken = { token: cc.access_token, expiresAt: Date.now() + (cc.expires_in ?? 600) * 1000 };
+      return digikeyAccessToken.token;
+    }
+  }
+
+  // Fallback: authorization-code refresh token.
   const refreshToken = await getDigikeyRefreshToken();
-  if (!refreshToken) throw new Error('DigiKey not authorized — run "npm run digikey:authorize" once');
+  if (!refreshToken) {
+    throw new Error(`DigiKey client_credentials was rejected (${ccRes.status}) and no refresh token is stored — run "npm run digikey:authorize"`);
+  }
   const res = await fetch('https://api.digikey.com/v1/oauth2/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -177,12 +203,11 @@ async function refreshDigikeyToken(): Promise<string> {
     }),
   });
   if (!res.ok) {
-    // Do NOT blindly discard the stored token here. DigiKey rotates the refresh
-    // token on every use, so the stored copy is usually the only valid one —
-    // deleting it and falling back to .env (which still holds the original,
-    // already-consumed token) turns a recoverable failure into a permanent one.
-    // Only reach for .env when it actually differs, i.e. the user has since
-    // re-run digikey:authorize.
+    // Do NOT blindly discard the stored token. DigiKey rotates the refresh token
+    // on every use, so the stored copy is usually the only valid one — dropping
+    // it and falling back to .env (which still holds the original, already
+    // consumed token) turns a recoverable failure into a permanent one. Only
+    // reach for .env when it genuinely differs, i.e. after a re-authorization.
     if (res.status === 400 || res.status === 401) {
       const envToken = process.env.DIGIKEY_REFRESH_TOKEN;
       if (envToken && envToken !== refreshToken) {
@@ -190,7 +215,6 @@ async function refreshDigikeyToken(): Promise<string> {
         await setDigikeyRefreshToken(envToken);
         throw new Error('DigiKey token refreshed from .env — retry the request.');
       }
-      console.warn('[DIGIKEY] refresh token rejected and .env holds the same value; re-authorization required.');
     }
     throw new Error(`DigiKey token refresh failed (${res.status}) — re-run "npm run digikey:authorize"`);
   }
@@ -335,7 +359,12 @@ app.get('/api/pricing/usage', async (_req, res) => {
         used: digikey,
         limit: PRICING_DAILY_LIMIT,
         configured: !!process.env.DIGIKEY_CLIENT_ID,
-        authorized: !!(await getDigikeyRefreshToken()),
+        // Actually try to obtain a token rather than merely checking that some
+        // refresh token exists — the old check reported authorized: true while
+        // every lookup was failing with a rejected token. With
+        // client_credentials there is no refresh token to look for at all.
+        authorized: await getDigikeyToken().then(() => true).catch(() => false),
+        grant: 'client_credentials (falls back to refresh_token)',
       },
       mouser: { used: mouser, limit: PRICING_DAILY_LIMIT, configured: !!process.env.MOUSER_API_KEY },
       lcsc: { cached: Number(lcscCount?.count ?? 0), lastUpdated: lcscLast?.updated_at ?? null },
