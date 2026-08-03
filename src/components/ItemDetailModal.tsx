@@ -16,6 +16,16 @@ import {
   Trash2
 } from 'lucide-react';
 
+// Component costs run to sub-cent values (0402 resistors at $0.006, R0.0871),
+// so prices carry up to 7 decimal places. The inputs use step="any" to accept
+// anything from a whole number up to that precision.
+const PRICE_DECIMALS = 7;
+const roundTo = (n: number, dp: number) => {
+  if (!Number.isFinite(n)) return 0;
+  const f = 10 ** dp;
+  return Math.round(n * f) / f;
+};
+
 const IMP_TO_METRIC: Record<string, string> = {
   "01005": "0402",
   "0201": "0603",
@@ -78,6 +88,17 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete }: Ite
   const [deleteReferences, setDeleteReferences] = useState<{ [key: string]: number }>({});
   const [cascadeDelete, setCascadeDelete] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  // USD<->ZAR conversion used when one price field derives the other. This was
+  // hard-coded to 19, which no longer matches the stored rate (~16.69) and so
+  // wrote a wrong figure into whichever field the user was not editing.
+  const [usdToZar, setUsdToZar] = useState<number>(19);
+
+  React.useEffect(() => {
+    fetch('/api/exchange-rate')
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (d && Number.isFinite(Number(d.usdToZar)) && Number(d.usdToZar) > 0) setUsdToZar(Number(d.usdToZar)); })
+      .catch(() => { /* keep the previous value if the rate is unavailable */ });
+  }, []);
   const [checkingReferences, setCheckingReferences] = useState(false);
   const [edited, setEdited] = useState<Item>(() => {
     const enriched = { ...item };
@@ -198,10 +219,12 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete }: Ite
           updated.size = derived;
         }
       } else if (name === 'price') {
-        updated.bulkPriceZar = Number((finalValue * 19).toFixed(5));
+        // Round to 7 dp, not 5: the field accepts up to 7 decimals, so rounding
+        // the derived value tighter than that silently discards what was typed.
+        updated.bulkPriceZar = roundTo(finalValue * usdToZar, PRICE_DECIMALS);
       } else if (name === 'priceZar') {
         const zarVal = Number(value) || 0;
-        updated.price = Number((zarVal / 19).toFixed(5));
+        updated.price = roundTo(zarVal / usdToZar, PRICE_DECIMALS);
         updated.bulkPriceZar = zarVal;
       }
       
@@ -758,9 +781,15 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete }: Ite
                       <label className="font-bold text-outline">Standard cost $USD each</label>
                       <input 
                         className="bg-surface-container-high border border-outline-variant rounded p-2 text-on-surface outline-none focus:border-primary font-mono" 
-                        type="number" 
+                        type="number"
                         name="price"
-                        step="0.0001"
+                        // step="any" accepts any number of decimals, 0 through 7+.
+                        // A fixed step (was 0.0001) made the browser reject
+                        // sub-step values outright: 144.0029 against step 0.001
+                        // errored with "nearest valid values are 144.002 and
+                        // 144.003". Component costs are genuinely sub-cent
+                        // (resistors at $0.006), so the precision is needed.
+                        step="any"
                         min="0"
                         value={edited.price}
                         onChange={handleChange}
@@ -772,12 +801,14 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete }: Ite
                       <label className="font-bold text-outline">standard cost ZAR each</label>
                       <input 
                         className="bg-surface-container-high border border-outline-variant rounded p-2 text-on-surface outline-none focus:border-primary font-mono" 
-                        type="number" 
+                        type="number"
                         name="priceZar"
-                        step="0.001"
+                        step="any"
                         min="0"
                         title="Standard cost per unit in ZAR. This is used for financial calculations and can be adjusted based on supplier quotes or market changes."
-                        value={edited.bulkPriceZar !== undefined ? Number(edited.bulkPriceZar.toFixed(5)) : Number((edited.price * 19).toFixed(5))}
+                        value={edited.bulkPriceZar !== undefined
+                          ? roundTo(edited.bulkPriceZar, PRICE_DECIMALS)
+                          : roundTo(edited.price * usdToZar, PRICE_DECIMALS)}
                         onChange={handleChange}
                         required
                       />

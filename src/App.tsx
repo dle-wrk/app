@@ -2084,7 +2084,7 @@ if (currentView === 'alternates') {
                       name="price"
                       className="bg-surface-container-high border border-outline-variant rounded p-2 text-on-surface outline-none font-mono text-xs"
                       type="number"
-                      step="0.0001"
+                      step="any"
                       min="0"
                       required
                       value={newItem.price}
@@ -2098,7 +2098,7 @@ if (currentView === 'alternates') {
                       name="bulkPriceZar"
                       className="bg-surface-container-high border border-outline-variant rounded p-2 text-on-surface outline-none font-mono text-xs"
                       type="number"
-                      step="0.0001"
+                      step="any"
                       min="0"
                       required
                       value={newItem.bulkPriceZar || Number((newItem.price * 19).toFixed(5))}
@@ -2411,7 +2411,7 @@ if (currentView === 'alternates') {
                     <input
                       className="bg-surface-container-high border border-outline-variant rounded p-2 text-on-surface outline-none font-mono text-xs focus:border-primary"
                       type="number"
-                      step="0.001"
+                      step="any"
                       min="0.001"
                       required
                       value={bookInCost}
