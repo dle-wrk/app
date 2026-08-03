@@ -265,7 +265,11 @@ export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChang
                     <input
                       type="number"
                       min={0}
-                      step="0.01"
+                      // step="any" so a sub-cent unit price can be entered, matching
+                      // component costs (0402 resistors bill at R0.0871). The derived
+                      // line total still rounds to 2 dp in computeLineTotals — the
+                      // amount actually billed stays a currency figure in cents.
+                      step="any"
                       value={line.unitPrice}
                       onChange={(e) => update(line.key, { unitPrice: parseFloat(e.target.value) || 0 })}
                       className={`${inputClass} py-2.5 px-3 text-sm text-right font-mono w-full`}

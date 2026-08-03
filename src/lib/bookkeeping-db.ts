@@ -110,7 +110,7 @@ export async function ensureBookkeepingSchema() {
     part_number TEXT,
     description TEXT NOT NULL,
     quantity NUMERIC(12,2) DEFAULT 1,
-    unit_price NUMERIC(14,4) DEFAULT 0,
+    unit_price NUMERIC(18,7) DEFAULT 0,
     tax_rate_id INTEGER REFERENCES tax_rates(id),
     tax_amount NUMERIC(14,2) DEFAULT 0,
     line_total NUMERIC(14,2) DEFAULT 0,
@@ -163,7 +163,7 @@ export async function ensureBookkeepingSchema() {
     part_number TEXT,
     description TEXT NOT NULL,
     quantity NUMERIC(12,2) DEFAULT 1,
-    unit_price NUMERIC(14,4) DEFAULT 0,
+    unit_price NUMERIC(18,7) DEFAULT 0,
     tax_rate_id INTEGER REFERENCES tax_rates(id),
     tax_amount NUMERIC(14,2) DEFAULT 0,
     line_total NUMERIC(14,2) DEFAULT 0,
@@ -197,7 +197,7 @@ export async function ensureBookkeepingSchema() {
     part_number TEXT,
     description TEXT NOT NULL,
     quantity NUMERIC(12,2) DEFAULT 1,
-    unit_price NUMERIC(14,4) DEFAULT 0,
+    unit_price NUMERIC(18,7) DEFAULT 0,
     account_id INTEGER REFERENCES accounts(id),
     tax_rate_id INTEGER REFERENCES tax_rates(id),
     tax_amount NUMERIC(14,2) DEFAULT 0,
@@ -297,6 +297,16 @@ export async function ensureBookkeepingSchema() {
   await exec(`ALTER TABLE clients ADD COLUMN IF NOT EXISTS payment_terms_days INTEGER DEFAULT 30`).catch(() => {});
   await exec(`ALTER TABLE clients ADD COLUMN IF NOT EXISTS opening_balance NUMERIC(14,2) DEFAULT 0`).catch(() => {});
   await exec(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS payment_terms_days INTEGER DEFAULT 30`).catch(() => {});
+
+  // Widen line unit prices from NUMERIC(14,4) to NUMERIC(18,7). Component costs
+  // are genuinely sub-cent (0402 resistors at R0.0871), and at 4 dp Postgres
+  // silently rounded a 7 dp entry on save. Purely a widening change — more
+  // integer digits and more scale — so existing values are untouched.
+  // Deliberately NOT applied to line_total / tax_amount / quantity: those stay
+  // at 2 dp because a billed amount is a currency figure in cents.
+  for (const t of ['invoice_items', 'bill_items', 'purchase_order_items']) {
+    await exec(`ALTER TABLE ${t} ALTER COLUMN unit_price TYPE NUMERIC(18,7)`).catch(() => {});
+  }
 
   // --- Document numbering sequences --------------------------------------------
   await exec(`CREATE SEQUENCE IF NOT EXISTS invoice_seq`).catch(() => {});
