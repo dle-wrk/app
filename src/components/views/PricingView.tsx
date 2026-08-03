@@ -44,6 +44,28 @@ interface UsageResponse {
   tme: { used: number; limit: number; configured: boolean };
 }
 
+// Mirrors GET /api/pricing/keys. `masked` is a redacted preview of a stored
+// value — the plaintext credential is never sent to the browser.
+interface ProviderKeyField {
+  name: string;
+  label: string;
+  envVar: string;
+  type: 'text' | 'password';
+  required?: boolean;
+  help?: string;
+  hasValue: boolean;
+  source: 'db' | 'env' | null;
+  masked: string;
+}
+
+interface ProviderKeyConfig {
+  provider: string;
+  label: string;
+  description: string;
+  configured: boolean;
+  fields: ProviderKeyField[];
+}
+
 function UsageMeter({ label, used, limit }: { label: string; used: number; limit: number }) {
   const pct = Math.min(100, Math.round((used / limit) * 100));
   const nearLimit = pct >= 90;
@@ -113,7 +135,76 @@ export const PricingView: React.FC<PricingViewProps> = ({
   setSelectedDetailPartNumber,
   setView
 }) => {
-  const [activeTab, setActiveTab] = useState<'lookup' | 'wizard' | 'directory'>('lookup');
+  const [activeTab, setActiveTab] = useState<'lookup' | 'wizard' | 'directory' | 'keys'>('lookup');
+  // Provider credential management. The backend already exposed GET/POST
+  // /api/pricing/keys and a live /test, but nothing in the UI called them —
+  // keys could only be set by editing .env by hand.
+  const [providers, setProviders] = useState<ProviderKeyConfig[]>([]);
+  const [keyDrafts, setKeyDrafts] = useState<Record<string, Record<string, string>>>({});
+  const [keyBusy, setKeyBusy] = useState<string | null>(null);
+  const [keyTest, setKeyTest] = useState<Record<string, { success: boolean; text: string }>>({});
+
+  const loadProviders = React.useCallback(async () => {
+    try {
+      const res = await fetch('/api/pricing/keys');
+      if (!res.ok) return;
+      const data = await res.json();
+      setProviders(Array.isArray(data) ? data : (data.providers ?? []));
+    } catch {
+      /* leave the list empty; the tab shows its own empty state */
+    }
+  }, []);
+
+  React.useEffect(() => { if (activeTab === 'keys') loadProviders(); }, [activeTab, loadProviders]);
+
+  const saveProviderKeys = async (provider: string) => {
+    const credentials = keyDrafts[provider] ?? {};
+    const filled = Object.fromEntries(Object.entries(credentials).filter(([, v]) => v && v.trim() !== ''));
+    if (!Object.keys(filled).length) {
+      triggerToast('Enter at least one value before saving.', 'ERROR');
+      return;
+    }
+    setKeyBusy(`save-${provider}`);
+    try {
+      const res = await fetch('/api/pricing/keys', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider, credentials: filled }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Save failed');
+      triggerToast(`${provider} credentials saved${data.configured ? '' : ' (still missing required fields)'}.`, 'SUCCESS');
+      setKeyDrafts(prev => ({ ...prev, [provider]: {} }));
+      await loadProviders();
+    } catch (err: any) {
+      triggerToast(err.message, 'ERROR');
+    } finally {
+      setKeyBusy(null);
+    }
+  };
+
+  const testProviderKeys = async (provider: string) => {
+    setKeyBusy(`test-${provider}`);
+    setKeyTest(prev => ({ ...prev, [provider]: { success: false, text: 'Testing…' } }));
+    try {
+      const res = await fetch('/api/pricing/keys/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider }),
+      });
+      const d = await res.json();
+      setKeyTest(prev => ({
+        ...prev,
+        [provider]: d.success
+          ? { success: true, text: `OK — ${d.matchedPart ?? 'match'} @ ${d.currency ?? ''}${d.unitPrice ?? '?'}` }
+          : { success: false, text: d.error || 'Test failed' },
+      }));
+    } catch (err: any) {
+      setKeyTest(prev => ({ ...prev, [provider]: { success: false, text: err.message } }));
+    } finally {
+      setKeyBusy(null);
+    }
+  };
   const [searchInput, setSearchInput] = useState('');
   const [searching, setSearching] = useState(false);
   const [searchResult, setSearchResult] = useState<SearchResponse | null>(null);
@@ -227,6 +318,17 @@ export const PricingView: React.FC<PricingViewProps> = ({
         >
           <Database className="w-4 h-4" />
           Price Directory ({items.length})
+        </button>
+        <button
+          onClick={() => setActiveTab('keys')}
+          className={`px-md py-2 text-sm font-bold flex items-center gap-2 whitespace-nowrap transition ${
+            activeTab === 'keys'
+              ? 'text-primary border-b-2 border-primary'
+              : 'text-on-surface-variant hover:text-on-surface'
+          }`}
+        >
+          <Settings className="w-4 h-4" />
+          API Keys
         </button>
       </div>
 
@@ -479,6 +581,106 @@ export const PricingView: React.FC<PricingViewProps> = ({
           </div>
         )}
       </div>
+      )}
+
+      {/* API key management. Values are write-only from here: the server returns
+          a masked preview and never the stored secret. */}
+      {activeTab === 'keys' && (
+        <div className="space-y-md">
+          <div className="bg-surface-container rounded-xl border border-outline-variant p-lg">
+            <h3 className="text-sm font-bold text-on-surface mb-1">Supplier API Credentials</h3>
+            <p className="text-xs text-on-surface-variant">
+              Saved keys are stored in the database and take effect immediately — no restart, no
+              editing <span className="font-mono">.env</span>. A value already set in{' '}
+              <span className="font-mono">.env</span> is used as a fallback and shown as such.
+              Existing secrets are never sent back to the browser, so fields show a masked preview
+              and stay blank until you enter a replacement.
+            </p>
+          </div>
+
+          {providers.length === 0 ? (
+            <div className="bg-surface-container rounded-xl border border-outline-variant p-lg text-center text-xs text-outline italic">
+              Loading providers…
+            </div>
+          ) : providers.map(p => {
+            const test = keyTest[p.provider];
+            return (
+              <div key={p.provider} className="bg-surface-container rounded-xl border border-outline-variant p-lg space-y-md">
+                <div className="flex items-start justify-between gap-md flex-wrap">
+                  <div className="min-w-[240px]">
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-sm font-bold text-on-surface">{p.label}</h4>
+                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${
+                        p.configured
+                          ? 'bg-green-500/10 text-green-400 border border-green-500/20'
+                          : 'bg-orange-500/10 text-orange-400 border border-orange-500/20'
+                      }`}>
+                        {p.configured ? 'Configured' : 'Not configured'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-on-surface-variant mt-1">{p.description}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => testProviderKeys(p.provider)}
+                      disabled={!!keyBusy || !p.configured}
+                      title={p.configured ? 'Run a live lookup with these credentials' : 'Set the required fields first'}
+                      className="px-md py-1.5 rounded-lg border border-outline-variant text-xs font-bold text-on-surface hover:bg-surface-container-high disabled:opacity-40"
+                    >
+                      {keyBusy === `test-${p.provider}` ? 'Testing…' : 'Test'}
+                    </button>
+                    <button
+                      onClick={() => saveProviderKeys(p.provider)}
+                      disabled={!!keyBusy}
+                      className="px-md py-1.5 rounded-lg bg-primary text-on-primary text-xs font-bold hover:brightness-110 disabled:opacity-40"
+                    >
+                      {keyBusy === `save-${p.provider}` ? 'Saving…' : 'Save'}
+                    </button>
+                  </div>
+                </div>
+
+                {test && (
+                  <div className={`text-[11px] rounded-lg px-3 py-2 border ${
+                    test.success
+                      ? 'bg-green-500/10 text-green-400 border-green-500/20'
+                      : 'bg-red-500/10 text-red-400 border-red-500/20'
+                  }`}>
+                    {test.text}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {p.fields.map(f => (
+                    <div key={f.name} className="flex flex-col gap-1">
+                      <label className="text-[10px] font-bold text-outline uppercase tracking-wide flex items-center gap-1.5">
+                        {f.label}
+                        {f.required && <span className="text-error">*</span>}
+                        {f.hasValue && (
+                          <span className="font-normal normal-case text-[9px] text-on-surface-variant/70">
+                            set{f.source ? ` via ${f.source === 'env' ? '.env' : 'database'}` : ''}
+                            {f.masked ? ` · ${f.masked}` : ''}
+                          </span>
+                        )}
+                      </label>
+                      <input
+                        type={f.type === 'password' ? 'password' : 'text'}
+                        autoComplete="off"
+                        placeholder={f.hasValue ? 'Enter a new value to replace' : `Not set — ${f.envVar}`}
+                        value={keyDrafts[p.provider]?.[f.name] ?? ''}
+                        onChange={(e) => setKeyDrafts(prev => ({
+                          ...prev,
+                          [p.provider]: { ...(prev[p.provider] ?? {}), [f.name]: e.target.value },
+                        }))}
+                        className="bg-surface-container-high border border-outline-variant rounded px-3 py-2 text-xs font-mono text-on-surface outline-none focus:border-primary"
+                      />
+                      {f.help && <span className="text-[9px] text-on-surface-variant/60">{f.help}</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       )}
     </div>
   );
