@@ -67,10 +67,19 @@ export const StockTablesView: React.FC<StockTablesViewProps> = ({
 
   // ── Computed analytics from real data ─────────────────────────────────────
   const analytics = useMemo(() => {
-    const totalInventoryValue = items.reduce(
-      (sum, item) => sum + (item.price || 0) * (item.stockLevel || 0),
-      0
-    );
+    // Asset valuation at cost — MUST mirror the dashboard's totalValuation
+    // filter so the two cards report the same figure. Only items that are
+    // current assets count: positive stock and not DISCONTINUED/BOOKED OUT.
+    // Negative stock is an over-issue (a data fault, not a negative asset),
+    // and DISCONTINUED/BOOKED OUT items are no longer held for use or sale.
+    const totalInventoryValue = items
+      .filter(
+        (item) =>
+          (item.stockLevel || 0) > 0 &&
+          item.status !== 'DISCONTINUED' &&
+          item.status !== 'BOOKED OUT'
+      )
+      .reduce((sum, item) => sum + (item.price || 0) * (item.stockLevel || 0), 0);
     const totalSkus = items.length;
     const lowStockItems = items.filter(
       (item) => (item.lowStockLvl ?? 50) > 0 && (item.stockLevel || 0) <= (item.lowStockLvl ?? 50)

@@ -147,8 +147,20 @@ async function setDigikeyRefreshToken(token: string): Promise<void> {
   );
 }
 
+// DigiKey issues a NEW refresh token on every refresh and invalidates the old
+// one immediately. Two concurrent refreshes therefore kill each other: the
+// second presents a token DigiKey has already retired. A bulk price run makes
+// exactly that pattern likely, so collapse concurrent refreshes into one.
+let digikeyRefreshInFlight: Promise<string> | null = null;
+
 async function getDigikeyToken(): Promise<string> {
   if (digikeyAccessToken && digikeyAccessToken.expiresAt > Date.now() + 5000) return digikeyAccessToken.token;
+  if (digikeyRefreshInFlight) return digikeyRefreshInFlight;
+  digikeyRefreshInFlight = refreshDigikeyToken().finally(() => { digikeyRefreshInFlight = null; });
+  return digikeyRefreshInFlight;
+}
+
+async function refreshDigikeyToken(): Promise<string> {
   const clientId = process.env.DIGIKEY_CLIENT_ID;
   const clientSecret = process.env.DIGIKEY_CLIENT_SECRET;
   if (!clientId || !clientSecret) throw new Error('DigiKey credentials not configured');
@@ -165,15 +177,20 @@ async function getDigikeyToken(): Promise<string> {
     }),
   });
   if (!res.ok) {
-    // A rejected refresh token is dead. getDigikeyRefreshToken prefers the
-    // pricing_tokens row over .env, so leaving the dead row in place shadowed
-    // any newly authorized token — re-running digikey:authorize appeared to do
-    // nothing. Drop the stored copy (and the in-process cache) so the next call
-    // re-seeds from .env.
+    // Do NOT blindly discard the stored token here. DigiKey rotates the refresh
+    // token on every use, so the stored copy is usually the only valid one —
+    // deleting it and falling back to .env (which still holds the original,
+    // already-consumed token) turns a recoverable failure into a permanent one.
+    // Only reach for .env when it actually differs, i.e. the user has since
+    // re-run digikey:authorize.
     if (res.status === 400 || res.status === 401) {
-      cachedDigikeyRefreshToken = null;
-      await query(`DELETE FROM pricing_tokens WHERE provider = 'digikey'`).catch(() => {});
-      console.warn('[DIGIKEY] refresh token rejected; cleared the stored copy so .env can re-seed it.');
+      const envToken = process.env.DIGIKEY_REFRESH_TOKEN;
+      if (envToken && envToken !== refreshToken) {
+        console.warn('[DIGIKEY] stored refresh token rejected; adopting the newer token from .env.');
+        await setDigikeyRefreshToken(envToken);
+        throw new Error('DigiKey token refreshed from .env — retry the request.');
+      }
+      console.warn('[DIGIKEY] refresh token rejected and .env holds the same value; re-authorization required.');
     }
     throw new Error(`DigiKey token refresh failed (${res.status}) — re-run "npm run digikey:authorize"`);
   }
