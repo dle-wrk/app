@@ -1434,21 +1434,21 @@ app.post('/api/pricing/bulk-refresh', async (req, res) => {
         // account gets 'R' back, and converting that again would inflate it ~17x.
         const sym = String(raw?.currency ?? '').toUpperCase();
         const code = normaliseCurrency(sym);
-        // Only USD and ZAR can be converted: the app stores a single USD->ZAR
-        // rate. Element14 quotes GBP and the EU stores quote EUR, and treating
-        // those as USD would misprice them by ~30%. Report them instead of
-        // guessing — a wrong price is worse than a missing one.
-        if (code !== 'USD' && code !== 'ZAR') {
-          return { rejected: `${provider} quoted ${code}, which has no stored conversion rate` };
+        // Look up ZAR per <native currency> from the stored rate map. Element14
+        // quotes GBP, TME quotes PLN, the EU stores quote EUR — all convertible
+        // now that updateExchangeRate harvests them. A currency the map does
+        // not carry still gets rejected rather than silently mispriced.
+        const rateToZar = fx.ratesToZar?.[code];
+        if (!Number.isFinite(rateToZar) || rateToZar <= 0) {
+          return { rejected: `${provider} quoted ${code}, which has no stored conversion rate — refresh the exchange rate` };
         }
-        const isZar = code === 'ZAR';
-        const usdEquivalent = isZar ? price / fx.usdToZar! : price;
-        const zarValue = isZar ? price : price * fx.usdToZar!;
+        const zarValue = code === 'ZAR' ? price : price * rateToZar;
+        const usdEquivalent = fx.usdToZar ? zarValue / fx.usdToZar : NaN;
         return {
           provider,
           native: price,
           currency: code,
-          usdEquivalent: Number(usdEquivalent.toFixed(4)),
+          usdEquivalent: Number.isFinite(usdEquivalent) ? Number(usdEquivalent.toFixed(4)) : null,
           zar: Number(zarValue.toFixed(4)),
           matchedPart: raw?.partNumber ?? null,
           matchedManufacturer: raw?.manufacturer ?? null,
@@ -5693,6 +5693,12 @@ async function runSchemaBootstrap() {
 // ---------------------------------------------------------------------------
 const RATE_KEY = 'usd_to_zar_rate';
 const RATE_UPDATED_KEY = 'usd_to_zar_rate_updated';
+// Element14 quotes GBP for the UK store and TME quotes PLN — the bulk refresh
+// held those results for review because it had no way to convert them. The
+// same exchangerate-api call returns rates for every currency against ZAR, so
+// we harvest and cache them here without extra API traffic.
+const EXTRA_CURRENCIES = ['GBP', 'EUR', 'PLN', 'CAD', 'AUD', 'SGD'] as const;
+const rateKeyFor = (cur: string) => `${cur.toLowerCase()}_to_zar_rate`;
 
 async function putSetting(key: string, value: string) {
   await query(
@@ -5725,6 +5731,20 @@ async function readExchangeRate() {
     if (Number.isFinite(t)) ageDays = Math.floor((Date.now() - t) / 86400000);
   }
 
+  // Read whatever additional rates are stored. Missing ones are simply omitted
+  // rather than defaulted, so a downstream conversion fails visibly instead of
+  // guessing.
+  const extraRates: Record<string, number> = {};
+  for (const cur of EXTRA_CURRENCIES) {
+    const row = await queryOne<{ value: string }>(`SELECT value FROM settings WHERE key = $1`, [rateKeyFor(cur)]);
+    const v = row ? parseFloat(readSettingString(row.value) || '') : NaN;
+    if (Number.isFinite(v) && v > 0) extraRates[cur] = v;
+  }
+  // USD is always available (it's the primary rate); expose it in the same map
+  // so callers only need one lookup path.
+  if (Number.isFinite(usdToZar)) extraRates.USD = usdToZar;
+  extraRates.ZAR = 1;
+
   return {
     usdToZar: Number.isFinite(usdToZar) ? usdToZar : null,
     zarToUsd: Number.isFinite(usdToZar) && usdToZar !== 0 ? Number((1 / usdToZar).toFixed(6)) : null,
@@ -5732,6 +5752,8 @@ async function readExchangeRate() {
     ageDays,
     // Surfaced so the UI can warn instead of presenting a stale rate as current.
     stale: ageDays === null || ageDays > 7,
+    // { GBP: 22.87, EUR: 19.42, PLN: 4.65, USD: 16.69, ZAR: 1, ... }
+    ratesToZar: extraRates,
   };
 }
 
@@ -5749,7 +5771,20 @@ async function updateExchangeRate() {
     const usdToZar = Number((1 / zarToUsd).toFixed(5));
     await putSetting(RATE_KEY, String(usdToZar));
     await putSetting(RATE_UPDATED_KEY, new Date().toISOString().slice(0, 10));
-    console.log(`Exchange rate updated: 1 USD = ${usdToZar} ZAR`);
+
+    // Harvest additional currencies from the same response. This adds no API
+    // traffic — the exchangerate-api endpoint always returns a rates{} map.
+    // The API is anchored to ZAR (see the URL), so data.rates[XXX] is XXX per
+    // ZAR; inverting gives the ZAR-per-XXX rate we store.
+    // USD is stored separately under RATE_KEY, so EXTRA_CURRENCIES omits it.
+    for (const cur of EXTRA_CURRENCIES) {
+      const xxxPerZar = Number(data.rates?.[cur]);
+      if (!Number.isFinite(xxxPerZar) || xxxPerZar <= 0) continue;
+      const zarPerXxx = Number((1 / xxxPerZar).toFixed(5));
+      await putSetting(rateKeyFor(cur), String(zarPerXxx));
+    }
+
+    console.log(`Exchange rate updated: 1 USD = ${usdToZar} ZAR (+ ${EXTRA_CURRENCIES.length} extra currencies)`);
     return true;
   } catch (err) {
     // Deliberately do NOT overwrite a previously good rate with a hard-coded
