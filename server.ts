@@ -195,8 +195,8 @@ const PRICING_PROVIDERS: PricingProviderConfig[] = [
     label: 'TME',
     description: 'HMAC-SHA1 signed requests. Get credentials at https://developers.tme.eu/',
     fields: [
-      { name: 'api_key', label: 'API Key', envVar: 'TME_API_KEY', type: 'text', required: true },
-      { name: 'api_secret', label: 'API Secret', envVar: 'TME_API_SECRET', type: 'password', required: true },
+      { name: 'api_key', label: 'Anonymous Token', envVar: 'TME_API_KEY', type: 'text', required: true, help: 'The 45-character anonymous token from the TME API panel. A private key is NOT needed for catalogue and price lookups — that requires linking a tme.eu customer account with a 10-minute Temporary Token.' },
+      { name: 'api_secret', label: 'Application Secret', envVar: 'TME_API_SECRET', type: 'password', required: true, help: 'The Application secret shown on your app in the TME API panel (reveal with the eye icon).' },
     ],
   },
 ];
@@ -817,7 +817,14 @@ async function searchTme(partNumber: string, qty = 1) {
   const body = new URLSearchParams({ ...params, ApiSignature: apiSignature });
   const res = await fetch(endpoint, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' },
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Accept': 'application/json',
+      // TME distinguishes anonymous from customer-linked calls via this header.
+      // Catalogue and price endpoints are reachable with an anonymous token, so
+      // no customer account linking (and no 10-minute Temporary Token) is needed.
+      'request-context': 'anonymous',
+    },
     body: body.toString(),
   });
   if (!res.ok) {
@@ -859,7 +866,11 @@ async function searchTme(partNumber: string, qty = 1) {
         .digest('base64');
       const priceRes = await fetch(priceEndpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' },
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Accept': 'application/json',
+          'request-context': 'anonymous',
+        },
         body: new URLSearchParams({ ...priceParams, ApiSignature: priceSig }).toString(),
       });
       if (priceRes.ok) {
