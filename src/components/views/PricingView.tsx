@@ -388,37 +388,11 @@ export const PricingView: React.FC<PricingViewProps> = ({
             <UsageMeter label="TME API calls today" used={usage.tme.used} limit={usage.tme.limit} />
           </div>
         )}
-        {/* Only advise once usage has actually loaded. These were written as
-            !usage?.x?.configured, which is !undefined === true whenever the
-            fetch is still in flight or has failed — so every provider was
-            reported unconfigured while the server was simply unreachable.
-            Credentials are now entered in the API Keys tab, not .env. */}
-        {!usage ? (
-          <div className="text-[10px] text-outline mt-sm">
-            Provider status unavailable — could not reach the pricing service.
-          </div>
-        ) : (
-          <>
-            {!usage.digikey.configured && (
-              <div className="text-[10px] text-outline mt-sm">DigiKey not configured — add its Client ID and Secret in the API Keys tab.</div>
-            )}
-            {usage.digikey.configured && !usage.digikey.authorized && (
-              <div className="text-[10px] text-outline mt-sm">DigiKey credentials are set but no token could be obtained — check them in the API Keys tab and press Test.</div>
-            )}
-            {!usage.mouser.configured && (
-              <div className="text-[10px] text-outline mt-sm">Mouser not configured — add its API Key in the API Keys tab.</div>
-            )}
-            {!usage.nexar?.configured && (
-              <div className="text-[10px] text-outline mt-sm">Nexar (Octopart aggregator) not configured — add its API Key and Secret in the API Keys tab for Arrow, Heilind and Avnet coverage.</div>
-            )}
-            {!usage.element14?.configured && (
-              <div className="text-[10px] text-outline mt-sm">Element14 / Farnell not configured — add its API Key in the API Keys tab.</div>
-            )}
-            {!usage.tme?.configured && (
-              <div className="text-[10px] text-outline mt-sm">TME not configured — register at developers.tme.eu, then add the key and secret in the API Keys tab.</div>
-            )}
-          </>
-        )}
+        {/* Per-provider setup hints removed — the API Keys tab already lists
+            Configured / Not-configured state per provider with more detail, so
+            duplicating the same guidance under the usage meters was redundant.
+            The earlier version also mis-reported configured providers as
+            missing while the usage fetch was still loading. */}
       </div>
       )}
 
