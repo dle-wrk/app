@@ -790,43 +790,103 @@ async function searchTme(partNumber: string, qty = 1) {
   const apiSecret = await getPricingCredential('tme', 'api_secret', 'TME_API_SECRET');
   if (!apiKey || !apiSecret) throw new Error('TME credentials not configured');
 
-  // Build and sign the request. TME requires parameters sorted alphabetically,
-  // joined as key=value&key=value, then HMAC-SHA1 with the secret as the key.
+  // TME signs like OAuth 1.0, not with a bare query-string HMAC. The base string
+  // is METHOD & rawurlencode(endpoint) & rawurlencode(sorted params), the request
+  // is a form POST, the key parameter is `Token`, and the signature travels as
+  // `ApiSignature`. The previous implementation got all of those wrong and would
+  // have failed on every call.
+  const endpoint = 'https://api.tme.eu/Products/Search.json';
   const params: Record<string, string> = {
-    language: 'en',
-    search: partNumber,
-    api_key: apiKey,
+    Token: apiKey,
+    Country: 'PL',
+    Language: 'EN',
+    SearchPlain: partNumber,
   };
-  const sortedKeys = Object.keys(params).sort();
-  const queryString = sortedKeys.map(k => `${k}=${encodeURIComponent(params[k])}`).join('&');
-  const signatureBase = `${queryString}`;
-  const signature = createHmac('sha1', apiSecret).update(signatureBase).digest('base64');
 
-  const url = `https://api.tme.eu/products/search.json?${queryString}&signature=${encodeURIComponent(signature)}`;
-  const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
-  if (!res.ok) throw new Error(`TME search failed: ${res.status}`);
+  // RFC3986: encodeURIComponent leaves !'()* alone, but the signature must treat
+  // them as reserved or the digest will not match TME's.
+  const rfc3986 = (s: string) =>
+    encodeURIComponent(s).replace(/[!'()*]/g, c => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+
+  const sortedQuery = Object.keys(params).sort()
+    .map(k => `${rfc3986(k)}=${rfc3986(params[k])}`)
+    .join('&');
+  const signatureBase = `POST&${rfc3986(endpoint)}&${rfc3986(sortedQuery)}`;
+  const apiSignature = createHmac('sha1', apiSecret).update(signatureBase).digest('base64');
+
+  const body = new URLSearchParams({ ...params, ApiSignature: apiSignature });
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' },
+    body: body.toString(),
+  });
+  if (!res.ok) {
+    // TME returns a JSON body describing the fault; surface it rather than a bare code.
+    let detail = '';
+    try {
+      const errBody: any = await res.json();
+      detail = errBody?.Status || errBody?.Error || errBody?.ErrorMessage || '';
+    } catch { /* non-JSON error body */ }
+    throw new Error(`TME search failed: ${res.status}${detail ? ` — ${detail}` : ''}`);
+  }
   const data: any = await res.json();
-  const products: any[] = data?.data?.productList ?? data?.productList ?? [];
+  // TME responds in PascalCase: { Status, Data: { ProductList: [...] } }.
+  const products: any[] = data?.Data?.ProductList ?? data?.data?.productList ?? [];
   const product = products[0];
   if (!product) return null;
 
-  // TME price breaks: [{amount, priceSymbol, price}] — pick for qty.
-  const breaks: any[] = product.priceList ?? product.prices ?? [];
-  const chosen = pickBreakForQty(breaks, qty, (b) => Number(b.amount ?? b.Quantity) || 1) ?? breaks[0];
-  const rawPrice = chosen ? String(chosen.price ?? chosen.priceSymbol ?? '') : '';
-  const priceNum = rawPrice ? Number(rawPrice.replace(/[^0-9.]/g, '')) : null;
+  const symbol: string | undefined = product.Symbol ?? product.symbol;
 
-  const stockNum = product.amountInStock ?? product.stock;
-  const stock = stockNum != null ? Number(stockNum) : null;
+  // Search returns catalogue entries WITHOUT pricing — TME serves prices from a
+  // separate endpoint keyed by the product symbol, so a second signed call is
+  // required. Without it this provider could only ever report "no price".
+  let chosen: any = null;
+  let currency: string | null = null;
+  if (symbol) {
+    try {
+      const priceParams: Record<string, string> = {
+        Token: apiKey,
+        Country: 'PL',
+        Language: 'EN',
+        'SymbolList[0]': symbol,
+      };
+      const priceEndpoint = 'https://api.tme.eu/Products/GetPrices.json';
+      const priceQuery = Object.keys(priceParams).sort()
+        .map(k => `${rfc3986(k)}=${rfc3986(priceParams[k])}`)
+        .join('&');
+      const priceSig = createHmac('sha1', apiSecret)
+        .update(`POST&${rfc3986(priceEndpoint)}&${rfc3986(priceQuery)}`)
+        .digest('base64');
+      const priceRes = await fetch(priceEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' },
+        body: new URLSearchParams({ ...priceParams, ApiSignature: priceSig }).toString(),
+      });
+      if (priceRes.ok) {
+        const pd: any = await priceRes.json();
+        currency = pd?.Data?.Currency ?? null;
+        const entry = (pd?.Data?.ProductList ?? [])[0];
+        const breaks: any[] = entry?.PriceList ?? [];
+        chosen = pickBreakForQty(breaks, qty, (b) => Number(b.Amount) || 1) ?? breaks[0] ?? null;
+      }
+    } catch {
+      // Leave the price null rather than failing the whole lookup: the catalogue
+      // match is still useful on its own.
+    }
+  }
+
+  const priceNum = chosen != null ? Number(chosen.PriceValue ?? chosen.PriceNet) : null;
+  const stockNum = Number(product.Amount ?? product.amountInStock);
 
   return {
-    partNumber: product.manufacturerPartNumber ?? product.symbol,
-    manufacturer: product.producer ?? product.manufacturer,
+    partNumber: product.OriginalSymbol ?? symbol ?? null,
+    manufacturer: product.Producer ?? product.producer ?? null,
     unitPrice: Number.isFinite(priceNum) ? priceNum : null,
-    breakQuantity: chosen?.amount ?? null,
-    currency: chosen?.currency ?? 'EUR',
-    stock: Number.isFinite(stock) ? stock : null,
-    productUrl: product.productUrl ?? `https://www.tme.eu/en/details/${product.symbol}`,
+    breakQuantity: chosen?.Amount ?? null,
+    currency: currency ?? 'PLN',
+    stock: Number.isFinite(stockNum) ? stockNum : null,
+    productUrl: symbol ? `https://www.tme.eu/en/details/${symbol}` : null,
+    distributor: 'TME',
   };
 }
 
