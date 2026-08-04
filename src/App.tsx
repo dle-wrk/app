@@ -1347,12 +1347,14 @@ export default function App() {
   };
 
   // Dynamic STM32 Search Routing
+  // Keystrokes update the query but never navigate on their own. The user
+  // switches to Search by submitting (Enter or Cmd/Ctrl+K), and clearing the
+  // field only returns to the dashboard if we are already on Search — from any
+  // other page a hijacked autofill would otherwise throw the user out of it.
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     setSearchQuery(val);
-    if (val.trim() !== '') {
-      setView('search');
-    } else {
+    if (val.trim() === '' && currentView === 'search') {
       setView('dashboard');
     }
   };
@@ -1512,21 +1514,32 @@ export default function App() {
               {currentView.replace('_', ' ')}
             </h2>
 
-            {/* Quick search input */}
-            <div className="hidden md:flex items-center bg-surface-container-high rounded-full px-md py-1 border border-outline-variant w-96 font-mono text-[13px]">
+            {/* Quick search input — form-wrapped so Enter navigates explicitly. */}
+            <form
+              onSubmit={(e) => { e.preventDefault(); if (searchQuery.trim() !== '') setView('search'); }}
+              className="hidden md:flex items-center bg-surface-container-high rounded-full px-md py-1 border border-outline-variant w-96 font-mono text-[13px]"
+            >
               <Search className="text-outline w-4 h-4 mr-sm shrink-0" />
               <input
                 id="search-input"
                 className="bg-transparent border-none focus:outline-none focus:ring-0 text-xs w-full text-on-surface"
                 placeholder="Search SKU, name, ID... (⌘K)"
-                type="text"
+                // 'search' + off-name + all-off keeps password managers out of
+                // this field. Without them Chrome autofilled the user's login
+                // email here whenever a page mounted a password input (e.g. the
+                // API Keys tab), which then routed the app to Search Results.
+                type="search"
+                name="tracklab-quick-search"
+                autoComplete="off"
+                data-1p-ignore="true"
+                data-lpignore="true"
                 value={searchQuery}
                 onChange={handleSearchChange}
               />
               <span className="text-[10px] text-outline ml-sm opacity-50 bg-surface-container-lowest px-1.5 py-0.5 rounded border border-outline-variant">
                 ⌘K
               </span>
-            </div>
+            </form>
           </div>
 
           {/* Quick Operations Actions */}
