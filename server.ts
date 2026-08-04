@@ -195,8 +195,8 @@ const PRICING_PROVIDERS: PricingProviderConfig[] = [
     label: 'TME',
     description: 'HMAC-SHA1 signed requests. Get credentials at https://developers.tme.eu/',
     fields: [
-      { name: 'api_key', label: 'Anonymous Token', envVar: 'TME_API_KEY', type: 'text', required: true, help: 'The 45-character anonymous token from the TME API panel. A private key is NOT needed for catalogue and price lookups — that requires linking a tme.eu customer account with a 10-minute Temporary Token.' },
-      { name: 'api_secret', label: 'Application Secret', envVar: 'TME_API_SECRET', type: 'password', required: true, help: 'The Application secret shown on your app in the TME API panel (reveal with the eye icon).' },
+      { name: 'api_key', label: 'Private Key', envVar: 'TME_API_KEY', type: 'text', required: true, help: 'The generated Private Key from your Tracklab ERP app on developers.tme.eu. Same key works for anonymous market data — this app sends request-context: anonymous so no customer-specific pricing is used. To obtain: log into tme.eu customer account → User Panel → Applications → Register new app → copy the Temporary Token → paste it back on developers.tme.eu → Generate new private key → Show private keys.' },
+      { name: 'api_secret', label: 'Application Secret', envVar: 'TME_API_SECRET', type: 'password', required: true, help: 'The Application secret shown at the top of your app card on developers.tme.eu (reveal with the eye icon).' },
     ],
   },
 ];
