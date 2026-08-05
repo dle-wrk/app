@@ -1560,11 +1560,13 @@ export default function App() {
               <Download className="w-4 h-4" />
             </button>
 
-            <div className="h-4 w-px bg-outline-variant mx-1 self-center"></div>
+            <div className="h-4 w-px bg-outline-variant mx-1 self-center hidden md:block"></div>
 
             <button
               onClick={handleStockSync}
-              className="bg-surface-container-high border border-outline-variant text-on-surface px-3 py-1.5 rounded-lg font-bold text-xs hover:bg-surface-container-highest active:scale-95 transition-all duration-150"
+              title="Sync Stock"
+              aria-label="Sync Stock"
+              className="bg-surface-container-high border border-outline-variant text-on-surface px-3 py-1.5 rounded-lg font-bold text-xs hover:bg-surface-container-highest active:scale-95 transition-all duration-150 hidden md:inline-flex"
             >
               Sync Stock
             </button>
@@ -1580,21 +1582,26 @@ export default function App() {
                 }
                 setShowBookInModal(true);
               }}
-              className="bg-secondary text-white px-3 py-1.5 rounded-lg font-bold text-xs hover:brightness-110 active:scale-95 transition-all duration-150 flex items-center gap-1.5 shadow-md shadow-secondary/10"
+              title="Book In Component"
+              aria-label="Book In Component"
+              className="bg-secondary text-white px-2.5 md:px-3 py-1.5 rounded-lg font-bold text-xs hover:brightness-110 active:scale-95 transition-all duration-150 flex items-center gap-1.5 shadow-md shadow-secondary/10"
             >
-              <RefreshCw className="w-3.5 h-3.5" />
-              Book In Component
+              <RefreshCw className="w-3.5 h-3.5 shrink-0" />
+              {/* Text collapses on mobile — the icon and aria-label carry the meaning. */}
+              <span className="hidden md:inline">Book In Component</span>
             </button>
 
             <button
               onClick={() => setShowAddModal(true)}
-              className="bg-primary text-white px-3 py-1.5 rounded-lg font-bold text-xs shadow-md shadow-primary/10 hover:brightness-110 active:scale-95 transition-all duration-150 flex items-center gap-1.5"
+              title="Add Item"
+              aria-label="Add Item"
+              className="bg-primary text-white px-2.5 md:px-3 py-1.5 rounded-lg font-bold text-xs shadow-md shadow-primary/10 hover:brightness-110 active:scale-95 transition-all duration-150 flex items-center gap-1.5"
             >
-              <Plus className="w-3.5 h-3.5" />
-              Add Item
+              <Plus className="w-3.5 h-3.5 shrink-0" />
+              <span className="hidden md:inline">Add Item</span>
             </button>
 
-            <div className="h-4 w-px bg-outline-variant mx-1 self-center"></div>
+            <div className="h-4 w-px bg-outline-variant mx-1 self-center hidden md:block"></div>
 
             {/* User Profile & Logout */}
             <div className="flex items-center gap-2">
