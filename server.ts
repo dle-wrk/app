@@ -939,15 +939,37 @@ const PRICING_CACHE_DEFAULT_MS = 24 * 60 * 60 * 1000;
 const PRICING_CACHE_BULK_MS = 30 * 24 * 60 * 60 * 1000;
 
 app.get('/api/pricing/search', async (req, res) => {
-  const partNumber = String(req.query.partNumber || '').trim();
-  if (!partNumber) return res.status(400).json({ error: 'partNumber is required' });
+  const requested = String(req.query.partNumber || '').trim();
+  if (!requested) return res.status(400).json({ error: 'partNumber is required' });
   const qty = Math.max(1, Math.min(1_000_000, parseInt(String(req.query.qty || '1'), 10) || 1));
   const maxAgeDays = parseFloat(String(req.query.maxAgeDays || ''));
   const maxAgeMs = Number.isFinite(maxAgeDays) && maxAgeDays > 0
     ? maxAgeDays * 24 * 60 * 60 * 1000
     : PRICING_CACHE_DEFAULT_MS;
 
+  // Translate an internal SKU to the item's manufacturer part number before
+  // sending it to the suppliers. Users routinely type their own stock codes
+  // (e.g. "ANT-001") expecting the lookup to know what they mean; without this
+  // it went straight to DigiKey/Mouser as if it were an MFN and returned
+  // nothing. Match is case-insensitive; the query is unaffected if the input
+  // is not a known SKU.
+  let partNumber = requested;
+  let resolvedFromSku: { sku: string; name: string } | null = null;
+  const skuMatch = await queryOne<{ serial_number: string; man_pn_1: string; name: string }>(
+    `SELECT serial_number, man_pn_1, name FROM inventory
+     WHERE deleted != true AND UPPER(TRIM(serial_number)) = UPPER($1) LIMIT 1`,
+    [requested]
+  );
+  if (skuMatch && skuMatch.man_pn_1 && String(skuMatch.man_pn_1).trim() && String(skuMatch.man_pn_1).trim().toUpperCase() !== 'N/A') {
+    partNumber = String(skuMatch.man_pn_1).trim();
+    resolvedFromSku = { sku: skuMatch.serial_number, name: skuMatch.name };
+  }
+
   const results: any = { partNumber, qty };
+  if (resolvedFromSku) {
+    results.searchedFor = requested;
+    results.resolvedFromSku = resolvedFromSku;
+  }
 
   if (!(await isProviderConfigured('digikey'))) {
     results.digikey = { error: 'Not configured' };

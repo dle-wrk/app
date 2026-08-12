@@ -27,6 +27,9 @@ interface ProviderResult {
 
 interface SearchResponse {
   partNumber: string;
+  /** Present when the caller typed an internal SKU that we translated to an MFN. */
+  searchedFor?: string;
+  resolvedFromSku?: { sku: string; name: string };
   digikey?: ProviderResult;
   mouser?: ProviderResult;
   lcsc?: ProviderResult;
@@ -356,6 +359,14 @@ export const PricingView: React.FC<PricingViewProps> = ({
           </button>
         </div>
 
+        {searchResult && searchResult.resolvedFromSku && (
+          <div className="mt-md text-[11px] rounded-lg px-3 py-2 border bg-primary/10 text-primary border-primary/20">
+            You searched <span className="font-mono font-bold">{searchResult.searchedFor}</span>{' '}
+            ({searchResult.resolvedFromSku.name}). Suppliers do not know your internal SKU, so we
+            looked up its manufacturer part number{' '}
+            <span className="font-mono font-bold">{searchResult.partNumber}</span> instead.
+          </div>
+        )}
         {searchResult && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-sm mt-md">
             <ProviderResultCard name="DigiKey" result={searchResult.digikey} />
