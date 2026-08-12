@@ -158,7 +158,13 @@ export default function App() {
     let cancelled = false;
     const check = async () => {
       const sessionId = localStorage.getItem('sessionId');
-      if (!sessionId) return;
+      // A logged-in tab with no sessionId was signed in before this feature
+      // shipped, so it never picked one up. Boot it — otherwise a newer device
+      // has no way to displace it and the "kick" never happens.
+      if (!sessionId) {
+        if (!cancelled) handleLogout({ kicked: true });
+        return;
+      }
       try {
         const res = await fetch('/api/session/verify', {
           method: 'POST',
