@@ -6,7 +6,7 @@ import path from 'path';
 import { existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 import cron from 'node-cron';
-import { createHmac } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 import { pool, query, queryOne, exec, ensureSchema, close } from './src/lib/db';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -2448,6 +2448,23 @@ app.get('/api/items/generate-code/:category', async (req, res) => {
 // USER MANAGEMENT & AUTHENTICATION
 // ============================================================================
 
+// Mint a fresh session id and, in the same transaction, wipe any prior sessions
+// for the same email. Older devices that were still holding a session id will
+// fail their next /api/session/verify call and get kicked out of the app.
+async function mintSessionAndKickOthers(email: string, userId: number | null, req: any): Promise<string> {
+  const sessionId = randomBytes(24).toString('hex');
+  const ua = String(req.headers?.['user-agent'] ?? '').slice(0, 500);
+  const ip = String(
+    req.headers?.['x-forwarded-for'] ?? req.headers?.['x-real-ip'] ?? req.socket?.remoteAddress ?? ''
+  ).split(',')[0].trim().slice(0, 100);
+  await query(`DELETE FROM user_sessions WHERE user_email = $1`, [email]);
+  await query(
+    `INSERT INTO user_sessions (id, user_email, user_id, user_agent, ip_address) VALUES ($1, $2, $3, $4, $5)`,
+    [sessionId, email, userId, ua, ip]
+  );
+  return sessionId;
+}
+
 app.post('/api/login', async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -2457,14 +2474,16 @@ app.post('/api/login', async (req, res) => {
     }
 
     // Check hardcoded demo credentials first
-    if (email === 'dedw13@gmail.com' && password === 'password123') {
+    if (email === 'dedw13@gmail.com' && password === 'tracklabadm1n') {
+      const sessionId = await mintSessionAndKickOthers('dedw13@gmail.com', 1, req).catch(() => null);
       return res.json({
         id: 1,
         email: 'dedw13@gmail.com',
         firstName: 'Demo',
         lastName: 'User',
         role: 'admin',
-        status: 'ACTIVE'
+        status: 'ACTIVE',
+        sessionId
       });
     }
 
@@ -2500,6 +2519,8 @@ app.post('/api/login', async (req, res) => {
         return res.status(401).json({ error: 'Invalid email or password' });
       }
 
+      const sessionId = await mintSessionAndKickOthers(user.email, user.id, req).catch(() => null);
+
       // Return user info (without password)
       res.json({
         id: user.id,
@@ -2507,7 +2528,8 @@ app.post('/api/login', async (req, res) => {
         firstName: user.first_name,
         lastName: user.last_name,
         role: user.role,
-        status: user.status
+        status: user.status,
+        sessionId
       });
     } catch (dbErr) {
       // If database query fails, only allow demo credentials (already checked above)
@@ -2517,6 +2539,42 @@ app.post('/api/login', async (req, res) => {
   } catch (err: any) {
     console.error('Login error:', err.message);
     res.status(500).json({ error: 'Authentication failed' });
+  }
+});
+
+// Client polls this every ~30s. Returns `active: false` when the sessionId is
+// missing from `user_sessions` — either the user logged in from another device
+// (which deleted the row) or explicitly signed out here.
+app.post('/api/session/verify', async (req, res) => {
+  try {
+    const sessionId = String(req.body?.sessionId ?? req.headers?.['x-session-id'] ?? '');
+    if (!sessionId) return res.json({ active: false, reason: 'missing_session_id' });
+    const row = await queryOne<{ user_email: string }>(
+      `SELECT user_email FROM user_sessions WHERE id = $1`,
+      [sessionId]
+    );
+    if (!row) return res.json({ active: false, reason: 'signed_in_elsewhere' });
+    // Cheap heartbeat so we could add an idle-timeout later without another table.
+    await query(`UPDATE user_sessions SET last_seen = CURRENT_TIMESTAMP WHERE id = $1`, [sessionId]).catch(() => {});
+    res.json({ active: true, email: row.user_email });
+  } catch (err: any) {
+    // Fail open on transient DB errors — don't spuriously kick a logged-in user
+    // just because Neon hiccupped. A real "kicked" signal must come from the DB.
+    console.error('Session verify error:', err.message);
+    res.json({ active: true, degraded: true });
+  }
+});
+
+app.post('/api/session/logout', async (req, res) => {
+  try {
+    const sessionId = String(req.body?.sessionId ?? req.headers?.['x-session-id'] ?? '');
+    if (sessionId) {
+      await query(`DELETE FROM user_sessions WHERE id = $1`, [sessionId]);
+    }
+    res.json({ ok: true });
+  } catch (err: any) {
+    console.error('Session logout error:', err.message);
+    res.json({ ok: true });
   }
 });
 
@@ -5600,6 +5658,18 @@ async function runSchemaBootstrap() {
     await exec(`ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`).catch(() => {});
     await exec(`ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`).catch(() => {});
     await exec(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login TIMESTAMP`).catch(() => {});
+    // One row per active login. A new login for the same email deletes prior
+    // rows, so any older device polling /api/session/verify gets kicked out.
+    await exec(`CREATE TABLE IF NOT EXISTS user_sessions (
+      id TEXT PRIMARY KEY,
+      user_email TEXT NOT NULL,
+      user_id INTEGER,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      user_agent TEXT,
+      ip_address TEXT
+    )`).catch(() => {});
+    await exec(`CREATE INDEX IF NOT EXISTS user_sessions_email_idx ON user_sessions (user_email)`).catch(() => {});
     await exec(`CREATE TABLE IF NOT EXISTS role_permissions (
       id SERIAL PRIMARY KEY,
       role TEXT NOT NULL,
@@ -5745,7 +5815,7 @@ async function runSchemaBootstrap() {
       const demoUser = await queryOne(`SELECT id FROM users WHERE email = $1`, ['dedw13@gmail.com']);
       if (!demoUser) {
         await exec(`INSERT INTO users (email, first_name, last_name, role, status, password, created_at)
-          VALUES ('dedw13@gmail.com', 'Demo', 'User', 'admin', 'ACTIVE', 'password123', datetime('now'))`);
+          VALUES ('dedw13@gmail.com', 'Demo', 'User', 'admin', 'ACTIVE', 'tracklabadm1n', datetime('now'))`);
         console.log('Demo user created successfully');
       }
     } catch (e) {

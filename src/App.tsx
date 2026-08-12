@@ -114,6 +114,7 @@ export default function App() {
       const user = await response.json();
       localStorage.setItem('userLoggedIn', 'true');
       localStorage.setItem('currentUser', JSON.stringify(user));
+      if (user.sessionId) localStorage.setItem('sessionId', user.sessionId);
       setCurrentUser(user);
       setIsAuthenticated(true);
       await logActivity({ userEmail: email, action: 'LOGIN', details: { role: user.role } });
@@ -125,15 +126,61 @@ export default function App() {
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = (opts?: { kicked?: boolean }) => {
     const email = currentUser?.email;
+    const sessionId = localStorage.getItem('sessionId');
     localStorage.removeItem('userLoggedIn');
     localStorage.removeItem('currentUser');
+    localStorage.removeItem('sessionId');
     setCurrentUser(null);
     setIsAuthenticated(false);
-    if (email) logActivity({ userEmail: email, action: 'LOGOUT' });
-    triggerToast('Logged out successfully', 'SUCCESS');
+    // Tell the server to drop the row too so it's gone from admin views.
+    if (sessionId && !opts?.kicked) {
+      fetch('/api/session/logout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId }),
+      }).catch(() => {});
+    }
+    if (email) logActivity({ userEmail: email, action: 'LOGOUT', details: opts?.kicked ? { kicked: true } : undefined });
+    triggerToast(
+      opts?.kicked ? 'Signed out — this account signed in from another device' : 'Logged out successfully',
+      opts?.kicked ? 'WARNING' : 'SUCCESS'
+    );
   };
+
+  // Poll the server periodically. When another device logs into the same
+  // account, that login deletes our row from user_sessions and the next
+  // verify returns active:false — we log out with a toast so the user knows
+  // why they were kicked instead of quietly losing their state.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    let cancelled = false;
+    const check = async () => {
+      const sessionId = localStorage.getItem('sessionId');
+      if (!sessionId) return;
+      try {
+        const res = await fetch('/api/session/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId }),
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled && data && data.active === false) handleLogout({ kicked: true });
+      } catch { /* fail open — network hiccups shouldn't kick the user */ }
+    };
+    check();
+    const interval = window.setInterval(check, 30_000);
+    const onFocus = () => check();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener('focus', onFocus);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated]);
 
   // Advanced Filtering State Management
   const [selectedItemType, setSelectedItemType] = useState<string>('ALL');
@@ -1610,7 +1657,7 @@ export default function App() {
                 <p className="text-[10px] text-on-surface-variant capitalize">{currentUser?.role || 'viewer'}</p>
               </div>
               <button
-                onClick={handleLogout}
+                onClick={() => handleLogout()}
                 className="p-2 text-on-surface-variant hover:text-error hover:bg-error/10 rounded-lg transition-all duration-200 border border-transparent hover:border-error/30"
                 title="Logout"
               >
