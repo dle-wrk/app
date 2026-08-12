@@ -302,6 +302,7 @@
         <div class="toc">
             <h2>📋 Table of Contents</h2>
             <ul>
+                <li><a href="#whats-new">What's New (v2.6)</a></li>
                 <li><a href="#getting-started">Getting Started</a></li>
                 <li><a href="#dashboard">Dashboard Overview</a></li>
                 <li><a href="#inventory">Inventory Management</a></li>
@@ -314,6 +315,61 @@
                 <li><a href="#advanced">Advanced Features</a></li>
                 <li><a href="#tips">Pro Tips & Best Practices</a></li>
             </ul>
+        </div>
+
+        <!-- What's New -->
+        <div class="section" id="whats-new">
+            <h2>🆕 What's New (v2.6)</h2>
+
+            <h3>One account, one active device</h3>
+            <div class="step">
+                <p>Signing in on a new device now automatically signs the previous device out.</p>
+                <ul>
+                    <li>Log in on your phone → your desktop tab shows a toast reading <em>"Signed out — this account signed in from another device"</em> and drops back to the login screen.</li>
+                    <li>Detection happens on a 30-second heartbeat and immediately when you refocus the older tab.</li>
+                    <li>Explicit logout on either device only signs that one device out.</li>
+                </ul>
+            </div>
+            <div class="tip">
+                <strong>💡 Tip:</strong> If a device seems to hang on the login screen after signing in elsewhere, that's expected — sign back in on the device you want to use.
+            </div>
+
+            <h3>Mobile-optimised UI</h3>
+            <div class="step">
+                <p>The app now detects screen size (breakpoint 768 px) and adapts the header and layout for phones.</p>
+                <ul>
+                    <li>The top-bar action buttons collapse to icons on small screens, freeing horizontal space.</li>
+                    <li>A new <code>useIsMobile</code> hook exposes the breakpoint to any component that needs to reflow.</li>
+                    <li>The rest of the pages are being reflowed page-by-page — check back for further mobile improvements.</li>
+                </ul>
+            </div>
+
+            <h3>Smarter Live Price Lookup</h3>
+            <div class="step">
+                <p>The Pricing Directory now recognises what kind of code you typed and routes the query intelligently instead of blindly asking every supplier.</p>
+                <ul>
+                    <li><strong>Internal SKU → MFN:</strong> if you type one of your own stock codes, the system looks up its stored manufacturer part number and searches suppliers by that instead.</li>
+                    <li><strong>DigiKey stock codes</strong> (anything ending in <code>-ND</code>): DigiKey is asked first to resolve the code to the real manufacturer part number, and every other supplier is then queried for that real MPN. Comparable quotes, no double DigiKey call.</li>
+                    <li><strong>LCSC stock codes</strong> (<code>C</code> followed by digits, e.g. <code>C105882</code>): only LCSC is queried. Other distributors would fuzzy-match to unrelated parts (a 100 nF capacitor was once priced at $241 via Pasternack this way).</li>
+                    <li><strong>Full supplier fan-out</strong> now covers DigiKey, Mouser, LCSC, Nexar (Octopart aggregator: Arrow, Heilind, Avnet, …), Element14/Farnell/Newark and TME.</li>
+                    <li><strong>Multi-currency:</strong> non-USD quotes (GBP, EUR, PLN, CAD, AUD, SGD) are converted to ZAR/USD automatically. Exchange rates refresh daily via a single call and are cached for 30 days.</li>
+                </ul>
+            </div>
+
+            <h3>API Keys tab</h3>
+            <div class="step">
+                <p>Provider credentials for every supplier can be entered and rotated from inside the app.</p>
+                <ul>
+                    <li>DigiKey now uses OAuth2 <code>client_credentials</code> where available — no more manual re-authorisation every day. Fall back to the 3-legged flow with <code>npm run digikey:authorize</code> if your account doesn't have it.</li>
+                    <li>TME uses its Private Key + Application Secret; the workflow help text now matches the current TME portal.</li>
+                    <li>The tab is protected against browser autofill hijack, so entering login credentials in your password manager will no longer redirect you to the search view.</li>
+                </ul>
+            </div>
+
+            <h3>Distributor stock code detection</h3>
+            <div class="step">
+                <p>Roughly 25% of items in the catalogue carry a distributor stock code in the manufacturer part number field. Live Price Lookup now handles those gracefully as described above; over time, cleaning those fields to the real MPN will give you the best cross-supplier price coverage.</p>
+            </div>
         </div>
 
         <!-- Getting Started -->
@@ -331,7 +387,10 @@
             </div>
 
             <div class="tip">
-                <strong>💡 Tip:</strong> Bookmark the URL for quick access. The application works best on desktop browsers (Chrome, Firefox, Safari, Edge).
+                <strong>💡 Tip:</strong> Bookmark the URL for quick access. The app works on any modern browser on desktop, tablet, or phone — the header collapses to icon buttons below 768 px so it stays usable on small screens.
+            </div>
+            <div class="tip">
+                <strong>🔐 Single-session sign-in:</strong> Only one device can be signed in per account. If you sign in on a phone while your desktop tab is still open, the desktop tab will show a toast and drop back to the login screen within 30 seconds (immediately on refocus).
             </div>
 
             <h3>Understanding the Interface</h3>
@@ -572,21 +631,29 @@
                 <h4>Compare Supplier Prices in Real-Time</h4>
                 <ol>
                     <li>Click the <strong>Live Price Lookup</strong> tab (Search icon)</li>
-                    <li>Enter part number or manufacturer part number</li>
-                    <li>System queries multiple suppliers:
+                    <li>Enter one of: an internal SKU, a manufacturer part number, a DigiKey stock code (<code>…-ND</code>), or an LCSC stock code (<code>C</code> + digits)</li>
+                    <li>The system detects what you typed and queries the right suppliers:
                         <ul>
-                            <li>DigiKey</li>
-                            <li>Mouser Electronics</li>
-                            <li>LCSC (web-scraped pricing)</li>
+                            <li><strong>DigiKey</strong> (OAuth2 client_credentials or refresh token)</li>
+                            <li><strong>Mouser Electronics</strong></li>
+                            <li><strong>LCSC</strong> (live lookup + cached import)</li>
+                            <li><strong>Nexar / Octopart</strong> — aggregator covering Arrow, Heilind, Avnet and dozens more</li>
+                            <li><strong>Element14 / Farnell / Newark</strong> (Avnet)</li>
+                            <li><strong>TME</strong> (Transfer Multisort Elektronik)</li>
                         </ul>
                     </li>
-                    <li>View API usage meters to track credit consumption</li>
-                    <li>Click "View listing" to visit supplier webpage</li>
+                    <li>Look for the notice above the result cards — it tells you when the search term was translated (SKU→MFN or DigiKey stock code → real MPN) or when a supplier was skipped because it wouldn't recognise the code (LCSC codes).</li>
+                    <li>View API usage meters to track credit consumption per provider</li>
+                    <li>Click "View listing" to visit the supplier webpage</li>
                 </ol>
             </div>
 
             <div class="tip">
-                <strong>💡 Tip:</strong> The system caches pricing data for 30 days to reduce API costs while keeping prices current.
+                <strong>💡 Tip:</strong> The system caches pricing data for 30 days per (provider, part, quantity) to keep API costs down. Non-USD quotes (GBP, EUR, PLN, CAD, AUD, SGD) are converted using daily exchange rates cached alongside them.
+            </div>
+
+            <div class="success">
+                <strong>✅ Fuzzy-match trap avoided:</strong> Sending an LCSC stock code like <code>C105882</code> to Mouser or Element14 used to return unrelated $200+ parts. Live Price Lookup now recognises those codes and only asks LCSC. If you need cross-supplier quotes for the same part, search by the real manufacturer part number instead.
             </div>
 
             <h3>Bulk Pricing Wizard</h3>
