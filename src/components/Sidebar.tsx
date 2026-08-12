@@ -18,7 +18,8 @@ import {
   Brain,
   Shield,
   ChevronDown,
-  Activity
+  Activity,
+  BookOpen
 } from 'lucide-react';
 import { ViewType, UserProfile } from '../types';
 
@@ -46,6 +47,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     projects: false,
     automation: false,
     quality: false,
+    documentation: false,
     admin: false,
   });
 
@@ -64,6 +66,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         manufacturing: false,
         automation: section === 'automation' && !isCurrentlyOpen,
         quality: section === 'quality' && !isCurrentlyOpen,
+        documentation: section === 'documentation' && !isCurrentlyOpen,
         admin: section === 'admin' && !isCurrentlyOpen,
       };
     });
@@ -255,6 +258,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <span>{item.label}</span>
           </button>
         ))}
+
+        <button
+          onClick={() => toggleSection('documentation')}
+          className="w-full flex items-center justify-between px-2.5 py-1.5 mt-3 text-[10px] text-outline font-bold opacity-60 hover:opacity-100 transition-opacity"
+        >
+          <span>DOCUMENTATION</span>
+          <ChevronDown className={`w-3 h-3 transition-transform ${expandedSections.documentation ? '' : '-rotate-90'}`} />
+        </button>
+        {expandedSections.documentation && (
+          <a
+            href="/tracklab-complete-guide.html"
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={() => setIsSidebarOpen(false)}
+            className="w-full flex items-center px-2.5 py-1.5 rounded text-left transition-all text-[12px] text-on-surface-variant/80 hover:text-on-surface hover:bg-surface-variant/40"
+          >
+            <BookOpen className="w-3.5 h-3.5 mr-2" />
+            <span>Complete User Guide</span>
+          </a>
+        )}
 
         <button
           onClick={() => toggleSection('admin')}
