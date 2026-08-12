@@ -965,13 +965,57 @@ app.get('/api/pricing/search', async (req, res) => {
     resolvedFromSku = { sku: skuMatch.serial_number, name: skuMatch.name };
   }
 
-  const results: any = { partNumber, qty };
+  // Distinguish a distributor stock code from a real manufacturer part number.
+  // DigiKey codes always end in "-ND"; LCSC codes are "C" followed by digits.
+  // Sending a distributor code to another distributor is what produces the
+  // Pasternack RF-part-for-a-100nF-capacitor keyword-mismatch trap.
+  const upper = partNumber.toUpperCase();
+  const codeFormat: 'digikey' | 'lcsc' | 'mfn' =
+    /-ND$/.test(upper) ? 'digikey'
+      : /^C\d+$/.test(upper) ? 'lcsc'
+        : 'mfn';
+
+  // For DigiKey-coded parts, ask DigiKey what the real manufacturer part number
+  // is BEFORE we hit anyone else. That upgrades the lookup for every other
+  // provider — they get a real MFN, not an -ND stock code that means nothing
+  // to them. Cheap: one extra DigiKey call, cached like any other lookup.
+  let resolvedFromDigikeyCode: string | null = null;
+  let digikeyPreLookupResult: any = null;
+  if (codeFormat === 'digikey' && (await isProviderConfigured('digikey')) && (await getDigikeyRefreshToken())) {
+    try {
+      const lookup = await cachedProviderLookup('digikey', partNumber, qty, maxAgeMs);
+      digikeyPreLookupResult = lookup.result;
+      const mpn = lookup.result?.partNumber;
+      if (typeof mpn === 'string' && mpn && mpn.toUpperCase() !== partNumber.toUpperCase()) {
+        resolvedFromDigikeyCode = mpn;
+        // Fan-out below sees the real MPN. DigiKey's own slot is filled from the
+        // pre-lookup we already paid for — no second DigiKey call for -ND codes.
+        partNumber = mpn;
+      }
+    } catch { /* fall through: original code goes to all providers */ }
+  }
+
+  const results: any = { partNumber, qty, codeFormat };
   if (resolvedFromSku) {
     results.searchedFor = requested;
     results.resolvedFromSku = resolvedFromSku;
   }
+  if (resolvedFromDigikeyCode) {
+    results.resolvedFromDigikeyCode = { code: upper, mpn: resolvedFromDigikeyCode };
+  }
+  // LCSC codes only mean something to LCSC and (sometimes) Nexar's aggregator.
+  // Skip the other providers rather than let them fuzzy-match to unrelated
+  // parts — the same trap that priced a 100nF capacitor at $241 via Pasternack.
+  const skipForOtherDistributor = codeFormat === 'lcsc'
+    ? { error: 'Skipped: LCSC-format code — this distributor does not recognise it' }
+    : null;
 
-  if (!(await isProviderConfigured('digikey'))) {
+  if (skipForOtherDistributor) {
+    results.digikey = skipForOtherDistributor;
+  } else if (digikeyPreLookupResult) {
+    // Already paid for this call during -ND code resolution. Don't hit it twice.
+    results.digikey = digikeyPreLookupResult;
+  } else if (!(await isProviderConfigured('digikey'))) {
     results.digikey = { error: 'Not configured' };
   } else if (!(await getDigikeyRefreshToken())) {
     results.digikey = { error: 'Not authorized — run "npm run digikey:authorize"' };
@@ -1002,7 +1046,9 @@ app.get('/api/pricing/search', async (req, res) => {
     }
   }
 
-  if (!(await isProviderConfigured('mouser'))) {
+  if (skipForOtherDistributor) {
+    results.mouser = skipForOtherDistributor;
+  } else if (!(await isProviderConfigured('mouser'))) {
     results.mouser = { error: 'Not configured' };
   } else {
     try {
@@ -1076,7 +1122,9 @@ app.get('/api/pricing/search', async (req, res) => {
   }
 
   // Nexar (Octopart aggregator) — covers Arrow, Heilind, Avnet, and many others.
-  if (!(await isProviderConfigured('nexar'))) {
+  if (skipForOtherDistributor) {
+    results.nexar = skipForOtherDistributor;
+  } else if (!(await isProviderConfigured('nexar'))) {
     results.nexar = { error: 'Not configured' };
   } else {
     try {
@@ -1106,7 +1154,9 @@ app.get('/api/pricing/search', async (req, res) => {
   }
 
   // Element14 / Farnell / Newark (Avnet)
-  if (!(await isProviderConfigured('element14'))) {
+  if (skipForOtherDistributor) {
+    results.element14 = skipForOtherDistributor;
+  } else if (!(await isProviderConfigured('element14'))) {
     results.element14 = { error: 'Not configured' };
   } else {
     try {
@@ -1136,7 +1186,9 @@ app.get('/api/pricing/search', async (req, res) => {
   }
 
   // TME (Transfer Multisort Elektronik)
-  if (!(await isProviderConfigured('tme'))) {
+  if (skipForOtherDistributor) {
+    results.tme = skipForOtherDistributor;
+  } else if (!(await isProviderConfigured('tme'))) {
     results.tme = { error: 'Not configured' };
   } else {
     try {

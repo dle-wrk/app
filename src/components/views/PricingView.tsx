@@ -30,6 +30,10 @@ interface SearchResponse {
   /** Present when the caller typed an internal SKU that we translated to an MFN. */
   searchedFor?: string;
   resolvedFromSku?: { sku: string; name: string };
+  /** 'digikey' for `-ND` codes, 'lcsc' for `C\d+` codes, 'mfn' otherwise. */
+  codeFormat?: 'digikey' | 'lcsc' | 'mfn';
+  /** DigiKey resolved the `-ND` stock code to the real manufacturer part number. */
+  resolvedFromDigikeyCode?: { code: string; mpn: string };
   digikey?: ProviderResult;
   mouser?: ProviderResult;
   lcsc?: ProviderResult;
@@ -365,6 +369,21 @@ export const PricingView: React.FC<PricingViewProps> = ({
             ({searchResult.resolvedFromSku.name}). Suppliers do not know your internal SKU, so we
             looked up its manufacturer part number{' '}
             <span className="font-mono font-bold">{searchResult.partNumber}</span> instead.
+          </div>
+        )}
+        {searchResult && searchResult.resolvedFromDigikeyCode && (
+          <div className="mt-md text-[11px] rounded-lg px-3 py-2 border bg-primary/10 text-primary border-primary/20">
+            <span className="font-mono font-bold">{searchResult.resolvedFromDigikeyCode.code}</span>{' '}
+            is a DigiKey stock code. DigiKey resolved it to manufacturer part number{' '}
+            <span className="font-mono font-bold">{searchResult.resolvedFromDigikeyCode.mpn}</span>,
+            which we then quoted at Mouser, Nexar, Element14 and TME so their results are comparable.
+          </div>
+        )}
+        {searchResult && searchResult.codeFormat === 'lcsc' && (
+          <div className="mt-md text-[11px] rounded-lg px-3 py-2 border bg-primary/10 text-primary border-primary/20">
+            <span className="font-mono font-bold">{searchResult.partNumber}</span> is an LCSC stock
+            code. Other distributors would fuzzy-match it to an unrelated part, so we only queried
+            LCSC. If you need cross-quotes, search by the manufacturer part number instead.
           </div>
         )}
         {searchResult && (
