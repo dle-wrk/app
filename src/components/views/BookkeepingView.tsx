@@ -40,6 +40,13 @@ interface BookkeepingViewProps {
   items: Item[];
   suppliers: Supplier[];
   triggerToast: (message: string, type?: 'SUCCESS' | 'ERROR' | 'INFO') => void;
+  /** When the command palette targets a specific tab, App passes it through
+   * here. pendingTargetKey changes on every navigation so the effect below
+   * re-fires even if the section is the same as last time. */
+  initialSection?: Section;
+  initialSalesSub?: SalesSub;
+  initialPurchasesSub?: PurchasesSub;
+  pendingTargetKey?: string | null;
 }
 
 type Section = 'OVERVIEW' | 'SALES' | 'PURCHASES' | 'ACCOUNTING' | 'PRODUCTION' | 'REPORTS';
@@ -73,10 +80,20 @@ const PURCHASES_SUBS: { key: PurchasesSub; label: string; icon: React.ReactNode 
 
 export const BookkeepingView: React.FC<BookkeepingViewProps> = ({
   clients, clientOrders, clientOrderItems, items, suppliers, triggerToast,
+  initialSection, initialSalesSub, initialPurchasesSub, pendingTargetKey,
 }) => {
-  const [section, setSection] = useState<Section>('OVERVIEW');
-  const [salesSub, setSalesSub] = useState<SalesSub>('INVOICES');
-  const [purchasesSub, setPurchasesSub] = useState<PurchasesSub>('BILLS');
+  const [section, setSection] = useState<Section>(initialSection ?? 'OVERVIEW');
+  const [salesSub, setSalesSub] = useState<SalesSub>(initialSalesSub ?? 'INVOICES');
+  const [purchasesSub, setPurchasesSub] = useState<PurchasesSub>(initialPurchasesSub ?? 'BILLS');
+
+  // Sync with palette-driven navigation. Sub-tab keys only apply within their
+  // own section, so we ignore initialSalesSub when the target isn't SALES.
+  useEffect(() => {
+    if (!pendingTargetKey) return;
+    if (initialSection) setSection(initialSection);
+    if (initialSection === 'SALES' && initialSalesSub) setSalesSub(initialSalesSub);
+    if (initialSection === 'PURCHASES' && initialPurchasesSub) setPurchasesSub(initialPurchasesSub);
+  }, [pendingTargetKey, initialSection, initialSalesSub, initialPurchasesSub]);
 
   const [loading, setLoading] = useState(true);
   const [accounts, setAccounts] = useState<Account[]>([]);

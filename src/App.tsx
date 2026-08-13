@@ -64,6 +64,8 @@ import AutomationDashboard from './components/views/AutomationDashboard';
 import AutoPOConfigView from './components/views/AutoPOConfigView';
 import QualityComplianceDashboard from './components/views/QualityComplianceDashboard';
 import AdvancedAutomationDashboard from './components/views/AdvancedAutomationDashboard';
+import { CommandPalette } from './components/CommandPalette';
+import type { CommandTarget } from './lib/commandPalette';
 
 const TIMEZONES = [
   { name: 'UTC (Coordinated Universal Time)', value: 'UTC' },
@@ -632,13 +634,16 @@ export default function App() {
     return () => clearInterval(interval);
   }, [systemConfig.timezone]);
 
-  // Keyboard shortcut CMD+K / Ctrl+K focus search
+  // Keyboard shortcut CMD+K / Ctrl+K opens the command palette. Was originally
+  // just focus-the-header-search; the palette is a superset — it can jump to
+  // any page, deep-link a Bookkeeping tab, or filter to a specific item.
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [pendingBookkeepingTarget, setPendingBookkeepingTarget] = useState<{ section?: string; subSection?: string } | null>(null);
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
-        const searchInput = document.getElementById('search-input');
-        if (searchInput) searchInput.focus();
+        setPaletteOpen(true);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -1525,6 +1530,17 @@ export default function App() {
     return <Login onLogin={handleLogin} isLoading={isLoginLoading} />;
   }
 
+  const handleCommand = (target: CommandTarget) => {
+    if (target.view === 'bookkeeping' && (target.section || target.subSection)) {
+      setPendingBookkeepingTarget({ section: target.section, subSection: target.subSection });
+    } else {
+      setPendingBookkeepingTarget(null);
+    }
+    if (target.focusQuery !== undefined) setSearchQuery(target.focusQuery);
+    setView(target.view);
+    setIsSidebarOpen(false);
+  };
+
   return (
     <div
       className={`min-h-screen text-on-surface font-sans flex ${systemConfig.visualTheme === 'light' ? 'light-mode bg-[#F8FAFC]' : 'dark-mode bg-[#10131a]'
@@ -1534,6 +1550,14 @@ export default function App() {
         colorScheme: systemConfig.visualTheme
       }}
     >
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        onNavigate={handleCommand}
+        items={items}
+        clients={clients}
+        suppliers={suppliers}
+      />
       <Sidebar
         currentView={currentView}
         setView={(v) => { setView(v); setSearchQuery(''); }}
@@ -1987,6 +2011,10 @@ if (currentView === 'alternates') {
                    items={items}
                    suppliers={suppliers}
                    triggerToast={triggerToast}
+                   initialSection={pendingBookkeepingTarget?.section as any}
+                   initialSalesSub={pendingBookkeepingTarget?.subSection as any}
+                   initialPurchasesSub={pendingBookkeepingTarget?.subSection as any}
+                   pendingTargetKey={pendingBookkeepingTarget ? `${pendingBookkeepingTarget.section}:${pendingBookkeepingTarget.subSection}` : null}
                  />
                );
              }
