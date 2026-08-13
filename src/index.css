@@ -497,3 +497,29 @@
     max-width: 100% !important;
   }
 }
+
+/* Collapsed sidebar: hide labels, hide section headers, centre icons. Applies
+   only on lg+; the mobile drawer keeps the full labels regardless. */
+@media (min-width: 1024px) {
+  .sidebar-rail[data-collapsed="true"] nav > button,
+  .sidebar-rail[data-collapsed="true"] nav > a {
+    justify-content: center;
+    padding-left: 0.375rem;
+    padding-right: 0.375rem;
+  }
+  .sidebar-rail[data-collapsed="true"] nav > button > span,
+  .sidebar-rail[data-collapsed="true"] nav > a > span {
+    display: none;
+  }
+  .sidebar-rail[data-collapsed="true"] .rail-section-header {
+    display: none;
+  }
+  .sidebar-rail[data-collapsed="true"] .rail-footer-label {
+    display: none;
+  }
+  /* Kill the left margin on nav-item icons so they sit dead-centre. */
+  .sidebar-rail[data-collapsed="true"] nav > button > svg,
+  .sidebar-rail[data-collapsed="true"] nav > a > svg {
+    margin-right: 0;
+  }
+}

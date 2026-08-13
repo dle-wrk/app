@@ -19,7 +19,9 @@ import {
   Shield,
   ChevronDown,
   Activity,
-  BookOpen
+  BookOpen,
+  PanelLeftClose,
+  PanelLeftOpen
 } from 'lucide-react';
 import { ViewType, UserProfile } from '../types';
 
@@ -30,6 +32,10 @@ interface SidebarProps {
   isSidebarOpen: boolean;
   setIsSidebarOpen: (open: boolean) => void;
   profile: UserProfile;
+  /** Desktop-only rail mode: icons only, no labels, no section headers. On
+   * mobile the drawer always shows the full labels regardless of this flag. */
+  isCollapsed: boolean;
+  setIsCollapsed: (collapsed: boolean) => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -38,7 +44,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   appName,
   isSidebarOpen,
   setIsSidebarOpen,
-  profile
+  profile,
+  isCollapsed,
+  setIsCollapsed,
 }) => {
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     main: true,
@@ -50,6 +58,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
     documentation: false,
     admin: false,
   });
+
+  // In collapsed rail mode every section header is hidden, so users can't
+  // toggle them. Force every section open so all icons stay reachable.
+  const effectiveExpanded = isCollapsed
+    ? { main: true, stock: true, manufacturing: true, projects: true, automation: true, quality: true, documentation: true, admin: true }
+    : expandedSections;
 
   const toggleSection = (section: string) => {
     setExpandedSections((prev): Record<string, boolean> => {
@@ -111,21 +125,32 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   return (
-    <aside className={`fixed min-h-dvh w-64 left-0 top-0 bg-(--sidebar-bg) border-r border-outline-variant flex flex-col z-50 transition-all duration-300 shadow-2xl lg:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-      <div className="px-md mb-xl flex flex-col pt-sm relative py-md shrink-0">
+    <aside
+      data-collapsed={isCollapsed ? 'true' : 'false'}
+      className={`sidebar-rail fixed min-h-dvh left-0 top-0 bg-(--sidebar-bg) border-r border-outline-variant flex flex-col z-50 transition-[width,transform] duration-300 shadow-2xl lg:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} w-64 ${isCollapsed ? 'lg:w-14' : 'lg:w-64'}`}
+    >
+      <div className={`mb-xl flex flex-col pt-sm relative py-md shrink-0 ${isCollapsed ? 'lg:px-1 lg:items-center px-md' : 'px-md'}`}>
         <button
           onClick={() => setIsSidebarOpen(false)}
           className="lg:hidden absolute top-0 right-2 p-2 text-on-surface-variant hover:text-on-surface"
         >
           <X className="w-5 h-5" aria-label="Close" />
         </button>
+        <button
+          onClick={() => setIsCollapsed(!isCollapsed)}
+          title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          className="hidden lg:flex absolute top-1 right-1 p-1.5 text-on-surface-variant hover:text-on-surface hover:bg-surface-variant/40 rounded"
+        >
+          {isCollapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
+        </button>
         <div className="flex items-center gap-xs mb-1">
-          <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center shadow-lg shadow-primary/20">
+          <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center shadow-lg shadow-primary/20 shrink-0">
             <Workflow className="text-white w-5 h-5" />
           </div>
-          <span className="text-primary font-black text-[22px] tracking-tighter">{appName}</span>
+          <span className={`text-primary font-black text-[22px] tracking-tighter ${isCollapsed ? 'lg:hidden' : ''}`}>{appName}</span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className={`flex items-center gap-2 ${isCollapsed ? 'lg:hidden' : ''}`}>
           <span className="text-[10px] bg-primary/10 border border-primary/20 text-primary px-1.5 py-0.5 rounded-full font-black">
             v{__APP_VERSION__}-PRO
           </span>
@@ -140,6 +165,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <button
             key={item.id}
             onClick={() => handleNavClick(item.id as ViewType)}
+            title={isCollapsed ? item.label : undefined}
             className={`w-full flex items-center px-2.5 py-2 rounded-lg text-left transition-all group ${currentView === item.id
               ? 'text-primary font-black bg-primary/10 shadow-sm ring-1 ring-primary/20'
               : 'text-on-surface-variant/70 hover:text-on-surface hover:bg-surface-variant/40'
@@ -152,12 +178,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         <button
           onClick={() => toggleSection('stock')}
-          className="w-full flex items-center justify-between px-2.5 py-1.5 mt-3 text-[10px] text-outline font-bold opacity-60 hover:opacity-100 transition-opacity"
+          className="rail-section-header w-full flex items-center justify-between px-2.5 py-1.5 mt-3 text-[10px] text-outline font-bold opacity-60 hover:opacity-100 transition-opacity"
         >
           <span>STOCK</span>
           <ChevronDown className={`w-3 h-3 transition-transform ${expandedSections.stock ? '' : '-rotate-90'}`} />
         </button>
-        {expandedSections.stock && stockItems.map((item) => (
+        {effectiveExpanded.stock && stockItems.map((item) => (
           <button
             key={item.id}
             onClick={() => handleNavClick(item.id as ViewType)}
@@ -173,12 +199,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         <button
           onClick={() => toggleSection('projects')}
-          className="w-full flex items-center justify-between px-2.5 py-1.5 mt-3 text-[10px] text-outline font-bold opacity-60 hover:opacity-100 transition-opacity"
+          className="rail-section-header w-full flex items-center justify-between px-2.5 py-1.5 mt-3 text-[10px] text-outline font-bold opacity-60 hover:opacity-100 transition-opacity"
         >
           <span>PROJECTS</span>
           <ChevronDown className={`w-3 h-3 transition-transform ${expandedSections.projects ? '' : '-rotate-90'}`} />
         </button>
-        {expandedSections.projects && (
+        {effectiveExpanded.projects && (
           <>
             {projectItems.map((item) => (
               <button
@@ -196,12 +222,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
             <button
               onClick={() => toggleSection('manufacturing')}
-              className="w-full flex items-center justify-between pl-5 pr-2.5 py-1.5 mt-1 text-[10px] text-outline font-bold opacity-60 hover:opacity-100 transition-opacity"
+              className="rail-section-header w-full flex items-center justify-between pl-5 pr-2.5 py-1.5 mt-1 text-[10px] text-outline font-bold opacity-60 hover:opacity-100 transition-opacity"
             >
               <span>MANUFACTURING</span>
               <ChevronDown className={`w-3 h-3 transition-transform ${expandedSections.manufacturing ? '' : '-rotate-90'}`} />
             </button>
-            {expandedSections.manufacturing && manufacturingItems.map((item) => (
+            {effectiveExpanded.manufacturing && manufacturingItems.map((item) => (
               <button
                 key={item.id}
                 onClick={() => handleNavClick(item.id as ViewType)}
@@ -219,12 +245,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         <button
           onClick={() => toggleSection('automation')}
-          className="w-full flex items-center justify-between px-2.5 py-1.5 mt-3 text-[10px] text-outline font-bold opacity-60 hover:opacity-100 transition-opacity"
+          className="rail-section-header w-full flex items-center justify-between px-2.5 py-1.5 mt-3 text-[10px] text-outline font-bold opacity-60 hover:opacity-100 transition-opacity"
         >
           <span>AUTOMATION</span>
           <ChevronDown className={`w-3 h-3 transition-transform ${expandedSections.automation ? '' : '-rotate-90'}`} />
         </button>
-        {expandedSections.automation && automationItems.map((item) => (
+        {effectiveExpanded.automation && automationItems.map((item) => (
           <button
             key={item.id}
             onClick={() => handleNavClick(item.id as ViewType)}
@@ -240,12 +266,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         <button
           onClick={() => toggleSection('quality')}
-          className="w-full flex items-center justify-between px-2.5 py-1.5 mt-3 text-[10px] text-outline font-bold opacity-60 hover:opacity-100 transition-opacity"
+          className="rail-section-header w-full flex items-center justify-between px-2.5 py-1.5 mt-3 text-[10px] text-outline font-bold opacity-60 hover:opacity-100 transition-opacity"
         >
           <span>QUALITY</span>
           <ChevronDown className={`w-3 h-3 transition-transform ${expandedSections.quality ? '' : '-rotate-90'}`} />
         </button>
-        {expandedSections.quality && phase5Items.map((item) => (
+        {effectiveExpanded.quality && phase5Items.map((item) => (
           <button
             key={item.id}
             onClick={() => handleNavClick(item.id as ViewType)}
@@ -261,12 +287,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         <button
           onClick={() => toggleSection('documentation')}
-          className="w-full flex items-center justify-between px-2.5 py-1.5 mt-3 text-[10px] text-outline font-bold opacity-60 hover:opacity-100 transition-opacity"
+          className="rail-section-header w-full flex items-center justify-between px-2.5 py-1.5 mt-3 text-[10px] text-outline font-bold opacity-60 hover:opacity-100 transition-opacity"
         >
           <span>DOCUMENTATION</span>
           <ChevronDown className={`w-3 h-3 transition-transform ${expandedSections.documentation ? '' : '-rotate-90'}`} />
         </button>
-        {expandedSections.documentation && (
+        {effectiveExpanded.documentation && (
           <a
             href="/tracklab-complete-guide.html"
             target="_blank"
@@ -281,12 +307,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         <button
           onClick={() => toggleSection('admin')}
-          className="w-full flex items-center justify-between px-2.5 py-1.5 mt-3 text-[10px] text-outline font-bold opacity-60 hover:opacity-100 transition-opacity"
+          className="rail-section-header w-full flex items-center justify-between px-2.5 py-1.5 mt-3 text-[10px] text-outline font-bold opacity-60 hover:opacity-100 transition-opacity"
         >
           <span>ADMIN</span>
           <ChevronDown className={`w-3 h-3 transition-transform ${expandedSections.admin ? '' : '-rotate-90'}`} />
         </button>
-        {expandedSections.admin && (
+        {effectiveExpanded.admin && (
           <>
             <button
               onClick={() => handleNavClick('settings')}
@@ -324,24 +350,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
         )}
       </nav>
 
-      <div className="mt-auto px-sm pt-md border-t border-outline-variant/30 space-y-md">
-        <div className="mx-md p-sm rounded bg-surface-container-high/40 flex items-center gap-xs font-mono text-[10px] text-on-surface-variant">
+      <div className={`mt-auto px-sm pt-md border-t border-outline-variant/30 space-y-md ${isCollapsed ? 'lg:px-0' : ''}`}>
+        <div className={`mx-md p-sm rounded bg-surface-container-high/40 flex items-center gap-xs font-mono text-[10px] text-on-surface-variant ${isCollapsed ? 'lg:hidden' : ''}`}>
           <span className="w-2 h-2 rounded-full bg-green-500 inline-block"></span>
-          <span>DB Node: active_sync</span>
+          <span className="rail-footer-label">DB Node: active_sync</span>
         </div>
 
         <div
           onClick={() => handleNavClick('profile')}
-          className="flex items-center px-md py-sm rounded hover:bg-surface-variant/40 cursor-pointer transition-all duration-200"
+          title={isCollapsed ? profile.name : undefined}
+          className={`flex items-center px-md py-sm rounded hover:bg-surface-variant/40 cursor-pointer transition-all duration-200 ${isCollapsed ? 'lg:justify-center lg:px-0' : ''}`}
         >
-          <div className="w-8 h-8 rounded-full overflow-hidden mr-sm border border-outline-variant shrink-0 relative">
+          <div className={`w-8 h-8 rounded-full overflow-hidden border border-outline-variant shrink-0 relative ${isCollapsed ? 'lg:mr-0 mr-sm' : 'mr-sm'}`}>
             <img
               className="w-full h-full object-cover"
               src={profile.avatarUrl}
               alt={`${profile.name} Profile`}
             />
           </div>
-          <div className="truncate flex flex-col justify-center">
+          <div className={`truncate flex flex-col justify-center rail-footer-label ${isCollapsed ? 'lg:hidden' : ''}`}>
             <span className="font-body-md text-xs font-bold leading-tight truncate">{profile.name}</span>
             <span className="text-[10px] text-outline truncate">{profile.role}</span>
           </div>

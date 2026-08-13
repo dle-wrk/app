@@ -196,6 +196,13 @@ export default function App() {
   const [selectedStockStatus, setSelectedStockStatus] = useState<'ALL' | 'OK' | 'LOW' | 'CRITICAL'>('ALL');
   const [sortBy, setSortBy] = useState<'name' | 'stockLevel' | 'price'>('name');
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsedState] = useState<boolean>(() => {
+    try { return localStorage.getItem('sidebarCollapsed') === 'true'; } catch { return false; }
+  });
+  const setIsSidebarCollapsed = (v: boolean) => {
+    setIsSidebarCollapsedState(v);
+    try { localStorage.setItem('sidebarCollapsed', v ? 'true' : 'false'); } catch { /* ignore */ }
+  };
 
   // Supplier Management State
   const [showSupplierModal, setShowSupplierModal] = useState<boolean>(false);
@@ -1565,6 +1572,8 @@ export default function App() {
         isSidebarOpen={isSidebarOpen}
         setIsSidebarOpen={setIsSidebarOpen}
         profile={profile}
+        isCollapsed={isSidebarCollapsed}
+        setIsCollapsed={setIsSidebarCollapsed}
       />
 
       {/* Sidebar Overlay for Mobile */}
@@ -1576,7 +1585,7 @@ export default function App() {
       )}
 
       {/* Main Content Area */}
-      <main className="lg:pl-64 flex-1 flex flex-col min-h-screen relative overflow-y-auto w-full transition-all duration-300">
+      <main className={`${isSidebarCollapsed ? 'lg:pl-14' : 'lg:pl-64'} flex-1 flex flex-col min-h-screen relative overflow-y-auto w-full transition-all duration-300`}>
 
         {/* TopNavBar Header */}
         <header className="h-16 flex justify-between items-center px-4 md:px-container-margin sticky top-0 z-40 bg-surface/80 backdrop-blur-md border-b border-outline-variant gap-4">
