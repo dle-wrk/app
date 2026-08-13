@@ -1589,14 +1589,26 @@ export default function App() {
 
         {/* TopNavBar Header */}
         <header className="h-16 flex justify-between items-center px-4 md:px-container-margin sticky top-0 z-40 bg-surface/80 backdrop-blur-md border-b border-outline-variant gap-4">
-          <div className="flex items-center gap-xl flex-1 min-w-0">
+          <div className="flex items-center gap-1 md:gap-xl flex-1 min-w-0">
             <button
               onClick={() => setIsSidebarOpen(true)}
               className="lg:hidden p-2 -ml-2 text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high rounded-lg transition-colors"
+              aria-label="Open menu"
             >
               <Menu className="w-5 h-5" />
             </button>
-            <h2 className="font-headline-md text-xl font-black text-primary select-none flex items-center capitalize gap-sm tracking-tighter leading-none">
+            {/* Mobile-only search entry point — placed before the title so it
+                isn't crushed by the packed right-side action buttons. Desktop
+                users get the input bar below or Ctrl+K. */}
+            <button
+              onClick={() => setPaletteOpen(true)}
+              className="md:hidden p-2 text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high rounded-lg transition-colors"
+              aria-label="Search and jump"
+              title="Search and jump"
+            >
+              <Search className="w-5 h-5" />
+            </button>
+            <h2 className="font-headline-md text-lg md:text-xl font-black text-primary select-none flex items-center capitalize gap-sm tracking-tighter leading-none truncate">
               {currentView.replace('_', ' ')}
             </h2>
 
@@ -1640,7 +1652,7 @@ export default function App() {
 
             <button
               onClick={() => handleExportCSV('tracklab_report')}
-              className="p-1.5 text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high rounded-lg transition-all duration-200 flex items-center justify-center border border-transparent hover:border-outline-variant/40"
+              className="hidden md:flex p-1.5 text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high rounded-lg transition-all duration-200 items-center justify-center border border-transparent hover:border-outline-variant/40"
               title="Export Table Data"
             >
               <Download className="w-4 h-4" />
