@@ -520,10 +520,15 @@
     background-size: 20px 100%, 20px 100%;
     background-attachment: local, scroll;
   }
-  /* Tab strips (flex + overflow-x-auto) wrap onto multiple rows so users see
-     every tab without swiping. Table wrappers are `div.overflow-x-auto` with
-     no `flex` — this selector leaves them alone so they keep scrolling. */
-  .flex.overflow-x-auto {
+  /* Tab strips wrap onto multiple rows so users see every tab without
+     swiping. Any flex row that directly contains `whitespace-nowrap` buttons
+     counts as a tab strip — that covers the two conventions in this app:
+     `flex overflow-x-auto` (Automation, Bookkeeping) and
+     `flex border-b` (Pricing). Table wrappers are `div.overflow-x-auto`
+     with no `flex` — this selector leaves them alone. */
+  .flex.overflow-x-auto,
+  .flex:has(> button.whitespace-nowrap),
+  .flex:has(> a.whitespace-nowrap) {
     flex-wrap: wrap !important;
     overflow-x: visible !important;
     row-gap: 6px;
@@ -532,7 +537,8 @@
   }
   /* Also cancel `w-fit` on the parent so wrapped tabs use the full width
      instead of the intrinsic single-row width. */
-  .flex.overflow-x-auto.w-fit {
+  .flex.overflow-x-auto.w-fit,
+  .flex.w-fit:has(> button.whitespace-nowrap) {
     width: 100% !important;
   }
 }
