@@ -2,7 +2,6 @@ import React from 'react';
 import {
   Boxes,
   AlertTriangle,
-  TrendingUp
 } from 'lucide-react';
 import { Item, ViewType } from '../../types';
 
@@ -12,15 +11,11 @@ interface DashboardViewProps {
   totalItemsCount: number;
   lowStockCount: number;
   criticalCount: number;
-  totalValuation: number;
-  sparklineCoords: string;
   categoryCounts: { cat: string; count: number, skuCount: any }[];
   maxCategoryCount: number;
   okPercent: number;
   lowPercent: number;
   criticalPercent: number;
-  /** USD→ZAR conversion for the valuation card; null until loaded or if unset. */
-  fxRate?: { usdToZar: number | null; lastUpdated: string | null; ageDays: number | null; stale: boolean } | null;
   setView: (view: ViewType) => void;
 }
 
@@ -30,14 +25,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   totalItemsCount,
   lowStockCount,
   criticalCount,
-  totalValuation,
-  sparklineCoords,
   categoryCounts,
   maxCategoryCount,
   okPercent,
   lowPercent,
   criticalPercent,
-  fxRate,
   setView
 }) => {
   return (
@@ -53,7 +45,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       </div>
 
       {/* Stats Row: Bento Style */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-md">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-md">
         {/* Total Items */}
         <div className="bg-surface-container p-md rounded-xl border border-outline-variant hover:border-primary/50 transition-colors group relative overflow-hidden">
           <div className="absolute -right-2 -top-2 opacity-5 group-hover:opacity-10 transition-opacity">
@@ -117,51 +109,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
 
-        {/* Total Inventory Value */}
-        <div className="bg-surface-container p-5 rounded-xl border border-outline-variant hover:border-primary/50 transition-all duration-300 group relative overflow-hidden shadow-sm hover:shadow-primary/5">
-          <div className="absolute -right-4 -top-4 opacity-5 group-hover:opacity-10 transition-all duration-500 transform group-hover:rotate-12 group-hover:scale-110">
-            <TrendingUp className="w-24 h-24 text-primary" />
-          </div>
-          <div className="flex flex-col">
-            <span className="text-on-surface-variant text-[11px] font-bold mb-2">Asset Valuation (USD)</span>
-            <div className="flex items-baseline gap-sm">
-              <span className="text-3xl font-black text-primary tracking-tighter">
-                ${Math.round(totalValuation).toLocaleString()}
-              </span>
-            </div>
-            {/* ZAR equivalent. Costs are stored in USD, so USD stays the primary
-                figure and the rand value is shown as a conversion with the rate
-                it used — a stale rate is flagged rather than quietly applied. */}
-            {fxRate?.usdToZar ? (
-              <div className="mt-1 flex items-baseline gap-1.5 flex-wrap">
-                <span className="text-sm font-bold text-tertiary">
-                  R{Math.round(totalValuation * fxRate.usdToZar).toLocaleString()}
-                </span>
-                <span className="text-[10px] text-outline">
-                  @ {fxRate.usdToZar.toFixed(2)}/USD
-                  {fxRate.lastUpdated ? ` · ${fxRate.lastUpdated}` : ''}
-                </span>
-                {fxRate.stale && (
-                  <span
-                    className="text-[9px] font-bold uppercase text-orange-400 bg-orange-500/10 border border-orange-500/20 px-1.5 py-0.5 rounded"
-                    title={fxRate.ageDays !== null ? `Rate is ${fxRate.ageDays} days old` : 'Rate age unknown'}
-                  >
-                    Stale rate
-                  </span>
-                )}
-              </div>
-            ) : (
-              <div className="mt-1 text-[10px] text-outline italic">
-                ZAR equivalent unavailable — no exchange rate stored.
-              </div>
-            )}
-            <div className="mt-4">
-              <svg className="w-full h-8 opacity-40 text-primary group-hover:opacity-80 transition-opacity" viewBox="0 0 60 20" preserveAspectRatio="none">
-                <path d={sparklineCoords} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* Main Dashboard Grid */}

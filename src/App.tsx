@@ -511,9 +511,6 @@ export default function App() {
 
 
 
-  // Sparkline data coordinates
-  const sparklineCoords = 'M0,15 L10,10 L20,18 L30,5 L40,12 L50,2 L60,14';
-
   // Listen for tab deep-linking from the sidebar navigation
   useEffect(() => {
     const handleTabSwitch = (e: Event) => {
@@ -1483,15 +1480,6 @@ export default function App() {
 
   // Totals calculations
   const totalItemsCount = items.length;
-  // Asset valuation: sum of (stock × unit cost) for items that are actually
-  // current assets — positive stock and not discontinued/booked-out. Negative
-  // stock indicates an over-issue (a data fault, not a negative asset), and
-  // DISCONTINUED/BOOKED OUT items are no longer held for use or sale.
-  const totalValuation = Math.round(
-    items
-      .filter(i => i.stockLevel > 0 && i.status !== 'DISCONTINUED' && i.status !== 'BOOKED OUT')
-      .reduce((acc, curr) => acc + curr.stockLevel * curr.price, 0) * 100
-  ) / 100;
 
   // Explicitly isolate warning levels (between 19 and 48 inclusive)
   const lowStockCount = items.filter(i => i.stockLevel >= 19 && i.stockLevel < 49).length;
@@ -1730,14 +1718,11 @@ export default function App() {
                   criticalCount={criticalCount}
                   setView={setView}
                   totalItemsCount={totalItemsCount}
-                  totalValuation={totalValuation}
-                  fxRate={fxRate}
                   okPercent={okPercent}
                   lowPercent={lowPercent}
                   criticalPercent={criticalPercent}
                   categoryCounts={categoryCounts}
                   maxCategoryCount={maxCategoryCount}
-                  sparklineCoords={sparklineCoords}
                 />
               );
             }
