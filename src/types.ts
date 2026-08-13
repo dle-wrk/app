@@ -411,6 +411,8 @@ export interface Bill {
   balanceDue: number;
   notes?: string;
   journalEntryId?: number;
+  /** Base64 data URL of the scanned till slip / vendor invoice, if attached. */
+  receiptImage?: string | null;
   createdAt: string;
   updatedAt?: string;
   items?: BillItem[];

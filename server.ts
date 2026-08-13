@@ -33,7 +33,9 @@ app.use((req, res, next) => {
   }
   next();
 });
-app.use(express.json({ limit: '1mb' }));
+// 10mb accommodates scanned till slips / vendor invoices as base64 data URLs
+// posted to /api/bills/:id/receipt. The receipt endpoint has its own 8mb cap.
+app.use(express.json({ limit: '10mb' }));
 
 // Serve static files from dist directory
 app.use(express.static(DIST_DIR));
@@ -4297,17 +4299,25 @@ app.post('/api/automation-rules', async (req, res) => {
 
 app.put('/api/automation-rules/:id', async (req, res) => {
   const id = parseInt(req.params.id);
-  const { isActive, priority, actions, conditions } = req.body;
+  const { ruleName, ruleType, description, triggerEvent, isActive, priority, actions, conditions } = req.body;
   try {
     const row = await queryOne(
-      `UPDATE automation_rules SET is_active = COALESCE($1, is_active), priority = COALESCE($2, priority),
-       actions = COALESCE($3, actions), conditions = COALESCE($4, conditions), updated_at = now()
-       WHERE id = $5 RETURNING *`,
-      [isActive ?? null, priority ?? null, actions || null, conditions || null, id]
+      `UPDATE automation_rules SET
+         rule_name = COALESCE($1, rule_name), rule_type = COALESCE($2, rule_type),
+         description = COALESCE($3, description), trigger_event = COALESCE($4, trigger_event),
+         is_active = COALESCE($5, is_active), priority = COALESCE($6, priority),
+         actions = COALESCE($7, actions), conditions = COALESCE($8, conditions), updated_at = now()
+       WHERE id = $9 RETURNING *`,
+      [ruleName || null, ruleType || null, description || null, triggerEvent || null,
+       isActive ?? null, priority ?? null, actions || null, conditions || null, id]
     );
     if (!row) return res.status(404).json({ error: 'Automation rule not found' });
     res.json({
       id: row.id,
+      ruleName: row.rule_name,
+      ruleType: row.rule_type,
+      description: row.description,
+      triggerEvent: row.trigger_event,
       isActive: row.is_active,
       priority: row.priority,
       updatedAt: row.updated_at,

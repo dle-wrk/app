@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { Plus, Send, Ban, Eye, Wallet } from 'lucide-react';
+import React, { useMemo, useRef, useState } from 'react';
+import { Plus, Send, Ban, Eye, Wallet, Camera, Image as ImageIcon, X, Trash2 } from 'lucide-react';
 import { Bill, PurchaseOrder } from '../../types';
 import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, addDaysISO, apiPost, apiGet, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
 import { LineItemsEditor, EditableLine, newEditableLine } from './LineItemsEditor';
@@ -13,6 +13,7 @@ export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
   const [showEditor, setShowEditor] = useState(!!prefillFromPO);
   const [viewing, setViewing] = useState<any>(null);
   const [payingBill, setPayingBill] = useState<Bill | null>(null);
+  const [scanningBill, setScanningBill] = useState<Bill | null>(null);
   const [busy, setBusy] = useState(false);
 
   React.useEffect(() => {
@@ -100,6 +101,7 @@ export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
                 <th className="px-lg py-sm text-right">Total</th>
                 <th className="px-lg py-sm text-right">Balance Due</th>
                 <th className="px-lg py-sm">Status</th>
+                <th className="px-lg py-sm">Receipt</th>
                 <th className="px-lg py-sm text-right">Actions</th>
               </tr>
             </thead>
@@ -113,6 +115,26 @@ export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
                   <td className="px-lg py-sm text-right font-mono">{fmtMoney(b.total, b.currency)}</td>
                   <td className="px-lg py-sm text-right font-mono font-bold">{fmtMoney(b.balanceDue, b.currency)}</td>
                   <td className="px-lg py-sm"><StatusPill status={b.status} /></td>
+                  <td className="px-lg py-sm">
+                    {b.receiptImage ? (
+                      <button
+                        onClick={() => setScanningBill(b)}
+                        title="View / replace scanned receipt"
+                        className="inline-flex items-center gap-1.5 text-[11px] text-green-400 hover:text-green-300"
+                      >
+                        <img src={b.receiptImage} alt="receipt" className="w-6 h-6 object-cover rounded border border-outline-variant" />
+                        Attached
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => setScanningBill(b)}
+                        title="Scan / upload receipt"
+                        className="inline-flex items-center gap-1 text-[11px] text-on-surface-variant hover:text-primary p-1.5 rounded hover:bg-surface-container-high"
+                      >
+                        <Camera className="w-3.5 h-3.5" /> Scan
+                      </button>
+                    )}
+                  </td>
                   <td className="px-lg py-sm text-right">
                     <div className="flex justify-end gap-1">
                       <button onClick={() => openView(b)} className="p-1.5 rounded hover:bg-surface-container-high text-on-surface-variant" title="View"><Eye className="w-3.5 h-3.5" /></button>
@@ -123,7 +145,7 @@ export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
                   </td>
                 </tr>
               ))}
-              {filtered.length === 0 && <EmptyState message="No bills match this filter yet." colSpan={8} />}
+              {filtered.length === 0 && <EmptyState message="No bills match this filter yet." colSpan={9} />}
             </tbody>
           </table>
         </div>
@@ -163,6 +185,14 @@ export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
               </tbody>
             </table>
           </div>
+          {viewing.receiptImage && (
+            <div className="mb-md">
+              <div className="text-[10px] uppercase font-bold text-outline mb-1">Attached receipt</div>
+              <a href={viewing.receiptImage} target="_blank" rel="noopener noreferrer" title="Open full size">
+                <img src={viewing.receiptImage} alt="Scanned receipt" className="max-h-64 object-contain rounded border border-outline-variant bg-black/20 p-1" />
+              </a>
+            </div>
+          )}
           <div className="flex justify-end mb-md">
             <div className="w-56 space-y-1 text-xs">
               <div className="flex justify-between"><span className="text-on-surface-variant">Subtotal</span><span className="font-mono">{fmtMoney(viewing.subtotal, viewing.currency)}</span></div>
@@ -187,7 +217,169 @@ export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
       {payingBill && (
         <QuickBillPaymentModal bill={payingBill} accounts={props.accounts} triggerToast={triggerToast} onClose={() => setPayingBill(null)} onSaved={async () => { setPayingBill(null); await refresh(); }} />
       )}
+
+      {scanningBill && (
+        <ReceiptScanModal
+          bill={scanningBill}
+          onClose={() => setScanningBill(null)}
+          onSaved={async () => { setScanningBill(null); await refresh(); }}
+          triggerToast={triggerToast}
+        />
+      )}
     </div>
+  );
+};
+
+// Attach a scanned till slip / vendor invoice to a bill. On phones the
+// `capture="environment"` hint triggers the rear-facing camera directly; on
+// desktop the browser falls back to a normal file picker, which also handles
+// screenshots and saved PDFs-as-images.
+const ReceiptScanModal: React.FC<{
+  bill: Bill;
+  onClose: () => void;
+  onSaved: () => Promise<void> | void;
+  triggerToast: (m: string, t?: 'SUCCESS' | 'ERROR' | 'INFO') => void;
+}> = ({ bill, onClose, onSaved, triggerToast }) => {
+  const [preview, setPreview] = useState<string | null>(bill.receiptImage || null);
+  const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const readFile = (file: File) => new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+
+  // Downscale to at most 1600px on the long edge and re-encode as JPEG q0.85.
+  // A raw 12MP phone photo is 4-6MB; this brings it to ~200-400KB while still
+  // being readable enough to double-check line items later.
+  const compressImage = (dataUrl: string, maxDim = 1600, quality = 0.85) => new Promise<string>((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return resolve(dataUrl);
+      ctx.drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL('image/jpeg', quality));
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+
+  const handleFile = async (file: File | undefined) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      triggerToast('Please choose an image file', 'ERROR');
+      return;
+    }
+    try {
+      const raw = await readFile(file);
+      const compressed = await compressImage(raw);
+      setPreview(compressed);
+      setDirty(true);
+    } catch (err: any) {
+      triggerToast(err?.message || 'Failed to read image', 'ERROR');
+    }
+  };
+
+  const save = async () => {
+    if (!preview) return;
+    setSaving(true);
+    try {
+      await apiPost(`/api/bills/${bill.id}/receipt`, { image: preview });
+      triggerToast('Receipt saved.');
+      await onSaved();
+    } catch (err: any) {
+      triggerToast(err?.message || 'Failed to save receipt', 'ERROR');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async () => {
+    if (!confirm('Remove the attached receipt?')) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/bills/${bill.id}/receipt`, { method: 'DELETE' });
+      if (!res.ok) throw new Error((await res.json()).error || 'Failed to remove');
+      triggerToast('Receipt removed.');
+      await onSaved();
+    } catch (err: any) {
+      triggerToast(err?.message || 'Failed to remove receipt', 'ERROR');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      title={`Receipt for ${bill.billNumber}`}
+      subtitle={bill.supplierName || bill.supplierId || 'No supplier'}
+      onClose={onClose}
+      maxWidth="max-w-lg"
+    >
+      <div className="space-y-md">
+        {preview ? (
+          <div className="rounded-lg border border-outline-variant bg-black/20 flex items-center justify-center p-2">
+            <img src={preview} alt="Scanned receipt" className="max-h-[60vh] object-contain rounded" />
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed border-outline-variant/60 p-8 text-center text-xs text-on-surface-variant">
+            No receipt attached yet. Take a photo of the till slip or choose an existing image.
+          </div>
+        )}
+
+        {/* The two hidden inputs are the actual capture surfaces. Buttons
+            below trigger them so we can style them and pick between "camera
+            now" and "file picker" without visual clutter from the raw inputs. */}
+        <input
+          ref={cameraInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="hidden"
+          onChange={(e) => handleFile(e.target.files?.[0])}
+        />
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => handleFile(e.target.files?.[0])}
+        />
+
+        <div className="flex flex-wrap gap-2 justify-between">
+          <div className="flex flex-wrap gap-2">
+            <PrimaryButton icon={<Camera className="w-3.5 h-3.5" />} onClick={() => cameraInputRef.current?.click()}>
+              {preview ? 'Retake' : 'Take photo'}
+            </PrimaryButton>
+            <SecondaryButton icon={<ImageIcon className="w-3.5 h-3.5" />} onClick={() => fileInputRef.current?.click()}>
+              Choose image
+            </SecondaryButton>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {bill.receiptImage && !dirty && (
+              <DangerButton icon={<Trash2 className="w-3.5 h-3.5" />} onClick={remove} disabled={saving}>
+                Remove
+              </DangerButton>
+            )}
+            {dirty && (
+              <PrimaryButton onClick={save} disabled={saving || !preview}>
+                {saving ? 'Saving…' : 'Save receipt'}
+              </PrimaryButton>
+            )}
+          </div>
+        </div>
+      </div>
+    </Modal>
   );
 };
 

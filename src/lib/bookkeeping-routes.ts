@@ -918,6 +918,34 @@ export function registerBookkeepingRoutes(app: Express) {
     }
   });
 
+  // Attach or replace the scanned till slip / vendor invoice image for a bill.
+  // Expects a base64 data URL (data:image/…;base64,…) in body.image. The
+  // client resizes on capture to keep payloads under ~2 MB.
+  app.post('/api/bills/:id/receipt', async (req, res) => {
+    const id = parseInt(req.params.id);
+    const image = String(req.body?.image ?? '');
+    if (!image.startsWith('data:image/')) return res.status(400).json({ error: 'Expected a data:image/… base64 URL in body.image' });
+    if (image.length > 8_000_000) return res.status(413).json({ error: 'Image too large — please retake at lower resolution' });
+    try {
+      const bill = await queryOne<any>(`SELECT id FROM bills WHERE id = $1`, [id]);
+      if (!bill) return res.status(404).json({ error: 'bill not found' });
+      await query(`UPDATE bills SET receipt_image = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [image, id]);
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete('/api/bills/:id/receipt', async (req, res) => {
+    const id = parseInt(req.params.id);
+    try {
+      await query(`UPDATE bills SET receipt_image = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [id]);
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ==========================================================================
   // PAYMENTS MADE
   // ==========================================================================

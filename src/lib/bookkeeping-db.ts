@@ -187,9 +187,13 @@ export async function ensureBookkeepingSchema() {
     balance_due NUMERIC(14,2) DEFAULT 0,
     notes TEXT,
     journal_entry_id INTEGER REFERENCES journal_entries(id),
+    receipt_image TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   )`).catch(() => {});
+  // Additive migration for existing installs — captures a base64 data URL
+  // of the scanned till slip / vendor invoice attached to the bill.
+  await exec(`ALTER TABLE bills ADD COLUMN IF NOT EXISTS receipt_image TEXT`).catch(() => {});
 
   await exec(`CREATE TABLE IF NOT EXISTS bill_items (
     id SERIAL PRIMARY KEY,
@@ -700,6 +704,7 @@ export const mapBill = (r: any) => ({
   balanceDue: parseFloat(r.balance_due) || 0,
   notes: r.notes,
   journalEntryId: r.journal_entry_id,
+  receiptImage: r.receipt_image,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
   supplierName: r.supplier_name,
