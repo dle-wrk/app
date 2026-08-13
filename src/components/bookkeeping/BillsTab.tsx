@@ -230,10 +230,11 @@ export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
   );
 };
 
-// Attach a scanned till slip / vendor invoice to a bill. On phones the
-// `capture="environment"` hint triggers the rear-facing camera directly; on
-// desktop the browser falls back to a normal file picker, which also handles
-// screenshots and saved PDFs-as-images.
+// Attach a scanned till slip / vendor invoice to a bill. "Take photo" opens
+// a live camera stream inside the modal via getUserMedia — works on phones
+// (rear camera via facingMode: environment) AND on desktop laptops with a
+// webcam. If the browser can't grant camera access, we fall back to a hidden
+// file input with `capture="environment"` so the flow still completes.
 const ReceiptScanModal: React.FC<{
   bill: Bill;
   onClose: () => void;
@@ -243,8 +244,79 @@ const ReceiptScanModal: React.FC<{
   const [preview, setPreview] = useState<string | null>(bill.receiptImage || null);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [cameraOn, setCameraOn] = useState(false);
+  const [cameraStarting, setCameraStarting] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop());
+      streamRef.current = null;
+    }
+    setCameraOn(false);
+  };
+
+  // Always release the camera when the modal closes.
+  React.useEffect(() => () => stopCamera(), []);
+
+  const startCamera = async () => {
+    // No secure context (HTTP over LAN, file://) → getUserMedia is unavailable.
+    if (!navigator.mediaDevices?.getUserMedia) {
+      cameraInputRef.current?.click();
+      return;
+    }
+    setCameraStarting(true);
+    try {
+      // facingMode as a hint (not exact) so laptops with only a front camera
+      // still work — an "exact: environment" would reject on those.
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+        audio: false,
+      });
+      streamRef.current = stream;
+      setCameraOn(true);
+      // srcObject must be set after the <video> renders — the effect below picks it up.
+    } catch (err: any) {
+      // Permission denied, no camera, in-use elsewhere — fall through to file input.
+      triggerToast('Camera unavailable — falling back to file picker', 'INFO');
+      cameraInputRef.current?.click();
+    } finally {
+      setCameraStarting(false);
+    }
+  };
+
+  // Bind the live stream to the video element once both exist.
+  React.useEffect(() => {
+    if (cameraOn && videoRef.current && streamRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+      videoRef.current.play().catch(() => { /* autoplay might need a user gesture — the button click was one */ });
+    }
+  }, [cameraOn]);
+
+  const capture = async () => {
+    const video = videoRef.current;
+    if (!video) return;
+    const w = video.videoWidth;
+    const h = video.videoHeight;
+    if (!w || !h) {
+      triggerToast('Camera not ready yet — hold on a moment', 'ERROR');
+      return;
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(video, 0, 0, w, h);
+    const raw = canvas.toDataURL('image/jpeg', 0.92);
+    stopCamera();
+    const compressed = await compressImage(raw);
+    setPreview(compressed);
+    setDirty(true);
+  };
 
   const readFile = (file: File) => new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -319,15 +391,27 @@ const ReceiptScanModal: React.FC<{
     }
   };
 
+  const handleClose = () => { stopCamera(); onClose(); };
+
   return (
     <Modal
       title={`Receipt for ${bill.billNumber}`}
       subtitle={bill.supplierName || bill.supplierId || 'No supplier'}
-      onClose={onClose}
+      onClose={handleClose}
       maxWidth="max-w-lg"
     >
       <div className="space-y-md">
-        {preview ? (
+        {cameraOn ? (
+          <div className="rounded-lg border border-outline-variant bg-black overflow-hidden">
+            <video
+              ref={videoRef}
+              playsInline
+              muted
+              autoPlay
+              className="w-full max-h-[60vh] object-contain bg-black"
+            />
+          </div>
+        ) : preview ? (
           <div className="rounded-lg border border-outline-variant bg-black/20 flex items-center justify-center p-2">
             <img src={preview} alt="Scanned receipt" className="max-h-[60vh] object-contain rounded" />
           </div>
@@ -337,9 +421,8 @@ const ReceiptScanModal: React.FC<{
           </div>
         )}
 
-        {/* The two hidden inputs are the actual capture surfaces. Buttons
-            below trigger them so we can style them and pick between "camera
-            now" and "file picker" without visual clutter from the raw inputs. */}
+        {/* Hidden inputs are the fallback path when getUserMedia is unavailable
+            or the user picks "Choose image". */}
         <input
           ref={cameraInputRef}
           type="file"
@@ -358,20 +441,31 @@ const ReceiptScanModal: React.FC<{
 
         <div className="flex flex-wrap gap-2 justify-between">
           <div className="flex flex-wrap gap-2">
-            <PrimaryButton icon={<Camera className="w-3.5 h-3.5" />} onClick={() => cameraInputRef.current?.click()}>
-              {preview ? 'Retake' : 'Take photo'}
-            </PrimaryButton>
-            <SecondaryButton icon={<ImageIcon className="w-3.5 h-3.5" />} onClick={() => fileInputRef.current?.click()}>
-              Choose image
-            </SecondaryButton>
+            {cameraOn ? (
+              <>
+                <PrimaryButton icon={<Camera className="w-3.5 h-3.5" />} onClick={capture}>
+                  Capture
+                </PrimaryButton>
+                <SecondaryButton onClick={stopCamera}>Cancel</SecondaryButton>
+              </>
+            ) : (
+              <>
+                <PrimaryButton icon={<Camera className="w-3.5 h-3.5" />} onClick={startCamera} disabled={cameraStarting}>
+                  {cameraStarting ? 'Opening…' : preview ? 'Retake' : 'Take photo'}
+                </PrimaryButton>
+                <SecondaryButton icon={<ImageIcon className="w-3.5 h-3.5" />} onClick={() => fileInputRef.current?.click()}>
+                  Choose image
+                </SecondaryButton>
+              </>
+            )}
           </div>
           <div className="flex flex-wrap gap-2">
-            {bill.receiptImage && !dirty && (
+            {!cameraOn && bill.receiptImage && !dirty && (
               <DangerButton icon={<Trash2 className="w-3.5 h-3.5" />} onClick={remove} disabled={saving}>
                 Remove
               </DangerButton>
             )}
-            {dirty && (
+            {!cameraOn && dirty && (
               <PrimaryButton onClick={save} disabled={saving || !preview}>
                 {saving ? 'Saving…' : 'Save receipt'}
               </PrimaryButton>
