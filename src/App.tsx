@@ -1365,6 +1365,21 @@ export default function App() {
     setCsvParsedPreview(parsed);
   };
 
+  // Blank starter file with just the header row, so users have a correctly
+  // ordered column layout to fill in rather than reverse-engineering it from docs.
+  const handleDownloadCsvTemplate = () => {
+    const blob = new Blob([CSV_HEADER + '\n'], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'inventory_import_template.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    triggerToast('Downloaded blank CSV import template.');
+  };
+
   // Save Settings handler
   const handleSaveSettings = async () => {
     setIsSavingSettings(true);
@@ -2376,7 +2391,16 @@ if (currentView === 'alternates') {
 
                   {/* CSV formatting helper */}
                   <div className="text-[10px] text-on-surface-variant space-y-1 bg-surface-container-low p-3 rounded border border-outline-variant/30">
-                    <span className="font-bold uppercase tracking-wider block text-on-surface text-[9px] mb-1">Required CSV Columns Layout:</span>
+                    <div className="flex items-center justify-between gap-sm mb-1">
+                      <span className="font-bold uppercase tracking-wider block text-on-surface text-[9px]">Required CSV Columns Layout:</span>
+                      <button
+                        type="button"
+                        onClick={handleDownloadCsvTemplate}
+                        className="shrink-0 inline-flex items-center gap-1 bg-surface-container border border-outline-variant text-primary px-2 py-1 rounded font-bold text-[9px] uppercase tracking-wider hover:bg-surface-container-high transition-colors cursor-pointer"
+                      >
+                        <Download className="w-3 h-3" /> Download Template
+                      </button>
+                    </div>
                     <p className="font-mono bg-surface-container/60 p-1 rounded overflow-x-auto text-[9px] whitespace-nowrap text-on-surface">
                       serial_number; name; description; value; size; package; ...; stock; ...
                     </p>
