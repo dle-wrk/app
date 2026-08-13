@@ -46,8 +46,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   return (
     <div className="p-container-margin space-y-4 max-w-7xl mx-auto w-full">
       {/* Header overview content */}
-      <div className="flex justify-between items-end mb-lg">
-        <div>
+      <div className="flex flex-col md:flex-row md:justify-between md:items-end gap-md mb-lg">
+        <div className="min-w-0">
           <h3 className="font-headline-sm text-lg text-on-surface">Inventory items</h3>
           <p className="text-on-surface-variant font-body-sm">
             Check and modify individual product specifications and available stock.

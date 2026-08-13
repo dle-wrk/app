@@ -2065,15 +2065,21 @@ if (currentView === 'alternates') {
         </div>
 
         {/* System bottom absolute metadata footer */}
-        <footer className="mt-auto h-10 bg-surface-container-lowest border-t border-outline-variant flex items-center justify-between px-lg text-[10px] text-outline font-mono select-none">
-          <div className="flex gap-4">
+        <footer className="mt-auto min-h-10 bg-surface-container-lowest border-t border-outline-variant flex items-center justify-between px-lg text-[10px] text-outline font-mono select-none gap-4">
+          <div className="hidden md:flex gap-4 min-w-0">
             <div className="inline-flex items-center gap-1">
               <span>SYSTEM STATUS: <span className="text-[#4ade80] font-bold">OPTIMAL</span></span>
             </div>
             <span>SYNC DATA STREAM: 0.4s AGO</span>
             <span>ENCRYPT NODE: AES-256</span>
           </div>
-          <div>© 2026 TRACKLAB IM | ALL SYSTEMS OPERATIONAL</div>
+          {/* Compact single-badge fallback for mobile — the desktop columns
+              are illegible below ~640px and just eat vertical space. */}
+          <div className="md:hidden inline-flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#4ade80] inline-block" />
+            <span>OPTIMAL</span>
+          </div>
+          <div className="truncate">© 2026 TRACKLAB IM</div>
         </footer>
 
         {/* Global floating notification Toast system */}

@@ -496,6 +496,45 @@
   .max-w-\[1600px\], [class*="max-w-"] {
     max-width: 100% !important;
   }
+
+  /* Page headers built as `flex justify-between items-end/items-start` with a
+     text block on the left and action buttons on the right stack cleanly on
+     mobile so the title doesn't get compressed to one-word-per-line. */
+  .flex.justify-between.items-end:not([data-no-mobile-stack]),
+  .flex.justify-between.items-start:not([data-no-mobile-stack]) {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 12px !important;
+  }
+  /* But not the app header — it's a fixed 64px bar. */
+  header.flex.justify-between {
+    flex-direction: row !important;
+    align-items: center !important;
+    gap: 4px !important;
+  }
+  /* Tell users a table is horizontally scrollable via a right-edge fade. */
+  .overflow-x-auto {
+    background-image: linear-gradient(to right, transparent, transparent), linear-gradient(to right, transparent, var(--surface-container, rgba(0,0,0,0.15)));
+    background-position: left center, right center;
+    background-repeat: no-repeat;
+    background-size: 20px 100%, 20px 100%;
+    background-attachment: local, scroll;
+  }
+  /* Tab strips (flex + overflow-x-auto) wrap onto multiple rows so users see
+     every tab without swiping. Table wrappers are `div.overflow-x-auto` with
+     no `flex` — this selector leaves them alone so they keep scrolling. */
+  .flex.overflow-x-auto {
+    flex-wrap: wrap !important;
+    overflow-x: visible !important;
+    row-gap: 6px;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+  /* Also cancel `w-fit` on the parent so wrapped tabs use the full width
+     instead of the intrinsic single-row width. */
+  .flex.overflow-x-auto.w-fit {
+    width: 100% !important;
+  }
 }
 
 /* Collapsed sidebar: hide labels, hide section headers, centre icons. Applies

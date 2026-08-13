@@ -21,8 +21,8 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
   return (
     <div className="p-container-margin space-y-4 max-w-7xl mx-auto w-full">
       {/* Header view suppliers directory info */}
-      <div className="flex justify-between items-end mb-lg">
-        <div>
+      <div className="flex flex-col md:flex-row md:justify-between md:items-end gap-md mb-lg">
+        <div className="min-w-0">
           <h3 className="font-headline-sm text-lg text-on-surface">Registered Procurement Partners</h3>
           <p className="text-on-surface-variant font-body-sm">
             Configure external vendor connections, compliance directories, and contact parameters.
@@ -33,7 +33,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
             setEditingSupplier(null);
             setShowSupplierModal(true);
           }}
-          className="bg-primary text-white px-3 py-1.5 rounded-lg font-bold text-xs shadow-md shadow-primary/10 hover:brightness-110 active:scale-95 transition-all duration-150 flex items-center gap-1.5"
+          className="bg-primary text-white px-3 py-1.5 rounded-lg font-bold text-xs shadow-md shadow-primary/10 hover:brightness-110 active:scale-95 transition-all duration-150 flex items-center gap-1.5 self-start md:self-auto"
         >
           <Plus className="w-3.5 h-3.5" />
           Add Supplier
