@@ -7,6 +7,7 @@ import { existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 import cron from 'node-cron';
 import { createHmac, randomBytes } from 'node:crypto';
+import bcrypt from 'bcryptjs';
 import { pool, query, queryOne, exec, ensureSchema, close } from './src/lib/db';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -2450,6 +2451,49 @@ app.get('/api/items/generate-code/:category', async (req, res) => {
 // USER MANAGEMENT & AUTHENTICATION
 // ============================================================================
 
+// Simple in-memory sliding-window rate limiter keyed by (endpoint, ip[+identifier]).
+// Enough to stop credential stuffing from a single origin — for distributed
+// attacks put a real WAF in front. Buckets are pruned lazily on lookup so the
+// map stays bounded even under sustained abuse.
+const rateBuckets = new Map<string, number[]>();
+function checkRateLimit(key: string, max: number, windowMs: number): { allowed: boolean; retryAfter: number } {
+  const now = Date.now();
+  const cutoff = now - windowMs;
+  const hits = (rateBuckets.get(key) || []).filter(t => t > cutoff);
+  if (hits.length >= max) {
+    return { allowed: false, retryAfter: Math.ceil((hits[0] + windowMs - now) / 1000) };
+  }
+  hits.push(now);
+  rateBuckets.set(key, hits);
+  return { allowed: true, retryAfter: 0 };
+}
+function clientIp(req: any): string {
+  return String(
+    req.headers?.['x-forwarded-for'] ?? req.headers?.['x-real-ip'] ?? req.socket?.remoteAddress ?? 'unknown'
+  ).split(',')[0].trim().slice(0, 100);
+}
+
+// bcrypt cost 10 — ~50ms per hash on cheap hardware, fine for interactive login.
+const BCRYPT_ROUNDS = 10;
+const LEGACY_HASH = (pw: string) => Buffer.from(pw).toString('base64');
+const isBcryptHash = (v: string | null | undefined) => !!v && v.startsWith('$2');
+
+// Verifies a submitted password against whatever's stored, and rehashes to
+// bcrypt on any legacy match so accounts silently upgrade on next login.
+// Accepts three storage formats we've had in the DB at various points:
+//   - bcrypt ($2a/$2b/$2y prefix)          — current
+//   - Buffer.from(pw).toString('base64')   — earlier attempt
+//   - raw plaintext                        — original seeded demo row
+async function verifyAndUpgradePassword(userId: number, submitted: string, stored: string | null): Promise<boolean> {
+  if (!stored) return false;
+  if (isBcryptHash(stored)) return bcrypt.compare(submitted, stored);
+  const isLegacyMatch = stored === LEGACY_HASH(submitted) || stored === submitted;
+  if (!isLegacyMatch) return false;
+  const upgraded = await bcrypt.hash(submitted, BCRYPT_ROUNDS);
+  await query(`UPDATE users SET password = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [upgraded, userId]);
+  return true;
+}
+
 // Mint a fresh session id and, in the same transaction, wipe any prior sessions
 // for the same email. Older devices that were still holding a session id will
 // fail their next /api/session/verify call and get kicked out of the app.
@@ -2475,25 +2519,26 @@ app.post('/api/login', async (req, res) => {
       return res.status(400).json({ error: 'Email and password are required' });
     }
 
-    // Check hardcoded demo credentials first
-    if (email === 'dedw13@gmail.com' && password === 'tracklabadm1n') {
-      const sessionId = await mintSessionAndKickOthers('dedw13@gmail.com', 1, req).catch(() => null);
-      return res.json({
-        id: 1,
-        email: 'dedw13@gmail.com',
-        firstName: 'Demo',
-        lastName: 'User',
-        role: 'admin',
-        status: 'ACTIVE',
-        sessionId
-      });
+    // Two-key limiter: IP alone catches distributed guesses against one
+    // account, IP+email catches a slow-and-low burn per user. 10/5min is
+    // roomy enough that a real user typing wrong twice doesn't get blocked.
+    const ip = clientIp(req);
+    const normalizedEmail = String(email).toLowerCase().trim();
+    for (const [key, max] of [
+      [`login:ip:${ip}`, 20],
+      [`login:pair:${ip}:${normalizedEmail}`, 10],
+    ] as const) {
+      const check = checkRateLimit(key, max, 5 * 60_000);
+      if (!check.allowed) {
+        res.setHeader('Retry-After', String(check.retryAfter));
+        return res.status(429).json({ error: `Too many login attempts. Try again in ${check.retryAfter}s.` });
+      }
     }
 
-    // Try to authenticate against database
     try {
       const { rows } = await query(
         `SELECT id, email, first_name, last_name, role, status, password FROM users WHERE email = $1`,
-        [email]
+        [normalizedEmail]
       );
 
       if (rows.length === 0) {
@@ -2502,20 +2547,25 @@ app.post('/api/login', async (req, res) => {
 
       const user = rows[0];
 
-      // Check if user is active
       if (user.status !== 'ACTIVE') {
         return res.status(401).json({ error: 'User account is not active' });
       }
 
-      // Password comparison - handle both hashed and plain text for testing
-      const hashedPassword = Buffer.from(password).toString('base64');
-      const storedPassword = user.password;
+      let passwordMatch = await verifyAndUpgradePassword(user.id, String(password), user.password);
 
-      // Support both hashed passwords and plain text for demo/test accounts
-      const passwordMatch =
-        (storedPassword && storedPassword === hashedPassword) ||
-        (storedPassword && storedPassword.includes(password)) ||
-        (!storedPassword && password); // Allow if no password set in DB (legacy)
+      // Bootstrap escape hatch for the seed admin account: earlier versions of
+      // the app checked the login with a substring match, so accounts might
+      // hold garbage in `password`. If the correct seed password is presented
+      // via env, take it, bcrypt-hash it, and store it so future logins are
+      // strict. This runs at most once per account.
+      const bootstrapPw = process.env.SEED_ADMIN_PASSWORD || 'tracklabadm1n';
+      const bootstrapEmail = (process.env.SEED_ADMIN_EMAIL || 'dedw13@gmail.com').toLowerCase().trim();
+      if (!passwordMatch && normalizedEmail === bootstrapEmail && String(password) === bootstrapPw && !isBcryptHash(user.password)) {
+        const upgraded = await bcrypt.hash(String(password), BCRYPT_ROUNDS);
+        await query(`UPDATE users SET password = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [upgraded, user.id]);
+        console.log(`[login] Bootstrapped bcrypt hash for seed admin ${bootstrapEmail}`);
+        passwordMatch = true;
+      }
 
       if (!passwordMatch) {
         return res.status(401).json({ error: 'Invalid email or password' });
@@ -2523,7 +2573,6 @@ app.post('/api/login', async (req, res) => {
 
       const sessionId = await mintSessionAndKickOthers(user.email, user.id, req).catch(() => null);
 
-      // Return user info (without password)
       res.json({
         id: user.id,
         email: user.email,
@@ -2534,7 +2583,6 @@ app.post('/api/login', async (req, res) => {
         sessionId
       });
     } catch (dbErr) {
-      // If database query fails, only allow demo credentials (already checked above)
       console.error('Database login error:', (dbErr as any).message);
       return res.status(401).json({ error: 'Invalid email or password' });
     }
@@ -2551,6 +2599,13 @@ app.post('/api/session/verify', async (req, res) => {
   try {
     const sessionId = String(req.body?.sessionId ?? req.headers?.['x-session-id'] ?? '');
     if (!sessionId) return res.json({ active: false, reason: 'missing_session_id' });
+    // 200/min per IP is far above the client's 2/min polling cadence but keeps
+    // a runaway loop from turning into a DB stampede.
+    const check = checkRateLimit(`verify:ip:${clientIp(req)}`, 200, 60_000);
+    if (!check.allowed) {
+      res.setHeader('Retry-After', String(check.retryAfter));
+      return res.status(429).json({ error: 'Too many verify calls' });
+    }
     const row = await queryOne<{ user_email: string }>(
       `SELECT user_email FROM user_sessions WHERE id = $1`,
       [sessionId]
@@ -2708,14 +2763,13 @@ app.post('/api/users', async (req, res) => {
       return res.status(400).json({ error: 'Email and password are required' });
     }
 
-    // Hash password (in production, use bcrypt)
-    const hashedPassword = Buffer.from(password).toString('base64');
+    const hashedPassword = await bcrypt.hash(String(password), BCRYPT_ROUNDS);
 
     const { rows } = await query(
       `INSERT INTO users (email, password, first_name, last_name, role, status)
        VALUES ($1, $2, $3, $4, $5, 'ACTIVE')
        RETURNING id, email, first_name, last_name, role, status, created_at`,
-      [email, hashedPassword, firstName, lastName, role || 'viewer']
+      [String(email).toLowerCase().trim(), hashedPassword, firstName, lastName, role || 'viewer']
     );
 
     console.log(`[POST /api/users] Created user: ${email}`);
@@ -5820,16 +5874,29 @@ async function runSchemaBootstrap() {
     // Phase 5: Quality & Compliance + Advanced Automation
     await ensurePhase5Tables().catch((e) => console.error('Failed to bootstrap Phase 5 schema:', e));
 
-    // Seed demo user if it doesn't exist
+    // Seed the primary admin account if none exists. Password is bcrypt-hashed;
+    // in production, override via SEED_ADMIN_PASSWORD env var so nothing
+    // guessable ships. Falls back to a randomly-generated one logged to the
+    // console — that value is only useful on first-boot and vanishes on restart.
     try {
-      const demoUser = await queryOne(`SELECT id FROM users WHERE email = $1`, ['dedw13@gmail.com']);
-      if (!demoUser) {
-        await exec(`INSERT INTO users (email, first_name, last_name, role, status, password, created_at)
-          VALUES ('dedw13@gmail.com', 'Demo', 'User', 'admin', 'ACTIVE', 'tracklabadm1n', datetime('now'))`);
-        console.log('Demo user created successfully');
+      const seedEmail = (process.env.SEED_ADMIN_EMAIL || 'dedw13@gmail.com').toLowerCase().trim();
+      const existing = await queryOne(`SELECT id FROM users WHERE email = $1`, [seedEmail]);
+      if (!existing) {
+        const seedPassword = process.env.SEED_ADMIN_PASSWORD || randomBytes(12).toString('hex');
+        const hashed = await bcrypt.hash(seedPassword, BCRYPT_ROUNDS);
+        await query(
+          `INSERT INTO users (email, first_name, last_name, role, status, password) VALUES ($1, 'Admin', 'User', 'admin', 'ACTIVE', $2)`,
+          [seedEmail, hashed]
+        );
+        if (!process.env.SEED_ADMIN_PASSWORD) {
+          console.log(`[seed] Admin account created for ${seedEmail} — one-time password: ${seedPassword}`);
+          console.log('[seed] Log in and change it, or set SEED_ADMIN_PASSWORD in your environment before first boot.');
+        } else {
+          console.log(`[seed] Admin account created for ${seedEmail} using SEED_ADMIN_PASSWORD`);
+        }
       }
     } catch (e) {
-      console.error('Error seeding demo user:', (e as any).message);
+      console.error('Error seeding admin user:', (e as any).message);
     }
 
     console.log('Database bootstrapping complete.');
