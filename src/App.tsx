@@ -251,7 +251,7 @@ export default function App() {
     setToastType(toastType);
     setShowToast(true);
     setTimeout(() => setShowToast(false), 4000);
-  };
+  }, []);
 
   const handleNewKitCreation = async (newKit: ProductionKit) => {
     setProductionKits((prev) => {
