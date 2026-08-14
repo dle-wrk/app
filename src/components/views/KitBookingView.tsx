@@ -228,20 +228,35 @@ export default function KitBookingView({ projects, triggerToast }: KitBookingVie
                     )}
                   </td>
                   <td className="px-lg py-3" data-label="Sourcing">
-                    <div className="flex gap-1.5">
-                      {res.supplier_links.slice(0, 3).map((link, idx) => (
-                        <a
-                          key={idx}
-                          href={link}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="p-1 rounded bg-surface-container-highest border border-outline-variant hover:border-primary transition-colors text-outline hover:text-primary"
-                        >
-                          <ExternalLink className="w-3 h-3" />
-                        </a>
-                      ))}
-                      {res.supplier_links.length === 0 && <span className="text-[10px] text-outline italic">No links</span>}
-                    </div>
+                    {(() => {
+                      const validLinks = (res.supplier_links || [])
+                        .map(v => typeof v === 'string' ? v.trim() : '')
+                        .filter(v => /^https?:\/\/\S+\.\S+/.test(v))
+                        .slice(0, 3);
+                      if (validLinks.length === 0) {
+                        return <span className="text-[10px] text-outline italic">No links</span>;
+                      }
+                      return (
+                        <div className="flex gap-1.5">
+                          {validLinks.map((link, idx) => {
+                            let host = '';
+                            try { host = new URL(link).hostname.replace(/^www\./, ''); } catch { /* leave blank */ }
+                            return (
+                              <a
+                                key={idx}
+                                href={link}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title={host || link}
+                                className="p-1 rounded bg-surface-container-highest border border-outline-variant hover:border-primary transition-colors text-outline hover:text-primary"
+                              >
+                                <ExternalLink className="w-3 h-3" />
+                              </a>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
                   </td>
                 </tr>
               ))}

@@ -5283,7 +5283,14 @@ async function auditKitStock(projectId: number, buildQty: number) {
     }
 
     const shortageQty = Math.max(0, qtyRequired - qtyOnHand);
-    const supplierLinks = item ? [item.weblink_1, item.weblink_2, item.weblink_3, item.weblink_4, item.weblink_5].filter(Boolean) : [];
+    // Only surface links that are actually navigable URLs — the weblink_N
+    // columns hold plenty of placeholder junk ("N/A", " ", partial paths)
+    // that used to render as broken sourcing buttons.
+    const rawLinks = item ? [item.weblink_1, item.weblink_2, item.weblink_3, item.weblink_4, item.weblink_5] : [];
+    const supplierLinks = rawLinks
+      .map((v: any) => typeof v === 'string' ? v.trim() : '')
+      .map((v: string) => v && !/^https?:\/\//i.test(v) && /^[\w-]+(\.[\w-]+)+/.test(v) ? `https://${v}` : v)
+      .filter((v: string) => /^https?:\/\/\S+\.\S+/.test(v));
 
     auditResults.push({
       component_id: stockCode,
