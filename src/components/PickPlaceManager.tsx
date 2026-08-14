@@ -227,7 +227,7 @@ export default function PickPlaceManager({
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse min-w-[700px]">
+              <table className="stacked-mobile w-full text-left border-collapse min-w-[700px]">
                 <thead>
                   <tr className="bg-surface-container-high text-[10px] uppercase font-mono text-outline border-b border-outline-variant">
                     <th className="px-lg py-sm">Stock Code</th>
@@ -241,8 +241,8 @@ export default function PickPlaceManager({
                   {filteredBoms.length > 0 ? (
                     filteredBoms.map(item => (
                       <tr key={item.id} className="hover:bg-surface-variant/20 transition-all duration-150">
-                        <td className="px-lg py-sm">
-                          <span 
+                        <td className="px-lg py-sm" data-label="Stock code">
+                          <span
                             onClick={() => onItemClick?.(item.stockCode)}
                             className="text-primary font-bold hover:underline cursor-pointer select-none"
                             title="Click to view/edit component details"
@@ -250,16 +250,16 @@ export default function PickPlaceManager({
                             {item.stockCode}
                           </span>
                         </td>
-                        <td className="px-lg py-sm">
+                        <td className="px-lg py-sm" data-label="Note & library">
                           <span className="text-on-surface font-bold block">{item.comment}</span>
                           <span className="text-[10px] text-outline block italic mb-1">{item.description}</span>
                           <span className="text-[10px] text-outline block">{item.libref}</span>
                         </td>
-                        <td className="px-lg py-sm text-on-surface max-w-[150px] truncate" title={item.designator}>
+                        <td className="px-lg py-sm text-on-surface max-w-[150px] truncate" title={item.designator} data-label="Designators">
                           {item.designator}
                         </td>
-                        <td className="px-lg py-sm text-outline">{item.footprint}</td>
-                        <td className="px-lg py-sm text-right text-on-surface font-semibold">{item.quantity}</td>
+                        <td className="px-lg py-sm text-outline" data-label="Footprint">{item.footprint}</td>
+                        <td className="px-lg py-sm text-right text-on-surface font-semibold" data-label="Qty">{item.quantity}</td>
                       </tr>
                     ))
                   ) : (

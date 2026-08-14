@@ -166,7 +166,7 @@ export default function KitBookingView({ projects, triggerToast }: KitBookingVie
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[1000px]">
+          <table className="stacked-mobile w-full text-left border-collapse min-w-[1000px]">
             <thead>
               <tr className="bg-surface-container-high text-[10px] uppercase font-mono text-outline border-b border-outline-variant">
                 <th className="px-lg py-2">Component ID</th>
@@ -181,7 +181,7 @@ export default function KitBookingView({ projects, triggerToast }: KitBookingVie
             <tbody className="divide-y divide-outline-variant/30 text-xs">
               {auditResults.map((res) => (
                 <tr key={res.component_id} className={`hover:bg-surface-variant/20 transition-all ${res.shortage_qty > 0 ? 'bg-red-500/5' : ''}`}>
-                  <td className="px-lg py-3">
+                  <td className="px-lg py-3" data-label="Part">
                     <div className="font-mono font-bold text-primary">{res.component_id}</div>
                     {res.designator && (
                       <div className="text-[9px] text-outline font-mono truncate max-w-[150px]" title={res.designator}>
@@ -189,19 +189,19 @@ export default function KitBookingView({ projects, triggerToast }: KitBookingVie
                       </div>
                     )}
                   </td>
-                  <td className="px-lg py-3">
+                  <td className="px-lg py-3" data-label="Description">
                     <div className="max-w-[300px] truncate font-medium text-on-surface">{res.description}</div>
                     <div className="text-[10px] text-outline italic">{res.comment}</div>
                   </td>
-                  <td className="px-lg py-3 text-right font-mono font-bold">
+                  <td className="px-lg py-3 text-right font-mono font-bold" data-label="Required">
                     {res.qty_required}
                   </td>
-                  <td className="px-lg py-3 text-right font-mono">
+                  <td className="px-lg py-3 text-right font-mono" data-label="On hand">
                     <span className={res.qty_on_hand < res.qty_required ? 'text-red-400 font-bold' : 'text-on-surface'}>
                       {res.qty_on_hand}
                     </span>
                   </td>
-                  <td className="px-lg py-3 text-center">
+                  <td className="px-lg py-3 text-center" data-label="Status">
                     {res.shortage_qty > 0 ? (
                       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-red-500/10 text-red-400 border border-red-500/15 font-mono uppercase">
                         <AlertTriangle className="w-3 h-3" />
@@ -214,7 +214,7 @@ export default function KitBookingView({ projects, triggerToast }: KitBookingVie
                       </span>
                     )}
                   </td>
-                  <td className="px-lg py-3 text-center">
+                  <td className="px-lg py-3 text-center" data-label="Alternates">
                     {res.used_alternative ? (
                       <div className="flex flex-col items-center">
                         <span className="inline-flex items-center gap-1 text-[9px] font-bold text-primary font-mono uppercase bg-primary/10 border border-primary/20 px-1 py-0.5 rounded">
@@ -227,7 +227,7 @@ export default function KitBookingView({ projects, triggerToast }: KitBookingVie
                       <span className="text-[10px] text-outline italic">None used</span>
                     )}
                   </td>
-                  <td className="px-lg py-3">
+                  <td className="px-lg py-3" data-label="Sourcing">
                     <div className="flex gap-1.5">
                       {res.supplier_links.slice(0, 3).map((link, idx) => (
                         <a

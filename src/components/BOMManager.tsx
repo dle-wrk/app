@@ -341,7 +341,7 @@ export default function BOMManager({
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse min-w-[750px]">
+              <table className="stacked-mobile w-full text-left border-collapse min-w-[750px]">
                 <thead>
                   <tr className="bg-surface-container-high text-[10px] uppercase font-mono text-outline border-b border-outline-variant">
                     <th className="px-lg py-2">Stock Reference</th>
@@ -361,7 +361,7 @@ export default function BOMManager({
                       <tr key={line.id} className={`hover:bg-surface-variant/20 transition-all ${isShortage ? 'bg-red-500/5' : ''}`}>
                         
                         {/* SKU Reference with hover tooltips */}
-                        <td className="px-lg py-3">
+                        <td className="px-lg py-3" data-label="Part">
                           <div 
                             onClick={() => onItemClick?.(resolvedCode)}
                             className="font-bold font-mono text-[13px] text-primary hover:underline cursor-pointer flex items-center gap-1 select-none w-fit"
@@ -383,17 +383,17 @@ export default function BOMManager({
                         </td>
 
                         {/* Qty Per PCB */}
-                        <td className="px-lg py-3 text-right font-mono text-on-surface-variant font-semibold">
+                        <td className="px-lg py-3 text-right font-mono text-on-surface-variant font-semibold" data-label="Per PCB">
                           {line.quantity}
                         </td>
 
                         {/* Calculated Target total required */}
-                        <td className="px-lg py-3 text-right font-mono font-bold text-on-surface">
+                        <td className="px-lg py-3 text-right font-mono font-bold text-on-surface" data-label="Total needed">
                           {requiredTotal.toLocaleString()}
                         </td>
 
                         {/* Current inventory level */}
-                        <td className="px-lg py-3 text-right font-mono">
+                        <td className="px-lg py-3 text-right font-mono" data-label="On hand">
                           <span className={`font-semibold ${currentStock < 10 ? 'text-red-400 font-black' : 'text-on-surface-variant'}`}>
                             {currentStock.toLocaleString()}
                           </span>
@@ -403,7 +403,7 @@ export default function BOMManager({
                         </td>
 
                         {/* Status checks */}
-                        <td className="px-lg py-3 text-center">
+                        <td className="px-lg py-3 text-center" data-label="Status">
                           {isShortage ? (
                             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-red-500/10 text-red-400 border border-red-500/15 font-mono">
                               <AlertCircle className="w-3 h-3" />
@@ -418,7 +418,7 @@ export default function BOMManager({
                         </td>
 
                         {/* Alternates prompt portal dropdown */}
-                        <td className="px-lg py-3 text-center">
+                        <td className="px-lg py-3 text-center" data-label="Alternates">
                           {altOptions.length > 0 ? (
                             <div className="flex flex-col items-center gap-1">
                               <select

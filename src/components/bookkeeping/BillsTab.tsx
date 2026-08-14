@@ -1,7 +1,8 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { Plus, Send, Ban, Eye, Wallet, Camera, Image as ImageIcon, X, Trash2 } from 'lucide-react';
+import { Plus, Send, Ban, Eye, Wallet, Camera, Image as ImageIcon, X, Trash2, Sparkles } from 'lucide-react';
 import { Bill, PurchaseOrder } from '../../types';
 import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, addDaysISO, apiPost, apiGet, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
+import { runOcr, OcrResult } from '../../lib/receiptOcr';
 import { LineItemsEditor, EditableLine, newEditableLine } from './LineItemsEditor';
 import { ErrorBoundary } from '../ErrorBoundary';
 
@@ -246,6 +247,8 @@ const ReceiptScanModal: React.FC<{
   const [dirty, setDirty] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
   const [cameraStarting, setCameraStarting] = useState(false);
+  const [ocr, setOcr] = useState<OcrResult | null>(null);
+  const [ocrRunning, setOcrRunning] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -296,6 +299,23 @@ const ReceiptScanModal: React.FC<{
     }
   }, [cameraOn]);
 
+  // Kick off OCR after any new capture. Runs in the background — the user
+  // can save the raw image immediately without waiting for OCR to finish.
+  const startOcr = async (image: string) => {
+    setOcr(null);
+    setOcrRunning(true);
+    try {
+      const result = await runOcr(image);
+      setOcr(result);
+    } catch (err: any) {
+      // OCR is a nice-to-have — don't block the save flow on its failure.
+      console.warn('OCR failed:', err);
+      triggerToast('OCR unavailable — receipt saved as image only', 'INFO');
+    } finally {
+      setOcrRunning(false);
+    }
+  };
+
   const capture = async () => {
     const video = videoRef.current;
     if (!video) return;
@@ -316,6 +336,7 @@ const ReceiptScanModal: React.FC<{
     const compressed = await compressImage(raw);
     setPreview(compressed);
     setDirty(true);
+    startOcr(compressed);
   };
 
   const readFile = (file: File) => new Promise<string>((resolve, reject) => {
@@ -357,6 +378,7 @@ const ReceiptScanModal: React.FC<{
       const compressed = await compressImage(raw);
       setPreview(compressed);
       setDirty(true);
+      startOcr(compressed);
     } catch (err: any) {
       triggerToast(err?.message || 'Failed to read image', 'ERROR');
     }
@@ -418,6 +440,37 @@ const ReceiptScanModal: React.FC<{
         ) : (
           <div className="rounded-lg border border-dashed border-outline-variant/60 p-8 text-center text-xs text-on-surface-variant">
             No receipt attached yet. Take a photo of the till slip or choose an existing image.
+          </div>
+        )}
+
+        {!cameraOn && preview && (ocrRunning || ocr) && (
+          <div className="rounded-lg border border-outline-variant/60 bg-surface-container-high/40 p-3">
+            <div className="flex items-center gap-2 mb-2 text-[10px] uppercase font-bold text-outline">
+              <Sparkles className="w-3.5 h-3.5 text-primary" />
+              OCR — extracted fields
+              {ocrRunning && <span className="text-primary normal-case font-normal">running…</span>}
+            </div>
+            {ocr && (
+              <div className="grid grid-cols-3 gap-2 text-xs">
+                <div>
+                  <div className="text-[10px] uppercase text-outline">Supplier</div>
+                  <div className="font-mono truncate" title={ocr.supplier || ''}>{ocr.supplier || '—'}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase text-outline">Date</div>
+                  <div className="font-mono">{ocr.date || '—'}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase text-outline">Total</div>
+                  <div className="font-mono font-bold text-primary">{ocr.total !== null ? ocr.total.toFixed(2) : '—'}</div>
+                </div>
+              </div>
+            )}
+            {ocr && !ocr.supplier && !ocr.date && ocr.total === null && (
+              <div className="text-[11px] text-on-surface-variant italic">
+                Couldn't extract clean fields — the image is still saved as-is.
+              </div>
+            )}
           </div>
         )}
 

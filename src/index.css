@@ -541,6 +541,56 @@
   .flex.w-fit:has(> button.whitespace-nowrap) {
     width: 100% !important;
   }
+
+  /* Any <table class="stacked-mobile"> collapses to card-per-row on mobile.
+     The <thead> hides, each <tr> becomes a bordered block, and each <td>
+     shows its header via a `data-label` attribute — so we don't
+     dual-maintain a card component. Used by BOM Manager, Kit Booking, and
+     Pick & Place, which had 750-1000px minimum widths that scrolled here. */
+  .stacked-mobile {
+    min-width: 0 !important;
+  }
+  .stacked-mobile thead {
+    display: none;
+  }
+  .stacked-mobile,
+  .stacked-mobile tbody,
+  .stacked-mobile tr,
+  .stacked-mobile td {
+    display: block;
+    width: 100%;
+  }
+  .stacked-mobile tr {
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    border: 1px solid var(--outline-variant, rgba(255,255,255,0.08));
+    border-radius: 8px;
+    background: var(--surface-container, transparent);
+  }
+  .stacked-mobile td {
+    padding: 4px 0 !important;
+    text-align: left !important;
+    border: none !important;
+    display: flex !important;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .stacked-mobile td[data-label]::before {
+    content: attr(data-label);
+    font-size: 10px;
+    text-transform: uppercase;
+    color: var(--outline, #8c909f);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    flex-shrink: 0;
+  }
+  /* Wrappers that were only there for horizontal scroll can stop being
+     scrollable — the cards flow naturally. */
+  .overflow-x-auto:has(> .stacked-mobile) {
+    overflow-x: visible !important;
+  }
 }
 
 /* Collapsed sidebar: hide labels, hide section headers, centre icons. Applies
