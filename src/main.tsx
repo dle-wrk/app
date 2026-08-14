@@ -14,17 +14,32 @@ console.error = function (...args: any[]) {
   return originalError.apply(console, args);
 };
 
-if (window.location.port === '3000') {
-  const originalFetch = window.fetch;
-  window.fetch = function (input, init) {
+// Route dev-server /api requests to the backend and, everywhere, attach the
+// current session id so admin-gated endpoints know who's calling. Doing this
+// once at the app boundary means every fetch — including third-party libs —
+// picks up auth automatically.
+const originalFetch = window.fetch;
+window.fetch = function (input, init) {
+  const isDevProxy = window.location.port === '3000';
+  if (isDevProxy) {
     if (typeof input === 'string' && input.startsWith('/api')) {
       input = 'http://127.0.0.1:3001' + input;
     } else if (input instanceof URL && input.pathname.startsWith('/api')) {
       input = new URL(input.pathname, 'http://127.0.0.1:3001');
     }
-    return originalFetch(input, init);
-  };
-}
+  }
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url;
+  const isApiCall = /(^|\/\/[^/]+)?\/api\b/.test(url) || (isDevProxy && url.includes('127.0.0.1:3001'));
+  if (isApiCall) {
+    const sessionId = localStorage.getItem('sessionId');
+    if (sessionId) {
+      const headers = new Headers(init?.headers || {});
+      if (!headers.has('X-Session-Id')) headers.set('X-Session-Id', sessionId);
+      init = { ...init, headers };
+    }
+  }
+  return originalFetch(input, init);
+};
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

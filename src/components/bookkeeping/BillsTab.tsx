@@ -8,6 +8,16 @@ import { ErrorBoundary } from '../ErrorBoundary';
 
 const STATUS_FILTERS = ['ALL', 'DRAFT', 'AWAITING_PAYMENT', 'PARTIAL', 'PAID', 'OVERDUE', 'VOID'];
 
+// Payload the scan modal hands the editor when the user chooses "Continue to
+// bill". Any field may be null — the editor uses defaults where we couldn't
+// extract cleanly.
+interface PrefillFromScan {
+  supplierName: string | null;
+  date: string | null;
+  total: number | null;
+  receiptImage: string | null;
+}
+
 export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrder | null; onPrefillConsumed?: () => void }> = (props) => {
   const { bills, triggerToast, refresh, prefillFromPO, onPrefillConsumed } = props;
   const [statusFilter, setStatusFilter] = useState('ALL');
@@ -15,6 +25,8 @@ export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
   const [viewing, setViewing] = useState<any>(null);
   const [payingBill, setPayingBill] = useState<Bill | null>(null);
   const [scanningBill, setScanningBill] = useState<Bill | null>(null);
+  const [scanningForNewBill, setScanningForNewBill] = useState(false);
+  const [scanResultForEditor, setScanResultForEditor] = useState<PrefillFromScan | null>(null);
   const [busy, setBusy] = useState(false);
 
   React.useEffect(() => {
@@ -87,6 +99,7 @@ export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
                 <button key={s} onClick={() => setStatusFilter(s)} className={`px-2 py-0.5 rounded text-[10px] font-bold border transition-colors ${statusFilter === s ? 'bg-primary text-white border-primary' : 'bg-surface-container-high text-on-surface-variant border-outline-variant'}`}>{s.replace('_', ' ')}</button>
               ))}
             </div>
+            <SecondaryButton icon={<Camera className="w-3.5 h-3.5" />} onClick={() => setScanningForNewBill(true)}>Scan Receipt</SecondaryButton>
             <PrimaryButton icon={<Plus className="w-3.5 h-3.5" />} onClick={() => setShowEditor(true)}>New Bill</PrimaryButton>
           </>
         }
@@ -156,8 +169,9 @@ export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
         <BillEditorModal
           {...props}
           prefillFromPO={prefillFromPO}
-          onClose={() => { setShowEditor(false); onPrefillConsumed?.(); }}
-          onSaved={async () => { setShowEditor(false); onPrefillConsumed?.(); await refresh(); }}
+          prefillFromScan={scanResultForEditor}
+          onClose={() => { setShowEditor(false); setScanResultForEditor(null); onPrefillConsumed?.(); }}
+          onSaved={async () => { setShowEditor(false); setScanResultForEditor(null); onPrefillConsumed?.(); await refresh(); }}
         />
       )}
 
@@ -227,6 +241,21 @@ export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
           triggerToast={triggerToast}
         />
       )}
+
+      {scanningForNewBill && (
+        <ReceiptScanModal
+          bill={null}
+          mode="new-bill"
+          onClose={() => setScanningForNewBill(false)}
+          onContinueToBill={(payload) => {
+            setScanningForNewBill(false);
+            setScanResultForEditor(payload);
+            setShowEditor(true);
+          }}
+          onSaved={async () => { setScanningForNewBill(false); await refresh(); }}
+          triggerToast={triggerToast}
+        />
+      )}
     </div>
   );
 };
@@ -237,12 +266,14 @@ export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
 // webcam. If the browser can't grant camera access, we fall back to a hidden
 // file input with `capture="environment"` so the flow still completes.
 const ReceiptScanModal: React.FC<{
-  bill: Bill;
+  bill: Bill | null;
+  mode?: 'attach' | 'new-bill';
   onClose: () => void;
   onSaved: () => Promise<void> | void;
+  onContinueToBill?: (payload: PrefillFromScan) => void;
   triggerToast: (m: string, t?: 'SUCCESS' | 'ERROR' | 'INFO') => void;
-}> = ({ bill, onClose, onSaved, triggerToast }) => {
-  const [preview, setPreview] = useState<string | null>(bill.receiptImage || null);
+}> = ({ bill, mode = 'attach', onClose, onSaved, onContinueToBill, triggerToast }) => {
+  const [preview, setPreview] = useState<string | null>(bill?.receiptImage || null);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
@@ -385,7 +416,7 @@ const ReceiptScanModal: React.FC<{
   };
 
   const save = async () => {
-    if (!preview) return;
+    if (!preview || !bill) return;
     setSaving(true);
     try {
       await apiPost(`/api/bills/${bill.id}/receipt`, { image: preview });
@@ -398,8 +429,22 @@ const ReceiptScanModal: React.FC<{
     }
   };
 
+  // "new-bill" mode: hand the OCR result + image to the parent so it can
+  // open the BillEditor with everything prefilled. If OCR is still running
+  // when the user clicks, we ship what we have (image only) — worst case the
+  // editor just opens blank like the old "New Bill" button.
+  const continueToBill = () => {
+    if (!onContinueToBill || !preview) return;
+    onContinueToBill({
+      supplierName: ocr?.supplier ?? null,
+      date: ocr?.date ?? null,
+      total: ocr?.total ?? null,
+      receiptImage: preview,
+    });
+  };
+
   const remove = async () => {
-    if (!confirm('Remove the attached receipt?')) return;
+    if (!bill || !confirm('Remove the attached receipt?')) return;
     setSaving(true);
     try {
       const res = await fetch(`/api/bills/${bill.id}/receipt`, { method: 'DELETE' });
@@ -417,8 +462,8 @@ const ReceiptScanModal: React.FC<{
 
   return (
     <Modal
-      title={`Receipt for ${bill.billNumber}`}
-      subtitle={bill.supplierName || bill.supplierId || 'No supplier'}
+      title={bill ? `Receipt for ${bill.billNumber}` : 'Scan receipt → new bill'}
+      subtitle={bill ? (bill.supplierName || bill.supplierId || 'No supplier') : 'We\'ll pre-fill the bill from what OCR reads'}
       onClose={handleClose}
       maxWidth="max-w-lg"
     >
@@ -513,14 +558,19 @@ const ReceiptScanModal: React.FC<{
             )}
           </div>
           <div className="flex flex-wrap gap-2">
-            {!cameraOn && bill.receiptImage && !dirty && (
+            {!cameraOn && mode === 'attach' && bill?.receiptImage && !dirty && (
               <DangerButton icon={<Trash2 className="w-3.5 h-3.5" />} onClick={remove} disabled={saving}>
                 Remove
               </DangerButton>
             )}
-            {!cameraOn && dirty && (
+            {!cameraOn && mode === 'attach' && dirty && (
               <PrimaryButton onClick={save} disabled={saving || !preview}>
                 {saving ? 'Saving…' : 'Save receipt'}
+              </PrimaryButton>
+            )}
+            {!cameraOn && mode === 'new-bill' && preview && (
+              <PrimaryButton onClick={continueToBill} disabled={saving}>
+                {ocrRunning ? 'Continue anyway →' : 'Continue to bill →'}
               </PrimaryButton>
             )}
           </div>
@@ -530,18 +580,43 @@ const ReceiptScanModal: React.FC<{
   );
 };
 
-const BillEditorModal: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrder | null; onClose: () => void; onSaved: () => void }> = ({ suppliers, items, taxRates, accounts, prefillFromPO, onClose, onSaved, triggerToast }) => {
-  const [supplierId, setSupplierId] = useState(prefillFromPO?.supplierId || '');
-  const [billDate, setBillDate] = useState(todayISO());
+const BillEditorModal: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrder | null; prefillFromScan?: PrefillFromScan | null; onClose: () => void; onSaved: () => void }> = ({ suppliers, items, taxRates, accounts, prefillFromPO, prefillFromScan, onClose, onSaved, triggerToast }) => {
+  // Fuzzy-match the OCR'd supplier name to a known supplier ID. Anything
+  // shorter than 3 chars or with too many false positives is left blank so
+  // the user picks manually.
+  const scanSupplierId = React.useMemo(() => {
+    const name = prefillFromScan?.supplierName?.toLowerCase().trim();
+    if (!name || name.length < 3) return '';
+    const hit = suppliers.find(s => {
+      const cand = String(s.name || '').toLowerCase();
+      return cand === name || cand.includes(name) || name.includes(cand);
+    });
+    return hit ? String(hit.id) : '';
+  }, [prefillFromScan?.supplierName, suppliers]);
+
+  const [supplierId, setSupplierId] = useState(prefillFromPO?.supplierId || scanSupplierId || '');
+  const [billDate, setBillDate] = useState(prefillFromScan?.date || todayISO());
   const [dueDate, setDueDate] = useState(addDaysISO(30));
   const [currency, setCurrency] = useState(prefillFromPO?.currency || 'ZAR');
-  const [notes, setNotes] = useState('');
-  const poItems = (prefillFromPO as any)?.items as any[] | undefined;
-  const [lines, setLines] = useState<EditableLine[]>(
-    poItems?.length
-      ? poItems.map((it: any) => ({ key: `L${it.id}`, partNumber: it.partNumber, description: it.description, quantity: it.quantity, unitPrice: it.unitPrice, taxRateId: it.taxRateId ?? null, receiveStock: !!it.partNumber }))
-      : [newEditableLine()]
+  const [notes, setNotes] = useState(
+    prefillFromScan && !prefillFromScan.supplierName && !prefillFromScan.date && !prefillFromScan.total
+      ? 'From receipt scan (OCR extracted no fields cleanly)'
+      : prefillFromScan ? 'From receipt scan' : ''
   );
+  const poItems = (prefillFromPO as any)?.items as any[] | undefined;
+  const [lines, setLines] = useState<EditableLine[]>(() => {
+    if (poItems?.length) {
+      return poItems.map((it: any) => ({ key: `L${it.id}`, partNumber: it.partNumber, description: it.description, quantity: it.quantity, unitPrice: it.unitPrice, taxRateId: it.taxRateId ?? null, receiveStock: !!it.partNumber }));
+    }
+    if (prefillFromScan?.total && prefillFromScan.total > 0) {
+      const line = newEditableLine();
+      line.description = 'Receipt total (edit to break down)';
+      line.quantity = 1;
+      line.unitPrice = prefillFromScan.total;
+      return [line];
+    }
+    return [newEditableLine()];
+  });
   const [saving, setSaving] = useState<'DRAFT' | 'AWAITING_PAYMENT' | null>(null);
 
   const submit = async (status: 'DRAFT' | 'AWAITING_PAYMENT') => {
@@ -549,12 +624,21 @@ const BillEditorModal: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
     if (!validLines.length) { triggerToast('Add at least one line item.', 'ERROR'); return; }
     setSaving(status);
     try {
-      await apiPost('/api/bills', {
+      const created = await apiPost('/api/bills', {
         supplierId: supplierId || null,
         purchaseOrderId: prefillFromPO?.id || null,
         billDate, dueDate, currency, notes, status,
         items: validLines.map(l => ({ partNumber: l.partNumber || undefined, description: l.description, quantity: l.quantity, unitPrice: l.unitPrice, taxRateId: l.taxRateId || undefined, accountId: l.accountId || undefined, receiveStock: !!l.receiveStock })),
       });
+      // If the user reached this modal from the scan flow, attach the image
+      // to the fresh bill so line items and the source slip live together.
+      if (prefillFromScan?.receiptImage && created?.id) {
+        try {
+          await apiPost(`/api/bills/${created.id}/receipt`, { image: prefillFromScan.receiptImage });
+        } catch (err: any) {
+          triggerToast('Bill saved but receipt attach failed — retry from the row', 'ERROR');
+        }
+      }
       triggerToast(status === 'AWAITING_PAYMENT' ? 'Bill finalized and posted to the ledger.' : 'Bill saved as draft.');
       onSaved();
     } catch (err: any) {

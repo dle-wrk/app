@@ -6,8 +6,39 @@ import path from 'path';
 import { existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 import cron from 'node-cron';
-import { createHmac, randomBytes } from 'node:crypto';
+import { createHmac, randomBytes, createCipheriv, createDecipheriv, scryptSync } from 'node:crypto';
 import bcrypt from 'bcryptjs';
+
+// ---------------------------------------------------------------------------
+// At-rest encryption for provider API keys (DigiKey/Mouser/Nexar/TME/…).
+// AES-256-GCM using a key derived from PRICING_CRED_KEY. On Fly, set this to a
+// long random string via `flyctl secrets set PRICING_CRED_KEY=...` — the
+// stopgap fallback derives from DATABASE_URL, which at least isn't in the
+// same table as the ciphertexts.
+// ---------------------------------------------------------------------------
+const CRED_KEY_MATERIAL = process.env.PRICING_CRED_KEY || `fallback:${process.env.DATABASE_URL || 'dev'}`;
+const CRED_KEY = scryptSync(CRED_KEY_MATERIAL, 'tracklab-pricing-creds', 32);
+
+interface CipherEnvelope { v: 1; iv: string; tag: string; ct: string; }
+function isCipherEnvelope(v: any): v is CipherEnvelope {
+  return v && typeof v === 'object' && v.v === 1 && typeof v.iv === 'string' && typeof v.tag === 'string' && typeof v.ct === 'string';
+}
+function encryptCreds(creds: Record<string, string>): CipherEnvelope {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', CRED_KEY, iv);
+  const ct = Buffer.concat([cipher.update(JSON.stringify(creds), 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return { v: 1, iv: iv.toString('base64'), tag: tag.toString('base64'), ct: ct.toString('base64') };
+}
+function decryptCreds(env: CipherEnvelope): Record<string, string> {
+  const iv = Buffer.from(env.iv, 'base64');
+  const tag = Buffer.from(env.tag, 'base64');
+  const ct = Buffer.from(env.ct, 'base64');
+  const decipher = createDecipheriv('aes-256-gcm', CRED_KEY, iv);
+  decipher.setAuthTag(tag);
+  const pt = Buffer.concat([decipher.update(ct), decipher.final()]).toString('utf8');
+  return JSON.parse(pt);
+}
 import { pool, query, queryOne, exec, ensureSchema, close } from './src/lib/db';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -37,6 +68,45 @@ app.use((req, res, next) => {
 // 10mb accommodates scanned till slips / vendor invoices as base64 data URLs
 // posted to /api/bills/:id/receipt. The receipt endpoint has its own 8mb cap.
 app.use(express.json({ limit: '10mb' }));
+
+// Security response headers. We deliberately don't use a full CSRF token
+// scheme — the auth surface uses X-Session-Id from localStorage, which
+// browsers won't send on cross-origin requests (no CORS preflight allowance
+// on a custom header) and no other origin can read localStorage. Frame
+// embedding is disallowed so a malicious iframe can't render the app and
+// scrape via postMessage.
+app.use((req, res, next) => {
+  // CSP: allow self + inline styles (Tailwind), data: images (receipts),
+  // blob: workers (Tesseract), and wasm eval. External images/APIs limited
+  // to the vendors we actually call from the browser (rare — most vendor
+  // traffic goes server-side).
+  const csp = [
+    "default-src 'self'",
+    "script-src 'self' 'wasm-unsafe-eval' blob:",
+    "worker-src 'self' blob:",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob: https:",
+    "font-src 'self' data:",
+    "connect-src 'self' https: blob:",
+    "frame-ancestors 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "object-src 'none'",
+  ].join('; ');
+  res.setHeader('Content-Security-Policy', csp);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(self), microphone=(), geolocation=()');
+  // HSTS only makes sense over HTTPS; Fly serves us over HTTPS. Two-year
+  // max-age + includeSubDomains + preload readiness.
+  res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains');
+  next();
+});
+
+// Populate req.user from the client's X-Session-Id header when present.
+// Scoped to /api so static asset requests don't trigger a DB lookup.
+app.use('/api', (req, res, next) => attachSessionUser(req, res, next));
 
 // Serve static files from dist directory
 app.use(express.static(DIST_DIR));
@@ -218,11 +288,21 @@ function invalidatePricingKeyCache(provider?: string): void {
 
 async function loadProviderCredentials(provider: string): Promise<Record<string, string>> {
   if (pricingKeyCache.has(provider)) return pricingKeyCache.get(provider)!;
-  const row = await queryOne<{ credentials: Record<string, string> }>(
+  const row = await queryOne<{ credentials: any }>(
     `SELECT credentials FROM pricing_api_keys WHERE provider = $1`,
     [provider]
   );
-  const creds = row?.credentials ?? {};
+  let creds: Record<string, string> = {};
+  const stored = row?.credentials;
+  if (stored) {
+    if (isCipherEnvelope(stored)) {
+      try { creds = decryptCreds(stored); }
+      catch (err: any) { console.error(`[creds] failed to decrypt ${provider}:`, err.message); }
+    } else if (typeof stored === 'object') {
+      // Legacy plaintext row — accept it now, will re-encrypt on next write.
+      creds = stored;
+    }
+  }
   pricingKeyCache.set(provider, creds);
   return creds;
 }
@@ -256,13 +336,28 @@ async function isProviderConfigured(provider: string): Promise<boolean> {
 let digikeyAccessToken: { token: string; expiresAt: number } | null = null;
 let cachedDigikeyRefreshToken: string | null = null;
 
+// The stored value is either raw plaintext (legacy) or a JSON-serialised
+// CipherEnvelope. Detect at read time; write as ciphertext going forward.
+function unwrapStoredToken(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (isCipherEnvelope(parsed)) {
+      const decrypted = decryptCreds({ ...parsed, ct: parsed.ct });
+      return decrypted.token || null;
+    }
+  } catch { /* not JSON — plaintext */ }
+  return raw;
+}
+
 async function getDigikeyRefreshToken(): Promise<string | null> {
   if (cachedDigikeyRefreshToken) return cachedDigikeyRefreshToken;
   const row = await queryOne<{ refresh_token: string }>(
     `SELECT refresh_token FROM pricing_tokens WHERE provider = 'digikey'`
   );
-  if (row?.refresh_token) {
-    cachedDigikeyRefreshToken = row.refresh_token;
+  const unwrapped = unwrapStoredToken(row?.refresh_token);
+  if (unwrapped) {
+    cachedDigikeyRefreshToken = unwrapped;
   } else {
     // Check pricing_api_keys table first, then fall back to .env
     const token = await getPricingCredential('digikey', 'refresh_token', 'DIGIKEY_REFRESH_TOKEN');
@@ -276,10 +371,11 @@ async function getDigikeyRefreshToken(): Promise<string | null> {
 
 async function setDigikeyRefreshToken(token: string): Promise<void> {
   cachedDigikeyRefreshToken = token;
+  const envelope = encryptCreds({ token });
   await query(
     `INSERT INTO pricing_tokens (provider, refresh_token, updated_at) VALUES ('digikey', $1, now())
      ON CONFLICT (provider) DO UPDATE SET refresh_token = EXCLUDED.refresh_token, updated_at = now()`,
-    [token]
+    [JSON.stringify(envelope)]
   );
 }
 
@@ -1300,7 +1396,7 @@ function maskValue(val: string | undefined): string {
   return val.slice(0, 4) + '••••' + val.slice(-4);
 }
 
-app.get('/api/pricing/keys', async (_req, res) => {
+app.get('/api/pricing/keys', requireAdmin, async (_req, res) => {
   try {
     const providers = await Promise.all(PRICING_PROVIDERS.map(async (cfg) => {
       const dbCreds = await loadProviderCredentials(cfg.provider);
@@ -1326,7 +1422,7 @@ app.get('/api/pricing/keys', async (_req, res) => {
   }
 });
 
-app.post('/api/pricing/keys', async (req, res) => {
+app.post('/api/pricing/keys', requireAdmin, async (req, res) => {
   const { provider, credentials } = req.body as { provider: string; credentials: Record<string, string> };
   if (!provider || !credentials || typeof credentials !== 'object') {
     return res.status(400).json({ error: 'provider and credentials are required' });
@@ -1346,11 +1442,12 @@ app.post('/api/pricing/keys', async (req, res) => {
   try {
     const existing = await loadProviderCredentials(provider);
     const merged = { ...existing, ...cleanCreds };
+    const envelope = encryptCreds(merged);
     await query(
       `INSERT INTO pricing_api_keys (provider, credentials, updated_at)
        VALUES ($1, $2, now())
        ON CONFLICT (provider) DO UPDATE SET credentials = EXCLUDED.credentials, updated_at = now()`,
-      [provider, JSON.stringify(merged)]
+      [provider, JSON.stringify(envelope)]
     );
     invalidatePricingKeyCache(provider);
     if (provider === 'digikey') { digikeyAccessToken = null; cachedDigikeyRefreshToken = null; }
@@ -1361,7 +1458,7 @@ app.post('/api/pricing/keys', async (req, res) => {
   }
 });
 
-app.post('/api/pricing/keys/test', async (req, res) => {
+app.post('/api/pricing/keys/test', requireAdmin, async (req, res) => {
   const { provider } = req.body as { provider: string };
   if (!provider) return res.status(400).json({ error: 'provider is required' });
   const config = PRICING_PROVIDERS.find(p => p.provider === provider);
@@ -2494,6 +2591,38 @@ async function verifyAndUpgradePassword(userId: number, submitted: string, store
   return true;
 }
 
+// Middleware: attach the current user to req if a valid session ID is
+// presented. Reads from X-Session-Id header or body.sessionId — the same
+// convention the client already uses for /api/session/verify.
+async function attachSessionUser(req: any, _res: any, next: any): Promise<void> {
+  try {
+    const sessionId = String(req.headers?.['x-session-id'] ?? req.body?.sessionId ?? '');
+    if (!sessionId) return next();
+    const row = await queryOne<{ id: number; email: string; role: string; status: string }>(
+      `SELECT u.id, u.email, u.role, u.status
+       FROM user_sessions s
+       JOIN users u ON u.id = s.user_id
+       WHERE s.id = $1`,
+      [sessionId]
+    );
+    if (row && row.status === 'ACTIVE') {
+      req.user = { id: row.id, email: row.email, role: (row.role || '').toLowerCase() };
+    }
+  } catch (err: any) {
+    console.warn('attachSessionUser failed:', err.message);
+  }
+  next();
+}
+
+// Middleware: require an active session tied to an admin role. Use on any
+// endpoint that mutates users, credentials, or org-wide config.
+function requireAdmin(req: any, res: any, next: any): void {
+  const user = req.user;
+  if (!user) return res.status(401).json({ error: 'Sign in required' });
+  if (user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
+  next();
+}
+
 // Mint a fresh session id and, in the same transaction, wipe any prior sessions
 // for the same email. Older devices that were still holding a session id will
 // fail their next /api/session/verify call and get kicked out of the app.
@@ -2546,6 +2675,18 @@ app.post('/api/login', async (req, res) => {
       }
 
       const user = rows[0];
+
+      // Seed admin recovery: if the primary admin account has been
+      // deactivated (via UserManagement UI or DB tweak) AND the caller
+      // presents the seed password from env, reactivate the row. This is
+      // the only path back in without direct DB access.
+      const seedPw = process.env.SEED_ADMIN_PASSWORD || 'tracklabadm1n';
+      const seedEmail = (process.env.SEED_ADMIN_EMAIL || 'dedw13@gmail.com').toLowerCase().trim();
+      if (user.status !== 'ACTIVE' && normalizedEmail === seedEmail && String(password) === seedPw) {
+        await query(`UPDATE users SET status = 'ACTIVE', updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [user.id]);
+        user.status = 'ACTIVE';
+        console.log(`[login] Reactivated seed admin ${seedEmail}`);
+      }
 
       if (user.status !== 'ACTIVE') {
         return res.status(401).json({ error: 'User account is not active' });
@@ -2744,7 +2885,7 @@ app.post('/api/users/init-roles', async (_req, res) => {
   }
 });
 
-app.get('/api/users', async (_req, res) => {
+app.get('/api/users', requireAdmin, async (_req, res) => {
   try {
     const { rows } = await query(
       `SELECT id, email, first_name, last_name, role, status, created_at, last_login FROM users ORDER BY created_at DESC`
@@ -2755,7 +2896,7 @@ app.get('/api/users', async (_req, res) => {
   }
 });
 
-app.post('/api/users', async (req, res) => {
+app.post('/api/users', requireAdmin, async (req, res) => {
   try {
     const { email, password, firstName, lastName, role } = req.body;
 
@@ -2783,7 +2924,7 @@ app.post('/api/users', async (req, res) => {
   }
 });
 
-app.put('/api/users/:id', async (req, res) => {
+app.put('/api/users/:id', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { firstName, lastName, role, status } = req.body;
@@ -2806,7 +2947,7 @@ app.put('/api/users/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/users/:id', async (req, res) => {
+app.delete('/api/users/:id', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
 

@@ -90,6 +90,23 @@ export default defineConfig(() => {
         '@': path.resolve(__dirname, '.'),
       },
     },
+    build: {
+      rollupOptions: {
+        output: {
+          // Tesseract.js (used for receipt OCR) is ~15MB with its WASM
+          // engine and language data. Splitting it into its own chunk means
+          // it only downloads when the user first opens the scan modal —
+          // the main vendor bundle stays lean.
+          manualChunks: (id) => {
+            if (id.includes('tesseract.js')) return 'tesseract';
+            return undefined;
+          },
+        },
+      },
+      // Silence the "chunk over 500KB" warning for the tesseract chunk —
+      // it's the point of the split.
+      chunkSizeWarningLimit: 2500,
+    },
     server: {
       port: 3000,
       host: '0.0.0.0',
