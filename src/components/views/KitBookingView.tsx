@@ -229,29 +229,44 @@ export default function KitBookingView({ projects, triggerToast }: KitBookingVie
                   </td>
                   <td className="px-lg py-3" data-label="Sourcing">
                     {(() => {
-                      const validLinks = (res.supplier_links || [])
+                      // Parse into URL objects up front — anything that fails
+                      // the WHATWG parser is out. This is stricter than the
+                      // earlier regex and mirrors what the browser actually
+                      // does before it decides whether to load a link.
+                      const parsed = (res.supplier_links || [])
                         .map(v => typeof v === 'string' ? v.trim() : '')
-                        .filter(v => /^https?:\/\/\S+\.\S+/.test(v))
+                        .map(v => { try { return new URL(v); } catch { return null; } })
+                        .filter((u): u is URL => !!u && (u.protocol === 'http:' || u.protocol === 'https:'))
                         .slice(0, 3);
-                      if (validLinks.length === 0) {
+                      if (parsed.length === 0) {
                         return <span className="text-[10px] text-outline italic">No links</span>;
                       }
+                      const open = (u: URL) => {
+                        // window.open with explicit args survives some
+                        // popup blockers that reject bare <a target="_blank">.
+                        // Fallback: current-tab navigation, so the user always
+                        // ends up on the vendor page instead of about:blank#blocked.
+                        const w = window.open(u.href, '_blank', 'noopener,noreferrer');
+                        if (!w) {
+                          triggerToast(`Popup blocked — opening ${u.hostname} in this tab`);
+                          window.location.href = u.href;
+                        }
+                      };
                       return (
-                        <div className="flex gap-1.5">
-                          {validLinks.map((link, idx) => {
-                            let host = '';
-                            try { host = new URL(link).hostname.replace(/^www\./, ''); } catch { /* leave blank */ }
+                        <div className="flex flex-wrap gap-1.5">
+                          {parsed.map((u, idx) => {
+                            const host = u.hostname.replace(/^www\./, '');
                             return (
-                              <a
+                              <button
                                 key={idx}
-                                href={link}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                title={host || link}
-                                className="p-1 rounded bg-surface-container-highest border border-outline-variant hover:border-primary transition-colors text-outline hover:text-primary"
+                                type="button"
+                                onClick={() => open(u)}
+                                title={u.href}
+                                className="inline-flex items-center gap-1 p-1 rounded bg-surface-container-highest border border-outline-variant hover:border-primary transition-colors text-outline hover:text-primary"
                               >
                                 <ExternalLink className="w-3 h-3" />
-                              </a>
+                                <span className="text-[10px] font-mono max-w-[80px] truncate">{host}</span>
+                              </button>
                             );
                           })}
                         </div>
