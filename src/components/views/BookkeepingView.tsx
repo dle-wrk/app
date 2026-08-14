@@ -135,7 +135,13 @@ export const BookkeepingView: React.FC<BookkeepingViewProps> = ({
     }
   }, [triggerToast]);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  // Load once on mount. Children call `refresh()` explicitly after mutations
+  // (invoice created, bill saved etc). Depending on `refresh` here would loop:
+  // triggerToast is a new function on every App render, so refresh's identity
+  // churns, useEffect fires, /api/bookkeeping/bootstrap gets hammered, and
+  // Fly's proxy starts aborting requests — the "failed to fetch" the user saw.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { refresh(); }, []);
 
   const moduleData = {
     accounts, taxRates, invoices, paymentsReceived, purchaseOrders, bills, paymentsMade, expenses,

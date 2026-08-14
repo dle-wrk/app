@@ -41,7 +41,8 @@ export async function runOcr(dataUrl: string): Promise<OcrResult> {
 // or split across the first two if the trading name is long. Ignore lines that
 // are obviously headers ("TAX INVOICE", "RECEIPT"), phone numbers, or VAT
 // numbers. Return null if nothing looks name-y.
-function extractSupplier(text: string): string | null {
+// Exported for unit tests — real callers use `runOcr` above.
+export function extractSupplier(text: string): string | null {
   const junk = /^\s*(tax\s+invoice|invoice|receipt|vat\s+no|vat\s*#|reg\s*no|customer|receipt\s*#|no\.|no|slip)\s*[:#-]?/i;
   const phony = /^[\d\s\-().+]{5,}$/;
   const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
@@ -57,7 +58,7 @@ function extractSupplier(text: string): string | null {
 
 // Accept common receipt-visible date formats and normalise to ISO YYYY-MM-DD.
 // Years two digits wide are pinned to 2000-2099.
-function extractDate(text: string): string | null {
+export function extractDate(text: string): string | null {
   const iso = /(\d{4})-(\d{1,2})-(\d{1,2})/;
   const dmy = /(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})/;
   const written = /(\d{1,2})\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+(\d{2,4})/i;
@@ -86,9 +87,11 @@ function extractDate(text: string): string | null {
 // Look for a "TOTAL" line first (with variants); if that fails, take the
 // largest money-shaped number on the receipt. Handles a few OCR quirks
 // (comma decimals from ZA locale, currency prefixes like R / ZAR / $).
-function extractTotal(text: string): number | null {
-  const currency = /(?:R|ZAR|\$|£|€)\s*/i;
-  const money = new RegExp(`${currency.source}?(-?\\d{1,7}(?:[,\\s]\\d{3})*(?:[.,]\\d{2}))`, 'gi');
+export function extractTotal(text: string): number | null {
+  // Currency prefix is OPTIONAL — some slips omit the R/$. Wrapping in a
+  // non-capturing group + ? makes the whole prefix optional (was only
+  // making the trailing whitespace lazy before, which required a prefix).
+  const money = /(?:(?:R|ZAR|\$|£|€)\s*)?(-?\d{1,7}(?:[,\s]\d{3})*(?:[.,]\d{2}))/gi;
   const parseMoney = (raw: string): number => {
     const cleaned = raw.replace(/\s/g, '').replace(/,(?=\d{3})/g, '');
     return parseFloat(cleaned.replace(',', '.'));
@@ -96,9 +99,12 @@ function extractTotal(text: string): number | null {
   const lines = text.split(/\r?\n/);
 
   // Named-total pass: look for TOTAL / GRAND TOTAL / AMOUNT DUE / BALANCE.
-  const totalKeywords = /(grand\s+total|amount\s+(due|owing)|balance\s+due|balance\s+owing|total(?!\s+(vat|excl))|invoice\s+total)/i;
+  // Word-boundary before "total" so Sub<b>total</b> doesn't hijack the read.
+  const totalKeywords = /(grand\s+total|amount\s+(due|owing)|balance\s+due|balance\s+owing|\btotal(?!\s+(vat|excl))|invoice\s+total)/i;
   for (const line of lines) {
     if (!totalKeywords.test(line)) continue;
+    // Reset regex state — /g regexes carry lastIndex across matchAll calls.
+    money.lastIndex = 0;
     const matches = Array.from(line.matchAll(money));
     if (matches.length) {
       const last = matches[matches.length - 1][1];
@@ -108,6 +114,7 @@ function extractTotal(text: string): number | null {
   }
 
   // Fallback: largest money-shaped number on the receipt.
+  money.lastIndex = 0;
   let max = 0;
   for (const m of text.matchAll(money)) {
     const val = parseMoney(m[1]);

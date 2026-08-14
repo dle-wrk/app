@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Menu,
   LayoutDashboard,
@@ -237,7 +237,10 @@ export default function App() {
    * Accepts a loose string type (so callers may pass 'error'/'success'/'info'
    * in any case) and normalizes it to the strict union the toast UI expects.
    */
-  const triggerToast = (message: string, type: string = 'SUCCESS') => {
+  // useCallback with an empty dep list keeps a single stable reference across
+  // the app's lifetime — child effects that depend on triggerToast in their
+  // dep arrays no longer refetch on every App render.
+  const triggerToast = useCallback((message: string, type: string = 'SUCCESS') => {
     const normalized = type.toUpperCase();
     const toastType: 'SUCCESS' | 'ERROR' | 'INFO' =
       normalized === 'ERROR' ? 'ERROR' :
@@ -2045,7 +2048,7 @@ if (currentView === 'alternates') {
              }
 
              if (currentView === 'automation') {
-               return <AutomationDashboard triggerToast={triggerToast} />;
+               return <AutomationDashboard triggerToast={triggerToast} userRole={currentUser?.role || 'viewer'} />;
              }
 
              if (currentView === 'auto_po_config') {
