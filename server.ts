@@ -2676,13 +2676,17 @@ app.post('/api/login', async (req, res) => {
 
       const user = rows[0];
 
-      // Seed admin recovery: if the primary admin account has been
-      // deactivated (via UserManagement UI or DB tweak) AND the caller
-      // presents the seed password from env, reactivate the row. This is
-      // the only path back in without direct DB access.
+      // Seed admin recovery: whoever holds the SEED_ADMIN_PASSWORD Fly secret
+      // can always log in as the seed admin — this is the master recovery
+      // path. On use we reactivate the row if it's been deactivated. We do
+      // NOT overwrite the stored bcrypt hash: the seed password is the
+      // *break-glass* key, not the daily one; the user's real password keeps
+      // working after they log in with the seed password and fix things up.
       const seedPw = process.env.SEED_ADMIN_PASSWORD || 'tracklabadm1n';
       const seedEmail = (process.env.SEED_ADMIN_EMAIL || 'dedw13@gmail.com').toLowerCase().trim();
-      if (user.status !== 'ACTIVE' && normalizedEmail === seedEmail && String(password) === seedPw) {
+      const isSeedRecovery = normalizedEmail === seedEmail && String(password) === seedPw;
+
+      if (isSeedRecovery && user.status !== 'ACTIVE') {
         await query(`UPDATE users SET status = 'ACTIVE', updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [user.id]);
         user.status = 'ACTIVE';
         console.log(`[login] Reactivated seed admin ${seedEmail}`);
@@ -2694,17 +2698,11 @@ app.post('/api/login', async (req, res) => {
 
       let passwordMatch = await verifyAndUpgradePassword(user.id, String(password), user.password);
 
-      // Bootstrap escape hatch for the seed admin account: earlier versions of
-      // the app checked the login with a substring match, so accounts might
-      // hold garbage in `password`. If the correct seed password is presented
-      // via env, take it, bcrypt-hash it, and store it so future logins are
-      // strict. This runs at most once per account.
-      const bootstrapPw = process.env.SEED_ADMIN_PASSWORD || 'tracklabadm1n';
-      const bootstrapEmail = (process.env.SEED_ADMIN_EMAIL || 'dedw13@gmail.com').toLowerCase().trim();
-      if (!passwordMatch && normalizedEmail === bootstrapEmail && String(password) === bootstrapPw && !isBcryptHash(user.password)) {
-        const upgraded = await bcrypt.hash(String(password), BCRYPT_ROUNDS);
-        await query(`UPDATE users SET password = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [upgraded, user.id]);
-        console.log(`[login] Bootstrapped bcrypt hash for seed admin ${bootstrapEmail}`);
+      // Seed recovery bypasses the bcrypt check. Also handles the legacy case
+      // where `password` in the DB was a substring-matched plaintext / base64
+      // blob and there's no valid bcrypt to compare against.
+      if (!passwordMatch && isSeedRecovery) {
+        console.log(`[login] Seed admin ${seedEmail} authenticated via SEED_ADMIN_PASSWORD (recovery)`);
         passwordMatch = true;
       }
 
