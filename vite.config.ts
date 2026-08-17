@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
@@ -119,6 +120,16 @@ export default defineConfig(() => {
           secure: false,
         },
       },
+    },
+    test: {
+      // jsdom for tests that touch DOM (URL parsing quirks etc); pure Node
+      // works for the parsers, but jsdom is close enough to a browser that
+      // one env covers both.
+      environment: 'jsdom',
+      globals: false,
+      include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'tests/**/*.test.ts'],
+      exclude: ['node_modules', 'dist', 'tests/e2e/**'],
+      coverage: { reporter: ['text', 'html'], provider: 'v8' },
     },
   };
 });

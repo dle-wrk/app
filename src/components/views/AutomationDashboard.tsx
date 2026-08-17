@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   Zap, Clock, Bell, Settings, LogIn, AlertCircle, CheckCircle2,
-  Play, Pause, RefreshCw, Plus, ChevronRight, TrendingUp
+  Play, Pause, RefreshCw, Plus, ChevronRight, TrendingUp, Pencil, Lock
 } from 'lucide-react';
 
 interface AutomationStats {
@@ -12,11 +12,16 @@ interface AutomationStats {
   autoPOsCreated: number;
 }
 
+// Free-form editing of automation rules is reserved for admin/manager —
+// viewers can still see rule configuration, just not change it.
+const canEditAutomation = (userRole?: string) => userRole === 'admin' || userRole === 'manager';
+
 interface DashboardProps {
   triggerToast: (msg: string, type?: string) => void;
+  userRole?: string;
 }
 
-export default function AutomationDashboard({ triggerToast }: DashboardProps) {
+export default function AutomationDashboard({ triggerToast, userRole }: DashboardProps) {
   const [stats, setStats] = useState<AutomationStats>({
     activeRules: 0,
     scheduledJobs: 0,
@@ -143,7 +148,7 @@ export default function AutomationDashboard({ triggerToast }: DashboardProps) {
       {/* Content Area */}
       <div className="min-h-[400px]">
         {selectedView === 'overview' && <OverviewSection stats={stats} onNavigate={setSelectedView} />}
-        {selectedView === 'rules' && <AutomationRulesSection triggerToast={triggerToast} />}
+        {selectedView === 'rules' && <AutomationRulesSection triggerToast={triggerToast} userRole={userRole} />}
         {selectedView === 'jobs' && <ScheduledJobsSection triggerToast={triggerToast} />}
         {selectedView === 'notifications' && <NotificationsSection triggerToast={triggerToast} />}
         {selectedView === 'auto-po' && <AutoPOConfigSection triggerToast={triggerToast} />}
@@ -255,11 +260,20 @@ function FeatureCard({ icon, title, description, action, onClick }: any) {
   );
 }
 
-function AutomationRulesSection({ triggerToast }: any) {
+function AutomationRulesSection({ triggerToast, userRole }: any) {
+  const canEdit = canEditAutomation(userRole);
   const [rules, setRules] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [formData, setFormData] = useState({
+    ruleName: '',
+    description: '',
+    triggerEvent: 'LOW_STOCK',
+    ruleType: 'AUTO_PO',
+    isActive: true,
+  });
+  const [editingRuleId, setEditingRuleId] = useState<number | null>(null);
+  const [editFormData, setEditFormData] = useState({
     ruleName: '',
     description: '',
     triggerEvent: 'LOW_STOCK',
@@ -283,6 +297,10 @@ function AutomationRulesSection({ triggerToast }: any) {
   };
 
   const handleCreateRule = async () => {
+    if (!canEdit) {
+      triggerToast('Only admins and managers can create automation rules', 'error');
+      return;
+    }
     if (!formData.ruleName.trim()) {
       triggerToast('Rule name is required', 'error');
       return;
@@ -319,16 +337,66 @@ function AutomationRulesSection({ triggerToast }: any) {
     }
   };
 
+  const startEditRule = (rule: any) => {
+    if (!canEdit) {
+      triggerToast('Only admins and managers can edit automation rules', 'error');
+      return;
+    }
+    setEditingRuleId(rule.id);
+    setEditFormData({
+      ruleName: rule.ruleName || '',
+      description: rule.description || '',
+      triggerEvent: rule.triggerEvent || 'LOW_STOCK',
+      ruleType: rule.ruleType || 'AUTO_PO',
+      isActive: !!rule.isActive,
+    });
+  };
+
+  const handleSaveRule = async (ruleId: number) => {
+    if (!canEdit) {
+      triggerToast('Only admins and managers can edit automation rules', 'error');
+      return;
+    }
+    if (!editFormData.ruleName.trim()) {
+      triggerToast('Rule name is required', 'error');
+      return;
+    }
+    try {
+      const res = await fetch(`/api/automation-rules/${ruleId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editFormData),
+      });
+      if (res.ok) {
+        triggerToast('✅ Automation rule updated', 'success');
+        setEditingRuleId(null);
+        fetchRules();
+      } else {
+        const error = await res.json();
+        triggerToast(`Failed: ${error.error || 'Unknown error'}`, 'error');
+      }
+    } catch (err: any) {
+      triggerToast(`Error: ${err.message}`, 'error');
+    }
+  };
+
   if (loading) return <div className="text-center py-8 text-outline">Loading...</div>;
 
   return (
     <div className="space-y-md">
-      <button onClick={() => setShowCreateForm(!showCreateForm)} className="px-lg py-2 rounded-lg bg-primary text-on-primary text-xs font-bold hover:brightness-110 transition flex items-center gap-2">
-        <Plus className="w-4 h-4" />
-        Create Automation Rule
-      </button>
+      {canEdit ? (
+        <button onClick={() => setShowCreateForm(!showCreateForm)} className="px-lg py-2 rounded-lg bg-primary text-on-primary text-xs font-bold hover:brightness-110 transition flex items-center gap-2">
+          <Plus className="w-4 h-4" />
+          Create Automation Rule
+        </button>
+      ) : (
+        <div className="flex items-center gap-2 text-[11px] text-outline bg-surface-container-high/40 border border-outline-variant/30 rounded-lg px-md py-2">
+          <Lock className="w-3.5 h-3.5" />
+          Only admins and managers can create or edit automation rules.
+        </div>
+      )}
 
-      {showCreateForm && (
+      {canEdit && showCreateForm && (
         <div className="bg-surface-container border border-outline-variant rounded-lg p-lg space-y-md">
           <h4 className="text-sm font-bold text-on-surface">New Automation Rule</h4>
           <div className="space-y-sm">
@@ -408,25 +476,104 @@ function AutomationRulesSection({ triggerToast }: any) {
         ) : (
           rules.map(rule => (
             <div key={rule.id} className="bg-surface-container border border-outline-variant rounded-lg p-md">
-              <div className="flex items-start justify-between">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-2">
-                    <h5 className="text-sm font-bold text-on-surface">{rule.ruleName}</h5>
-                    {rule.isActive ? (
-                      <span className="px-2 py-1 rounded text-[9px] font-bold bg-green-500/10 text-green-400">ACTIVE</span>
-                    ) : (
-                      <span className="px-2 py-1 rounded text-[9px] font-bold bg-gray-500/10 text-outline">INACTIVE</span>
-                    )}
+              {editingRuleId === rule.id ? (
+                <div className="space-y-sm">
+                  <div>
+                    <label className="text-xs font-bold text-on-surface-variant block mb-1">Rule Name</label>
+                    <input
+                      type="text"
+                      value={editFormData.ruleName}
+                      onChange={(e) => setEditFormData({ ...editFormData, ruleName: e.target.value })}
+                      className="w-full bg-surface-container-high border border-outline-variant rounded px-2 py-1.5 text-xs text-on-surface"
+                    />
                   </div>
-                  <p className="text-xs text-on-surface-variant">{rule.description}</p>
-                  <div className="text-[10px] text-outline mt-2">
-                    Trigger: <span className="font-mono">{rule.triggerEvent}</span> | Type: {rule.ruleType}
+                  <div>
+                    <label className="text-xs font-bold text-on-surface-variant block mb-1">Description</label>
+                    <textarea
+                      value={editFormData.description}
+                      onChange={(e) => setEditFormData({ ...editFormData, description: e.target.value })}
+                      className="w-full bg-surface-container-high border border-outline-variant rounded px-2 py-1.5 text-xs text-on-surface"
+                      rows={2}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-sm">
+                    <div>
+                      <label className="text-xs font-bold text-on-surface-variant block mb-1">Trigger Event</label>
+                      <select
+                        value={editFormData.triggerEvent}
+                        onChange={(e) => setEditFormData({ ...editFormData, triggerEvent: e.target.value })}
+                        className="w-full bg-surface-container-high border border-outline-variant rounded px-2 py-1.5 text-xs text-on-surface"
+                      >
+                        <option>LOW_STOCK</option>
+                        <option>CRITICAL_STOCK</option>
+                        <option>OUT_OF_STOCK</option>
+                        <option>MISSING_SUPPLIER</option>
+                        <option>SCHEDULED</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-on-surface-variant block mb-1">Rule Type</label>
+                      <select
+                        value={editFormData.ruleType}
+                        onChange={(e) => setEditFormData({ ...editFormData, ruleType: e.target.value })}
+                        className="w-full bg-surface-container-high border border-outline-variant rounded px-2 py-1.5 text-xs text-on-surface"
+                      >
+                        <option>AUTO_PO</option>
+                        <option>MPN_ENRICHMENT</option>
+                        <option>NOTIFICATION</option>
+                        <option>CUSTOM</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={editFormData.isActive}
+                      onChange={(e) => setEditFormData({ ...editFormData, isActive: e.target.checked })}
+                      className="rounded"
+                    />
+                    <label className="text-xs text-on-surface-variant">Active</label>
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={() => handleSaveRule(rule.id)} className="flex-1 px-3 py-1.5 rounded bg-primary text-on-primary text-xs font-bold hover:brightness-110 transition">
+                      Save Changes
+                    </button>
+                    <button onClick={() => setEditingRuleId(null)} className="flex-1 px-3 py-1.5 rounded bg-surface-container-high border border-outline-variant text-on-surface text-xs font-bold hover:bg-surface-variant transition">
+                      Cancel
+                    </button>
                   </div>
                 </div>
-                <button className="p-2 hover:bg-surface-container-high rounded transition">
-                  <ChevronRight className="w-4 h-4 text-on-surface-variant" />
-                </button>
-              </div>
+              ) : (
+                <div className="flex items-start justify-between">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-2">
+                      <h5 className="text-sm font-bold text-on-surface">{rule.ruleName}</h5>
+                      {rule.isActive ? (
+                        <span className="px-2 py-1 rounded text-[9px] font-bold bg-green-500/10 text-green-400">ACTIVE</span>
+                      ) : (
+                        <span className="px-2 py-1 rounded text-[9px] font-bold bg-gray-500/10 text-outline">INACTIVE</span>
+                      )}
+                    </div>
+                    <p className="text-xs text-on-surface-variant">{rule.description}</p>
+                    <div className="text-[10px] text-outline mt-2">
+                      Trigger: <span className="font-mono">{rule.triggerEvent}</span> | Type: {rule.ruleType}
+                    </div>
+                  </div>
+                  {canEdit ? (
+                    <button
+                      onClick={() => startEditRule(rule)}
+                      className="p-2 hover:bg-surface-container-high rounded transition"
+                      title="Edit rule"
+                    >
+                      <Pencil className="w-4 h-4 text-on-surface-variant" />
+                    </button>
+                  ) : (
+                    <span className="p-2 rounded text-outline/50" title="Only admins and managers can edit automation rules">
+                      <Lock className="w-4 h-4" />
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
           ))
         )}

@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Plus, Eye, FileText } from 'lucide-react';
-import { PurchaseOrder } from '../../types';
+import { PurchaseOrder, Item } from '../../types';
 import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, apiPost, apiPut, apiGet, PrimaryButton, SecondaryButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
 import { LineItemsEditor, EditableLine, newEditableLine } from './LineItemsEditor';
 import { ErrorBoundary } from '../ErrorBoundary';
@@ -130,9 +130,13 @@ const POEditorModal: React.FC<ModuleDataProps & { onClose: () => void; onSaved: 
   const [lines, setLines] = useState<EditableLine[]>([newEditableLine()]);
   const [saving, setSaving] = useState<'DRAFT' | 'SENT' | null>(null);
 
+  // Supplier POs are for raw components/consumables; customer POs are for
+  // finished products. `itemType` is the canonical field — Component /
+  // Consumable / Product / Sub-Assembly / Tool.
+  const isProductionItem = (i: Item) => i.itemType === 'Product' || i.itemType === 'Sub-Assembly';
   const filteredItems = poType === 'SUPPLIER'
-    ? items.filter(i => !i.isProduction)
-    : items.filter(i => i.isProduction);
+    ? items.filter(i => !isProductionItem(i))
+    : items.filter(i => isProductionItem(i));
 
   const submit = async (status: 'DRAFT' | 'SENT') => {
     const validLines = lines.filter(l => l.description.trim() && l.quantity > 0);
@@ -181,7 +185,7 @@ const POEditorModal: React.FC<ModuleDataProps & { onClose: () => void; onSaved: 
               )
             ) : (
               clients && clients.length > 0 ? (
-                clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)
+                clients.map(c => <option key={c.id} value={c.id}>{c.clientName}</option>)
               ) : (
                 <option disabled>No customers available</option>
               )

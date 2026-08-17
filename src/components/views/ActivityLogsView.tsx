@@ -297,11 +297,15 @@ export const ActivityLogsView: React.FC<ActivityLogsViewProps> = ({ currentUserE
                         {log.entity_id || '—'}
                       </td>
                       <td className="px-lg py-sm text-center">
-                        {log.status === 'SUCCESS' ? (
-                          <CheckCircle2 className="w-4 h-4 text-green-400 inline" title="Success" />
-                        ) : (
-                          <AlertCircle className="w-4 h-4 text-red-400 inline" title="Error" />
-                        )}
+                        {/* Lucide icons don't accept `title` directly — wrap
+                            in a <span title> so the tooltip still works. */}
+                        <span title={log.status === 'SUCCESS' ? 'Success' : 'Error'} className="inline-block">
+                          {log.status === 'SUCCESS' ? (
+                            <CheckCircle2 className="w-4 h-4 text-green-400 inline" />
+                          ) : (
+                            <AlertCircle className="w-4 h-4 text-red-400 inline" />
+                          )}
+                        </span>
                       </td>
                       <td className="px-lg py-sm font-mono text-[10px]">
                         {log.ip_address || '—'}

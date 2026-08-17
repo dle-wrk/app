@@ -587,8 +587,11 @@ export interface ProductionProduct {
 // AUTOMATION & WORKFLOW MANAGEMENT
 // ============================================================================
 
-export type AutomationRuleState = 'ACTIVE' | 'INACTIVE' | 'PAUSED' | 'ARCHIVED' | 'ERROR';
-export type ScheduledJobState = 'SCHEDULED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'PAUSED' | 'CANCELLED';
+// Single source of truth lives in ./lib/automationStates as `enum` — import
+// + re-export so this file uses them as types too. Using the same identifier
+// as the enum means these behave as both value and type (an enum is both).
+import { AutomationRuleState, ScheduledJobState } from './lib/automationStates';
+export { AutomationRuleState, ScheduledJobState };
 export type NotificationState = 'PENDING' | 'SENT' | 'FAILED' | 'READ' | 'ARCHIVED';
 export type EventState = 'CREATED' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'RETRYING';
 export type AutomationTriggerType = 'MANUAL' | 'SCHEDULED' | 'EVENT_BASED' | 'WEBHOOK' | 'API';
