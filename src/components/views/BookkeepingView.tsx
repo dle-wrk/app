@@ -79,7 +79,7 @@ const PURCHASES_SUBS: { key: PurchasesSub; label: string; icon: React.ReactNode 
 ];
 
 export const BookkeepingView: React.FC<BookkeepingViewProps> = ({
-  clients, clientOrders, clientOrderItems, items, suppliers, triggerToast,
+  clients, setClients, clientOrders, clientOrderItems, items, suppliers, triggerToast,
   initialSection, initialSalesSub, initialPurchasesSub, pendingTargetKey,
 }) => {
   const [section, setSection] = useState<Section>(initialSection ?? 'OVERVIEW');
@@ -145,7 +145,7 @@ export const BookkeepingView: React.FC<BookkeepingViewProps> = ({
 
   const moduleData = {
     accounts, taxRates, invoices, paymentsReceived, purchaseOrders, bills, paymentsMade, expenses,
-    clients, suppliers, items: productionItems.length > 0 ? productionItems : items, clientOrders, triggerToast, refresh,
+    clients, setClients, suppliers, items: productionItems.length > 0 ? productionItems : items, clientOrders, triggerToast, refresh,
   };
 
   if (loading) {
