@@ -12,6 +12,7 @@ export interface ModuleDataProps {
   paymentsMade: PaymentMade[];
   expenses: Expense[];
   clients: Client[];
+  setClients?: React.Dispatch<React.SetStateAction<Client[]>>;
   suppliers: Supplier[];
   items: Item[];
   clientOrders: ClientOrder[];
