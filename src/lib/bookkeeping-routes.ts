@@ -31,24 +31,45 @@ import {
 const LineItemSchema = z.object({
   partNumber: z.string().optional(),
   description: z.string().min(1),
-  quantity: z.number().positive(),
-  unitPrice: z.number().min(0),
-  taxRateId: z.number().nullable().optional(),
-  deductStock: z.boolean().optional(),
-  receiveStock: z.boolean().optional(),
-  accountId: z.number().nullable().optional(),
+  quantity: z.preprocess((v) => v === '' || v === null || v === undefined ? v : Number(v), z.number().positive()),
+  unitPrice: z.preprocess((v) => v === '' || v === null || v === undefined ? v : Number(v), z.number().min(0)),
+  taxRateId: z.preprocess((v) => {
+    if (v === null || v === undefined || v === '') return null;
+    return Number(v);
+  }, z.number().nullable().optional()),
+  deductStock: z.preprocess((v) => {
+    if (typeof v === 'string') return v === 'true' || v === 'on';
+    return v;
+  }, z.boolean().optional()),
+  receiveStock: z.preprocess((v) => {
+    if (typeof v === 'string') return v === 'true' || v === 'on';
+    return v;
+  }, z.boolean().optional()),
+  accountId: z.preprocess((v) => {
+    if (v === null || v === undefined || v === '') return null;
+    return Number(v);
+  }, z.number().nullable().optional()),
 });
 
 const InvoiceCreateSchema = z.object({
-  clientId: z.number().nullable().optional(),
-  clientOrderId: z.number().nullable().optional(),
+  clientId: z.preprocess((v) => {
+    if (v === null || v === undefined || v === '') return null;
+    return Number(v);
+  }, z.number().nullable().optional()),
+  clientOrderId: z.preprocess((v) => {
+    if (v === null || v === undefined || v === '') return null;
+    return Number(v);
+  }, z.number().nullable().optional()),
   invoiceDate: z.string().optional(),
   dueDate: z.string().nullable().optional(),
   currency: z.string().optional(),
   notes: z.string().optional(),
   terms: z.string().optional(),
-  discountTotal: z.number().min(0).optional(),
-  isWarrantyClaim: z.boolean().optional(),
+  discountTotal: z.preprocess((v) => v === '' || v === null || v === undefined ? v : Number(v), z.number().min(0).optional()),
+  isWarrantyClaim: z.preprocess((v) => {
+    if (typeof v === 'string') return v === 'true' || v === 'on';
+    return v;
+  }, z.boolean().optional()),
   status: z.enum(['DRAFT', 'SENT']).optional(),
   items: z.array(LineItemSchema).min(1),
 });
