@@ -77,6 +77,22 @@ export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
     }
   };
 
+  const handleDelete = async (id: number) => {
+    if (!confirm('Delete this bill? This action cannot be undone.')) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/bills/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error((await res.json()).error || 'Failed to delete');
+      triggerToast('Bill deleted.');
+      await refresh();
+      setViewing(null);
+    } catch (err: any) {
+      triggerToast(err.message || 'Failed to delete bill', 'ERROR');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-md">
@@ -218,7 +234,12 @@ export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
             </div>
           </div>
           <div className="flex flex-wrap gap-2 justify-end pt-2 border-t border-outline-variant/20">
-            {viewing.status === 'DRAFT' && <PrimaryButton icon={<Send className="w-3.5 h-3.5" />} onClick={() => handleFinalize(viewing.id)} disabled={busy}>Finalize</PrimaryButton>}
+            {viewing.status === 'DRAFT' && (
+              <>
+                <PrimaryButton icon={<Send className="w-3.5 h-3.5" />} onClick={() => handleFinalize(viewing.id)} disabled={busy}>Finalize</PrimaryButton>
+                <DangerButton icon={<Ban className="w-3.5 h-3.5" />} onClick={() => handleDelete(viewing.id)} disabled={busy}>Delete</DangerButton>
+              </>
+            )}
             {['AWAITING_PAYMENT', 'PARTIAL', 'OVERDUE'].includes(viewing.status) && (
               <>
                 <PrimaryButton icon={<Wallet className="w-3.5 h-3.5" />} onClick={() => { setPayingBill(viewing); setViewing(null); }}>Pay Bill</PrimaryButton>

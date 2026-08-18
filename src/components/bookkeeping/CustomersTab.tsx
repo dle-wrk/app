@@ -3,8 +3,9 @@ import { Eye } from 'lucide-react';
 import { Client } from '../../types';
 import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, EmptyState, SectionCard } from './shared';
 
-export const CustomersTab: React.FC<ModuleDataProps> = ({ clients, invoices, paymentsReceived }) => {
+export const CustomersTab: React.FC<ModuleDataProps> = ({ clients, invoices, paymentsReceived, triggerToast, refresh }) => {
   const [viewing, setViewing] = useState<Client | null>(null);
+  const [showNewClientModal, setShowNewClientModal] = useState(false);
 
   const balances = useMemo(() => {
     const map = new Map<number, number>();
@@ -21,9 +22,33 @@ export const CustomersTab: React.FC<ModuleDataProps> = ({ clients, invoices, pay
     return { clientInvoices, clientPayments };
   };
 
+  const handleDelete = async (id: number) => {
+    if (!confirm('Delete this customer? This action cannot be undone.')) return;
+    try {
+      const res = await fetch(`/api/clients/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error((await res.json()).error || 'Failed to delete');
+      triggerToast('Customer deleted.');
+      await refresh();
+      setViewing(null);
+    } catch (err: any) {
+      triggerToast(err.message || 'Failed to delete customer', 'ERROR');
+    }
+  };
+
   return (
     <div className="space-y-4">
-      <SectionCard title="Customers" badge={`${clients.length} customers`}>
+      <SectionCard 
+        title="Customers" 
+        badge={`${clients.length} customers`}
+        actions={
+          <button 
+            onClick={() => setShowNewClientModal(true)}
+            className="px-3 py-1.5 rounded bg-primary text-white text-xs font-bold hover:opacity-90 transition"
+          >
+            + New Customer
+          </button>
+        }
+      >
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse text-xs">
             <thead>
@@ -42,7 +67,7 @@ export const CustomersTab: React.FC<ModuleDataProps> = ({ clients, invoices, pay
                   <td className="px-lg py-sm text-on-surface-variant">{c.email || c.contactName || '—'}</td>
                   <td className="px-lg py-sm"><StatusPill status={c.status || 'ACTIVE'} /></td>
                   <td className="px-lg py-sm text-right font-mono font-bold">{(balances.get(c.id) || 0) > 0 ? fmtMoney(balances.get(c.id)) : '—'}</td>
-                  <td className="px-lg py-sm text-right">
+                  <td className="px-lg py-sm text-right flex gap-1 justify-end">
                     <button onClick={() => setViewing(c)} className="p-1.5 rounded hover:bg-surface-container-high text-on-surface-variant" title="Statement"><Eye className="w-3.5 h-3.5" /></button>
                   </td>
                 </tr>
@@ -95,6 +120,140 @@ export const CustomersTab: React.FC<ModuleDataProps> = ({ clients, invoices, pay
           </Modal>
         );
       })()}
+
+      {showNewClientModal && (
+        <NewClientModal 
+          onClose={() => setShowNewClientModal(false)}
+          onSaved={async () => { setShowNewClientModal(false); await refresh(); }}
+          triggerToast={triggerToast}
+        />
+      )}
     </div>
+  );
+};
+
+const NewClientModal: React.FC<{
+  onClose: () => void;
+  onSaved: () => void;
+  triggerToast: (m: string, t?: 'SUCCESS' | 'ERROR' | 'INFO') => void;
+}> = ({ onClose, onSaved, triggerToast }) => {
+  const [clientName, setClientName] = useState('');
+  const [contactName, setContactName] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [address, setAddress] = useState('');
+  const [vatNumber, setVatNumber] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const submit = async () => {
+    if (!clientName.trim()) {
+      triggerToast('Customer name is required.', 'ERROR');
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch('/api/clients', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientName: clientName.trim(),
+          contactName: contactName.trim() || undefined,
+          email: email.trim() || undefined,
+          phone: phone.trim() || undefined,
+          address: address.trim() || undefined,
+          vatNumber: vatNumber.trim() || undefined,
+          status: 'ACTIVE',
+        }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || 'Failed to create customer');
+      triggerToast('Customer created successfully.');
+      onSaved();
+    } catch (err: any) {
+      triggerToast(err.message || 'Failed to create customer', 'ERROR');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal title="New Customer" subtitle="Add a new customer to your system" onClose={onClose} maxWidth="max-w-md">
+      <div className="space-y-3">
+        <div>
+          <label className="block text-xs font-bold text-outline uppercase mb-1">Customer Name *</label>
+          <input
+            type="text"
+            className="w-full px-3 py-2 rounded border border-outline-variant bg-surface-container text-on-surface text-sm"
+            value={clientName}
+            onChange={(e) => setClientName(e.target.value)}
+            placeholder="Acme Corporation"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-bold text-outline uppercase mb-1">Contact Name</label>
+          <input
+            type="text"
+            className="w-full px-3 py-2 rounded border border-outline-variant bg-surface-container text-on-surface text-sm"
+            value={contactName}
+            onChange={(e) => setContactName(e.target.value)}
+            placeholder="John Doe"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-bold text-outline uppercase mb-1">Email</label>
+          <input
+            type="email"
+            className="w-full px-3 py-2 rounded border border-outline-variant bg-surface-container text-on-surface text-sm"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="john@acme.com"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-bold text-outline uppercase mb-1">Phone</label>
+          <input
+            type="tel"
+            className="w-full px-3 py-2 rounded border border-outline-variant bg-surface-container text-on-surface text-sm"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            placeholder="+27 21 123 4567"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-bold text-outline uppercase mb-1">Address</label>
+          <input
+            type="text"
+            className="w-full px-3 py-2 rounded border border-outline-variant bg-surface-container text-on-surface text-sm"
+            value={address}
+            onChange={(e) => setAddress(e.target.value)}
+            placeholder="123 Main Street, City, Country"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-bold text-outline uppercase mb-1">VAT Number</label>
+          <input
+            type="text"
+            className="w-full px-3 py-2 rounded border border-outline-variant bg-surface-container text-on-surface text-sm"
+            value={vatNumber}
+            onChange={(e) => setVatNumber(e.target.value)}
+            placeholder="ZA123456789"
+          />
+        </div>
+      </div>
+      <div className="flex justify-end gap-2 pt-md mt-md border-t border-outline-variant/20">
+        <button
+          onClick={onClose}
+          className="px-3 py-1.5 rounded bg-surface-container-high text-on-surface text-xs font-bold hover:opacity-90 transition"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={submit}
+          disabled={saving}
+          className="px-3 py-1.5 rounded bg-primary text-white text-xs font-bold hover:opacity-90 transition disabled:opacity-50"
+        >
+          {saving ? 'Creating...' : 'Create Customer'}
+        </button>
+      </div>
+    </Modal>
   );
 };
