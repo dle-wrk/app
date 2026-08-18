@@ -380,7 +380,7 @@ export function registerBookkeepingRoutes(app: Express) {
       const invRes = await client.query(
         `INSERT INTO invoices (invoice_number, client_id, client_order_id, invoice_date, due_date, status, currency, subtotal, tax_total, discount_total, total, balance_due, notes, terms, is_warranty_claim)
          VALUES ($1,$2,$3,$4,$5,'DRAFT',$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id`,
-        [invoiceNumber, body.clientId || null, body.clientOrderId || null, invoiceDate, body.dueDate || null, body.currency || 'ZAR', subtotal, taxTotal, body.discountTotal || 0, total, total, body.notes || null, body.terms || null, body.isWarrantyClaim ?? true]
+        [invoiceNumber, body.clientId || null, body.clientOrderId || null, invoiceDate, body.dueDate || null, body.currency || 'ZAR', subtotal, taxTotal, body.discountTotal || 0, total, total, body.notes || null, body.terms || null, body.isWarrantyClaim ?? false]
       );
       const invoiceId = invRes.rows[0].id;
 
@@ -430,7 +430,7 @@ export function registerBookkeepingRoutes(app: Express) {
 
       await client.query(
         `UPDATE invoices SET client_id=$1, client_order_id=$2, invoice_date=$3, due_date=$4, currency=$5, subtotal=$6, tax_total=$7, discount_total=$8, total=$9, balance_due=$10, notes=$11, terms=$12, is_warranty_claim=$13, updated_at=CURRENT_TIMESTAMP WHERE id=$14`,
-        [body.clientId || null, body.clientOrderId || null, body.invoiceDate || new Date().toISOString().slice(0, 10), body.dueDate || null, body.currency || 'ZAR', subtotal, taxTotal, body.discountTotal || 0, total, total, body.notes || null, body.terms || null, body.isWarrantyClaim ?? true, id]
+        [body.clientId || null, body.clientOrderId || null, body.invoiceDate || new Date().toISOString().slice(0, 10), body.dueDate || null, body.currency || 'ZAR', subtotal, taxTotal, body.discountTotal || 0, total, total, body.notes || null, body.terms || null, body.isWarrantyClaim ?? false, id]
       );
       await client.query(`DELETE FROM invoice_items WHERE invoice_id = $1`, [id]);
       const insertedItems: any[] = [];
