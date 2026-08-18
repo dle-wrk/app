@@ -258,7 +258,7 @@ export async function ensureBookkeepingSchema() {
   // per-invoice toggle to mark it as a normal sale instead. This is metadata only —
   // the GL posting is unchanged — so the accounting treatment can be refined later
   // (e.g. routing warranty claims to a dedicated income/expense account).
-  await exec(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS is_warranty_claim BOOLEAN DEFAULT TRUE`).catch(() => {});
+  await exec(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS is_warranty_claim BOOLEAN DEFAULT FALSE`).catch(() => {});
 
   // --- Dispatch notes: delivery & collection of final project products ---------
   // Fulfillment documents (not accounting entries): they record which finished goods
@@ -611,7 +611,7 @@ export const mapInvoice = (r: any) => ({
   balanceDue: parseFloat(r.balance_due) || 0,
   notes: r.notes,
   terms: r.terms,
-  isWarrantyClaim: r.is_warranty_claim ?? true,
+  isWarrantyClaim: r.is_warranty_claim ?? false,
   journalEntryId: r.journal_entry_id,
   createdAt: r.created_at,
   updatedAt: r.updated_at,

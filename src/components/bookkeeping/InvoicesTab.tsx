@@ -250,7 +250,7 @@ const InvoiceEditorModal: React.FC<ModuleDataProps & { initial: Invoice | null; 
   const [currency, setCurrency] = useState(initial?.currency || 'ZAR');
   const [notes, setNotes] = useState(initial?.notes || '');
   const [terms, setTerms] = useState(initial?.terms || 'Payment due within 30 days.');
-  const [isWarrantyClaim, setIsWarrantyClaim] = useState<boolean>(initial?.isWarrantyClaim ?? true);
+  const [isWarrantyClaim, setIsWarrantyClaim] = useState<boolean>(initial?.isWarrantyClaim ?? false);
   const [lines, setLines] = useState<EditableLine[]>(
     initial?.items?.length
       ? initial.items.map(it => ({ key: `L${it.id}`, partNumber: it.partNumber, description: it.description, quantity: it.quantity, unitPrice: it.unitPrice, taxRateId: it.taxRateId ?? null, deductStock: it.deductStock }))
