@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   LayoutDashboard,
   Boxes,
@@ -20,6 +20,9 @@ import {
   ChevronDown,
   Activity,
   BookOpen,
+  Upload,
+  FileText,
+  Trash2,
   PanelLeftClose,
   PanelLeftOpen
 } from 'lucide-react';
@@ -37,6 +40,15 @@ interface SidebarProps {
   isCollapsed: boolean;
   setIsCollapsed: (collapsed: boolean) => void;
 }
+
+type UploadedDocument = {
+  id: string;
+  name: string;
+  size: number;
+  type: string;
+  uploadedAt: string;
+  dataUrl: string;
+};
 
 export const Sidebar: React.FC<SidebarProps> = ({
   currentView,
@@ -58,6 +70,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
     documentation: false,
     admin: false,
   });
+  const [uploadedDocuments, setUploadedDocuments] = useState<UploadedDocument[]>(() => {
+    if (typeof window === 'undefined') return [];
+    try {
+      const stored = window.localStorage.getItem('tracklab-admin-documents');
+      return stored ? JSON.parse(stored) as UploadedDocument[] : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const isAdmin = String(profile?.role || '').trim().toLowerCase() === 'admin';
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('tracklab-admin-documents', JSON.stringify(uploadedDocuments));
+    }
+  }, [uploadedDocuments]);
 
   // In collapsed rail mode every section header is hidden, so users can't
   // toggle them. Force every section open so all icons stay reachable.
@@ -122,6 +151,52 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const handleNavClick = (view: ViewType) => {
     setView(view);
     setIsSidebarOpen(false);
+  };
+
+  const handleDocumentUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const lowerName = file.name.toLowerCase();
+    const acceptableExts = ['pdf', 'csv', 'xlsx'];
+    const acceptableTypes = new Set([
+      'application/pdf',
+      'text/csv',
+      'application/csv',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    ]);
+    const ext = lowerName.includes('.') ? lowerName.split('.').pop() : '';
+    const allowed = acceptableTypes.has(file.type.toLowerCase()) || acceptableExts.includes(ext || '');
+
+    if (!allowed) {
+      window.alert('Only PDF, CSV, and XLSX files can be uploaded.');
+      event.target.value = '';
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const nextDoc: UploadedDocument = {
+        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        name: file.name,
+        size: file.size,
+        type: file.type || ext || 'document',
+        uploadedAt: new Date().toISOString(),
+        dataUrl: String(reader.result || ''),
+      };
+      setUploadedDocuments((prev) => [nextDoc, ...prev]);
+      event.target.value = '';
+    };
+    reader.onerror = () => {
+      window.alert('The selected file could not be read. Please try another document.');
+      event.target.value = '';
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const removeDocument = (id: string) => {
+    setUploadedDocuments((prev) => prev.filter((doc) => doc.id !== id));
   };
 
   return (
@@ -293,16 +368,61 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <ChevronDown className={`w-3 h-3 transition-transform ${expandedSections.documentation ? '' : '-rotate-90'}`} />
         </button>
         {effectiveExpanded.documentation && (
-          <a
-            href="/tracklab-complete-guide.html"
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={() => setIsSidebarOpen(false)}
-            className="w-full flex items-center px-2.5 py-1.5 rounded text-left transition-all text-[12px] text-on-surface-variant/80 hover:text-on-surface hover:bg-surface-variant/40"
-          >
-            <BookOpen className="w-3.5 h-3.5 mr-2" />
-            <span>Complete User Guide</span>
-          </a>
+          <div className="space-y-2 px-2 pb-1">
+            <a
+              href="/tracklab-complete-guide.html"
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => setIsSidebarOpen(false)}
+              className="w-full flex items-center px-2.5 py-1.5 rounded text-left transition-all text-[12px] text-on-surface-variant/80 hover:text-on-surface hover:bg-surface-variant/40"
+            >
+              <BookOpen className="w-3.5 h-3.5 mr-2" />
+              <span>Complete User Guide</span>
+            </a>
+
+            {isAdmin && (
+              <>
+                <label className="flex cursor-pointer items-center gap-2 rounded border border-dashed border-primary/40 bg-primary/5 px-2.5 py-1.5 text-[12px] text-primary hover:bg-primary/10 transition-colors">
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>Upload admin document</span>
+                  <input
+                    type="file"
+                    className="hidden"
+                    accept=".pdf,.csv,.xlsx,application/pdf,text/csv,application/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    onChange={handleDocumentUpload}
+                  />
+                </label>
+
+                {uploadedDocuments.length > 0 && (
+                  <div className="space-y-1">
+                    {uploadedDocuments.map((doc) => (
+                      <div key={doc.id} className="flex items-center justify-between gap-2 rounded border border-outline-variant/60 bg-surface-container-high/40 px-2 py-1.5">
+                        <a
+                          href={doc.dataUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex min-w-0 items-center gap-2 text-[11px] text-on-surface-variant hover:text-on-surface"
+                          title={doc.name}
+                        >
+                          <FileText className="w-3.5 h-3.5 shrink-0" />
+                          <span className="truncate max-w-[150px]">{doc.name}</span>
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => removeDocument(doc.id)}
+                          className="text-outline hover:text-error transition-colors"
+                          aria-label={`Delete ${doc.name}`}
+                          title="Remove document"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         )}
 
         <button
