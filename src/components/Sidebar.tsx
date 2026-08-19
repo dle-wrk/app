@@ -70,23 +70,49 @@ export const Sidebar: React.FC<SidebarProps> = ({
     documentation: false,
     admin: false,
   });
-  const [uploadedDocuments, setUploadedDocuments] = useState<UploadedDocument[]>(() => {
-    if (typeof window === 'undefined') return [];
-    try {
-      const stored = window.localStorage.getItem('tracklab-admin-documents');
-      return stored ? JSON.parse(stored) as UploadedDocument[] : [];
-    } catch {
-      return [];
-    }
-  });
+  const [uploadedDocuments, setUploadedDocuments] = useState<UploadedDocument[]>([]);
 
   const isAdmin = String(profile?.role || '').trim().toLowerCase() === 'admin';
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem('tracklab-admin-documents', JSON.stringify(uploadedDocuments));
+    if (!isAdmin) {
+      setUploadedDocuments([]);
+      return;
     }
-  }, [uploadedDocuments]);
+
+    const loadDocuments = async () => {
+      try {
+        const response = await fetch('/api/admin/documents', { headers: { 'Content-Type': 'application/json' } });
+        if (!response.ok) {
+          if (response.status === 401 || response.status === 403) {
+            setUploadedDocuments([]);
+            return;
+          }
+          throw new Error(`Failed to load documents (${response.status})`);
+        }
+        const docs = await response.json() as Array<{
+          id: string | number;
+          name: string;
+          mimeType: string;
+          size: number;
+          dataUrl: string;
+          uploadedAt: string;
+        }>;
+        setUploadedDocuments(docs.map((doc) => ({
+          id: String(doc.id),
+          name: doc.name,
+          size: Number(doc.size) || 0,
+          type: doc.mimeType || 'application/octet-stream',
+          uploadedAt: doc.uploadedAt,
+          dataUrl: doc.dataUrl,
+        })));
+      } catch {
+        setUploadedDocuments([]);
+      }
+    };
+
+    loadDocuments();
+  }, [isAdmin]);
 
   // In collapsed rail mode every section header is hidden, so users can't
   // toggle them. Force every section open so all icons stay reachable.
@@ -176,17 +202,46 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
 
     const reader = new FileReader();
-    reader.onload = () => {
-      const nextDoc: UploadedDocument = {
-        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    reader.onload = async () => {
+      const dataUrl = String(reader.result || '');
+      const payload = {
         name: file.name,
+        mimeType: file.type || (ext ? `application/${ext}` : 'application/octet-stream'),
         size: file.size,
-        type: file.type || ext || 'document',
-        uploadedAt: new Date().toISOString(),
-        dataUrl: String(reader.result || ''),
+        dataUrl,
       };
-      setUploadedDocuments((prev) => [nextDoc, ...prev]);
-      event.target.value = '';
+
+      try {
+        const response = await fetch('/api/admin/documents', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({}));
+          throw new Error(err.error || 'Upload failed');
+        }
+        const doc = await response.json() as {
+          id: string | number;
+          name: string;
+          mimeType: string;
+          size: number;
+          dataUrl: string;
+          uploadedAt: string;
+        };
+        setUploadedDocuments((prev) => [{
+          id: String(doc.id),
+          name: doc.name,
+          size: Number(doc.size) || 0,
+          type: doc.mimeType || 'application/octet-stream',
+          uploadedAt: doc.uploadedAt,
+          dataUrl: doc.dataUrl,
+        }, ...prev]);
+      } catch (error: any) {
+        window.alert(error.message || 'Unable to save document.');
+      } finally {
+        event.target.value = '';
+      }
     };
     reader.onerror = () => {
       window.alert('The selected file could not be read. Please try another document.');
@@ -195,8 +250,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
     reader.readAsDataURL(file);
   };
 
-  const removeDocument = (id: string) => {
-    setUploadedDocuments((prev) => prev.filter((doc) => doc.id !== id));
+  const removeDocument = async (id: string) => {
+    try {
+      const response = await fetch(`/api/admin/documents/${id}`, { method: 'DELETE' });
+      if (!response.ok) {
+        throw new Error('Unable to delete document');
+      }
+      setUploadedDocuments((prev) => prev.filter((doc) => doc.id !== id));
+    } catch (error: any) {
+      window.alert(error.message || 'Unable to delete document.');
+    }
   };
 
   return (

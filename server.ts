@@ -2623,6 +2623,91 @@ function requireAdmin(req: any, res: any, next: any): void {
   next();
 }
 
+function isAllowedAdminDocument(name: string, mimeType: string): boolean {
+  const lowerName = name.toLowerCase();
+  const ext = lowerName.includes('.') ? lowerName.split('.').pop() : '';
+  const allowedExts = new Set(['pdf', 'csv', 'xlsx']);
+  const allowedMimeTypes = new Set([
+    'application/pdf',
+    'text/csv',
+    'application/csv',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  ]);
+  return allowedExts.has(ext || '') || allowedMimeTypes.has((mimeType || '').toLowerCase());
+}
+
+app.get('/api/admin/documents', requireAdmin, async (_req: any, res: any) => {
+  try {
+    const { rows } = await query(`
+      SELECT id, name, mime_type, size_bytes, data_url, uploaded_by_user_id, created_at
+      FROM admin_documents
+      ORDER BY created_at DESC
+    `);
+    res.json(rows.map((row: any) => ({
+      id: row.id,
+      name: row.name,
+      mimeType: row.mime_type,
+      size: Number(row.size_bytes) || 0,
+      dataUrl: row.data_url,
+      uploadedByUserId: row.uploaded_by_user_id,
+      uploadedAt: row.created_at,
+    })));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/documents', requireAdmin, async (req: any, res: any) => {
+  try {
+    const parsed = z.object({
+      name: z.string().min(1),
+      mimeType: z.string().min(1),
+      size: z.number().min(1),
+      dataUrl: z.string().min(50),
+    }).safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Invalid document payload', details: parsed.error.flatten() });
+    }
+
+    const payload = parsed.data;
+    if (!isAllowedAdminDocument(payload.name, payload.mimeType)) {
+      return res.status(400).json({ error: 'Only PDF, CSV, and XLSX documents are allowed.' });
+    }
+
+    const actorId = (req as any).user?.id ?? null;
+    const row = await queryOne<any>(`
+      INSERT INTO admin_documents (name, mime_type, size_bytes, data_url, uploaded_by_user_id)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING id, name, mime_type, size_bytes, data_url, uploaded_by_user_id, created_at
+    `, [payload.name, payload.mimeType, payload.size, payload.dataUrl, actorId]);
+
+    res.status(201).json({
+      id: row.id,
+      name: row.name,
+      mimeType: row.mime_type,
+      size: Number(row.size_bytes) || 0,
+      dataUrl: row.data_url,
+      uploadedByUserId: row.uploaded_by_user_id,
+      uploadedAt: row.created_at,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/admin/documents/:id', requireAdmin, async (req: any, res: any) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid document id' });
+    const result = await query(`DELETE FROM admin_documents WHERE id = $1`, [id]);
+    if ((result as any)?.rowCount === 0) return res.status(404).json({ error: 'Document not found' });
+    res.json({ ok: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Mint a fresh session id and, in the same transaction, wipe any prior sessions
 // for the same email. Older devices that were still holding a session id will
 // fail their next /api/session/verify call and get kicked out of the app.
@@ -5880,6 +5965,16 @@ async function runSchemaBootstrap() {
       ip_address TEXT
     )`).catch(() => {});
     await exec(`CREATE INDEX IF NOT EXISTS user_sessions_email_idx ON user_sessions (user_email)`).catch(() => {});
+    await exec(`CREATE TABLE IF NOT EXISTS admin_documents (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      size_bytes INTEGER NOT NULL DEFAULT 0,
+      data_url TEXT NOT NULL,
+      uploaded_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`).catch(() => {});
+    await exec(`CREATE INDEX IF NOT EXISTS idx_admin_documents_created_at ON admin_documents (created_at DESC)`).catch(() => {});
     await exec(`CREATE TABLE IF NOT EXISTS role_permissions (
       id SERIAL PRIMARY KEY,
       role TEXT NOT NULL,
