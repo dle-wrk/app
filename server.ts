@@ -6347,6 +6347,12 @@ async function runSchemaBootstrap() {
     await exec(`ALTER TABLE app_docs ADD COLUMN IF NOT EXISTS url TEXT`).catch(() => {});
     await exec(`ALTER TABLE app_docs ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 100`).catch(() => {});
     await exec(`ALTER TABLE app_docs ADD COLUMN IF NOT EXISTS updated_by TEXT`).catch(() => {});
+    // Drop constraints/columns from the earlier CMS shape (slug, content,
+    // category were NOT NULL there and would block every INSERT here).
+    // DROP COLUMN cascades to any unique index tied to it.
+    await exec(`ALTER TABLE app_docs DROP COLUMN IF EXISTS slug`).catch(() => {});
+    await exec(`ALTER TABLE app_docs DROP COLUMN IF EXISTS content`).catch(() => {});
+    await exec(`ALTER TABLE app_docs DROP COLUMN IF EXISTS category`).catch(() => {});
     // Optional binary attachment (PDFs, images, spreadsheets). Stored as
     // base64 in a text column — Postgres compresses TOAST well and this
     // avoids provisioning a Fly Volume. Cap enforced at the upload
