@@ -13,4 +13,4 @@ test-*.mjs
 scratch-*.mjs
 assets/
 *.db-shm
-*.db-wal
+*.db-walseed-docs.sql
