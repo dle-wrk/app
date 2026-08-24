@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractSupplier, extractDate, extractTotal } from './receiptOcr';
+import { extractSupplier, extractDate, extractTotal, extractLineItems } from './receiptOcr';
 
 // These tests pin the receipt parser's real-world behaviour so schema drifts
 // (a new currency symbol on the wire, a new date format from a supplier) are
@@ -93,5 +93,59 @@ describe('extractTotal', () => {
 
   it('returns null when no money-shaped numbers are present', () => {
     expect(extractTotal('thanks come again')).toBeNull();
+  });
+});
+
+describe('extractLineItems', () => {
+  it('pulls single-money lines as one-per-item', () => {
+    const text = 'Widget R150.00\nBracket R80.00\nTOTAL R230.00';
+    const items = extractLineItems(text);
+    expect(items).toEqual([
+      { description: 'Widget', quantity: 1, unitPrice: 150, lineTotal: 150 },
+      { description: 'Bracket', quantity: 1, unitPrice: 80, lineTotal: 80 },
+    ]);
+  });
+
+  it('extracts a leading "N x" quantity', () => {
+    const items = extractLineItems('2 x Widget R150.00');
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ description: 'Widget', quantity: 2, lineTotal: 150 });
+  });
+
+  it('extracts a trailing "x N" quantity', () => {
+    const items = extractLineItems('Widget x 3   R60.00');
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ description: 'Widget', quantity: 3, lineTotal: 60 });
+  });
+
+  it('splits unit and total when two money values are present', () => {
+    // "@ R25.00" plus line total "R50.00" for quantity 2
+    const items = extractLineItems('2 x Widget @ R25.00   R50.00');
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ quantity: 2, unitPrice: 25, lineTotal: 50 });
+  });
+
+  it('drops summary lines (TOTAL, SUBTOTAL, VAT, BALANCE, etc.)', () => {
+    const text = 'Bolt R100.00\nSubtotal R100.00\nVAT R15.00\nTOTAL R115.00\nChange R5.00';
+    const items = extractLineItems(text);
+    expect(items).toHaveLength(1);
+    expect(items[0].description).toBe('Bolt');
+  });
+
+  it('ignores blank lines and receipt junk', () => {
+    const text = 'MICROROBOTICS\n\nDate: 12/08/2026\nBolts R150.00\nSlip No 5548\nTOTAL R150.00';
+    const items = extractLineItems(text);
+    expect(items.map(i => i.description)).toEqual(['Bolts']);
+  });
+
+  it('returns empty when nothing looks like a line item', () => {
+    expect(extractLineItems('TAX INVOICE\nVAT NO 1234\nTOTAL R230.00')).toEqual([]);
+  });
+
+  it('handles ZA locale comma decimals', () => {
+    const items = extractLineItems('Widget R150,50\nBracket R80,25');
+    expect(items).toHaveLength(2);
+    expect(items[0].lineTotal).toBe(150.5);
+    expect(items[1].lineTotal).toBe(80.25);
   });
 });

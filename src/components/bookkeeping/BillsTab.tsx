@@ -16,6 +16,7 @@ interface PrefillFromScan {
   date: string | null;
   total: number | null;
   receiptImage: string | null;
+  lineItems: { description: string; quantity: number; unitPrice: number }[];
 }
 
 export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrder | null; onPrefillConsumed?: () => void }> = (props) => {
@@ -461,6 +462,11 @@ const ReceiptScanModal: React.FC<{
       date: ocr?.date ?? null,
       total: ocr?.total ?? null,
       receiptImage: preview,
+      lineItems: (ocr?.lineItems || []).map(li => ({
+        description: li.description,
+        quantity: li.quantity,
+        unitPrice: li.unitPrice,
+      })),
     });
   };
 
@@ -532,7 +538,26 @@ const ReceiptScanModal: React.FC<{
                 </div>
               </div>
             )}
-            {ocr && !ocr.supplier && !ocr.date && ocr.total === null && (
+            {ocr && ocr.lineItems && ocr.lineItems.length > 0 && (
+              <div className="mt-3 border-t border-outline-variant/40 pt-2">
+                <div className="text-[10px] uppercase text-outline mb-1">
+                  Line items ({ocr.lineItems.length}) — will prefill the bill editor
+                </div>
+                <div className="max-h-32 overflow-y-auto space-y-0.5">
+                  {ocr.lineItems.slice(0, 8).map((li, idx) => (
+                    <div key={idx} className="flex items-baseline gap-2 text-[11px]">
+                      <span className="font-mono text-outline w-8 text-right">{li.quantity}×</span>
+                      <span className="font-medium truncate flex-1" title={li.description}>{li.description}</span>
+                      <span className="font-mono text-primary">{li.lineTotal.toFixed(2)}</span>
+                    </div>
+                  ))}
+                  {ocr.lineItems.length > 8 && (
+                    <div className="text-[10px] text-outline italic pl-10">+ {ocr.lineItems.length - 8} more…</div>
+                  )}
+                </div>
+              </div>
+            )}
+            {ocr && !ocr.supplier && !ocr.date && ocr.total === null && ocr.lineItems.length === 0 && (
               <div className="text-[11px] text-on-surface-variant italic">
                 Couldn't extract clean fields — the image is still saved as-is.
               </div>
@@ -628,6 +653,19 @@ const BillEditorModal: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
   const [lines, setLines] = useState<EditableLine[]>(() => {
     if (poItems?.length) {
       return poItems.map((it: any) => ({ key: `L${it.id}`, partNumber: it.partNumber, description: it.description, quantity: it.quantity, unitPrice: it.unitPrice, taxRateId: it.taxRateId ?? null, receiveStock: !!it.partNumber }));
+    }
+    // OCR extracted per-line items — prefer these over the single-line
+    // fallback so the user starts with a structured bill they only need
+    // to check, not retype.
+    if (prefillFromScan?.lineItems?.length) {
+      return prefillFromScan.lineItems.map((li, idx) => {
+        const line = newEditableLine();
+        line.key = `OCR${idx}`;
+        line.description = li.description;
+        line.quantity = li.quantity;
+        line.unitPrice = li.unitPrice;
+        return line;
+      });
     }
     if (prefillFromScan?.total && prefillFromScan.total > 0) {
       const line = newEditableLine();
