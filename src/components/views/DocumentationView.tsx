@@ -395,7 +395,12 @@ const DocLinkEditor: React.FC<DocLinkEditorProps> = ({ mode, doc, onClose, onSav
                     className="text-xs px-3 py-2 rounded bg-surface-container-high hover:bg-surface-container-highest border border-outline-variant font-bold">
               Cancel
             </button>
-            <button type="submit" disabled={saving || !title.trim() || !url.trim()}
+            <button type="submit" disabled={
+              saving
+              || !title.trim()
+              || (source === 'url' && !url.trim())
+              || (source === 'file' && !pendingFile && !existingFileName)
+            }
                     className="text-xs px-3 py-2 rounded bg-primary text-on-primary font-bold hover:brightness-110 disabled:opacity-50 flex items-center gap-1.5">
               <Save className="w-3.5 h-3.5" />
               {saving ? 'Saving…' : mode === 'create' ? 'Add doc' : 'Save changes'}
