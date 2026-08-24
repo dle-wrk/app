@@ -65,6 +65,7 @@ import AutomationDashboard from './components/views/AutomationDashboard';
 import AutoPOConfigView from './components/views/AutoPOConfigView';
 import QualityComplianceDashboard from './components/views/QualityComplianceDashboard';
 import AdvancedAutomationDashboard from './components/views/AdvancedAutomationDashboard';
+import { DocumentationView } from './components/views/DocumentationView';
 import { CommandPalette } from './components/CommandPalette';
 import type { CommandTarget } from './lib/commandPalette';
 
@@ -2099,6 +2100,10 @@ if (currentView === 'alternates') {
 
              if (currentView === 'advanced_automation') {
                return <AdvancedAutomationDashboard triggerToast={triggerToast} />;
+             }
+
+             if (currentView === 'documentation') {
+               return <DocumentationView currentUserRole={currentUser?.role} triggerToast={triggerToast} />;
              }
 
              return null;

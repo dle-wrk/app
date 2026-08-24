@@ -51,6 +51,7 @@ export const ROUTES: CommandRoute[] = [
   { id: 'activity-logs', label: 'Activity Logs', path: 'Admin', keywords: 'audit history log events who did what', group: 'Pages', icon: 'Activity', target: { view: 'activity-logs' } },
   { id: 'reports_ledger', label: 'Reports & Ledger', path: 'Admin', keywords: 'reports ledger stock movements transactions', group: 'Pages', icon: 'ArrowLeftRight', target: { view: 'reports_ledger' } },
   { id: 'profile', label: 'My Profile', path: 'Admin', keywords: 'profile account me user', group: 'Pages', icon: 'User', target: { view: 'profile' } },
+  { id: 'documentation', label: 'Docs & Guides', path: 'Documentation', keywords: 'docs documentation help guides manual how to knowledge base wiki', group: 'Pages', icon: 'FileText', target: { view: 'documentation' } },
 
   // Bookkeeping sub-tabs — deep-linked via `section`/`subSection`.
   { id: 'bk_overview', label: 'Bookkeeping Overview', path: 'Bookkeeping › Overview', keywords: 'summary kpi', group: 'Bookkeeping', icon: 'LayoutDashboard', target: { view: 'bookkeeping', section: 'OVERVIEW' } },

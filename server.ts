@@ -2998,6 +2998,126 @@ app.post('/api/auth/reset-password', validateBody(ResetPasswordSchema), async (r
 });
 
 // ============================================================================
+// DOCUMENTATION
+// In-app markdown-backed docs. Everyone can read; only admins can mutate.
+// Slugs are stable identifiers for URLs and the command palette — auto-derived
+// from the title if the client doesn't send one.
+// ============================================================================
+
+const DocSlugSchema = z.string()
+  .min(1).max(80)
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'Slug must be lowercase kebab-case (letters, digits, dashes)');
+const DocUpsertSchema = z.object({
+  slug: DocSlugSchema.optional(),
+  title: z.string().min(1).max(200),
+  category: z.string().min(1).max(80).optional().default('General'),
+  content: z.string().max(200_000).default(''),
+  sortOrder: z.coerce.number().int().min(0).max(9999).optional(),
+});
+
+function slugify(v: string): string {
+  return v.toLowerCase().trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80) || `doc-${Date.now()}`;
+}
+
+app.get('/api/docs', async (_req, res) => {
+  try {
+    const { rows } = await query(
+      `SELECT id, slug, title, category, sort_order, updated_at
+         FROM docs
+        ORDER BY category ASC, sort_order ASC, title ASC`
+    );
+    res.json(rows.map((r: any) => ({
+      id: r.id, slug: r.slug, title: r.title, category: r.category,
+      sortOrder: r.sort_order, updatedAt: r.updated_at,
+    })));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/docs/:slug', async (req, res) => {
+  try {
+    const row = await queryOne<any>(
+      `SELECT id, slug, title, category, content, sort_order, updated_at, updated_by FROM docs WHERE slug = $1`,
+      [req.params.slug]
+    );
+    if (!row) return res.status(404).json({ error: 'Doc not found' });
+    res.json({
+      id: row.id, slug: row.slug, title: row.title, category: row.category,
+      content: row.content || '', sortOrder: row.sort_order, updatedAt: row.updated_at,
+      updatedBy: row.updated_by,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/docs', requireAdmin, validateBody(DocUpsertSchema), async (req: any, res) => {
+  const body = req.body as z.infer<typeof DocUpsertSchema>;
+  const slug = body.slug || slugify(body.title);
+  try {
+    const existing = await queryOne<any>(`SELECT id FROM docs WHERE slug = $1`, [slug]);
+    if (existing) return res.status(409).json({ error: `A doc with slug "${slug}" already exists — pick another title or slug.` });
+    const { rows } = await query(
+      `INSERT INTO docs (slug, title, category, content, sort_order, updated_by)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id, slug, title, category, content, sort_order, updated_at`,
+      [slug, body.title, body.category, body.content, body.sortOrder ?? 100, req.user?.email || null]
+    );
+    const r = rows[0];
+    res.status(201).json({
+      id: r.id, slug: r.slug, title: r.title, category: r.category,
+      content: r.content, sortOrder: r.sort_order, updatedAt: r.updated_at,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/docs/:id', requireAdmin, validateBody(DocUpsertSchema), async (req: any, res) => {
+  const id = parseInt(req.params.id);
+  const body = req.body as z.infer<typeof DocUpsertSchema>;
+  const slug = body.slug || slugify(body.title);
+  try {
+    const current = await queryOne<any>(`SELECT slug FROM docs WHERE id = $1`, [id]);
+    if (!current) return res.status(404).json({ error: 'Doc not found' });
+    if (slug !== current.slug) {
+      const clash = await queryOne<any>(`SELECT id FROM docs WHERE slug = $1 AND id <> $2`, [slug, id]);
+      if (clash) return res.status(409).json({ error: `A doc with slug "${slug}" already exists.` });
+    }
+    const { rows } = await query(
+      `UPDATE docs
+          SET slug = $1, title = $2, category = $3, content = $4, sort_order = $5,
+              updated_at = CURRENT_TIMESTAMP, updated_by = $6
+        WHERE id = $7
+        RETURNING id, slug, title, category, content, sort_order, updated_at`,
+      [slug, body.title, body.category, body.content, body.sortOrder ?? 100, req.user?.email || null, id]
+    );
+    const r = rows[0];
+    res.json({
+      id: r.id, slug: r.slug, title: r.title, category: r.category,
+      content: r.content, sortOrder: r.sort_order, updatedAt: r.updated_at,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/docs/:id', requireAdmin, async (req, res) => {
+  const id = parseInt(req.params.id);
+  try {
+    const { rowCount } = await query(`DELETE FROM docs WHERE id = $1`, [id]);
+    if (rowCount === 0) return res.status(404).json({ error: 'Doc not found' });
+    res.json({ ok: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================================
 
 app.post('/api/activity-log', async (req, res) => {
   try {
@@ -6150,6 +6270,21 @@ async function runSchemaBootstrap() {
       ip_address TEXT
     )`).catch(() => {});
     await exec(`CREATE INDEX IF NOT EXISTS password_reset_tokens_email_idx ON password_reset_tokens (user_email)`).catch(() => {});
+    // In-app documentation. Read by everyone (viewer role and up), mutated
+    // by admins only. Content is markdown so the editor stays simple and
+    // the render layer stays generic.
+    await exec(`CREATE TABLE IF NOT EXISTS docs (
+      id SERIAL PRIMARY KEY,
+      slug TEXT UNIQUE NOT NULL,
+      title TEXT NOT NULL,
+      category TEXT DEFAULT 'General',
+      content TEXT DEFAULT '',
+      sort_order INTEGER DEFAULT 100,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_by TEXT
+    )`).catch(() => {});
+    await exec(`CREATE INDEX IF NOT EXISTS docs_category_idx ON docs (category, sort_order)`).catch(() => {});
     await exec(`CREATE TABLE IF NOT EXISTS role_permissions (
       id SERIAL PRIMARY KEY,
       role TEXT NOT NULL,

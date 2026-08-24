@@ -566,7 +566,8 @@ export type ViewType =
   | 'automation'
   | 'auto_po_config'
   | 'quality_compliance'
-  | 'advanced_automation';
+  | 'advanced_automation'
+  | 'documentation';
 
 export interface ProductionProduct {
   id: number;

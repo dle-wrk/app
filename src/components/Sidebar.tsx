@@ -293,16 +293,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <ChevronDown className={`w-3 h-3 transition-transform ${expandedSections.documentation ? '' : '-rotate-90'}`} />
         </button>
         {effectiveExpanded.documentation && (
-          <a
-            href="/tracklab-complete-guide.html"
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={() => setIsSidebarOpen(false)}
-            className="w-full flex items-center px-2.5 py-1.5 rounded text-left transition-all text-[12px] text-on-surface-variant/80 hover:text-on-surface hover:bg-surface-variant/40"
+          <button
+            onClick={() => handleNavClick('documentation' as ViewType)}
+            title={isCollapsed ? 'Documentation' : undefined}
+            className={`w-full flex items-center px-2.5 py-1.5 rounded text-left transition-all text-[12px] ${
+              currentView === 'documentation'
+                ? 'text-primary font-bold border-l-4 border-primary bg-primary/10'
+                : 'text-on-surface-variant/80 hover:text-on-surface hover:bg-surface-variant/40'
+            }`}
           >
             <BookOpen className="w-3.5 h-3.5 mr-2" />
-            <span>Complete User Guide</span>
-          </a>
+            <span>Docs & Guides</span>
+          </button>
         )}
 
         <button
