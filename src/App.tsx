@@ -121,6 +121,11 @@ export default function App() {
       setCurrentUser(user);
       setIsAuthenticated(true);
       await logActivity({ userEmail: email, action: 'LOGIN', details: { role: user.role } });
+      // Tag Sentry with the current user so issues point at the right person.
+      // Dynamic import so tree-shaking drops it when Sentry isn't enabled.
+      import('./lib/sentryClient').then(({ Sentry, sentryEnabled }) => {
+        if (sentryEnabled) Sentry.setUser({ id: String(user.id), email: user.email, username: user.email });
+      }).catch(() => { /* Sentry is optional — never let this fail login */ });
       triggerToast('Login successful', 'SUCCESS');
     } catch (err: any) {
       throw new Error(err.message || 'Login failed');

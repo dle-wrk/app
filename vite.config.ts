@@ -100,6 +100,9 @@ export default defineConfig(() => {
           // the main vendor bundle stays lean.
           manualChunks: (id) => {
             if (id.includes('tesseract.js')) return 'tesseract';
+            // Sentry adds ~500KB to the main bundle otherwise. Splitting it
+            // means the first paint isn't blocked on the reporting SDK.
+            if (id.includes('@sentry/')) return 'sentry';
             return undefined;
           },
         },

@@ -1,3 +1,8 @@
+import { initSentry, requestIdMiddleware, attachErrorHandler } from './src/lib/sentryServer';
+// Init Sentry BEFORE the express import so its auto-instrumentation can hook
+// the module. No-ops if SENTRY_DSN isn't set — safe to leave unconfigured.
+initSentry();
+
 import express from 'express';
 import compression from 'compression';
 import { z } from 'zod';
@@ -55,6 +60,9 @@ import { ensurePhase5Tables } from './src/lib/phase5-db';
 import phase5Routes from './src/lib/phase5-routes';
 
 const app = express();
+// Request ID first — everything downstream should log with req.id so log
+// lines and Sentry events can be correlated on a single incident.
+app.use(requestIdMiddleware());
 app.use(compression());
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -6026,6 +6034,10 @@ app.get('*', (_req, res) => {
     }
   });
 });
+
+// Sentry's error handler must sit AFTER every route so it catches whatever
+// they throw. A no-op when SENTRY_DSN is unset.
+attachErrorHandler(app);
 
 async function runSchemaBootstrap() {
   await ensureSchema();
