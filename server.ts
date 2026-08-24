@@ -2840,6 +2840,156 @@ app.post('/api/session/logout', validateBody(SessionIdSchema), async (req, res) 
 });
 
 // ============================================================================
+// PASSWORD RESET
+// Self-serve flow so a locked-out user doesn't need me — or an admin — to
+// run SQL against Neon to get them back in. Two endpoints:
+//   POST /api/auth/forgot-password { email } → always 200 (don't leak
+//     whether the address is registered), sends a link with a token if the
+//     account exists.
+//   POST /api/auth/reset-password  { token, password } → validates the
+//     token (unused, unexpired), replaces the stored bcrypt hash, marks
+//     the token used so the link can only be redeemed once.
+// ============================================================================
+
+const RESET_TOKEN_TTL_MIN = 30;
+const RESET_TOKEN_BYTES = 24; // 32-char base64url — plenty for a URL fragment
+
+const ForgotPasswordSchema = z.object({ email: EmailSchema });
+const ResetPasswordSchema = z.object({
+  token: z.string().min(16).max(200),
+  password: z.string().min(8).max(200),
+});
+
+function hashResetToken(token: string): string {
+  return createHmac('sha256', CRED_KEY).update(token).digest('hex');
+}
+
+async function sendPasswordResetEmail(toEmail: string, resetUrl: string): Promise<void> {
+  // Prefer Resend if it's configured; otherwise log the link so the flow
+  // works out of the box in dev/self-hosted setups where email isn't wired.
+  const apiKey = process.env.RESEND_API_KEY;
+  const from = process.env.RESEND_FROM || 'Tracklab IM <noreply@tracklab.local>';
+  if (!apiKey) {
+    console.log(`[password-reset] No RESEND_API_KEY configured. Reset link for ${toEmail}:`);
+    console.log(`[password-reset]   ${resetUrl}`);
+    return;
+  }
+  try {
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from,
+        to: [toEmail],
+        subject: 'Reset your Tracklab IM password',
+        html: `<p>Someone (hopefully you) asked to reset the password for this account.</p>
+               <p><a href="${resetUrl}">Click here to choose a new one</a>. The link expires in ${RESET_TOKEN_TTL_MIN} minutes.</p>
+               <p>If it wasn't you, ignore this email — nothing has changed.</p>`,
+        text: `Reset your Tracklab IM password: ${resetUrl}\n\nExpires in ${RESET_TOKEN_TTL_MIN} minutes. If it wasn't you, ignore this email.`,
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      console.warn(`[password-reset] Resend rejected (${res.status}): ${body.slice(0, 200)}`);
+    }
+  } catch (err: any) {
+    console.warn('[password-reset] Resend call failed:', err.message);
+  }
+}
+
+app.post('/api/auth/forgot-password', validateBody(ForgotPasswordSchema), async (req, res) => {
+  const { email } = req.body as z.infer<typeof ForgotPasswordSchema>;
+  const ip = clientIp(req);
+  // Rate-limit by IP and by target address so a bulk-enumeration attack
+  // can't fish for real users OR hammer real inboxes with reset spam.
+  for (const [key, max] of [
+    [`forgot:ip:${ip}`, 20],
+    [`forgot:email:${email}`, 5],
+  ] as const) {
+    const check = checkRateLimit(key, max, 30 * 60_000);
+    if (!check.allowed) {
+      res.setHeader('Retry-After', String(check.retryAfter));
+      return res.status(429).json({ error: `Too many reset attempts. Try again in ${check.retryAfter}s.` });
+    }
+  }
+
+  // Fire-and-forget the token issue so timing doesn't leak whether the
+  // email is registered.
+  (async () => {
+    try {
+      const user = await queryOne<{ id: number; email: string; status: string }>(
+        `SELECT id, email, status FROM users WHERE email = $1`,
+        [email]
+      );
+      if (!user || user.status !== 'ACTIVE') return;
+
+      const token = randomBytes(RESET_TOKEN_BYTES).toString('base64')
+        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MIN * 60_000);
+      await query(
+        `INSERT INTO password_reset_tokens (token_hash, user_email, expires_at, ip_address) VALUES ($1, $2, $3, $4)`,
+        [hashResetToken(token), user.email, expiresAt.toISOString(), ip]
+      );
+
+      const origin = process.env.APP_ORIGIN
+        || `${req.protocol}://${req.get('host')}`;
+      const resetUrl = `${origin}/?reset=${encodeURIComponent(token)}`;
+      await sendPasswordResetEmail(user.email, resetUrl);
+    } catch (err: any) {
+      console.warn('[password-reset] issue failed:', err.message);
+    }
+  })();
+
+  // Constant response regardless of whether the email exists.
+  res.json({ ok: true, message: 'If that email is registered, a reset link has been sent.' });
+});
+
+app.post('/api/auth/reset-password', validateBody(ResetPasswordSchema), async (req, res) => {
+  const { token, password } = req.body as z.infer<typeof ResetPasswordSchema>;
+  const ip = clientIp(req);
+  const check = checkRateLimit(`reset:ip:${ip}`, 20, 30 * 60_000);
+  if (!check.allowed) {
+    res.setHeader('Retry-After', String(check.retryAfter));
+    return res.status(429).json({ error: 'Too many attempts. Try again shortly.' });
+  }
+  try {
+    const row = await queryOne<{ id: number; user_email: string; used_at: string | null; expires_at: string }>(
+      `SELECT id, user_email, used_at, expires_at FROM password_reset_tokens WHERE token_hash = $1`,
+      [hashResetToken(token)]
+    );
+    if (!row) return res.status(400).json({ error: 'Invalid or expired link' });
+    if (row.used_at) return res.status(400).json({ error: 'This link has already been used' });
+    if (new Date(row.expires_at).getTime() < Date.now()) {
+      return res.status(400).json({ error: 'This link has expired — request a new one' });
+    }
+
+    const hashed = await bcrypt.hash(password, BCRYPT_ROUNDS);
+    // Mark token used first so a race can't redeem the same token twice.
+    const { rowCount: markedUsed } = await query(
+      `UPDATE password_reset_tokens SET used_at = CURRENT_TIMESTAMP WHERE id = $1 AND used_at IS NULL`,
+      [row.id]
+    );
+    if (markedUsed !== 1) return res.status(400).json({ error: 'This link has already been used' });
+
+    await query(
+      `UPDATE users SET password = $1, status = 'ACTIVE', updated_at = CURRENT_TIMESTAMP WHERE email = $2`,
+      [hashed, row.user_email]
+    );
+    // Log the user out of every existing device — a password change should
+    // invalidate whoever the attacker (or the user themself before) was.
+    await query(`DELETE FROM user_sessions WHERE user_email = $1`, [row.user_email]);
+
+    res.json({ ok: true, message: 'Password updated. Please sign in.' });
+  } catch (err: any) {
+    console.error('[reset-password] failed:', err.message);
+    res.status(503).json({ error: 'Service unavailable — please try again shortly' });
+  }
+});
+
+// ============================================================================
 
 app.post('/api/activity-log', async (req, res) => {
   try {
@@ -5941,6 +6091,19 @@ async function runSchemaBootstrap() {
       ip_address TEXT
     )`).catch(() => {});
     await exec(`CREATE INDEX IF NOT EXISTS user_sessions_email_idx ON user_sessions (user_email)`).catch(() => {});
+    // Password reset tokens. Bcrypt-hashed at rest (like the passwords they
+    // reset) so a DB read alone can't be turned into an account takeover.
+    // One row per issued token; expired/used rows stay for audit.
+    await exec(`CREATE TABLE IF NOT EXISTS password_reset_tokens (
+      id SERIAL PRIMARY KEY,
+      token_hash TEXT NOT NULL,
+      user_email TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      expires_at TIMESTAMP NOT NULL,
+      used_at TIMESTAMP,
+      ip_address TEXT
+    )`).catch(() => {});
+    await exec(`CREATE INDEX IF NOT EXISTS password_reset_tokens_email_idx ON password_reset_tokens (user_email)`).catch(() => {});
     await exec(`CREATE TABLE IF NOT EXISTS role_permissions (
       id SERIAL PRIMARY KEY,
       role TEXT NOT NULL,

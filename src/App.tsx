@@ -45,6 +45,7 @@ import BulkPricingWizard from './components/BulkPricingWizard';
 import ItemDetailModal, { deriveMetric, deriveImperial } from './components/ItemDetailModal';
 import ProductionKitsManager from './components/ProductionKitsManager';
 import Login from './components/Login';
+import ResetPassword from './components/ResetPassword';
 import { Sidebar } from './components/Sidebar';
 import { DashboardView } from './components/views/DashboardView';
 import { InventoryView } from './components/views/InventoryView';
@@ -1537,6 +1538,26 @@ export default function App() {
   // Force the remainder onto critical to ensure they always aggregate to a clean 100%
   const criticalPercent = totalItemsCount > 0 ? 100 - okPercent - lowPercent : 0;
   const detailItem = items.find(i => i.partNumber === selectedDetailPartNumber);
+
+  // Password reset landing — the /?reset=TOKEN link lands here regardless of
+  // auth state. On success we clear the URL and drop back to the login card.
+  const resetToken = new URLSearchParams(window.location.search).get('reset');
+  if (resetToken) {
+    return (
+      <ResetPassword
+        token={resetToken}
+        onSuccess={() => {
+          window.history.replaceState({}, '', window.location.pathname);
+          // Force a re-render into the login card by wiping any lingering
+          // auth state (defensive — reset always signs out server-side too).
+          localStorage.removeItem('userLoggedIn');
+          localStorage.removeItem('currentUser');
+          localStorage.removeItem('sessionId');
+          window.location.replace('/');
+        }}
+      />
+    );
+  }
 
   // Show login screen if not authenticated
   if (!isAuthenticated) {

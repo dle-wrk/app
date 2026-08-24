@@ -1,17 +1,22 @@
 import React, { useState } from 'react';
-import { LogIn, Mail, Lock, AlertCircle, Eye, EyeOff } from 'lucide-react';
+import { LogIn, Mail, Lock, AlertCircle, Eye, EyeOff, KeyRound, CheckCircle2, ArrowLeft } from 'lucide-react';
 
 interface LoginProps {
   onLogin: (email: string, password: string) => Promise<void>;
   isLoading?: boolean;
 }
 
+type Mode = 'login' | 'forgot';
+
 export default function Login({ onLogin, isLoading = false }: LoginProps) {
+  const [mode, setMode] = useState<Mode>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [focused, setFocused] = useState<string | null>(null);
+  const [forgotSubmitting, setForgotSubmitting] = useState(false);
+  const [forgotSent, setForgotSent] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,6 +32,44 @@ export default function Login({ onLogin, isLoading = false }: LoginProps) {
     } catch (err: any) {
       setError(err.message || 'Login failed');
     }
+  };
+
+  const handleForgotSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    if (!email) {
+      setError('Enter your email to request a reset');
+      return;
+    }
+    setForgotSubmitting(true);
+    try {
+      // Always shows the same success message regardless of whether the
+      // email is registered — the server does the same for security.
+      const res = await fetch('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      if (!res.ok && res.status !== 429) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || 'Could not send reset link');
+      }
+      if (res.status === 429) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || 'Too many attempts — please wait a while.');
+      }
+      setForgotSent(true);
+    } catch (err: any) {
+      setError(err.message || 'Could not send reset link');
+    } finally {
+      setForgotSubmitting(false);
+    }
+  };
+
+  const goToLogin = () => {
+    setMode('login');
+    setForgotSent(false);
+    setError('');
   };
 
   return (
@@ -49,8 +92,16 @@ export default function Login({ onLogin, isLoading = false }: LoginProps) {
         {/* Login Card */}
         <div className="bg-surface-container rounded-2xl border border-outline-variant shadow-2xl p-8 space-y-6">
           <div>
-            <h2 className="text-2xl font-bold text-on-surface">Welcome Back</h2>
-            <p className="text-xs text-on-surface-variant mt-1">Sign in to your account to continue</p>
+            <h2 className="text-2xl font-bold text-on-surface">
+              {mode === 'login' ? 'Welcome Back' : 'Forgot password'}
+            </h2>
+            <p className="text-xs text-on-surface-variant mt-1">
+              {mode === 'login'
+                ? 'Sign in to your account to continue'
+                : forgotSent
+                  ? 'Check your inbox for a reset link.'
+                  : 'Enter your email — we\'ll send a reset link if the account exists.'}
+            </p>
           </div>
 
           {/* Error Message. Heading distinguishes a real "wrong credentials"
@@ -71,6 +122,43 @@ export default function Login({ onLogin, isLoading = false }: LoginProps) {
             );
           })()}
 
+          {mode === 'forgot' ? (
+            forgotSent ? (
+              <div className="bg-primary/10 border border-primary/30 rounded-xl p-4 flex items-start gap-3">
+                <CheckCircle2 className="w-5 h-5 text-primary flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-bold text-primary">Reset link sent</p>
+                  <p className="text-xs text-on-surface-variant mt-1">
+                    If <span className="font-mono">{email}</span> is registered, a reset link is on its way.
+                    The link is valid for 30 minutes. Check your spam folder if you don't see it.
+                  </p>
+                  <button type="button" onClick={goToLogin} className="text-xs text-primary font-bold mt-3 flex items-center gap-1 hover:underline">
+                    <ArrowLeft className="w-3 h-3" /> Back to sign in
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <form onSubmit={handleForgotSubmit} className="space-y-5">
+                <div>
+                  <label className="block text-xs font-bold text-on-surface mb-2 uppercase tracking-wider">Email Address</label>
+                  <div className={`relative rounded-lg border-2 transition-all ${focused === 'email' ? 'border-primary bg-surface-container-high/50' : 'border-outline-variant/50 bg-surface-container-high'}`}>
+                    <Mail className={`absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 ${focused === 'email' ? 'text-primary' : 'text-on-surface-variant'}`} />
+                    <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} onFocus={() => setFocused('email')} onBlur={() => setFocused(null)} placeholder="name@example.com" autoComplete="email" disabled={forgotSubmitting} className="w-full bg-transparent outline-none pl-10 pr-4 py-3 text-on-surface placeholder-on-surface-variant/50 text-sm font-medium" />
+                  </div>
+                </div>
+                <button type="submit" disabled={forgotSubmitting || !email} className="w-full bg-primary text-on-primary py-3 font-bold text-sm rounded-lg hover:brightness-110 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2 shadow-lg shadow-primary/30 uppercase tracking-wider">
+                  {forgotSubmitting ? (
+                    <><div className="w-4 h-4 border-2 border-on-primary/30 border-t-on-primary rounded-full animate-spin" />Sending</>
+                  ) : (
+                    <><KeyRound className="w-5 h-5" />Send reset link</>
+                  )}
+                </button>
+                <button type="button" onClick={goToLogin} className="w-full text-xs text-on-surface-variant hover:text-on-surface flex items-center justify-center gap-1">
+                  <ArrowLeft className="w-3 h-3" /> Back to sign in
+                </button>
+              </form>
+            )
+          ) : (
           <form onSubmit={handleSubmit} className="space-y-5">
             {/* Email Field */}
             <div>
@@ -135,11 +223,22 @@ export default function Login({ onLogin, isLoading = false }: LoginProps) {
               </div>
             </div>
 
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => { setMode('forgot'); setError(''); }}
+                className="text-xs text-on-surface-variant hover:text-primary transition-colors"
+                disabled={isLoading}
+              >
+                Forgot password?
+              </button>
+            </div>
+
             {/* Submit Button */}
             <button
               type="submit"
               disabled={isLoading || !email || !password}
-              className="w-full bg-primary text-on-primary py-3 font-bold text-sm rounded-lg hover:brightness-110 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all mt-8 flex items-center justify-center gap-2 shadow-lg shadow-primary/30 uppercase tracking-wider"
+              className="w-full bg-primary text-on-primary py-3 font-bold text-sm rounded-lg hover:brightness-110 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all mt-2 flex items-center justify-center gap-2 shadow-lg shadow-primary/30 uppercase tracking-wider"
             >
               {isLoading ? (
                 <>
@@ -154,6 +253,7 @@ export default function Login({ onLogin, isLoading = false }: LoginProps) {
               )}
             </button>
           </form>
+          )}
 
         </div>
 
