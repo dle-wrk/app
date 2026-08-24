@@ -1,17 +1,19 @@
 import React from 'react';
-import { Plus, ExternalLink, Shield, Clock } from 'lucide-react';
+import { Plus, ExternalLink, Shield, Clock, Trash2 } from 'lucide-react';
 import { Supplier } from '../../types';
 
 interface SuppliersViewProps {
   suppliers: Supplier[];
   setEditingSupplier: (supplier: Supplier | null) => void;
   setShowSupplierModal: (show: boolean) => void;
+  onDeleteSupplier?: (supplier: Supplier) => Promise<void>;
 }
 
 export const SuppliersView: React.FC<SuppliersViewProps> = ({
   suppliers,
   setEditingSupplier,
-  setShowSupplierModal
+  setShowSupplierModal,
+  onDeleteSupplier,
 }) => {
   // Sort by ID (sequential order)
   const sortedSuppliers = [...suppliers].sort((a, b) => {
@@ -92,15 +94,26 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
                     {s.notes}
                   </td>
                   <td className="px-lg py-sm text-right">
-                    <button
-                      onClick={() => {
-                        setEditingSupplier(s);
-                        setShowSupplierModal(true);
-                      }}
-                      className="text-primary hover:text-primary/80 font-bold p-1 hover:bg-primary/10 rounded transition-all"
-                    >
-                      Edit
-                    </button>
+                    <div className="flex justify-end gap-1">
+                      <button
+                        onClick={() => {
+                          setEditingSupplier(s);
+                          setShowSupplierModal(true);
+                        }}
+                        className="text-primary hover:text-primary/80 font-bold p-1 hover:bg-primary/10 rounded transition-all"
+                      >
+                        Edit
+                      </button>
+                      {onDeleteSupplier && (
+                        <button
+                          onClick={() => onDeleteSupplier(s)}
+                          className="text-error hover:text-error/80 p-1 hover:bg-error/10 rounded transition-all"
+                          title="Delete supplier"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

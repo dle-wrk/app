@@ -3252,6 +3252,40 @@ app.post('/api/suppliers', async (req, res) => {
   }
 });
 
+// Hard delete a supplier, but block the operation if anything still points
+// at it — a silent CASCADE would let the bills/POs it references vanish or
+// dangle. The client gets a specific error listing the counts so the user
+// knows what to reassign or void first.
+app.delete('/api/suppliers/:id', async (req, res) => {
+  const id = String(req.params.id);
+  try {
+    const supplier = await queryOne<any>(`SELECT id FROM suppliers WHERE id = $1`, [id]);
+    if (!supplier) return res.status(404).json({ error: 'supplier not found' });
+
+    const [billCount, poCount, invCount] = await Promise.all([
+      queryOne<{ n: string }>(`SELECT COUNT(*)::text AS n FROM bills WHERE supplier_id = $1`, [id]).then(r => Number(r?.n || 0)),
+      queryOne<{ n: string }>(`SELECT COUNT(*)::text AS n FROM purchase_orders WHERE supplier_id = $1`, [id]).then(r => Number(r?.n || 0)),
+      queryOne<{ n: string }>(`SELECT COUNT(*)::text AS n FROM inventory WHERE supplier = $1`, [id]).then(r => Number(r?.n || 0)),
+    ]);
+    const refs = [
+      billCount && `${billCount} bill${billCount === 1 ? '' : 's'}`,
+      poCount && `${poCount} purchase order${poCount === 1 ? '' : 's'}`,
+      invCount && `${invCount} inventory item${invCount === 1 ? '' : 's'}`,
+    ].filter(Boolean);
+    if (refs.length) {
+      return res.status(400).json({
+        error: `Supplier is still referenced by ${refs.join(', ')}. Void or reassign those first.`,
+        counts: { bills: billCount, purchaseOrders: poCount, inventoryItems: invCount },
+      });
+    }
+
+    await query(`DELETE FROM suppliers WHERE id = $1`, [id]);
+    res.json({ ok: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/projects', async (_req, res) => {
   try {
     const { rows } = await query('SELECT * FROM projects ORDER BY id');

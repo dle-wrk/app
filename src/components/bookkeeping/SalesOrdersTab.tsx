@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { Eye } from 'lucide-react';
+import { Eye, Trash2 } from 'lucide-react';
 import { ClientOrder } from '../../types';
-import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, apiGet, EmptyState, SectionCard } from './shared';
+import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, apiGet, apiDelete, DangerButton, EmptyState, SectionCard } from './shared';
 
-export const SalesOrdersTab: React.FC<ModuleDataProps> = ({ clientOrders, clients, triggerToast }) => {
+export const SalesOrdersTab: React.FC<ModuleDataProps> = ({ clientOrders, clients, triggerToast, refresh }) => {
   const [viewing, setViewing] = useState<any>(null);
+  const [busy, setBusy] = useState(false);
 
   const clientName = (id?: number) => clients.find(c => c.id === id)?.clientName || 'Unassigned';
 
@@ -15,6 +16,21 @@ export const SalesOrdersTab: React.FC<ModuleDataProps> = ({ clientOrders, client
       setViewing({ ...order, items });
     } catch (err: any) {
       setViewing({ ...order, items: [] });
+    }
+  };
+
+  const handleDelete = async (id: number) => {
+    if (!confirm('Delete this sales order? This cannot be undone.')) return;
+    setBusy(true);
+    try {
+      await apiDelete(`/api/client-orders/${id}`);
+      triggerToast('Sales order deleted.');
+      await refresh();
+      setViewing(null);
+    } catch (err: any) {
+      triggerToast(err.message || 'Failed to delete sales order', 'ERROR');
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -76,7 +92,8 @@ export const SalesOrdersTab: React.FC<ModuleDataProps> = ({ clientOrders, client
           ) : (
             <p className="text-xs text-outline italic mb-md">No line items on this order.</p>
           )}
-          <div className="flex justify-end">
+          <div className="flex items-center justify-between pt-2 border-t border-outline-variant/20 mt-md">
+            <DangerButton icon={<Trash2 className="w-3.5 h-3.5" />} onClick={() => handleDelete(viewing.id)} disabled={busy}>Delete</DangerButton>
             <div className="w-56 space-y-1 text-xs">
               <div className="flex justify-between font-bold text-sm"><span>Total</span><span className="font-mono text-primary">{fmtMoney(viewing.total, viewing.currency)}</span></div>
             </div>

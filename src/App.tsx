@@ -1858,6 +1858,18 @@ export default function App() {
                   suppliers={suppliers}
                   setShowSupplierModal={setShowSupplierModal}
                   setEditingSupplier={setEditingSupplier}
+                  onDeleteSupplier={async (s) => {
+                    if (!confirm(`Delete supplier "${s.name}" (${s.id})?\n\nThis is only allowed when no bills, POs, or inventory items reference the supplier.`)) return;
+                    try {
+                      const res = await fetch(`/api/suppliers/${encodeURIComponent(s.id)}`, { method: 'DELETE' });
+                      const body = await res.json().catch(() => ({}));
+                      if (!res.ok) throw new Error(body.error || 'Delete failed');
+                      setSuppliers(prev => prev.filter(x => x.id !== s.id));
+                      triggerToast(`Supplier "${s.name}" deleted.`, 'SUCCESS');
+                    } catch (err: any) {
+                      triggerToast(err.message || 'Failed to delete supplier', 'ERROR');
+                    }
+                  }}
                 />
               );
             }

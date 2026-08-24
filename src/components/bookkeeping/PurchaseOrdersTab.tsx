@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
-import { Plus, Eye, FileText } from 'lucide-react';
+import { Plus, Eye, FileText, Trash2 } from 'lucide-react';
 import { PurchaseOrder, Item } from '../../types';
-import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, apiPost, apiPut, apiGet, PrimaryButton, SecondaryButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
+import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, apiPost, apiPut, apiGet, apiDelete, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
 import { LineItemsEditor, EditableLine, newEditableLine } from './LineItemsEditor';
 import { ErrorBoundary } from '../ErrorBoundary';
 
@@ -29,6 +29,21 @@ export const PurchaseOrdersTab: React.FC<ModuleDataProps & { onConvertToBill?: (
       setViewing(null);
     } catch (err: any) {
       triggerToast(err.message || 'Failed to update purchase order', 'ERROR');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDelete = async (id: number) => {
+    if (!confirm('Delete this draft purchase order? This cannot be undone.')) return;
+    setBusy(true);
+    try {
+      await apiDelete(`/api/purchase-orders/${id}`);
+      triggerToast('Purchase order deleted.');
+      await refresh();
+      setViewing(null);
+    } catch (err: any) {
+      triggerToast(err.message || 'Failed to delete purchase order', 'ERROR');
     } finally {
       setBusy(false);
     }
@@ -112,6 +127,7 @@ export const PurchaseOrdersTab: React.FC<ModuleDataProps & { onConvertToBill?: (
             {viewing.status === 'DRAFT' && <SecondaryButton onClick={() => updateStatus(viewing.id, 'SENT')} disabled={busy}>Mark Sent</SecondaryButton>}
             {['SENT', 'PARTIAL'].includes(viewing.status) && <SecondaryButton onClick={() => updateStatus(viewing.id, 'RECEIVED')} disabled={busy}>Mark Received</SecondaryButton>}
             {viewing.status !== 'CANCELLED' && viewing.status !== 'RECEIVED' && <SecondaryButton onClick={() => updateStatus(viewing.id, 'CANCELLED')} disabled={busy}>Cancel</SecondaryButton>}
+            {viewing.status === 'DRAFT' && <DangerButton icon={<Trash2 className="w-3.5 h-3.5" />} onClick={() => handleDelete(viewing.id)} disabled={busy}>Delete</DangerButton>}
             {onConvertToBill && <PrimaryButton icon={<FileText className="w-3.5 h-3.5" />} onClick={() => { onConvertToBill(viewing); setViewing(null); }}>Convert to Bill</PrimaryButton>}
           </div>
         </Modal>

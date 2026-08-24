@@ -759,6 +759,14 @@ export function registerBookkeepingRoutes(app: Express) {
   app.delete('/api/purchase-orders/:id', async (req, res) => {
     const id = parseInt(req.params.id);
     try {
+      // Only DRAFTs can be deleted — a PO that's been SENT/RECEIVED has
+      // downstream effects (stock adjustments, bills) that a hard delete
+      // would silently corrupt. Client should void or cancel instead.
+      const row = await queryOne<{ status: string }>(`SELECT status FROM purchase_orders WHERE id = $1`, [id]);
+      if (!row) return res.status(404).json({ error: 'purchase order not found' });
+      if (row.status !== 'DRAFT') {
+        return res.status(400).json({ error: `Only DRAFT purchase orders can be deleted (this one is ${row.status})` });
+      }
       await query(`DELETE FROM purchase_orders WHERE id = $1`, [id]);
       res.json({ ok: true });
     } catch (err: any) {
