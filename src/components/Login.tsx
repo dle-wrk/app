@@ -53,16 +53,23 @@ export default function Login({ onLogin, isLoading = false }: LoginProps) {
             <p className="text-xs text-on-surface-variant mt-1">Sign in to your account to continue</p>
           </div>
 
-          {/* Error Message */}
-          {error && (
-            <div className="bg-error/20 border border-error/50 rounded-xl p-4 flex items-start gap-3 animate-pulse">
-              <AlertCircle className="w-5 h-5 text-error flex-shrink-0 mt-0.5" />
-              <div>
-                <p className="text-sm font-bold text-error">Authentication Failed</p>
-                <p className="text-xs text-error/80 mt-1">{error}</p>
+          {/* Error Message. Heading distinguishes a real "wrong credentials"
+              from a "service can't reach the DB" so operators (and users) can
+              tell at a glance whether the problem is on their end. */}
+          {error && (() => {
+            const isServiceIssue = /database|unavailable|network|try again/i.test(error);
+            return (
+              <div className="bg-error/20 border border-error/50 rounded-xl p-4 flex items-start gap-3 animate-pulse">
+                <AlertCircle className="w-5 h-5 text-error flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-bold text-error">
+                    {isServiceIssue ? 'Service Unavailable' : 'Authentication Failed'}
+                  </p>
+                  <p className="text-xs text-error/80 mt-1">{error}</p>
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           <form onSubmit={handleSubmit} className="space-y-5">
             {/* Email Field */}

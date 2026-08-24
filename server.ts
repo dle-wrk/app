@@ -2721,9 +2721,16 @@ app.post('/api/login', async (req, res) => {
         status: user.status,
         sessionId
       });
-    } catch (dbErr) {
-      console.error('Database login error:', (dbErr as any).message);
-      return res.status(401).json({ error: 'Invalid email or password' });
+    } catch (dbErr: any) {
+      // DB is unreachable or rejecting queries — this was previously bucketed
+      // as 401 which made a permission-denied migration look like a wrong
+      // password (see the "authenticator vs neondb_owner" chase). Surface it
+      // as 503 so the client and operators can tell the difference at a glance.
+      console.error('Database login error:', dbErr.message, dbErr.code || '');
+      return res.status(503).json({
+        error: 'Database unavailable — please try again shortly',
+        code: dbErr.code,
+      });
     }
   } catch (err: any) {
     console.error('Login error:', err.message);
