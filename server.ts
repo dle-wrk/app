@@ -2591,6 +2591,49 @@ async function verifyAndUpgradePassword(userId: number, submitted: string, store
   return true;
 }
 
+// Zod validation middleware factory. Any endpoint that reads req.body should
+// go through one of these so a bad payload returns a clean 400 with the
+// field list instead of crashing the handler with a cryptic pg error.
+// After validation req.body is the *parsed* value — coerced, defaults filled.
+function validateBody<T extends z.ZodTypeAny>(schema: T) {
+  return (req: any, res: any, next: any) => {
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: 'Invalid request body',
+        details: parsed.error.flatten(),
+      });
+    }
+    req.body = parsed.data;
+    next();
+  };
+}
+
+// Common shapes reused across endpoints. Kept locally rather than in a
+// separate file because they're small and Zod inference works best when the
+// schema and its consumer are close.
+const EmailSchema = z.string().email().max(200).transform(v => v.toLowerCase().trim());
+const CreateUserSchema = z.object({
+  email: EmailSchema,
+  password: z.string().min(8).max(200),
+  firstName: z.string().min(1).max(80).optional().nullable(),
+  lastName: z.string().min(1).max(80).optional().nullable(),
+  role: z.enum(['admin', 'manager', 'engineer', 'viewer']).optional().default('viewer'),
+});
+const UpdateUserSchema = z.object({
+  firstName: z.string().min(1).max(80).optional().nullable(),
+  lastName: z.string().min(1).max(80).optional().nullable(),
+  role: z.enum(['admin', 'manager', 'engineer', 'viewer']).optional(),
+  status: z.enum(['ACTIVE', 'INACTIVE', 'SUSPENDED']).optional(),
+});
+const LoginSchema = z.object({
+  email: EmailSchema,
+  password: z.string().min(1).max(200),
+});
+const SessionIdSchema = z.object({
+  sessionId: z.string().min(1).max(200).optional(),
+}).partial();
+
 // Middleware: attach the current user to req if a valid session ID is
 // presented. Reads from X-Session-Id header or body.sessionId — the same
 // convention the client already uses for /api/session/verify.
@@ -2640,13 +2683,9 @@ async function mintSessionAndKickOthers(email: string, userId: number | null, re
   return sessionId;
 }
 
-app.post('/api/login', async (req, res) => {
+app.post('/api/login', validateBody(LoginSchema), async (req, res) => {
   try {
-    const { email, password } = req.body;
-
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password are required' });
-    }
+    const { email, password } = req.body as z.infer<typeof LoginSchema>;
 
     // Two-key limiter: IP alone catches distributed guesses against one
     // account, IP+email catches a slow-and-low burn per user. 10/5min is
@@ -2741,7 +2780,7 @@ app.post('/api/login', async (req, res) => {
 // Client polls this every ~30s. Returns `active: false` when the sessionId is
 // missing from `user_sessions` — either the user logged in from another device
 // (which deleted the row) or explicitly signed out here.
-app.post('/api/session/verify', async (req, res) => {
+app.post('/api/session/verify', validateBody(SessionIdSchema), async (req, res) => {
   try {
     const sessionId = String(req.body?.sessionId ?? req.headers?.['x-session-id'] ?? '');
     if (!sessionId) return res.json({ active: false, reason: 'missing_session_id' });
@@ -2768,15 +2807,34 @@ app.post('/api/session/verify', async (req, res) => {
   }
 });
 
-app.post('/api/session/logout', async (req, res) => {
+app.post('/api/session/logout', validateBody(SessionIdSchema), async (req, res) => {
   try {
     const sessionId = String(req.body?.sessionId ?? req.headers?.['x-session-id'] ?? '');
-    if (sessionId) {
-      await query(`DELETE FROM user_sessions WHERE id = $1`, [sessionId]);
+    if (!sessionId) return res.json({ ok: true });
+
+    // Only allow logout if the caller is authenticated as the owner of that
+    // session, or is an admin. Without this any 48-char hex leak could be
+    // used to force other users out of the app.
+    const row = await queryOne<{ user_id: number }>(
+      `SELECT user_id FROM user_sessions WHERE id = $1`,
+      [sessionId]
+    );
+    if (!row) return res.json({ ok: true });   // already gone
+
+    const caller = (req as any).user;
+    const isOwner = caller && caller.id === row.user_id;
+    const isAdmin = caller && caller.role === 'admin';
+    if (!isOwner && !isAdmin) {
+      return res.status(403).json({ error: 'Not allowed to end this session' });
     }
+
+    await query(`DELETE FROM user_sessions WHERE id = $1`, [sessionId]);
     res.json({ ok: true });
   } catch (err: any) {
     console.error('Session logout error:', err.message);
+    // Fail-open: swallow the error and pretend it worked so a jittery DB
+    // doesn't leave a UI stuck with a spinner. The next verify will still
+    // reflect reality.
     res.json({ ok: true });
   }
 });
@@ -2901,13 +2959,9 @@ app.get('/api/users', requireAdmin, async (_req, res) => {
   }
 });
 
-app.post('/api/users', requireAdmin, async (req, res) => {
+app.post('/api/users', requireAdmin, validateBody(CreateUserSchema), async (req, res) => {
   try {
-    const { email, password, firstName, lastName, role } = req.body;
-
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password are required' });
-    }
+    const { email, password, firstName, lastName, role } = req.body as z.infer<typeof CreateUserSchema>;
 
     const hashedPassword = await bcrypt.hash(String(password), BCRYPT_ROUNDS);
 
@@ -2929,10 +2983,10 @@ app.post('/api/users', requireAdmin, async (req, res) => {
   }
 });
 
-app.put('/api/users/:id', requireAdmin, async (req, res) => {
+app.put('/api/users/:id', requireAdmin, validateBody(UpdateUserSchema), async (req, res) => {
   try {
     const { id } = req.params;
-    const { firstName, lastName, role, status } = req.body;
+    const { firstName, lastName, role, status } = req.body as z.infer<typeof UpdateUserSchema>;
 
     const { rows } = await query(
       `UPDATE users SET first_name = $1, last_name = $2, role = $3, status = $4, updated_at = CURRENT_TIMESTAMP
