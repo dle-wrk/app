@@ -73,9 +73,10 @@ app.use((req, res, next) => {
   }
   next();
 });
-// 10mb accommodates scanned till slips / vendor invoices as base64 data URLs
-// posted to /api/bills/:id/receipt. The receipt endpoint has its own 8mb cap.
-app.use(express.json({ limit: '10mb' }));
+// 20mb accommodates scanned till slips (receipts) and doc attachments (PDFs)
+// posted as base64. Individual endpoints enforce their own per-payload caps
+// so a huge body can't sneak past.
+app.use(express.json({ limit: '20mb' }));
 
 // Security response headers. We deliberately don't use a full CSRF token
 // scheme — the auth surface uses X-Session-Id from localStorage, which
@@ -3004,33 +3005,82 @@ app.post('/api/auth/reset-password', validateBody(ResetPasswordSchema), async (r
 // actually lives (static HTML, Notion page, Google Doc, PDF on Fly Volume).
 // ============================================================================
 
+// Either a URL or a base64 file attachment is required. When both are
+// supplied, the file wins and the URL is auto-set to the served path on the
+// way out.
+const DocFileSchema = z.object({
+  name: z.string().min(1).max(200),
+  mime: z.string().min(1).max(100),
+  // Base64 data URL from the browser's FileReader — cap at 15MB base64
+  // (~11MB raw) so the row stays sane. Larger files should go on a proper
+  // object store; not our problem here.
+  data: z.string().min(1).max(15_000_000),
+}).nullable().optional();
+
 const DocLinkSchema = z.object({
   title: z.string().min(1).max(200),
   description: z.string().max(500).optional().default(''),
-  url: z.string().min(1).max(2000)
-    .refine(v => /^https?:\/\//i.test(v) || v.startsWith('/'),
-      'URL must start with http://, https://, or /'),
+  url: z.string().max(2000).optional().default(''),
   sortOrder: z.coerce.number().int().min(0).max(9999).optional(),
-});
+  file: DocFileSchema,
+  // When true and no new `file` is sent, drop any existing attachment so a
+  // doc can flip back to being a plain URL link.
+  removeFile: z.boolean().optional().default(false),
+}).refine(v => (v.url && v.url.length > 0) || v.file || v.removeFile === false,
+  { message: 'Either a URL or an uploaded file is required.' });
 
 const mapDocLink = (r: any) => ({
   id: r.id,
   title: r.title,
   description: r.description || '',
-  url: r.url,
+  // If an attachment exists, expose it via the served path so the frontend
+  // treats it uniformly with plain URL rows.
+  url: r.file_data ? `/api/docs/${r.id}/file` : (r.url || ''),
+  externalUrl: r.file_data ? null : (r.url || null),
+  fileName: r.file_name || null,
+  fileMime: r.file_mime || null,
+  hasAttachment: !!r.file_data,
   sortOrder: r.sort_order,
   updatedAt: r.updated_at,
   updatedBy: r.updated_by,
 });
 
+// Turn a "data:<mime>;base64,<body>" URL into { mime, body } for storage.
+function parseDataUrl(dataUrl: string): { mime: string; body: string } | null {
+  const m = /^data:([^;]+);base64,(.+)$/.exec(dataUrl);
+  if (!m) return null;
+  return { mime: m[1], body: m[2] };
+}
+
 app.get('/api/docs', async (_req, res) => {
   try {
+    // NB: don't select file_data — it can be 10MB per row. Only the file
+    // presence flag comes back for the list.
     const { rows } = await query(
-      `SELECT id, title, description, url, sort_order, updated_at, updated_by
+      `SELECT id, title, description, url, file_name, file_mime,
+              (file_data IS NOT NULL) AS has_data,
+              sort_order, updated_at, updated_by
          FROM app_docs
         ORDER BY sort_order ASC, title ASC`
     );
-    res.json(rows.map(mapDocLink));
+    res.json(rows.map((r: any) => mapDocLink({ ...r, file_data: r.has_data ? '1' : null })));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Streams a stored attachment back with its recorded content type.
+app.get('/api/docs/:id/file', async (req, res) => {
+  const id = parseInt(req.params.id);
+  try {
+    const row = await queryOne<any>(
+      `SELECT file_name, file_mime, file_data FROM app_docs WHERE id = $1`, [id]);
+    if (!row || !row.file_data) return res.status(404).json({ error: 'No file for this doc' });
+    const buf = Buffer.from(row.file_data, 'base64');
+    res.setHeader('Content-Type', row.file_mime || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `inline; filename="${(row.file_name || 'file').replace(/"/g, '')}"`);
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    res.send(buf);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -3038,14 +3088,27 @@ app.get('/api/docs', async (_req, res) => {
 
 app.post('/api/docs', requireAdmin, validateBody(DocLinkSchema), async (req: any, res) => {
   const body = req.body as z.infer<typeof DocLinkSchema>;
+  let fileName: string | null = null;
+  let fileMime: string | null = null;
+  let fileData: string | null = null;
+  if (body.file) {
+    const parsed = parseDataUrl(body.file.data);
+    if (!parsed) return res.status(400).json({ error: 'File must be a data:<mime>;base64,<data> URL' });
+    fileName = body.file.name;
+    fileMime = body.file.mime || parsed.mime;
+    fileData = parsed.body;
+  }
   try {
     const { rows } = await query(
-      `INSERT INTO app_docs (title, description, url, sort_order, updated_by)
-         VALUES ($1, $2, $3, $4, $5)
-         RETURNING id, title, description, url, sort_order, updated_at, updated_by`,
-      [body.title, body.description, body.url, body.sortOrder ?? 100, req.user?.email || null]
+      `INSERT INTO app_docs (title, description, url, sort_order, updated_by, file_name, file_mime, file_data)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         RETURNING id, title, description, url, sort_order, updated_at, updated_by, file_name, file_mime,
+                   (file_data IS NOT NULL) AS has_data`,
+      [body.title, body.description, body.url || null, body.sortOrder ?? 100, req.user?.email || null,
+       fileName, fileMime, fileData]
     );
-    res.status(201).json(mapDocLink(rows[0]));
+    const r = rows[0];
+    res.status(201).json(mapDocLink({ ...r, file_data: r.has_data ? '1' : null }));
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -3055,16 +3118,47 @@ app.put('/api/docs/:id', requireAdmin, validateBody(DocLinkSchema), async (req: 
   const id = parseInt(req.params.id);
   const body = req.body as z.infer<typeof DocLinkSchema>;
   try {
-    const { rows } = await query(
-      `UPDATE app_docs
-          SET title = $1, description = $2, url = $3, sort_order = $4,
-              updated_at = CURRENT_TIMESTAMP, updated_by = $5
-        WHERE id = $6
-        RETURNING id, title, description, url, sort_order, updated_at, updated_by`,
-      [body.title, body.description, body.url, body.sortOrder ?? 100, req.user?.email || null, id]
-    );
+    // Three cases: attach a fresh file, drop the existing file, or leave the
+    // attachment untouched. Doing it as a WITH clause keeps the update atomic
+    // and avoids two separate round trips.
+    let sqlText: string;
+    let params: any[];
+    if (body.file) {
+      const parsed = parseDataUrl(body.file.data);
+      if (!parsed) return res.status(400).json({ error: 'File must be a data:<mime>;base64,<data> URL' });
+      sqlText = `UPDATE app_docs
+                    SET title = $1, description = $2, url = $3, sort_order = $4,
+                        updated_at = CURRENT_TIMESTAMP, updated_by = $5,
+                        file_name = $6, file_mime = $7, file_data = $8
+                  WHERE id = $9
+                  RETURNING id, title, description, url, sort_order, updated_at, updated_by,
+                            file_name, file_mime, (file_data IS NOT NULL) AS has_data`;
+      params = [body.title, body.description, body.url || null, body.sortOrder ?? 100,
+                req.user?.email || null, body.file.name, body.file.mime || parsed.mime, parsed.body, id];
+    } else if (body.removeFile) {
+      sqlText = `UPDATE app_docs
+                    SET title = $1, description = $2, url = $3, sort_order = $4,
+                        updated_at = CURRENT_TIMESTAMP, updated_by = $5,
+                        file_name = NULL, file_mime = NULL, file_data = NULL
+                  WHERE id = $6
+                  RETURNING id, title, description, url, sort_order, updated_at, updated_by,
+                            file_name, file_mime, (file_data IS NOT NULL) AS has_data`;
+      params = [body.title, body.description, body.url || null, body.sortOrder ?? 100,
+                req.user?.email || null, id];
+    } else {
+      sqlText = `UPDATE app_docs
+                    SET title = $1, description = $2, url = $3, sort_order = $4,
+                        updated_at = CURRENT_TIMESTAMP, updated_by = $5
+                  WHERE id = $6
+                  RETURNING id, title, description, url, sort_order, updated_at, updated_by,
+                            file_name, file_mime, (file_data IS NOT NULL) AS has_data`;
+      params = [body.title, body.description, body.url || null, body.sortOrder ?? 100,
+                req.user?.email || null, id];
+    }
+    const { rows } = await query(sqlText, params);
     if (rows.length === 0) return res.status(404).json({ error: 'Doc not found' });
-    res.json(mapDocLink(rows[0]));
+    const r = rows[0];
+    res.json(mapDocLink({ ...r, file_data: r.has_data ? '1' : null }));
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -6253,6 +6347,13 @@ async function runSchemaBootstrap() {
     await exec(`ALTER TABLE app_docs ADD COLUMN IF NOT EXISTS url TEXT`).catch(() => {});
     await exec(`ALTER TABLE app_docs ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 100`).catch(() => {});
     await exec(`ALTER TABLE app_docs ADD COLUMN IF NOT EXISTS updated_by TEXT`).catch(() => {});
+    // Optional binary attachment (PDFs, images, spreadsheets). Stored as
+    // base64 in a text column — Postgres compresses TOAST well and this
+    // avoids provisioning a Fly Volume. Cap enforced at the upload
+    // endpoint so the table stays healthy.
+    await exec(`ALTER TABLE app_docs ADD COLUMN IF NOT EXISTS file_name TEXT`).catch(() => {});
+    await exec(`ALTER TABLE app_docs ADD COLUMN IF NOT EXISTS file_mime TEXT`).catch(() => {});
+    await exec(`ALTER TABLE app_docs ADD COLUMN IF NOT EXISTS file_data TEXT`).catch(() => {});
     // Seed the built-in "Complete User Guide" link if nothing exists yet, so
     // a fresh install has something to show before the admin adds their own.
     await exec(`INSERT INTO app_docs (title, description, url, sort_order, updated_by)

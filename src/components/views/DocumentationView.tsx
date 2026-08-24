@@ -1,11 +1,15 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { BookOpen, ExternalLink, Plus, Pencil, Trash2, Save, X } from 'lucide-react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { BookOpen, ExternalLink, Plus, Pencil, Trash2, Save, X, Upload, Paperclip, FileText } from 'lucide-react';
 
 interface DocLink {
   id: number;
   title: string;
   description: string;
-  url: string;
+  url: string;              // Always points somewhere clickable (attachment or external)
+  externalUrl?: string | null;
+  fileName?: string | null;
+  fileMime?: string | null;
+  hasAttachment?: boolean;
   sortOrder: number;
   updatedAt: string;
   updatedBy?: string | null;
@@ -98,7 +102,7 @@ export const DocumentationView: React.FC<DocumentationViewProps> = ({ currentUse
             <li key={doc.id} className="bg-surface-container border border-outline-variant rounded-xl p-md hover:border-primary/40 transition-colors group">
               <div className="flex items-start gap-3">
                 <div className="w-10 h-10 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0">
-                  <BookOpen className="w-5 h-5 text-primary" />
+                  {doc.hasAttachment ? <Paperclip className="w-5 h-5 text-primary" /> : <BookOpen className="w-5 h-5 text-primary" />}
                 </div>
                 <div className="flex-1 min-w-0">
                   <button
@@ -112,8 +116,10 @@ export const DocumentationView: React.FC<DocumentationViewProps> = ({ currentUse
                     {doc.description && (
                       <p className="text-xs text-on-surface-variant mt-0.5 line-clamp-2">{doc.description}</p>
                     )}
-                    <div className="text-[10px] text-outline mt-1 font-mono truncate" title={doc.url}>
-                      {doc.url}
+                    <div className="text-[10px] text-outline mt-1 truncate" title={doc.hasAttachment ? doc.fileName || 'Attached file' : doc.url}>
+                      {doc.hasAttachment
+                        ? <span className="inline-flex items-center gap-1"><Paperclip className="w-3 h-3" />{doc.fileName || 'Attachment'}</span>
+                        : <span className="font-mono">{doc.url}</span>}
                     </div>
                   </button>
                 </div>
@@ -162,22 +168,86 @@ interface DocLinkEditorProps {
   triggerToast: (msg: string, type?: 'SUCCESS' | 'ERROR' | 'INFO') => void;
 }
 
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10MB raw before base64 encoding
+
 const DocLinkEditor: React.FC<DocLinkEditorProps> = ({ mode, doc, onClose, onSaved, triggerToast }) => {
+  const initialSource: 'file' | 'url' = doc?.hasAttachment ? 'file' : 'url';
+  const [source, setSource] = useState<'file' | 'url'>(initialSource);
   const [title, setTitle] = useState(doc?.title || '');
   const [description, setDescription] = useState(doc?.description || '');
-  const [url, setUrl] = useState(doc?.url || '');
+  const [url, setUrl] = useState(doc?.externalUrl || (doc?.hasAttachment ? '' : doc?.url) || '');
   const [sortOrder, setSortOrder] = useState<number>(doc?.sortOrder ?? 100);
   const [saving, setSaving] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  // The staged file: { name, mime, data (base64 data URL) }. Null means either
+  // no file yet, or the existing attachment is being kept as-is.
+  const [pendingFile, setPendingFile] = useState<{ name: string; mime: string; data: string } | null>(null);
+  const [existingFileName, setExistingFileName] = useState(doc?.fileName || null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const readFile = (file: File): Promise<{ name: string; mime: string; data: string }> => new Promise((resolve, reject) => {
+    if (file.size > MAX_UPLOAD_BYTES) {
+      reject(new Error(`File too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Max 10MB.`));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => resolve({
+      name: file.name,
+      mime: file.type || 'application/octet-stream',
+      data: String(reader.result),
+    });
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+
+  const handleFile = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      const staged = await readFile(file);
+      setPendingFile(staged);
+      setExistingFileName(null); // Fresh file supersedes any prior attachment
+    } catch (err: any) {
+      triggerToast(err.message || 'Could not read that file', 'ERROR');
+    }
+  };
+
+  const onDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    await handleFile(file);
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || !url.trim()) {
-      triggerToast('Title and URL are required', 'ERROR');
+    if (!title.trim()) {
+      triggerToast('Title is required', 'ERROR');
+      return;
+    }
+    if (source === 'url' && !url.trim()) {
+      triggerToast('Enter a URL or switch to file upload', 'ERROR');
+      return;
+    }
+    if (source === 'file' && !pendingFile && !existingFileName) {
+      triggerToast('Choose a file or switch to URL', 'ERROR');
       return;
     }
     setSaving(true);
     try {
-      const payload = { title: title.trim(), description: description.trim(), url: url.trim(), sortOrder };
+      const payload: Record<string, any> = {
+        title: title.trim(),
+        description: description.trim(),
+        sortOrder,
+      };
+      if (source === 'url') {
+        payload.url = url.trim();
+        // When flipping from an attached file to a URL, tell the server to
+        // drop the attachment; otherwise the file lingers in the row.
+        if (mode === 'edit' && doc?.hasAttachment) payload.removeFile = true;
+      } else {
+        payload.url = ''; // File wins; server rewrites this in the response
+        if (pendingFile) payload.file = pendingFile;
+      }
       const endpoint = mode === 'create' ? '/api/docs' : `/api/docs/${doc!.id}`;
       const method = mode === 'create' ? 'POST' : 'PUT';
       const res = await fetch(endpoint, {
@@ -233,17 +303,81 @@ const DocLinkEditor: React.FC<DocLinkEditorProps> = ({ mode, doc, onClose, onSav
           </div>
 
           <div>
-            <label className="block text-[10px] font-bold uppercase text-outline mb-1">Link URL</label>
-            <input
-              value={url}
-              onChange={e => setUrl(e.target.value)}
-              placeholder="https://…  or  /file-in-public.html"
-              required
-              className="w-full bg-surface-container-high border border-outline-variant rounded px-3 py-2 text-sm font-mono outline-none focus:border-primary"
-            />
-            <p className="text-[10px] text-outline mt-1">
-              External URL (Notion, Google Doc, etc.) or a path served by the app (e.g. <span className="font-mono">/tracklab-complete-guide.html</span>).
-            </p>
+            <div className="flex items-center gap-2 mb-2">
+              <label className="block text-[10px] font-bold uppercase text-outline">Source</label>
+              <div className="inline-flex bg-surface-container-high border border-outline-variant rounded overflow-hidden text-[10px] font-bold">
+                <button type="button" onClick={() => setSource('url')}
+                        className={`px-2.5 py-1 ${source === 'url' ? 'bg-primary text-on-primary' : 'text-on-surface-variant hover:text-on-surface'}`}>
+                  URL
+                </button>
+                <button type="button" onClick={() => setSource('file')}
+                        className={`px-2.5 py-1 ${source === 'file' ? 'bg-primary text-on-primary' : 'text-on-surface-variant hover:text-on-surface'}`}>
+                  Upload file
+                </button>
+              </div>
+            </div>
+
+            {source === 'url' ? (
+              <>
+                <input
+                  value={url}
+                  onChange={e => setUrl(e.target.value)}
+                  placeholder="https://…  or  /file-in-public.html"
+                  className="w-full bg-surface-container-high border border-outline-variant rounded px-3 py-2 text-sm font-mono outline-none focus:border-primary"
+                />
+                <p className="text-[10px] text-outline mt-1">
+                  External URL (Notion, Google Doc, etc.) or a path served by the app (e.g. <span className="font-mono">/tracklab-complete-guide.html</span>).
+                </p>
+              </>
+            ) : (
+              <>
+                <div
+                  onDragOver={e => { e.preventDefault(); setDragging(true); }}
+                  onDragLeave={() => setDragging(false)}
+                  onDrop={onDrop}
+                  onClick={() => fileInputRef.current?.click()}
+                  className={`cursor-pointer rounded-lg border-2 border-dashed p-6 text-center transition-colors ${
+                    dragging
+                      ? 'border-primary bg-primary/10'
+                      : 'border-outline-variant/60 hover:border-primary/50 hover:bg-primary/5'
+                  }`}
+                >
+                  <Upload className="w-6 h-6 mx-auto text-primary mb-2" />
+                  {pendingFile ? (
+                    <>
+                      <div className="text-xs font-bold text-on-surface flex items-center justify-center gap-1.5">
+                        <FileText className="w-3.5 h-3.5" /> {pendingFile.name}
+                      </div>
+                      <div className="text-[10px] text-outline mt-1">
+                        {pendingFile.mime} · {Math.round(pendingFile.data.length / 1024)} KB (base64)
+                      </div>
+                      <div className="text-[10px] text-primary mt-2">Click or drop again to replace</div>
+                    </>
+                  ) : existingFileName ? (
+                    <>
+                      <div className="text-xs font-bold text-on-surface flex items-center justify-center gap-1.5">
+                        <FileText className="w-3.5 h-3.5" /> {existingFileName}
+                      </div>
+                      <div className="text-[10px] text-outline mt-1">Current attachment — click or drop to replace</div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="text-xs text-on-surface font-bold">Drop a file here</div>
+                      <div className="text-[10px] text-outline mt-1">or click to choose (PDF, image, spreadsheet, etc. — max 10MB)</div>
+                    </>
+                  )}
+                </div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="hidden"
+                  onChange={e => handleFile(e.target.files?.[0] ?? undefined)}
+                />
+                <p className="text-[10px] text-outline mt-1">
+                  Files upload straight to the app's database and are served back via <span className="font-mono">/api/docs/{'{id}'}/file</span>.
+                </p>
+              </>
+            )}
           </div>
 
           <div>
