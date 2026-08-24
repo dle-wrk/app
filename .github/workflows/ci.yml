@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel in-flight runs on the same branch — pushing a fix immediately
+# supersedes the previous attempt instead of both racing to green.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck-and-unit:
+    name: Typecheck + Vitest + Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      # Explicit lint step so a bad tsc failure shows up under the right
+      # label in the PR check list rather than muddled with a build error.
+      - name: TypeScript
+        run: npm run lint
+      - name: Unit tests
+        run: npm test
+      - name: Production build
+        run: npm run build
+
+  e2e:
+    name: Playwright E2E
+    runs-on: ubuntu-latest
+    # E2E hits the real Neon DB and the seed admin, so it needs env secrets.
+    # Skip on PRs from forks — they can't see repo secrets and the run would
+    # just fail with an unhelpful "user not active" message.
+    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      # Playwright pins a specific Chromium build per version; caching it
+      # cuts ~30s off every subsequent CI run.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('**/package-lock.json') }}
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: E2E tests
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SEED_ADMIN_EMAIL: ${{ secrets.SEED_ADMIN_EMAIL }}
+          SEED_ADMIN_PASSWORD: ${{ secrets.SEED_ADMIN_PASSWORD }}
+          TEST_ADMIN_EMAIL: ${{ secrets.SEED_ADMIN_EMAIL }}
+          TEST_ADMIN_PASSWORD: ${{ secrets.SEED_ADMIN_PASSWORD }}
+          PRICING_CRED_KEY: ${{ secrets.PRICING_CRED_KEY }}
+        run: npm run test:e2e
+      # Upload the HTML report on failure so we can inspect screenshots +
+      # video + trace without re-running the flaky path locally.
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 14

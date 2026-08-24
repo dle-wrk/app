@@ -39,7 +39,7 @@
   },
   "devDependencies": {
     "@playwright/browser-chromium": "^1.61.0",
-    "@playwright/test": "^1.61.0",
+    "@playwright/test": "^1.62.1",
     "@types/compression": "^1.7.5",
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
