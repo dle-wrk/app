@@ -619,28 +619,3 @@
   }
 }
 
-/* Markdown rendering for the Documentation view. Kept scoped so we don't
-   accidentally style random <h1>/<pre> elsewhere in the app. */
-.prose-doc { color: var(--on-surface, #e1e2ec); font-size: 14px; line-height: 1.65; }
-.prose-doc h1 { font-size: 1.6rem; font-weight: 900; letter-spacing: -0.02em; margin-top: 1.5rem; margin-bottom: 0.75rem; }
-.prose-doc h2 { font-size: 1.3rem; font-weight: 800; letter-spacing: -0.01em; margin-top: 1.25rem; margin-bottom: 0.5rem; border-bottom: 1px solid var(--outline-variant, #424754); padding-bottom: 0.35rem; }
-.prose-doc h3 { font-size: 1.1rem; font-weight: 800; margin-top: 1rem; margin-bottom: 0.35rem; }
-.prose-doc h4 { font-size: 0.95rem; font-weight: 700; margin-top: 1rem; margin-bottom: 0.25rem; }
-.prose-doc p { margin: 0.5rem 0; }
-.prose-doc ul, .prose-doc ol { margin: 0.5rem 0 0.5rem 1.5rem; }
-.prose-doc ul { list-style: disc; }
-.prose-doc ol { list-style: decimal; }
-.prose-doc li { margin: 0.15rem 0; }
-.prose-doc a { color: var(--primary, #f7912b); text-decoration: underline; }
-.prose-doc a:hover { filter: brightness(1.2); }
-.prose-doc code { font-family: var(--font-mono, ui-monospace); background: var(--surface-container-high, rgba(255,255,255,0.06)); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.85em; }
-.prose-doc pre { background: var(--surface-container-highest, rgba(255,255,255,0.08)); padding: 0.75rem; border-radius: 8px; overflow-x: auto; font-size: 0.85em; margin: 0.75rem 0; border: 1px solid var(--outline-variant, #424754); }
-.prose-doc pre code { background: transparent; padding: 0; }
-.prose-doc blockquote { border-left: 3px solid var(--primary, #f7912b); padding-left: 0.75rem; margin: 0.75rem 0; color: var(--on-surface-variant, #c2c6d6); font-style: italic; }
-.prose-doc hr { border: 0; border-top: 1px solid var(--outline-variant, #424754); margin: 1.5rem 0; }
-.prose-doc table { border-collapse: collapse; margin: 0.75rem 0; font-size: 0.9em; }
-.prose-doc th, .prose-doc td { border: 1px solid var(--outline-variant, #424754); padding: 0.35rem 0.6rem; text-align: left; }
-.prose-doc th { background: var(--surface-container-high, rgba(255,255,255,0.06)); font-weight: 700; }
-.prose-doc img { max-width: 100%; border-radius: 6px; }
-.prose-doc strong { font-weight: 700; }
-.prose-doc em { font-style: italic; }

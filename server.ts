@@ -2998,109 +2998,73 @@ app.post('/api/auth/reset-password', validateBody(ResetPasswordSchema), async (r
 });
 
 // ============================================================================
-// DOCUMENTATION
-// In-app markdown-backed docs. Everyone can read; only admins can mutate.
-// Slugs are stable identifiers for URLs and the command palette — auto-derived
-// from the title if the client doesn't send one.
+// DOCUMENTATION LINKS
+// A simple registry of clickable docs (title, description, URL). Everyone can
+// list; only admins can mutate. Not a CMS — the URL points wherever the doc
+// actually lives (static HTML, Notion page, Google Doc, PDF on Fly Volume).
 // ============================================================================
 
-const DocSlugSchema = z.string()
-  .min(1).max(80)
-  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'Slug must be lowercase kebab-case (letters, digits, dashes)');
-const DocUpsertSchema = z.object({
-  slug: DocSlugSchema.optional(),
+const DocLinkSchema = z.object({
   title: z.string().min(1).max(200),
-  category: z.string().min(1).max(80).optional().default('General'),
-  content: z.string().max(200_000).default(''),
+  description: z.string().max(500).optional().default(''),
+  url: z.string().min(1).max(2000)
+    .refine(v => /^https?:\/\//i.test(v) || v.startsWith('/'),
+      'URL must start with http://, https://, or /'),
   sortOrder: z.coerce.number().int().min(0).max(9999).optional(),
 });
 
-function slugify(v: string): string {
-  return v.toLowerCase().trim()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 80) || `doc-${Date.now()}`;
-}
+const mapDocLink = (r: any) => ({
+  id: r.id,
+  title: r.title,
+  description: r.description || '',
+  url: r.url,
+  sortOrder: r.sort_order,
+  updatedAt: r.updated_at,
+  updatedBy: r.updated_by,
+});
 
 app.get('/api/docs', async (_req, res) => {
   try {
     const { rows } = await query(
-      `SELECT id, slug, title, category, sort_order, updated_at
+      `SELECT id, title, description, url, sort_order, updated_at, updated_by
          FROM app_docs
-        ORDER BY category ASC, sort_order ASC, title ASC`
+        ORDER BY sort_order ASC, title ASC`
     );
-    res.json(rows.map((r: any) => ({
-      id: r.id, slug: r.slug, title: r.title, category: r.category,
-      sortOrder: r.sort_order, updatedAt: r.updated_at,
-    })));
+    res.json(rows.map(mapDocLink));
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-app.get('/api/docs/:slug', async (req, res) => {
+app.post('/api/docs', requireAdmin, validateBody(DocLinkSchema), async (req: any, res) => {
+  const body = req.body as z.infer<typeof DocLinkSchema>;
   try {
-    const row = await queryOne<any>(
-      `SELECT id, slug, title, category, content, sort_order, updated_at, updated_by FROM app_docs WHERE slug = $1`,
-      [req.params.slug]
-    );
-    if (!row) return res.status(404).json({ error: 'Doc not found' });
-    res.json({
-      id: row.id, slug: row.slug, title: row.title, category: row.category,
-      content: row.content || '', sortOrder: row.sort_order, updatedAt: row.updated_at,
-      updatedBy: row.updated_by,
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/docs', requireAdmin, validateBody(DocUpsertSchema), async (req: any, res) => {
-  const body = req.body as z.infer<typeof DocUpsertSchema>;
-  const slug = body.slug || slugify(body.title);
-  try {
-    const existing = await queryOne<any>(`SELECT id FROM app_docs WHERE slug = $1`, [slug]);
-    if (existing) return res.status(409).json({ error: `A doc with slug "${slug}" already exists — pick another title or slug.` });
     const { rows } = await query(
-      `INSERT INTO app_docs (slug, title, category, content, sort_order, updated_by)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         RETURNING id, slug, title, category, content, sort_order, updated_at`,
-      [slug, body.title, body.category, body.content, body.sortOrder ?? 100, req.user?.email || null]
+      `INSERT INTO app_docs (title, description, url, sort_order, updated_by)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING id, title, description, url, sort_order, updated_at, updated_by`,
+      [body.title, body.description, body.url, body.sortOrder ?? 100, req.user?.email || null]
     );
-    const r = rows[0];
-    res.status(201).json({
-      id: r.id, slug: r.slug, title: r.title, category: r.category,
-      content: r.content, sortOrder: r.sort_order, updatedAt: r.updated_at,
-    });
+    res.status(201).json(mapDocLink(rows[0]));
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-app.put('/api/docs/:id', requireAdmin, validateBody(DocUpsertSchema), async (req: any, res) => {
+app.put('/api/docs/:id', requireAdmin, validateBody(DocLinkSchema), async (req: any, res) => {
   const id = parseInt(req.params.id);
-  const body = req.body as z.infer<typeof DocUpsertSchema>;
-  const slug = body.slug || slugify(body.title);
+  const body = req.body as z.infer<typeof DocLinkSchema>;
   try {
-    const current = await queryOne<any>(`SELECT slug FROM app_docs WHERE id = $1`, [id]);
-    if (!current) return res.status(404).json({ error: 'Doc not found' });
-    if (slug !== current.slug) {
-      const clash = await queryOne<any>(`SELECT id FROM app_docs WHERE slug = $1 AND id <> $2`, [slug, id]);
-      if (clash) return res.status(409).json({ error: `A doc with slug "${slug}" already exists.` });
-    }
     const { rows } = await query(
       `UPDATE app_docs
-          SET slug = $1, title = $2, category = $3, content = $4, sort_order = $5,
-              updated_at = CURRENT_TIMESTAMP, updated_by = $6
-        WHERE id = $7
-        RETURNING id, slug, title, category, content, sort_order, updated_at`,
-      [slug, body.title, body.category, body.content, body.sortOrder ?? 100, req.user?.email || null, id]
+          SET title = $1, description = $2, url = $3, sort_order = $4,
+              updated_at = CURRENT_TIMESTAMP, updated_by = $5
+        WHERE id = $6
+        RETURNING id, title, description, url, sort_order, updated_at, updated_by`,
+      [body.title, body.description, body.url, body.sortOrder ?? 100, req.user?.email || null, id]
     );
-    const r = rows[0];
-    res.json({
-      id: r.id, slug: r.slug, title: r.title, category: r.category,
-      content: r.content, sortOrder: r.sort_order, updatedAt: r.updated_at,
-    });
+    if (rows.length === 0) return res.status(404).json({ error: 'Doc not found' });
+    res.json(mapDocLink(rows[0]));
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -6270,32 +6234,30 @@ async function runSchemaBootstrap() {
       ip_address TEXT
     )`).catch(() => {});
     await exec(`CREATE INDEX IF NOT EXISTS password_reset_tokens_email_idx ON password_reset_tokens (user_email)`).catch(() => {});
-    // In-app documentation. Read by everyone (viewer role and up), mutated
-    // by admins only. Content is markdown so the editor stays simple and
-    // the render layer stays generic. Prefixed `app_` so we don't collide
-    // with any pg_docs/docs table an earlier or third-party migration may
-    // have left behind (Neon had one when this first shipped).
+    // Documentation registry — a simple list of links, not a CMS. Each row
+    // is one clickable doc: title + description + URL that opens in a new
+    // tab. Admin-only mutations, everyone can read.
     await exec(`CREATE TABLE IF NOT EXISTS app_docs (
       id SERIAL PRIMARY KEY,
-      slug TEXT UNIQUE NOT NULL,
       title TEXT NOT NULL,
-      category TEXT DEFAULT 'General',
-      content TEXT DEFAULT '',
+      description TEXT DEFAULT '',
+      url TEXT NOT NULL,
       sort_order INTEGER DEFAULT 100,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_by TEXT
     )`).catch(() => {});
-    // Migrate any earlier docs table if it happens to hold rows we want to
-    // preserve — old attempts may have created 'docs' without slug/title.
-    // Best effort: skip on error.
-    await exec(`ALTER TABLE app_docs ADD COLUMN IF NOT EXISTS slug TEXT`).catch(() => {});
-    await exec(`ALTER TABLE app_docs ADD COLUMN IF NOT EXISTS title TEXT`).catch(() => {});
-    await exec(`ALTER TABLE app_docs ADD COLUMN IF NOT EXISTS category TEXT`).catch(() => {});
-    await exec(`ALTER TABLE app_docs ADD COLUMN IF NOT EXISTS content TEXT`).catch(() => {});
+    // Additive migration for older shape from the earlier markdown-editor
+    // version: keep the row, drop unused columns lazily.
+    await exec(`ALTER TABLE app_docs ADD COLUMN IF NOT EXISTS description TEXT DEFAULT ''`).catch(() => {});
+    await exec(`ALTER TABLE app_docs ADD COLUMN IF NOT EXISTS url TEXT`).catch(() => {});
     await exec(`ALTER TABLE app_docs ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 100`).catch(() => {});
     await exec(`ALTER TABLE app_docs ADD COLUMN IF NOT EXISTS updated_by TEXT`).catch(() => {});
-    await exec(`CREATE INDEX IF NOT EXISTS app_docs_category_idx ON app_docs (category, sort_order)`).catch(() => {});
+    // Seed the built-in "Complete User Guide" link if nothing exists yet, so
+    // a fresh install has something to show before the admin adds their own.
+    await exec(`INSERT INTO app_docs (title, description, url, sort_order, updated_by)
+      SELECT 'Complete User Guide', 'Master the ERP from setup to advanced automation', '/tracklab-complete-guide.html', 1, 'seed'
+       WHERE NOT EXISTS (SELECT 1 FROM app_docs)`).catch(() => {});
     await exec(`CREATE TABLE IF NOT EXISTS role_permissions (
       id SERIAL PRIMARY KEY,
       role TEXT NOT NULL,
