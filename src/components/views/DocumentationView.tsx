@@ -58,10 +58,9 @@ export const DocumentationView: React.FC<DocumentationViewProps> = ({ currentUse
     }
   };
 
-  const openLink = (url: string) => {
-    const w = window.open(url, '_blank', 'noopener,noreferrer');
-    if (!w) window.location.href = url;
-  };
+  // Previously used window.open with a same-tab fallback, but some popup
+  // blockers return null even when the popup opens — the fallback then
+  // navigated the current tab too. Native <a target="_blank"> avoids that.
 
   return (
     <div className="p-container-margin max-w-5xl mx-auto w-full">
@@ -105,9 +104,11 @@ export const DocumentationView: React.FC<DocumentationViewProps> = ({ currentUse
                   {doc.hasAttachment ? <Paperclip className="w-5 h-5 text-primary" /> : <BookOpen className="w-5 h-5 text-primary" />}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <button
-                    onClick={() => openLink(doc.url)}
-                    className="text-left w-full"
+                  <a
+                    href={doc.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block text-left w-full"
                   >
                     <div className="font-bold text-on-surface text-sm group-hover:text-primary transition-colors flex items-center gap-1.5">
                       {doc.title}
@@ -121,7 +122,7 @@ export const DocumentationView: React.FC<DocumentationViewProps> = ({ currentUse
                         ? <span className="inline-flex items-center gap-1"><Paperclip className="w-3 h-3" />{doc.fileName || 'Attachment'}</span>
                         : <span className="font-mono">{doc.url}</span>}
                     </div>
-                  </button>
+                  </a>
                 </div>
                 {isAdmin && (
                   <div className="flex flex-col gap-1 shrink-0">
