@@ -11,8 +11,26 @@ import path from 'path';
 import { existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 import cron from 'node-cron';
-import { createHmac, randomBytes, createCipheriv, createDecipheriv, scryptSync } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 import bcrypt from 'bcryptjs';
+import {
+  deriveCredKey,
+  encryptCreds as _encryptCreds,
+  decryptCreds as _decryptCreds,
+  isCipherEnvelope,
+  checkRateLimit as _checkRateLimit,
+  clientIp,
+  parseDataUrl,
+  mapDocLink,
+  EmailSchema,
+  CreateUserSchema,
+  UpdateUserSchema,
+  LoginSchema,
+  SessionIdSchema,
+  DocFileSchema,
+  DocLinkSchema,
+  type CipherEnvelope,
+} from './src/lib/serverUtils';
 
 // ---------------------------------------------------------------------------
 // At-rest encryption for provider API keys (DigiKey/Mouser/Nexar/TME/…).
@@ -22,28 +40,10 @@ import bcrypt from 'bcryptjs';
 // same table as the ciphertexts.
 // ---------------------------------------------------------------------------
 const CRED_KEY_MATERIAL = process.env.PRICING_CRED_KEY || `fallback:${process.env.DATABASE_URL || 'dev'}`;
-const CRED_KEY = scryptSync(CRED_KEY_MATERIAL, 'tracklab-pricing-creds', 32);
+const CRED_KEY = deriveCredKey(CRED_KEY_MATERIAL);
 
-interface CipherEnvelope { v: 1; iv: string; tag: string; ct: string; }
-function isCipherEnvelope(v: any): v is CipherEnvelope {
-  return v && typeof v === 'object' && v.v === 1 && typeof v.iv === 'string' && typeof v.tag === 'string' && typeof v.ct === 'string';
-}
-function encryptCreds(creds: Record<string, string>): CipherEnvelope {
-  const iv = randomBytes(12);
-  const cipher = createCipheriv('aes-256-gcm', CRED_KEY, iv);
-  const ct = Buffer.concat([cipher.update(JSON.stringify(creds), 'utf8'), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  return { v: 1, iv: iv.toString('base64'), tag: tag.toString('base64'), ct: ct.toString('base64') };
-}
-function decryptCreds(env: CipherEnvelope): Record<string, string> {
-  const iv = Buffer.from(env.iv, 'base64');
-  const tag = Buffer.from(env.tag, 'base64');
-  const ct = Buffer.from(env.ct, 'base64');
-  const decipher = createDecipheriv('aes-256-gcm', CRED_KEY, iv);
-  decipher.setAuthTag(tag);
-  const pt = Buffer.concat([decipher.update(ct), decipher.final()]).toString('utf8');
-  return JSON.parse(pt);
-}
+const encryptCreds = (creds: Record<string, string>): CipherEnvelope => _encryptCreds(creds, CRED_KEY);
+const decryptCreds = (env: CipherEnvelope): Record<string, string> => _decryptCreds(env, CRED_KEY);
 import { pool, query, queryOne, exec, ensureSchema, close } from './src/lib/db';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -2562,22 +2562,8 @@ app.get('/api/items/generate-code/:category', async (req, res) => {
 // attacks put a real WAF in front. Buckets are pruned lazily on lookup so the
 // map stays bounded even under sustained abuse.
 const rateBuckets = new Map<string, number[]>();
-function checkRateLimit(key: string, max: number, windowMs: number): { allowed: boolean; retryAfter: number } {
-  const now = Date.now();
-  const cutoff = now - windowMs;
-  const hits = (rateBuckets.get(key) || []).filter(t => t > cutoff);
-  if (hits.length >= max) {
-    return { allowed: false, retryAfter: Math.ceil((hits[0] + windowMs - now) / 1000) };
-  }
-  hits.push(now);
-  rateBuckets.set(key, hits);
-  return { allowed: true, retryAfter: 0 };
-}
-function clientIp(req: any): string {
-  return String(
-    req.headers?.['x-forwarded-for'] ?? req.headers?.['x-real-ip'] ?? req.socket?.remoteAddress ?? 'unknown'
-  ).split(',')[0].trim().slice(0, 100);
-}
+const checkRateLimit = (key: string, max: number, windowMs: number) =>
+  _checkRateLimit(rateBuckets, key, max, windowMs);
 
 // bcrypt cost 10 — ~50ms per hash on cheap hardware, fine for interactive login.
 const BCRYPT_ROUNDS = 10;
@@ -2618,30 +2604,7 @@ function validateBody<T extends z.ZodTypeAny>(schema: T) {
   };
 }
 
-// Common shapes reused across endpoints. Kept locally rather than in a
-// separate file because they're small and Zod inference works best when the
-// schema and its consumer are close.
-const EmailSchema = z.string().email().max(200).transform(v => v.toLowerCase().trim());
-const CreateUserSchema = z.object({
-  email: EmailSchema,
-  password: z.string().min(8).max(200),
-  firstName: z.string().min(1).max(80).optional().nullable(),
-  lastName: z.string().min(1).max(80).optional().nullable(),
-  role: z.enum(['admin', 'manager', 'engineer', 'viewer']).optional().default('viewer'),
-});
-const UpdateUserSchema = z.object({
-  firstName: z.string().min(1).max(80).optional().nullable(),
-  lastName: z.string().min(1).max(80).optional().nullable(),
-  role: z.enum(['admin', 'manager', 'engineer', 'viewer']).optional(),
-  status: z.enum(['ACTIVE', 'INACTIVE', 'SUSPENDED']).optional(),
-});
-const LoginSchema = z.object({
-  email: EmailSchema,
-  password: z.string().min(1).max(200),
-});
-const SessionIdSchema = z.object({
-  sessionId: z.string().min(1).max(200).optional(),
-}).partial();
+// Schemas live in src/lib/serverUtils so tests can import them directly.
 
 // Middleware: attach the current user to req if a valid session ID is
 // presented. Reads from X-Session-Id header or body.sessionId — the same
@@ -3005,52 +2968,8 @@ app.post('/api/auth/reset-password', validateBody(ResetPasswordSchema), async (r
 // actually lives (static HTML, Notion page, Google Doc, PDF on Fly Volume).
 // ============================================================================
 
-// Either a URL or a base64 file attachment is required. When both are
-// supplied, the file wins and the URL is auto-set to the served path on the
-// way out.
-const DocFileSchema = z.object({
-  name: z.string().min(1).max(200),
-  mime: z.string().min(1).max(100),
-  // Base64 data URL from the browser's FileReader — cap at 15MB base64
-  // (~11MB raw) so the row stays sane. Larger files should go on a proper
-  // object store; not our problem here.
-  data: z.string().min(1).max(15_000_000),
-}).nullable().optional();
-
-const DocLinkSchema = z.object({
-  title: z.string().min(1).max(200),
-  description: z.string().max(500).optional().default(''),
-  url: z.string().max(2000).optional().default(''),
-  sortOrder: z.coerce.number().int().min(0).max(9999).optional(),
-  file: DocFileSchema,
-  // When true and no new `file` is sent, drop any existing attachment so a
-  // doc can flip back to being a plain URL link.
-  removeFile: z.boolean().optional().default(false),
-}).refine(v => (v.url && v.url.length > 0) || v.file || v.removeFile === false,
-  { message: 'Either a URL or an uploaded file is required.' });
-
-const mapDocLink = (r: any) => ({
-  id: r.id,
-  title: r.title,
-  description: r.description || '',
-  // If an attachment exists, expose it via the served path so the frontend
-  // treats it uniformly with plain URL rows.
-  url: r.file_data ? `/api/docs/${r.id}/file` : (r.url || ''),
-  externalUrl: r.file_data ? null : (r.url || null),
-  fileName: r.file_name || null,
-  fileMime: r.file_mime || null,
-  hasAttachment: !!r.file_data,
-  sortOrder: r.sort_order,
-  updatedAt: r.updated_at,
-  updatedBy: r.updated_by,
-});
-
-// Turn a "data:<mime>;base64,<body>" URL into { mime, body } for storage.
-function parseDataUrl(dataUrl: string): { mime: string; body: string } | null {
-  const m = /^data:([^;]+);base64,(.+)$/.exec(dataUrl);
-  if (!m) return null;
-  return { mime: m[1], body: m[2] };
-}
+// DocLinkSchema / DocFileSchema / mapDocLink / parseDataUrl live in
+// src/lib/serverUtils so tests can hit them without the rest of the server.
 
 app.get('/api/docs', async (_req, res) => {
   try {
