@@ -36,6 +36,8 @@ import {
 import { Item, Transaction, Supplier, ProductionKit, SystemConfig, ViewType, Project, BOMItem, PickPlaceItem, UserProfile, JobCard, Client, ClientOrder, ClientOrderItem, BuildJob, BomStructure, SubAssembly, FieldedAsset, StockLedgerEntry } from './types';
 import { INITIAL_TRANSACTIONS, INITIAL_PRODUCTION_KITS, INITIAL_SYSTEM_CONFIG, INITIAL_BOM_ITEMS, INITIAL_PP_BOM_ITEMS, generateCSVFromItems, CSV_HEADER } from './mockData';
 import { logActivity } from './lib/activityLogger';
+import { optimisticUpdate } from './lib/optimisticUpdate';
+import { setToastHandler } from './lib/toast';
 import BOMManager from './components/BOMManager';
 import { mapDbRowsToItems } from './lib/mapDbItem';
 import { mapDbRowsToTransactions, formatTrxDateTime } from './lib/mapDbTransaction';
@@ -260,39 +262,72 @@ export default function App() {
     setTimeout(() => setShowToast(false), 4000);
   }, []);
 
+  // Publish triggerToast to the global singleton so utility modules and
+  // deeply-nested components (bookkeeping tabs, item modal, etc.) can raise
+  // notifications through the same UI without prop-drilling the callback.
+  useEffect(() => {
+    setToastHandler(triggerToast);
+    return () => setToastHandler(null);
+  }, [triggerToast]);
+
   const handleNewKitCreation = async (newKit: ProductionKit) => {
-    setProductionKits((prev) => {
-      const exists = prev.find(k => k.kitId === newKit.kitId);
-      if (exists) {
-        return prev.map(k => k.kitId === newKit.kitId ? newKit : k);
-      }
-      return [newKit, ...prev];
-    });
-    try {
-      await fetch('/api/production-kits', {
+    // Close the modal immediately — the row appears in the list under the
+    // user's cursor before they finish moving the mouse. If the POST fails
+    // we rollback the row and surface an error toast.
+    setEditingKit(null);
+    setIsKitModalOpen(false);
+
+    await optimisticUpdate({
+      snapshot: () => productionKits,
+      applyOptimistic: () => {
+        setProductionKits((prev) => {
+          const exists = prev.find(k => k.kitId === newKit.kitId);
+          if (exists) return prev.map(k => k.kitId === newKit.kitId ? newKit : k);
+          return [newKit, ...prev];
+        });
+      },
+      rollback: (snap) => setProductionKits(snap),
+      request: () => fetch('/api/production-kits', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newKit),
-      });
-    } catch (err) {
-      console.error('Failed to save kit:', err);
-    }
-    setEditingKit(null);
-    setIsKitModalOpen(false);
+      }),
+      triggerToast,
+      errorMsg: `Failed to save kit ${newKit.kitId}.`,
+    });
   };
 
   const handleBatchKitsImport = async (uploadedKits: ProductionKit[]) => {
+    // Optimistically prepend the batch, then fire the POSTs in parallel.
+    // Any per-kit failure is collected and reported in a single summary
+    // toast so the user sees N-of-M rather than a rain of error toasts.
+    const snapshot = productionKits;
     setProductionKits((prev) => [...uploadedKits, ...prev]);
-    for (const kit of uploadedKits) {
-      try {
-        await fetch('/api/production-kits', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(kit),
-        });
-      } catch (err) {
-        console.error('Failed to save kit:', err);
-      }
+    const failures: string[] = [];
+    const results = await Promise.allSettled(uploadedKits.map(kit =>
+      fetch('/api/production-kits', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(kit),
+      }).then(async res => {
+        if (!res.ok) throw new Error(await res.text().catch(() => `${res.status}`));
+      })
+    ));
+    results.forEach((r, i) => {
+      if (r.status === 'rejected') failures.push(uploadedKits[i].kitId);
+    });
+    if (failures.length === 0) {
+      triggerToast(`Imported ${uploadedKits.length} kits.`);
+    } else if (failures.length === uploadedKits.length) {
+      setProductionKits(snapshot);
+      triggerToast(`Import failed — no kits saved.`, 'ERROR');
+    } else {
+      // Rebuild state without the ones that failed to persist.
+      setProductionKits((_curr) => [
+        ...uploadedKits.filter(k => !failures.includes(k.kitId)),
+        ...snapshot,
+      ]);
+      triggerToast(`Imported ${uploadedKits.length - failures.length} of ${uploadedKits.length} kits. Failed: ${failures.slice(0, 3).join(', ')}${failures.length > 3 ? '…' : ''}`, 'ERROR');
     }
   };
 
@@ -716,56 +751,57 @@ export default function App() {
       dateTime: now.toISOString()
     };
 
+    setSyncRotated(true);
     try {
-      setSyncRotated(true);
-      const payload = mapItemToPayload(createdItem);
-      const res = await fetch(`${API_BASE}/api/items`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+      await optimisticUpdate({
+        snapshot: () => ({ items, transactions }),
+        applyOptimistic: () => {
+          setItems(prev => [createdItem, ...prev]);
+          setTransactions(prev => [newTrx, ...prev]);
+        },
+        rollback: (snap) => {
+          setItems(snap.items);
+          setTransactions(snap.transactions);
+        },
+        request: async () => {
+          const res = await fetch(`${API_BASE}/api/items`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(mapItemToPayload(createdItem)),
+          });
+          if (!res.ok) return res;
+          // Best-effort transaction log — a failed trx write shouldn't undo
+          // the item creation (the item exists, just no BOOK-IN row).
+          fetch('/api/transactions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...newTrx, trxId: newTrx.id }),
+          }).catch(e => console.warn('Failed to log BOOK-IN transaction:', e));
+          return res;
+        },
+        onSuccess: async () => {
+          await logActivity({
+            userEmail: currentUser?.email || 'unknown',
+            action: 'CREATE_ITEM',
+            entityType: 'Item',
+            entityId: createdItem.partNumber,
+            details: { name: createdItem.name, price: createdItem.price, stockLevel: createdItem.stockLevel },
+          });
+        },
+        onError: async (err) => {
+          await logActivity({
+            userEmail: currentUser?.email || 'unknown',
+            action: 'CREATE_ITEM',
+            entityType: 'Item',
+            entityId: createdItem.partNumber,
+            status: 'ERROR',
+            details: { error: err.message },
+          });
+        },
+        triggerToast,
+        successMsg: `Created component SKU: ${createdItem.partNumber}`,
+        errorMsg: 'Failed to create component SKU.',
       });
-      if (!res.ok) {
-        const text = await res.text().catch(() => 'unknown error');
-        console.error('Failed to create item in DB:', res.status, text);
-        await logActivity({
-          userEmail: currentUser?.email || 'unknown',
-          action: 'CREATE_ITEM',
-          entityType: 'Item',
-          entityId: createdItem.partNumber,
-          status: 'ERROR',
-          details: { error: text }
-        });
-        triggerToast("Failed to sync new item to database.");
-        return;
-      }
-
-      await fetch('/api/transactions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...newTrx, trxId: newTrx.id }),
-      });
-
-      setItems(prev => [createdItem, ...prev]);
-      setTransactions(prev => [newTrx, ...prev]);
-      await logActivity({
-        userEmail: currentUser?.email || 'unknown',
-        action: 'CREATE_ITEM',
-        entityType: 'Item',
-        entityId: createdItem.partNumber,
-        details: { name: createdItem.name, price: createdItem.price, stockLevel: createdItem.stockLevel }
-      });
-      triggerToast(`Created component SKU: ${createdItem.partNumber}`);
-    } catch (err) {
-      console.error('Error syncing changes to DB:', err);
-      await logActivity({
-        userEmail: currentUser?.email || 'unknown',
-        action: 'CREATE_ITEM',
-        entityType: 'Item',
-        entityId: createdItem.partNumber,
-        status: 'ERROR',
-        details: { error: (err as any).message }
-      });
-      triggerToast("Network error: Failed to sync changes.", "ERROR");
     } finally {
       setSyncRotated(false);
     }
@@ -954,129 +990,140 @@ export default function App() {
     return payload;
   };
 
-  const saveItemToDB = async (item: Item) => {
-    try {
-      const payload = mapItemToPayload(item);
-      const res = await fetch(`${API_BASE}/api/items/${encodeURIComponent(item.partNumber)}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) {
-        const text = await res.text().catch(() => 'unknown error');
-        console.error('Failed to persist item to DB:', res.status, text);
-      }
-    } catch (err) {
-      console.error('Error saving item to DB:', err);
+  // Used to bulk-persist items (bookings, ledger side effects, sync flows).
+  // Callers that want to observe failure per item can catch the throw;
+  // callers that already fire-and-forget in a loop can wrap in .catch(noop).
+  // Historically this swallowed non-2xx responses and only logged them —
+  // that meant an optimistic update in the UI would never get rolled back
+  // even when the server rejected the write.
+  const saveItemToDB = async (item: Item): Promise<void> => {
+    const payload = mapItemToPayload(item);
+    const res = await fetch(`${API_BASE}/api/items/${encodeURIComponent(item.partNumber)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => 'unknown error');
+      throw new Error(`PATCH /api/items/${item.partNumber} → ${res.status}: ${text.slice(0, 200)}`);
     }
   };
 
   const handleSaveSupplier = async (supplier: Supplier) => {
+    const isNew = !suppliers.find(s => s.id === supplier.id);
+    // Close the modal immediately so the list flash-updates behind it.
+    setShowSupplierModal(false);
+    setSyncRotated(true);
     try {
-      setSyncRotated(true);
-      const isNew = !suppliers.find(s => s.id === supplier.id);
-      const payload = {
-        id: supplier.id,
-        name: supplier.name,
-        website: supplier.website,
-        contact_email: supplier.contact_email,
-        notes: supplier.notes,
-        lead_time: supplier.leadTime,
-        response_time: supplier.responseTime,
-      };
-      const res = await fetch('/api/suppliers', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+      await optimisticUpdate({
+        snapshot: () => suppliers,
+        applyOptimistic: () => {
+          setSuppliers(prev => {
+            const exists = prev.find(s => s.id === supplier.id);
+            if (exists) return prev.map(s => s.id === supplier.id ? supplier : s);
+            return [supplier, ...prev];
+          });
+        },
+        rollback: (snap) => setSuppliers(snap),
+        request: () => fetch('/api/suppliers', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: supplier.id,
+            name: supplier.name,
+            website: supplier.website,
+            contact_email: supplier.contact_email,
+            notes: supplier.notes,
+            lead_time: supplier.leadTime,
+            response_time: supplier.responseTime,
+          }),
+        }),
+        onSuccess: async () => {
+          await logActivity({
+            userEmail: currentUser?.email || 'unknown',
+            action: isNew ? 'CREATE_SUPPLIER' : 'UPDATE_SUPPLIER',
+            entityType: 'Supplier',
+            entityId: supplier.id,
+            details: { name: supplier.name, website: supplier.website },
+          });
+        },
+        onError: async (err) => {
+          await logActivity({
+            userEmail: currentUser?.email || 'unknown',
+            action: isNew ? 'CREATE_SUPPLIER' : 'UPDATE_SUPPLIER',
+            entityType: 'Supplier',
+            entityId: supplier.id,
+            status: 'ERROR',
+            details: { error: err.message },
+          });
+        },
+        triggerToast,
+        successMsg: `Supplier ${supplier.name} saved successfully.`,
+        errorMsg: `Failed to save supplier ${supplier.name}.`,
       });
-      if (!res.ok) throw new Error('Failed to save supplier');
-
-      setSuppliers(prev => {
-        const exists = prev.find(s => s.id === supplier.id);
-        if (exists) {
-          return prev.map(s => s.id === supplier.id ? supplier : s);
-        }
-        return [supplier, ...prev];
-      });
-      await logActivity({
-        userEmail: currentUser?.email || 'unknown',
-        action: isNew ? 'CREATE_SUPPLIER' : 'UPDATE_SUPPLIER',
-        entityType: 'Supplier',
-        entityId: supplier.id,
-        details: { name: supplier.name, website: supplier.website }
-      });
-      triggerToast(`Supplier ${supplier.name} saved successfully.`);
-      setShowSupplierModal(false);
-    } catch (err) {
-      console.error('Error saving supplier:', err);
-      await logActivity({
-        userEmail: currentUser?.email || 'unknown',
-        action: 'CREATE_SUPPLIER',
-        entityType: 'Supplier',
-        entityId: supplier.id,
-        status: 'ERROR',
-        details: { error: (err as any).message }
-      });
-      triggerToast('Failed to save supplier', 'ERROR');
     } finally {
       setSyncRotated(false);
     }
   };
 
-  // Save edited item details
+  // Save edited item details.
+  //
+  // Optimistic path: swap the row in-place, fire the PATCH in the background,
+  // rollback + error toast if the server rejects it. The previous version did
+  // a full /api/items refetch after every save to work around Neon read-after-write
+  // lag — that's now handled by the server-side PATCH's 15-attempt retry loop,
+  // so the client can trust its own updated model.
   const handleSaveItemDetail = async (updatedItem: Item) => {
+    setSyncRotated(true);
     try {
-      setSyncRotated(true);
-      await saveItemToDB(updatedItem);
-
-      // DATABASE PULL WORKAROUND: After saving, refetch all items from database
-      // to ensure we have the authoritative state (handles Neon consistency issues)
-      const response = await fetch('/api/items');
-      if (response.ok) {
-        // Raw rows MUST be mapped to the Item shape — setItems(rawRows) renders
-        // the whole app with undefined partNumber/price/stockLevel fields.
-        const freshItems = mapDbRowsToItems(await response.json());
-        if (freshItems.length > 0) {
-          setItems(freshItems);
-        } else {
+      await optimisticUpdate({
+        snapshot: () => items,
+        applyOptimistic: () => {
           setItems(prev => prev.map(i => i.partNumber === updatedItem.partNumber ? updatedItem : i));
-        }
-      } else {
-        // Fallback: use the updated item if refetch fails
-        setItems(prev => prev.map(i => i.partNumber === updatedItem.partNumber ? updatedItem : i));
-      }
-
-      await logActivity({
-        userEmail: currentUser?.email || 'unknown',
-        action: 'UPDATE_ITEM',
-        entityType: 'Item',
-        entityId: updatedItem.partNumber,
-        details: { name: updatedItem.name, price: updatedItem.price, status: updatedItem.status }
+        },
+        rollback: (snap) => setItems(snap),
+        request: () => fetch(`${API_BASE}/api/items/${encodeURIComponent(updatedItem.partNumber)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(mapItemToPayload(updatedItem)),
+        }),
+        onSuccess: async () => {
+          await logActivity({
+            userEmail: currentUser?.email || 'unknown',
+            action: 'UPDATE_ITEM',
+            entityType: 'Item',
+            entityId: updatedItem.partNumber,
+            details: { name: updatedItem.name, price: updatedItem.price, status: updatedItem.status },
+          });
+        },
+        onError: async (err) => {
+          await logActivity({
+            userEmail: currentUser?.email || 'unknown',
+            action: 'UPDATE_ITEM',
+            entityType: 'Item',
+            entityId: updatedItem.partNumber,
+            status: 'ERROR',
+            details: { error: err.message },
+          });
+        },
+        triggerToast,
+        successMsg: `Successfully saved parameters for SKU: ${updatedItem.partNumber}`,
+        errorMsg: 'Error: Failed to save changes to database.',
       });
-      triggerToast(`Successfully saved parameters for SKU: ${updatedItem.partNumber}`);
-    } catch (err) {
-      console.error('Failed to save item detail:', err);
-      await logActivity({
-        userEmail: currentUser?.email || 'unknown',
-        action: 'UPDATE_ITEM',
-        entityType: 'Item',
-        entityId: updatedItem.partNumber,
-        status: 'ERROR',
-        details: { error: (err as any).message }
-      });
-      triggerToast("Error: Failed to save changes to database.", "ERROR");
     } finally {
       setSyncRotated(false);
     }
   };
 
+  // Post-delete callback fired by ItemDetailModal after it has already sent
+  // DELETE /api/items/:sn. This handler just syncs the client state and logs.
+  // Previous versions did a full /api/items refetch after — dropped, since
+  // the modal wouldn't fire this callback unless the server confirmed success.
   const handleDeleteItem = async (deletedItem: Item) => {
+    setSyncRotated(true);
     try {
-      setSyncRotated(true);
       setItems(prev => prev.filter(i => i.partNumber !== deletedItem.partNumber));
       setSelectedDetailPartNumber(null);
-
-      // Log the deletion
       await logActivity({
         userEmail: currentUser?.email || 'unknown',
         action: 'DELETE_ITEM',
@@ -1085,35 +1132,14 @@ export default function App() {
         details: {
           name: deletedItem.name,
           sku: deletedItem.partNumber,
-          itemSnapshot: JSON.stringify(deletedItem)
-        }
+          itemSnapshot: JSON.stringify(deletedItem),
+        },
       });
-
-      // Database-pull workaround: Refetch all items to ensure deletion persists
-      try {
-        const response = await fetch('/api/items');
-        if (response.ok) {
-          // Map raw rows to the Item shape — raw rows in state break every view.
-          const freshItems = mapDbRowsToItems(await response.json());
-          if (freshItems.length > 0) setItems(freshItems);
-        }
-      } catch (refetchErr) {
-        console.error('Failed to refetch items after delete:', refetchErr);
-        // Fall back to local removal which we already did
-      }
-
       triggerToast(`Successfully deleted SKU: ${deletedItem.partNumber}`);
     } catch (err) {
-      console.error('Failed to delete item:', err);
-      await logActivity({
-        userEmail: currentUser?.email || 'unknown',
-        action: 'DELETE_ITEM',
-        entityType: 'Item',
-        entityId: deletedItem.partNumber,
-        status: 'ERROR',
-        details: { error: (err as any).message }
-      });
-      triggerToast("Error: Failed to delete item from database.", "ERROR");
+      // Only reachable if logActivity itself throws — the delete already
+      // succeeded server-side, so we don't roll the state change back.
+      console.error('Failed to log item deletion:', err);
     } finally {
       setSyncRotated(false);
     }
@@ -1861,15 +1887,17 @@ export default function App() {
                   setEditingSupplier={setEditingSupplier}
                   onDeleteSupplier={async (s) => {
                     if (!confirm(`Delete supplier "${s.name}" (${s.id})?\n\nThis is only allowed when no bills, POs, or inventory items reference the supplier.`)) return;
-                    try {
-                      const res = await fetch(`/api/suppliers/${encodeURIComponent(s.id)}`, { method: 'DELETE' });
-                      const body = await res.json().catch(() => ({}));
-                      if (!res.ok) throw new Error(body.error || 'Delete failed');
-                      setSuppliers(prev => prev.filter(x => x.id !== s.id));
-                      triggerToast(`Supplier "${s.name}" deleted.`, 'SUCCESS');
-                    } catch (err: any) {
-                      triggerToast(err.message || 'Failed to delete supplier', 'ERROR');
-                    }
+                    await optimisticUpdate({
+                      snapshot: () => suppliers,
+                      applyOptimistic: () => setSuppliers(prev => prev.filter(x => x.id !== s.id)),
+                      rollback: (snap) => setSuppliers(snap),
+                      request: () => fetch(`/api/suppliers/${encodeURIComponent(s.id)}`, { method: 'DELETE' }),
+                      triggerToast,
+                      successMsg: `Supplier "${s.name}" deleted.`,
+                      // Common failure: FK constraint from bills/POs. Server returns
+                      // a helpful message; we surface a generic one plus the code.
+                      errorMsg: `Failed to delete supplier "${s.name}" — it may still be referenced by bills, POs, or inventory.`,
+                    });
                   }}
                 />
               );

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { BookOpen, ExternalLink, Plus, Pencil, Trash2, Save, X, Upload, Paperclip, FileText } from 'lucide-react';
+import { optimisticUpdate } from '../../lib/optimisticUpdate';
 
 interface DocLink {
   id: number;
@@ -47,15 +48,15 @@ export const DocumentationView: React.FC<DocumentationViewProps> = ({ currentUse
 
   const handleDelete = async (doc: DocLink) => {
     if (!confirm(`Remove "${doc.title}" from the docs page? The linked file itself is not touched.`)) return;
-    try {
-      const res = await fetch(`/api/docs/${doc.id}`, { method: 'DELETE' });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
-      triggerToast('Doc removed.', 'SUCCESS');
-      await load();
-    } catch (err: any) {
-      triggerToast(err.message || 'Failed to remove', 'ERROR');
-    }
+    await optimisticUpdate({
+      snapshot: () => docs,
+      applyOptimistic: () => setDocs(prev => prev.filter(d => d.id !== doc.id)),
+      rollback: (snap) => setDocs(snap),
+      request: () => fetch(`/api/docs/${doc.id}`, { method: 'DELETE' }),
+      triggerToast,
+      successMsg: 'Doc removed.',
+      errorMsg: `Failed to remove "${doc.title}"`,
+    });
   };
 
   // Previously used window.open with a same-tab fallback, but some popup

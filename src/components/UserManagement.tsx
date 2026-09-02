@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Plus, Trash2, Edit2, User as UserIcon, Search, Shield, CheckCircle2, XCircle, Clock, KeyRound, Users as UsersIcon, AlertTriangle } from 'lucide-react';
 import { User, UserRole, UserStatus } from '../types';
+import { optimisticUpdate } from '../lib/optimisticUpdate';
 
 interface UserManagementProps {
   triggerToast: (msg: string, type?: string) => void;
@@ -184,15 +185,19 @@ export default function UserManagement({ triggerToast }: UserManagementProps) {
 
   const handleDelete = async (id: number | undefined) => {
     if (!id) return;
-    try {
-      const res = await fetch(`/api/users/${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      triggerToast('User deleted', 'success');
-      setConfirmDeleteId(null);
-      fetchUsers();
-    } catch (err: any) {
-      triggerToast(err.message, 'error');
-    }
+    // Close the confirm dialog immediately; the row disappears from the
+    // table under the user's cursor. If the DELETE fails, the row snaps
+    // back and an error toast surfaces.
+    setConfirmDeleteId(null);
+    await optimisticUpdate({
+      snapshot: () => users,
+      applyOptimistic: () => setUsers(prev => prev.filter(u => u.id !== id)),
+      rollback: (snap) => setUsers(snap),
+      request: () => fetch(`/api/users/${id}`, { method: 'DELETE' }),
+      triggerToast,
+      successMsg: 'User deleted',
+      errorMsg: 'Failed to delete user',
+    });
   };
 
   // Filtered + searched users
