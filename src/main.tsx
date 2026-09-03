@@ -17,22 +17,24 @@ console.error = function (...args: any[]) {
   return originalError.apply(console, args);
 };
 
-// Route dev-server /api requests to the backend and, everywhere, attach the
-// current session id so admin-gated endpoints know who's calling. Doing this
-// once at the app boundary means every fetch — including third-party libs —
-// picks up auth automatically.
+// Attach the current session id to every /api call so admin-gated
+// endpoints know who's calling. Doing this once at the app boundary
+// means every fetch — including third-party libs — picks up auth
+// automatically without prop-drilling a wrapper.
+//
+// Historical note: this wrapper used to also rewrite relative /api
+// URLs to `http://127.0.0.1:3001` in dev. That was redundant with
+// Vite's own proxy (see vite.config.ts server.proxy) and actively
+// broke authenticated fetches — going cross-origin triggers a CORS
+// preflight on X-Session-Id, which the server deliberately doesn't
+// allow (CSRF-lite; the header travels only same-origin). With the
+// rewrite gone, every /api call now goes to Vite on :3000, which
+// proxies same-origin to the backend on :3001. No preflight, header
+// travels fine.
 const originalFetch = window.fetch;
 window.fetch = function (input, init) {
-  const isDevProxy = window.location.port === '3000';
-  if (isDevProxy) {
-    if (typeof input === 'string' && input.startsWith('/api')) {
-      input = 'http://127.0.0.1:3001' + input;
-    } else if (input instanceof URL && input.pathname.startsWith('/api')) {
-      input = new URL(input.pathname, 'http://127.0.0.1:3001');
-    }
-  }
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url;
-  const isApiCall = /(^|\/\/[^/]+)?\/api\b/.test(url) || (isDevProxy && url.includes('127.0.0.1:3001'));
+  const isApiCall = /(^|\/\/[^/]+)?\/api\b/.test(url);
   if (isApiCall) {
     const sessionId = localStorage.getItem('sessionId');
     if (sessionId) {
