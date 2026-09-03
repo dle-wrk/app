@@ -219,17 +219,23 @@ export default function App() {
   const [isSavingSettings, setIsSavingSettings] = useState<boolean>(false);
   const [showToast, setShowToast] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string>('');
+  const [toastType, setToastType] = useState<'SUCCESS' | 'ERROR' | 'INFO'>('SUCCESS');
 
   /**
    * Universal Toast trigger for system-wide notifications. Accepts a loose
-   * string type for caller convenience — currently ignored because the
-   * toast UI is neutral, but the signature keeps callers portable if we
-   * ever wire per-severity styling back up.
+   * string type (callers pass 'error'/'success'/'info' in any case) and
+   * normalises to the strict union the toast UI switches styling on.
    */
   // useCallback with an empty dep list keeps a single stable reference across
   // the app's lifetime — child effects that depend on triggerToast in their
   // dep arrays no longer refetch on every App render.
-  const triggerToast = useCallback((message: string, _type: string = 'SUCCESS') => {
+  const triggerToast = useCallback((message: string, type: string = 'SUCCESS') => {
+    const normalised = String(type).toUpperCase();
+    const t: 'SUCCESS' | 'ERROR' | 'INFO' =
+      normalised === 'ERROR' ? 'ERROR' :
+      normalised === 'INFO' ? 'INFO' :
+      'SUCCESS';
+    setToastType(t);
     setToastMessage(message);
     setShowToast(true);
     setTimeout(() => setShowToast(false), 4000);
@@ -2138,18 +2144,31 @@ if (currentView === 'alternates') {
             confirmDialog(...) instead of window.confirm(). */}
         <ConfirmDialogHost />
 
-        {/* Global floating notification Toast system */}
-        {showToast && (
-          <div
-            onClick={() => setShowToast(false)}
-            className="fixed bottom-[24px] right-[24px] glass-panel px-lg py-md rounded-xl shadow-2xl border-primary/40 transform transition-all duration-300 z-50 flex items-center gap-md cursor-pointer translate-y-0 opacity-100"
-          >
-            <span className="w-2 h-2 rounded-full bg-green-500 animate-ping shrink-0"></span>
-            <span className="text-xs font-bold font-sans">
-              {toastMessage}
-            </span>
-          </div>
-        )}
+        {/* Global floating notification Toast system.
+            Per-severity styling: green for SUCCESS, red for ERROR,
+            primary/blue for INFO. Colour is on the ping dot AND the
+            border, so the severity is legible even from peripheral
+            vision when the user is looking at the source of the write. */}
+        {showToast && (() => {
+          const styles = toastType === 'ERROR'
+            ? { dot: 'bg-red-500', border: 'border-red-500/40' }
+            : toastType === 'INFO'
+              ? { dot: 'bg-blue-500', border: 'border-blue-500/40' }
+              : { dot: 'bg-green-500', border: 'border-green-500/40' };
+          return (
+            <div
+              onClick={() => setShowToast(false)}
+              role="status"
+              aria-live={toastType === 'ERROR' ? 'assertive' : 'polite'}
+              className={`fixed bottom-[24px] right-[24px] glass-panel px-lg py-md rounded-xl shadow-2xl ${styles.border} transform transition-all duration-300 z-50 flex items-center gap-md cursor-pointer translate-y-0 opacity-100`}
+            >
+              <span className={`w-2 h-2 rounded-full ${styles.dot} animate-ping shrink-0`}></span>
+              <span className="text-xs font-bold font-sans">
+                {toastMessage}
+              </span>
+            </div>
+          );
+        })()}
 
         {/* Integrated Modal Form for adding new SKUs */}
         {showAddModal && (
