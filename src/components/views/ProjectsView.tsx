@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Plus, Folder, X, Link as LinkIcon, Trash2, Edit, Search, Calendar, Users, FileText, CheckCircle2, AlertTriangle, Activity } from 'lucide-react';
 import { Item, Project, JobCard } from '../../types';
 

@@ -5,7 +5,6 @@ initSentry();
 
 import express from 'express';
 import compression from 'compression';
-import { z } from 'zod';
 import { spawn } from 'child_process';
 import path from 'path';
 import { existsSync } from 'fs';
@@ -13,7 +12,6 @@ import { fileURLToPath } from 'url';
 import cron from 'node-cron';
 import { randomBytes } from 'node:crypto';
 import bcrypt from 'bcryptjs';
-import { checkRateLimit as _checkRateLimit } from './src/lib/serverUtils';
 import {
   registerAuthRoutes,
   attachSessionUser,
@@ -72,7 +70,7 @@ app.use(express.json({ limit: '20mb' }));
 // on a custom header) and no other origin can read localStorage. Frame
 // embedding is disallowed so a malicious iframe can't render the app and
 // scrape via postMessage.
-app.use((req, res, next) => {
+app.use((_req, res, next) => {
   // CSP: allow self + inline styles (Tailwind), data: images (receipts),
   // blob: workers (Tesseract), and wasm eval. External images/APIs limited
   // to the vendors we actually call from the browser (rare — most vendor
@@ -498,29 +496,11 @@ app.get('/api/bootstrap', async (_req, res) => {
 // and user-CRUD routes still in this file.
 // ============================================================================
 
-// General-purpose in-memory rate limiter for non-auth routes. Auth has its own
-// bucket map inside authRoutes to keep quota domains isolated.
-const rateBuckets = new Map<string, number[]>();
-const checkRateLimit = (key: string, max: number, windowMs: number) =>
-  _checkRateLimit(rateBuckets, key, max, windowMs);
-
-// Zod validation middleware factory. Any endpoint that reads req.body should
-// go through one of these so a bad payload returns a clean 400 with the
-// field list instead of crashing the handler with a cryptic pg error.
-// After validation req.body is the *parsed* value — coerced, defaults filled.
-function validateBody<T extends z.ZodTypeAny>(schema: T) {
-  return (req: any, res: any, next: any) => {
-    const parsed = schema.safeParse(req.body);
-    if (!parsed.success) {
-      return res.status(400).json({
-        error: 'Invalid request body',
-        details: parsed.error.flatten(),
-      });
-    }
-    req.body = parsed.data;
-    next();
-  };
-}
+// The old in-file checkRateLimit + validateBody helpers moved with the
+// endpoints that used them. Each extracted route module (authRoutes,
+// docsRoutes, usersRoutes, pricingRoutes) owns its own local copy of
+// validateBody so the schema lives next to the handler that enforces
+// it. serverUtils still exports the shared rate-limit primitive.
 
 app.post('/api/activity-log', async (req, res) => {
   try {

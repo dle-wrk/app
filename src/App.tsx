@@ -1,37 +1,15 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Menu,
-  LayoutDashboard,
-  Boxes,
-  TableProperties,
-  ArrowLeftRight,
-  Tag,
-  Factory,
-  Settings as SettingsIcon,
   Search,
-  Database,
   RefreshCw,
-  FileDown,
   Plus,
   Check,
-  AlertTriangle,
   Download,
-  SlidersHorizontal,
-  ChevronRight,
-  TrendingUp,
   User,
-  Shield,
-  Clock,
-  ExternalLink,
-  HelpCircle,
-  Lightbulb,
   X,
-  PlusCircle,
-  ChevronLeft,
   Upload,
   FileSpreadsheet,
-  AlertCircle,
-  Zap
 } from 'lucide-react';
 import { Item, Transaction, Supplier, ProductionKit, SystemConfig, ViewType, Project, BOMItem, PickPlaceItem, UserProfile, JobCard, Client, ClientOrder, ClientOrderItem, BuildJob, BomStructure, SubAssembly, FieldedAsset, StockLedgerEntry } from './types';
 import { INITIAL_TRANSACTIONS, INITIAL_PRODUCTION_KITS, INITIAL_SYSTEM_CONFIG, INITIAL_BOM_ITEMS, INITIAL_PP_BOM_ITEMS, generateCSVFromItems, CSV_HEADER } from './mockData';
@@ -239,25 +217,18 @@ export default function App() {
   const [isSavingSettings, setIsSavingSettings] = useState<boolean>(false);
   const [showToast, setShowToast] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string>('');
-  const [toastType, setToastType] = useState<'SUCCESS' | 'ERROR' | 'INFO'>('SUCCESS');
 
   /**
-   * Universal Toast trigger for system-wide notifications.
-   * Accepts a loose string type (so callers may pass 'error'/'success'/'info'
-   * in any case) and normalizes it to the strict union the toast UI expects.
+   * Universal Toast trigger for system-wide notifications. Accepts a loose
+   * string type for caller convenience — currently ignored because the
+   * toast UI is neutral, but the signature keeps callers portable if we
+   * ever wire per-severity styling back up.
    */
   // useCallback with an empty dep list keeps a single stable reference across
   // the app's lifetime — child effects that depend on triggerToast in their
   // dep arrays no longer refetch on every App render.
-  const triggerToast = useCallback((message: string, type: string = 'SUCCESS') => {
-    const normalized = type.toUpperCase();
-    const toastType: 'SUCCESS' | 'ERROR' | 'INFO' =
-      normalized === 'ERROR' ? 'ERROR' :
-      normalized === 'INFO' ? 'INFO' :
-      'SUCCESS';
-    console.log('FRONTEND TOAST TRIGGERED:', message, toastType);
+  const triggerToast = useCallback((message: string, _type: string = 'SUCCESS') => {
     setToastMessage(message);
-    setToastType(toastType);
     setShowToast(true);
     setTimeout(() => setShowToast(false), 4000);
   }, []);
@@ -341,8 +312,6 @@ export default function App() {
     email: 'dedw13@gmail.com',
     timezone: 'UTC (Coordinated Universal Time)'
   });
-
-  const [isEditingProfile, setIsEditingProfile] = useState<boolean>(false);
 
   // Custom Project States
   const [projects, setProjects] = useState<Project[]>([]);
@@ -1005,25 +974,6 @@ export default function App() {
     };
     Object.keys(payload).forEach(k => (payload[k] === undefined || payload[k] === null) && delete payload[k]);
     return payload;
-  };
-
-  // Used to bulk-persist items (bookings, ledger side effects, sync flows).
-  // Callers that want to observe failure per item can catch the throw;
-  // callers that already fire-and-forget in a loop can wrap in .catch(noop).
-  // Historically this swallowed non-2xx responses and only logged them —
-  // that meant an optimistic update in the UI would never get rolled back
-  // even when the server rejected the write.
-  const saveItemToDB = async (item: Item): Promise<void> => {
-    const payload = mapItemToPayload(item);
-    const res = await fetch(`${API_BASE}/api/items/${encodeURIComponent(item.partNumber)}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) {
-      const text = await res.text().catch(() => 'unknown error');
-      throw new Error(`PATCH /api/items/${item.partNumber} → ${res.status}: ${text.slice(0, 200)}`);
-    }
   };
 
   const handleSaveSupplier = async (supplier: Supplier) => {
