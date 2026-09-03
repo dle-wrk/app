@@ -12,7 +12,7 @@ import {
   FileSpreadsheet,
 } from 'lucide-react';
 import { Item, Transaction, Supplier, ProductionKit, SystemConfig, ViewType, Project, BOMItem, PickPlaceItem, UserProfile, JobCard, Client, ClientOrder, ClientOrderItem, BuildJob, BomStructure, SubAssembly, FieldedAsset, StockLedgerEntry } from './types';
-import { INITIAL_TRANSACTIONS, INITIAL_PRODUCTION_KITS, INITIAL_SYSTEM_CONFIG, INITIAL_BOM_ITEMS, INITIAL_PP_BOM_ITEMS, generateCSVFromItems, CSV_HEADER } from './mockData';
+import { INITIAL_TRANSACTIONS, INITIAL_PRODUCTION_KITS, INITIAL_SYSTEM_CONFIG, INITIAL_BOM_ITEMS, INITIAL_PP_BOM_ITEMS, CSV_HEADER } from './mockData';
 import { logActivity } from './lib/activityLogger';
 import { optimisticUpdate } from './lib/optimisticUpdate';
 import { setToastHandler } from './lib/toast';
@@ -431,7 +431,6 @@ export default function App() {
   const [dateTimeStr, setDateTimeStr] = useState<string>('Loading system time...');
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
   const [showImportModal, setShowImportModal] = useState<boolean>(false);
-  const [csvFileContent, setCsvFileContent] = useState<string>('');
   const [csvParsedPreview, setCsvParsedPreview] = useState<Item[]>([]);
   const [isDraggingCsv, setIsDraggingCsv] = useState<boolean>(false);
   const [selectedTableTab, setSelectedTableTab] = useState<'Production_Kits' | 'users' | 'Item_Pricing'>('Production_Kits');
@@ -575,7 +574,6 @@ export default function App() {
         if (Array.isArray(itemsRaw)) {
           const mappedItems: Item[] = mapDbRowsToItems(itemsRaw);
           setItems(mappedItems);
-          setCsvFileContent(generateCSVFromItems(mappedItems));
         }
 
         if (Array.isArray(suppliers)) {
@@ -1319,7 +1317,6 @@ export default function App() {
       triggerToast("Network error during import synchronization.");
     }
     setShowImportModal(false);
-    setCsvFileContent('');
     setCsvParsedPreview([]);
   };
 
@@ -1340,9 +1337,7 @@ export default function App() {
       const reader = new FileReader();
       reader.onload = (event) => {
         const text = event.target?.result as string;
-        setCsvFileContent(text);
-        const parsed = parseCSVData(text);
-        setCsvParsedPreview(parsed);
+        setCsvParsedPreview(parseCSVData(text));
       };
       reader.readAsText(file);
     }
@@ -1354,18 +1349,14 @@ export default function App() {
       const reader = new FileReader();
       reader.onload = (event) => {
         const text = event.target?.result as string;
-        setCsvFileContent(text);
-        const parsed = parseCSVData(text);
-        setCsvParsedPreview(parsed);
+        setCsvParsedPreview(parseCSVData(text));
       };
       reader.readAsText(file);
     }
   };
 
   const loadDefaultCSV = () => {
-    setCsvFileContent(CSV_HEADER);
-    const parsed = parseCSVData(CSV_HEADER);
-    setCsvParsedPreview(parsed);
+    setCsvParsedPreview(parseCSVData(CSV_HEADER));
   };
 
   // Blank starter file with just the header row, so users have a correctly
@@ -1447,13 +1438,6 @@ export default function App() {
       setView('dashboard');
     }
   };
-
-  React.useEffect(() => {
-    setCsvFileContent(prev => {
-      if (prev === '') return prev;
-      return generateCSVFromItems(items);
-    });
-  }, [items]);
 
 
   // --- ADDED DYNAMIC FILTER LOGIC ---
@@ -2377,7 +2361,6 @@ if (currentView === 'alternates') {
               <button
                 onClick={() => {
                   setShowImportModal(false);
-                  setCsvFileContent('');
                   setCsvParsedPreview([]);
                 }}
                 className="absolute top-sm right-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high p-1.5 rounded-lg transition-colors cursor-pointer"
@@ -2509,7 +2492,6 @@ if (currentView === 'alternates') {
                     <button
                       type="button"
                       onClick={() => {
-                        setCsvFileContent('');
                         setCsvParsedPreview([]);
                       }}
                       className="border border-outline-variant hover:bg-surface-container-high py-2 rounded font-bold transition-all text-center text-xs cursor-pointer text-on-surface"
