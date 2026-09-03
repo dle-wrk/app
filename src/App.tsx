@@ -864,7 +864,11 @@ export default function App() {
     }));
   };
 
-  // Book In Item Handler
+  // Book In Item Handler — optimistic. Stock and the transaction ledger row
+  // both land in local state before the network call fires; the modal closes
+  // instantly. On failure both are rolled back and the user sees an error
+  // toast. The PATCH and transaction POST are parallelised because they
+  // touch different rows and don't depend on each other.
   const handleBookInItem = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!bookInPartNumber) {
@@ -878,37 +882,28 @@ export default function App() {
       return;
     }
 
-    // Find the item
     const targetItem = items.find(i => i.partNumber === bookInPartNumber);
     if (!targetItem) {
       alert(`SKU component "${bookInPartNumber}" not found in system.`);
       return;
     }
 
-    // Create updated item object
-    const updatedItem = { ...targetItem };
+    const updatedItem: Item = { ...targetItem };
     updatedItem.stockLevel += qtyVal;
     updatedItem.description = bookInDescription || updatedItem.description;
     if (bookInUpdateStandardCost) {
       updatedItem.price = Number(bookInCost) || updatedItem.price;
     }
-
     if (bookInDiscontinued) {
       updatedItem.status = 'DISCONTINUED';
     } else if (updatedItem.status === 'DISCONTINUED') {
-      updatedItem.status = 'ACTIVE'; // Re-activate
+      updatedItem.status = 'ACTIVE';
     }
 
     const now = new Date();
     const nowStr = now.toLocaleString('en-US', {
-      month: 'short',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false
+      month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
     });
-
-    // Create a transaction log
     const newTrx: Transaction = {
       id: `TRX-IN-${updatedItem.partNumber}-${now.getTime()}`,
       itemPartNumber: updatedItem.partNumber,
@@ -919,30 +914,52 @@ export default function App() {
       performedBy: profile.name,
       performedByAvatar: profile.avatarUrl,
       dateTime: nowStr,
-      newCost: Number(bookInCost)
+      newCost: Number(bookInCost),
     };
 
-    try {
-      setSyncRotated(true);
-      await saveItemToDB(updatedItem);
-      await fetch('/api/transactions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...newTrx, trxId: newTrx.id }),
-      });
-
-      setItems(prev => prev.map(i => i.partNumber === updatedItem.partNumber ? updatedItem : i));
-      setTransactions(prev => [newTrx, ...prev]);
-      triggerToast(`Booked in +${qtyVal} units for code SKU: ${updatedItem.partNumber}`);
-    } catch (err) {
-      console.error('Failed to sync booking data:', err);
-      triggerToast("Failed to sync booking data to database.", "ERROR");
-    } finally {
-      setSyncRotated(false);
-    }
-
+    // Close the modal and clear the update-cost flag right away — from the
+    // user's point of view the write is already done.
     setShowBookInModal(false);
     setBookInUpdateStandardCost(false);
+
+    const payload = mapItemToPayload(updatedItem);
+    setSyncRotated(true);
+    void optimisticUpdate({
+      snapshot: () => ({ items, transactions }),
+      applyOptimistic: () => {
+        setItems(prev => prev.map(i => i.partNumber === updatedItem.partNumber ? updatedItem : i));
+        setTransactions(prev => [newTrx, ...prev]);
+      },
+      rollback: (snap) => {
+        setItems(snap.items);
+        setTransactions(snap.transactions);
+      },
+      // Sequence the two writes ourselves so the helper's res.ok check has
+      // a single response to inspect. We surface either failure as one
+      // aggregated Response — the item PATCH is the primary; the ledger
+      // POST is best-effort but its failure still rolls the UI back.
+      request: async () => {
+        const [itemRes, trxRes] = await Promise.all([
+          fetch(`${API_BASE}/api/items/${encodeURIComponent(updatedItem.partNumber)}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          }),
+          fetch('/api/transactions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...newTrx, trxId: newTrx.id }),
+          }),
+        ]);
+        // Report the first failure so optimisticUpdate can pull an error
+        // body off it; if both are OK the helper sees the item response.
+        if (!itemRes.ok) return itemRes;
+        if (!trxRes.ok) return trxRes;
+        return itemRes;
+      },
+      successMsg: `Booked in +${qtyVal} units for code SKU: ${updatedItem.partNumber}`,
+      errorMsg: 'Failed to sync booking data to database.',
+    }).finally(() => setSyncRotated(false));
   };
 
   const API_BASE = '';
@@ -1416,18 +1433,27 @@ export default function App() {
     triggerToast('Downloaded blank CSV import template.');
   };
 
-  // Save Settings handler
+  // Save Settings handler. systemConfig is already updated locally by the
+  // settings form before this fires, so there's nothing to roll back — but
+  // we still need to surface a failing POST so the user knows their changes
+  // didn't actually persist. The old version swallowed both HTTP errors and
+  // network failures silently and just cleared the spinner.
   const handleSaveSettings = async () => {
     setIsSavingSettings(true);
     try {
-      await fetch('/api/settings', {
+      const res = await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(systemConfig),
       });
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        throw new Error(`${res.status} ${res.statusText}${body ? `: ${body.slice(0, 200)}` : ''}`);
+      }
       triggerToast('Configurations successfully applied to database.');
     } catch (err) {
       console.error('Failed to save settings:', err);
+      triggerToast('Failed to save settings — changes may not have been persisted.', 'ERROR');
     } finally {
       setIsSavingSettings(false);
     }

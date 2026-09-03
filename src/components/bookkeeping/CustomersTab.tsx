@@ -1,9 +1,10 @@
 import React, { useMemo, useState } from 'react';
-import { Eye } from 'lucide-react';
+import { Eye, Trash2 } from 'lucide-react';
 import { Client } from '../../types';
 import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, EmptyState, SectionCard } from './shared';
+import { optimisticUpdate } from '../../lib/optimisticUpdate';
 
-export const CustomersTab: React.FC<ModuleDataProps> = ({ clients, invoices, paymentsReceived, triggerToast, refresh }) => {
+export const CustomersTab: React.FC<ModuleDataProps> = ({ clients, setClients, invoices, paymentsReceived, triggerToast }) => {
   const [viewing, setViewing] = useState<Client | null>(null);
   const [showNewClientModal, setShowNewClientModal] = useState(false);
 
@@ -22,17 +23,34 @@ export const CustomersTab: React.FC<ModuleDataProps> = ({ clients, invoices, pay
     return { clientInvoices, clientPayments };
   };
 
+  // Optimistic delete: removes the customer from the list instantly, then
+  // fires DELETE in the background. On failure the row is restored and an
+  // error toast fires. The old code called refresh() after the await, but
+  // refresh() only refetches bookkeeping bootstrap data (invoices, bills,
+  // payments) — not clients — so the deleted row stayed visible until the
+  // user navigated away. That was a real bug, not just a slow write.
   const handleDelete = async (id: number) => {
-    if (!confirm('Delete this customer? This action cannot be undone.')) return;
-    try {
+    if (!setClients) {
+      // Fallback: no setter available, do a synchronous delete + toast.
+      // Shouldn't happen in production (BookkeepingView always passes it),
+      // but keeps the tab usable if a caller forgets to wire it.
+      if (!confirm('Delete this customer? This action cannot be undone.')) return;
       const res = await fetch(`/api/clients/${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error((await res.json()).error || 'Failed to delete');
-      triggerToast('Customer deleted.');
-      await refresh();
+      if (res.ok) triggerToast('Customer deleted.'); else triggerToast('Failed to delete customer', 'ERROR');
       setViewing(null);
-    } catch (err: any) {
-      triggerToast(err.message || 'Failed to delete customer', 'ERROR');
+      return;
     }
+    if (!confirm('Delete this customer? This action cannot be undone.')) return;
+    const wasViewing = viewing?.id === id;
+    if (wasViewing) setViewing(null);
+    await optimisticUpdate({
+      snapshot: () => clients,
+      applyOptimistic: () => setClients(prev => prev.filter(c => c.id !== id)),
+      rollback: (snap) => setClients(snap),
+      request: () => fetch(`/api/clients/${id}`, { method: 'DELETE' }),
+      successMsg: 'Customer deleted.',
+      errorMsg: 'Failed to delete customer',
+    });
   };
 
   return (
@@ -69,6 +87,7 @@ export const CustomersTab: React.FC<ModuleDataProps> = ({ clients, invoices, pay
                   <td className="px-lg py-sm text-right font-mono font-bold">{(balances.get(c.id) || 0) > 0 ? fmtMoney(balances.get(c.id)) : '—'}</td>
                   <td className="px-lg py-sm text-right flex gap-1 justify-end">
                     <button onClick={() => setViewing(c)} className="p-1.5 rounded hover:bg-surface-container-high text-on-surface-variant" title="Statement"><Eye className="w-3.5 h-3.5" /></button>
+                    <button onClick={() => handleDelete(c.id)} className="p-1.5 rounded hover:bg-error/10 text-error" title="Delete customer"><Trash2 className="w-3.5 h-3.5" /></button>
                   </td>
                 </tr>
               ))}
@@ -122,9 +141,16 @@ export const CustomersTab: React.FC<ModuleDataProps> = ({ clients, invoices, pay
       })()}
 
       {showNewClientModal && (
-        <NewClientModal 
+        <NewClientModal
           onClose={() => setShowNewClientModal(false)}
-          onSaved={async () => { setShowNewClientModal(false); await refresh(); }}
+          // Insert the returned client straight into App state — refresh() would
+          // only refetch bookkeeping bootstrap (invoices/bills/POs), not the
+          // clients list, so without this the newly created customer wouldn't
+          // appear in the table until the user reloaded the page.
+          onSaved={(newClient) => {
+            setShowNewClientModal(false);
+            if (setClients && newClient) setClients(prev => [...prev, newClient]);
+          }}
           triggerToast={triggerToast}
         />
       )}
@@ -134,7 +160,7 @@ export const CustomersTab: React.FC<ModuleDataProps> = ({ clients, invoices, pay
 
 const NewClientModal: React.FC<{
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (newClient?: Client) => void;
   triggerToast: (m: string, t?: 'SUCCESS' | 'ERROR' | 'INFO') => void;
 }> = ({ onClose, onSaved, triggerToast }) => {
   const [clientName, setClientName] = useState('');
@@ -166,8 +192,9 @@ const NewClientModal: React.FC<{
         }),
       });
       if (!res.ok) throw new Error((await res.json()).error || 'Failed to create customer');
+      const created = await res.json().catch(() => null);
       triggerToast('Customer created successfully.');
-      onSaved();
+      onSaved(created ?? undefined);
     } catch (err: any) {
       triggerToast(err.message || 'Failed to create customer', 'ERROR');
     } finally {
