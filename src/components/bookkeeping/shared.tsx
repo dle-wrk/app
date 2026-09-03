@@ -110,19 +110,34 @@ const MODAL_WIDTHS: Record<string, string> = {
   'max-w-sm': '384px', 'max-w-md': '448px', 'max-w-lg': '512px',
   'max-w-xl': '576px', 'max-w-2xl': '672px', 'max-w-3xl': '768px', 'max-w-4xl': '896px',
 };
-export const Modal: React.FC<{ title: string; subtitle?: string; onClose: () => void; children: React.ReactNode; maxWidth?: string }> = ({ title, subtitle, onClose, children, maxWidth = 'max-w-2xl' }) => (
-  <div className="fixed inset-0 bg-background/80 backdrop-blur-xs flex items-center justify-center z-100 p-md" onClick={onClose}>
-    <div className="bg-surface-container rounded-xl border border-outline-variant w-full p-lg shadow-2xl relative max-h-[90vh] overflow-y-auto custom-scrollbar" style={{ maxWidth: MODAL_WIDTHS[maxWidth] || maxWidth }} onClick={(e) => e.stopPropagation()}>
-      <button onClick={onClose} aria-label="Close modal" className="absolute top-sm right-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high p-1.5 rounded-lg transition-colors">
-        <X className="w-4 h-4" />
-      </button>
-      <h4 className="font-headline-sm text-lg font-black text-primary block mb-1 select-none tracking-tighter leading-none">{title}</h4>
-      {subtitle && <p className="text-xs text-on-surface-variant mb-md">{subtitle}</p>}
-      {!subtitle && <div className="mb-md" />}
-      {children}
+export const Modal: React.FC<{ title: string; subtitle?: string; onClose: () => void; children: React.ReactNode; maxWidth?: string }> = ({ title, subtitle, onClose, children, maxWidth = 'max-w-2xl' }) => {
+  // Escape-to-dismiss. Every bookkeeping tab uses this wrapper (bills,
+  // invoices, POs, customers, vendors, payments, expenses) so this one
+  // handler covers the whole surface. Bookkeeping modals aren't nested,
+  // so a single window-level listener is fine — if we ever add nesting
+  // we'd need to stack them and only fire the top one.
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 bg-background/80 backdrop-blur-xs flex items-center justify-center z-100 p-md" onClick={onClose}>
+      <div className="bg-surface-container rounded-xl border border-outline-variant w-full p-lg shadow-2xl relative max-h-[90vh] overflow-y-auto custom-scrollbar" style={{ maxWidth: MODAL_WIDTHS[maxWidth] || maxWidth }} onClick={(e) => e.stopPropagation()}>
+        <button onClick={onClose} aria-label="Close modal" className="absolute top-sm right-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high p-1.5 rounded-lg transition-colors">
+          <X className="w-4 h-4" />
+        </button>
+        <h4 className="font-headline-sm text-lg font-black text-primary block mb-1 select-none tracking-tighter leading-none">{title}</h4>
+        {subtitle && <p className="text-xs text-on-surface-variant mb-md">{subtitle}</p>}
+        {!subtitle && <div className="mb-md" />}
+        {children}
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 export const StatCard: React.FC<{ label: string; value: string; accent?: 'primary' | 'secondary' | 'tertiary' | 'error' | 'green'; sub?: string; icon?: React.ReactNode }> = ({ label, value, accent = 'primary', sub, icon }) => {
   const colorClass = accent === 'error' ? 'text-error' : accent === 'green' ? 'text-green-400' : accent === 'secondary' ? 'text-secondary' : accent === 'tertiary' ? 'text-tertiary' : 'text-primary';
