@@ -56,51 +56,11 @@ export function addDaysISO(days: number, from?: string): string {
 // ============================================================================
 // FETCH HELPERS
 // ============================================================================
-
-export class ApiError extends Error {}
-
-async function handleResponse(res: Response) {
-  if (!res.ok) {
-    let message = `Request failed (${res.status})`;
-    try {
-      const body = await res.json();
-      message = body.error || message;
-    } catch {
-      // ignore
-    }
-    throw new ApiError(message);
-  }
-  if (res.status === 204) return null;
-  return res.json();
-}
-
-export async function apiGet(url: string) {
-  const res = await fetch(url);
-  return handleResponse(res);
-}
-
-export async function apiPost(url: string, body?: any) {
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body ?? {}),
-  });
-  return handleResponse(res);
-}
-
-export async function apiPut(url: string, body?: any) {
-  const res = await fetch(url, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body ?? {}),
-  });
-  return handleResponse(res);
-}
-
-export async function apiDelete(url: string) {
-  const res = await fetch(url, { method: 'DELETE' });
-  return handleResponse(res);
-}
+// Re-exported from '../../lib/api' so the many existing
+// `import { apiGet, apiPost, ApiError } from '../shared'` sites in the
+// bookkeeping tabs keep working without an edit. New callers outside
+// the bookkeeping surface should import from './lib/api' directly.
+export { ApiError, apiGet, apiPost, apiPut, apiPatch, apiDelete } from '../../lib/api';
 
 // ============================================================================
 // UI PRIMITIVES (match the existing Tracklab design system)
