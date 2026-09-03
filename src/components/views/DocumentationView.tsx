@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { BookOpen, ExternalLink, Plus, Pencil, Trash2, Save, X, Upload, Paperclip, FileText } from 'lucide-react';
-import { optimisticUpdate } from '../../lib/optimisticUpdate';
+import { optimisticListDelete } from '../../lib/optimisticUpdate';
 
 interface DocLink {
   id: number;
@@ -48,10 +48,10 @@ export const DocumentationView: React.FC<DocumentationViewProps> = ({ currentUse
 
   const handleDelete = async (doc: DocLink) => {
     if (!confirm(`Remove "${doc.title}" from the docs page? The linked file itself is not touched.`)) return;
-    await optimisticUpdate({
-      snapshot: () => docs,
-      applyOptimistic: () => setDocs(prev => prev.filter(d => d.id !== doc.id)),
-      rollback: (snap) => setDocs(snap),
+    await optimisticListDelete({
+      list: docs,
+      setList: setDocs,
+      matches: d => d.id === doc.id,
       request: () => fetch(`/api/docs/${doc.id}`, { method: 'DELETE' }),
       triggerToast,
       successMsg: 'Doc removed.',

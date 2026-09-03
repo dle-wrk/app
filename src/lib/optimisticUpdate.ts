@@ -1,3 +1,4 @@
+import type { Dispatch, SetStateAction } from 'react';
 import { showToast } from './toast';
 
 // Optimistic-mutation helper for write paths.
@@ -85,4 +86,34 @@ export async function optimisticUpdate<TSnapshot>(opts: OptimisticOptions<TSnaps
     toast(opts.errorMsg, 'ERROR');
     return false;
   }
+}
+
+// Specialisation of optimisticUpdate for the most common shape by far:
+// "remove one row from a React list state, roll it back if the DELETE
+// fails". Every call site had the same skeleton — snapshot the list,
+// filter it, restore the whole list on error — so this hides the four
+// boilerplate lines behind `list` + `setList` + `matches` and lets the
+// caller focus on the endpoint and the messaging. See callers in
+// App.tsx (inline supplier delete), CustomersTab, DocumentationView,
+// and UserManagement.
+export function optimisticListDelete<T>(opts: {
+  list: T[];
+  setList: Dispatch<SetStateAction<T[]>>;
+  matches: (item: T) => boolean;
+  request: () => Promise<Response>;
+  successMsg?: string;
+  errorMsg: string;
+  triggerToast?: (message: string, type?: any) => void;
+  onSuccess?: (res: Response) => void | Promise<void>;
+}): Promise<boolean> {
+  return optimisticUpdate({
+    snapshot: () => opts.list,
+    applyOptimistic: () => opts.setList(prev => prev.filter(item => !opts.matches(item))),
+    rollback: (snap) => opts.setList(snap),
+    request: opts.request,
+    successMsg: opts.successMsg,
+    errorMsg: opts.errorMsg,
+    triggerToast: opts.triggerToast,
+    onSuccess: opts.onSuccess,
+  });
 }

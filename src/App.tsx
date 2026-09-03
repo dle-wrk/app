@@ -14,7 +14,7 @@ import {
 import { Item, Transaction, Supplier, ProductionKit, SystemConfig, ViewType, Project, BOMItem, PickPlaceItem, UserProfile, JobCard, Client, ClientOrder, ClientOrderItem, BuildJob, BomStructure, SubAssembly, FieldedAsset, StockLedgerEntry } from './types';
 import { INITIAL_TRANSACTIONS, INITIAL_PRODUCTION_KITS, INITIAL_SYSTEM_CONFIG, INITIAL_BOM_ITEMS, INITIAL_PP_BOM_ITEMS, CSV_HEADER } from './mockData';
 import { logActivity } from './lib/activityLogger';
-import { optimisticUpdate } from './lib/optimisticUpdate';
+import { optimisticUpdate, optimisticListDelete } from './lib/optimisticUpdate';
 import { setToastHandler } from './lib/toast';
 import BOMManager from './components/BOMManager';
 import { mapDbRowsToItems } from './lib/mapDbItem';
@@ -1847,10 +1847,10 @@ export default function App() {
                   setEditingSupplier={setEditingSupplier}
                   onDeleteSupplier={async (s) => {
                     if (!confirm(`Delete supplier "${s.name}" (${s.id})?\n\nThis is only allowed when no bills, POs, or inventory items reference the supplier.`)) return;
-                    await optimisticUpdate({
-                      snapshot: () => suppliers,
-                      applyOptimistic: () => setSuppliers(prev => prev.filter(x => x.id !== s.id)),
-                      rollback: (snap) => setSuppliers(snap),
+                    await optimisticListDelete({
+                      list: suppliers,
+                      setList: setSuppliers,
+                      matches: x => x.id === s.id,
                       request: () => fetch(`/api/suppliers/${encodeURIComponent(s.id)}`, { method: 'DELETE' }),
                       triggerToast,
                       successMsg: `Supplier "${s.name}" deleted.`,

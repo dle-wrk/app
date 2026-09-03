@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Plus, Trash2, Edit2, User as UserIcon, Search, Shield, CheckCircle2, XCircle, Clock, KeyRound, Users as UsersIcon, AlertTriangle } from 'lucide-react';
 import { User, UserRole, UserStatus } from '../types';
-import { optimisticUpdate } from '../lib/optimisticUpdate';
+import { optimisticListDelete } from '../lib/optimisticUpdate';
 
 interface UserManagementProps {
   triggerToast: (msg: string, type?: string) => void;
@@ -189,10 +189,10 @@ export default function UserManagement({ triggerToast }: UserManagementProps) {
     // table under the user's cursor. If the DELETE fails, the row snaps
     // back and an error toast surfaces.
     setConfirmDeleteId(null);
-    await optimisticUpdate({
-      snapshot: () => users,
-      applyOptimistic: () => setUsers(prev => prev.filter(u => u.id !== id)),
-      rollback: (snap) => setUsers(snap),
+    await optimisticListDelete({
+      list: users,
+      setList: setUsers,
+      matches: u => u.id === id,
       request: () => fetch(`/api/users/${id}`, { method: 'DELETE' }),
       triggerToast,
       successMsg: 'User deleted',

@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Eye, Trash2 } from 'lucide-react';
 import { Client } from '../../types';
 import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, EmptyState, SectionCard } from './shared';
-import { optimisticUpdate } from '../../lib/optimisticUpdate';
+import { optimisticListDelete } from '../../lib/optimisticUpdate';
 
 export const CustomersTab: React.FC<ModuleDataProps> = ({ clients, setClients, invoices, paymentsReceived, triggerToast }) => {
   const [viewing, setViewing] = useState<Client | null>(null);
@@ -43,10 +43,10 @@ export const CustomersTab: React.FC<ModuleDataProps> = ({ clients, setClients, i
     if (!confirm('Delete this customer? This action cannot be undone.')) return;
     const wasViewing = viewing?.id === id;
     if (wasViewing) setViewing(null);
-    await optimisticUpdate({
-      snapshot: () => clients,
-      applyOptimistic: () => setClients(prev => prev.filter(c => c.id !== id)),
-      rollback: (snap) => setClients(snap),
+    await optimisticListDelete({
+      list: clients,
+      setList: setClients,
+      matches: c => c.id === id,
       request: () => fetch(`/api/clients/${id}`, { method: 'DELETE' }),
       successMsg: 'Customer deleted.',
       errorMsg: 'Failed to delete customer',
