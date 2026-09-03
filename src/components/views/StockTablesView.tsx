@@ -559,10 +559,14 @@ export const StockTablesView: React.FC<StockTablesViewProps> = ({
                     </td>
                   </tr>
                 ) : (
-                  filteredKits.map((kit) => {
+                  filteredKits.map((kit, idx) => {
                     const project = projects.find((p) => p.id === kit.projectId);
+                    // kitId can be empty or duplicated on seeded / unsaved
+                    // rows; suffix with the map index so React's unique-key
+                    // warning stops firing. Cost is a slightly less efficient
+                    // reorder-diff, which doesn't matter for this small table.
                     return (
-                      <tr key={kit.kitId} className="hover:bg-surface-variant/10 transition-colors">
+                      <tr key={`${kit.kitId ?? ''}-${idx}`} className="hover:bg-surface-variant/10 transition-colors">
                         <td className="px-4 py-3 text-primary font-bold">{kit.kitId}</td>
                         <td className="px-4 py-3 text-on-surface-variant">{kit.skuReference}</td>
                         <td className="px-4 py-3">
@@ -632,8 +636,11 @@ export const StockTablesView: React.FC<StockTablesViewProps> = ({
                     </td>
                   </tr>
                 ) : (
-                  filteredPricingItems.slice(0, 100).map((item) => (
-                    <tr key={item.partNumber} className="hover:bg-surface-variant/10 transition-colors">
+                  filteredPricingItems.slice(0, 100).map((item, idx) => (
+                    // partNumber can be empty or duplicated when the same
+                    // inventory row is imported from multiple sources; suffix
+                    // with the map index to guarantee uniqueness.
+                    <tr key={`${item.partNumber ?? ''}-${idx}`} className="hover:bg-surface-variant/10 transition-colors">
                       <td className="px-4 py-3 text-primary font-bold">{item.partNumber}</td>
                       <td className="px-4 py-3 text-on-surface max-w-[200px] truncate">{item.name}</td>
                       <td className="px-4 py-3 text-on-surface-variant">{item.manufacturer || '—'}</td>
