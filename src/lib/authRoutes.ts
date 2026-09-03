@@ -19,6 +19,7 @@ import {
   EmailSchema,
   LoginSchema,
   SessionIdSchema,
+  validateBody,
 } from './serverUtils';
 
 // bcrypt cost 10 — ~50ms per hash on cheap hardware, fine for interactive login.
@@ -41,20 +42,6 @@ const CRED_KEY = deriveCredKey(CRED_KEY_MATERIAL);
 const rateBuckets = new Map<string, number[]>();
 const checkRateLimit = (key: string, max: number, windowMs: number) =>
   _checkRateLimit(rateBuckets, key, max, windowMs);
-
-// Zod middleware factory. Duplicated here (not imported from server.ts)
-// because the point of the extraction is to make this module self-contained.
-// If a third router grows to need it, promote it to serverUtils.
-function validateBody<T extends z.ZodTypeAny>(schema: T) {
-  return (req: any, res: any, next: any) => {
-    const parsed = schema.safeParse(req.body);
-    if (!parsed.success) {
-      return res.status(400).json({ error: 'Invalid request body', details: parsed.error.flatten() });
-    }
-    req.body = parsed.data;
-    next();
-  };
-}
 
 // ---------------------------------------------------------------------------
 // Password verification with silent upgrade of legacy formats.

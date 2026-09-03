@@ -163,3 +163,21 @@ export const DocLinkSchema = z.object({
   removeFile: z.boolean().optional().default(false),
 }).refine(v => (v.url && v.url.length > 0) || v.file || v.removeFile === false,
   { message: 'Either a URL or an uploaded file is required.' });
+
+// ---------------------------------------------------------------------------
+// Express middleware: parse-and-replace req.body against a Zod schema.
+// Any endpoint that reads req.body should go through this so a bad payload
+// returns a clean 400 with the field list instead of crashing the handler
+// with a cryptic pg error. After validation, req.body is the *parsed* value
+// — coerced, defaults filled — so handlers can trust its shape.
+// ---------------------------------------------------------------------------
+export function validateBody<T extends z.ZodTypeAny>(schema: T) {
+  return (req: any, res: any, next: any) => {
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Invalid request body', details: parsed.error.flatten() });
+    }
+    req.body = parsed.data;
+    next();
+  };
+}

@@ -10,21 +10,8 @@
 import type { Express } from 'express';
 import { z } from 'zod';
 import { query, queryOne } from './db';
-import { DocLinkSchema, mapDocLink, parseDataUrl } from './serverUtils';
+import { DocLinkSchema, mapDocLink, parseDataUrl, validateBody } from './serverUtils';
 import { requireAdmin } from './authRoutes';
-
-// Zod middleware factory. Duplicated per-router by design — see the note in
-// authRoutes.ts. Promote to serverUtils if a fourth router needs it.
-function validateBody<T extends z.ZodTypeAny>(schema: T) {
-  return (req: any, res: any, next: any) => {
-    const parsed = schema.safeParse(req.body);
-    if (!parsed.success) {
-      return res.status(400).json({ error: 'Invalid request body', details: parsed.error.flatten() });
-    }
-    req.body = parsed.data;
-    next();
-  };
-}
 
 export function registerDocsRoutes(app: Express): void {
   app.get('/api/docs', async (_req, res) => {

@@ -9,21 +9,8 @@ import type { Express } from 'express';
 import { z } from 'zod';
 import bcrypt from 'bcryptjs';
 import { query, queryOne } from './db';
-import { CreateUserSchema, UpdateUserSchema } from './serverUtils';
+import { CreateUserSchema, UpdateUserSchema, validateBody } from './serverUtils';
 import { requireAdmin, BCRYPT_ROUNDS } from './authRoutes';
-
-// Zod middleware factory. Duplicated per-router by design — see the note in
-// authRoutes.ts. Promote to serverUtils if a third router needs it.
-function validateBody<T extends z.ZodTypeAny>(schema: T) {
-  return (req: any, res: any, next: any) => {
-    const parsed = schema.safeParse(req.body);
-    if (!parsed.success) {
-      return res.status(400).json({ error: 'Invalid request body', details: parsed.error.flatten() });
-    }
-    req.body = parsed.data;
-    next();
-  };
-}
 
 // Default role→permission grants used by the one-shot seeder. Kept alongside
 // the seeder route rather than in a config file — this is boot-time data, not
