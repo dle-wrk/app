@@ -129,12 +129,8 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
   };
 
   const handleLinkComponents = async () => {
-    console.log('FRONTEND: handleLinkComponents CALLED');
-    if (!selectedProject) {
-      console.log('FRONTEND: selectedProject is null!');
-      return;
-    }
-    
+    if (!selectedProject) return;
+
     const componentsArray = Object.entries(selectedComponents).map(([stockCode, data]) => ({
       stockCode,
       quantity: data.quantity,
@@ -144,41 +140,33 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
       footprint: items.find(i => i.partNumber === stockCode)?.footprint || '',
       libref: ''
     }));
-    console.log('FRONTEND: componentsArray mapped:', componentsArray.length);
-    
+
     try {
       // Update inventory items with project reference
       for (const [stockCode] of Object.entries(selectedComponents)) {
-        console.log('FRONTEND: PATCHing item project reference:', stockCode);
         await fetch(`/api/items/${encodeURIComponent(stockCode)}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ project: selectedProject.projectName })
         });
-        console.log('FRONTEND: PATCHed item project reference successfully:', stockCode);
       }
-      
+
       // Create BOM entries
-      console.log('FRONTEND: POSTing project BOM entries... url:', `/api/projects/${selectedProject.id}/bom`, 'body:', JSON.stringify({ items: componentsArray }));
-      const bomRes = await fetch(`/api/projects/${selectedProject.id}/bom`, {
+      await fetch(`/api/projects/${selectedProject.id}/bom`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ items: componentsArray })
       });
-      console.log('FRONTEND: POSTed project BOM entries successfully. status:', bomRes.status);
-      
+
       // Create P&P entries
-      console.log('FRONTEND: POSTing project PP entries...');
-      const ppRes = await fetch(`/api/projects/${selectedProject.id}/pp`, {
+      await fetch(`/api/projects/${selectedProject.id}/pp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ items: componentsArray })
       });
-      console.log('FRONTEND: POSTed project PP entries successfully. status:', ppRes.status);
-      
+
       // Create initial job card
-      console.log('FRONTEND: POSTing initial job card...');
-      const jcRes = await fetch('/api/job-cards', {
+      await fetch('/api/job-cards', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -187,29 +175,25 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
           status: 'Pending'
         })
       });
-      console.log('FRONTEND: POSTed initial job card successfully. status:', jcRes.status);
-      
+
       triggerToast(`${Object.keys(selectedComponents).length} components linked to project "${selectedProject.projectName}"`);
       setSelectedComponents({});
       setShowLinkModal(false);
     } catch (err: any) {
-      console.error('FRONTEND ERROR in handleLinkComponents:', err);
+      console.error('Error linking components:', err);
       triggerToast('Failed to link components');
     }
   };
 
   const handleOpenLinkModal = async (project: Project) => {
-    console.log('handleOpenLinkModal CALLED for project:', project.projectName, 'id:', project.id);
     setSelectedProject(project);
     setSearchQuery('');
-    
+
     // Fetch existing BOM items for this project and include inventory items with project assigned
     try {
       const res = await fetch(`/api/projects/${project.id}/bom`);
-      console.log('Fetch response status:', res.status);
       if (res.ok) {
         const existingItems = await res.json();
-        console.log('BOM existing items fetched:', existingItems.length);
         const existingComponents: Record<string, LinkedComponent> = {};
         existingItems.forEach((item: any) => {
           existingComponents[item.stockCode] = {
@@ -230,10 +214,8 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
             };
           }
         });
-        console.log('Final existingComponents:', Object.keys(existingComponents).length);
         setSelectedComponents(existingComponents);
       } else {
-        console.log('Fetch response is NOT ok, checking inventory fallback');
         // Even if no BOM exists, check inventory for items with this project
         const inventoryComponents: Record<string, LinkedComponent> = {};
         items.forEach((invItem) => {
@@ -245,15 +227,13 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
             };
           }
         });
-        console.log('Fallback inventoryComponents:', Object.keys(inventoryComponents).length);
         setSelectedComponents(inventoryComponents);
       }
     } catch (err: any) {
-      console.error('ERROR in handleOpenLinkModal fetch:', err);
+      console.error('Error fetching project BOM:', err);
       setSelectedComponents({});
     }
-    
-    console.log('Setting showLinkModal to true');
+
     setShowLinkModal(true);
   };
 
@@ -744,10 +724,7 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
               </button>
               <button
                 id="sync-btn-raw"
-                onClick={() => {
-                  console.log('FRONTEND: SYNC BUTTON DOM CLICKED');
-                  handleLinkComponents();
-                }}
+                onClick={handleLinkComponents}
                 className="flex-1 bg-primary text-on-primary py-2.5 rounded text-xs font-bold uppercase tracking-wider cursor-pointer"
               >
                 Sync
