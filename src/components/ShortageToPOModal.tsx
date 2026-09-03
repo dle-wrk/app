@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useEscapeKey } from '../lib/useEscapeKey';
 import { AlertTriangle, X } from 'lucide-react';
 import SupplierComparisonModal from './SupplierComparisonModal';
 
@@ -24,6 +25,11 @@ export default function ShortageToPOModal({ shortages, onClose, onSuccess, trigg
   const [customSupplier, setCustomSupplier] = useState<string>('');
   const [saving, setSaving] = useState(false);
   const [showComparison, setShowComparison] = useState(false);
+
+  // Escape closes the price-comparison overlay first if it's open, else
+  // the whole PO modal. Guards keep only one listener active at a time.
+  useEscapeKey(() => setShowComparison(false), showComparison);
+  useEscapeKey(onClose, !showComparison);
 
   const shortageList = shortages.filter(s => s.shortage_qty > 0);
   const poItems = shortageList.filter(s => !s.component_id.toUpperCase().includes('DNF'));

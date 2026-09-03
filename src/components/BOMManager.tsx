@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useEscapeKey } from '../lib/useEscapeKey';
 import { Item, Transaction, Project, BOMItem } from '../types';
 import { mapDbRowsToItems } from '../lib/mapDbItem';
 import { 
@@ -127,6 +128,7 @@ export default function BOMManager({
   const totalShortagesCount = auditResults.filter(r => r.isShortage).length;
 
   const [showBookOutConfirm, setShowBookOutConfirm] = useState(false);
+  useEscapeKey(() => setShowBookOutConfirm(false), showBookOutConfirm);
 
   const requestBookOut = () => {
     if (pcbQty <= 0) {

@@ -1,6 +1,7 @@
 import React from 'react';
 import { X, Loader2 } from 'lucide-react';
 import { Account, TaxRate, Invoice, PaymentReceived, PurchaseOrder, Bill, PaymentMade, Expense, Client, Supplier, Item, ClientOrder } from '../../types';
+import { useEscapeKey } from '../../lib/useEscapeKey';
 
 export interface ModuleDataProps {
   accounts: Account[];
@@ -71,18 +72,9 @@ const MODAL_WIDTHS: Record<string, string> = {
   'max-w-xl': '576px', 'max-w-2xl': '672px', 'max-w-3xl': '768px', 'max-w-4xl': '896px',
 };
 export const Modal: React.FC<{ title: string; subtitle?: string; onClose: () => void; children: React.ReactNode; maxWidth?: string }> = ({ title, subtitle, onClose, children, maxWidth = 'max-w-2xl' }) => {
-  // Escape-to-dismiss. Every bookkeeping tab uses this wrapper (bills,
-  // invoices, POs, customers, vendors, payments, expenses) so this one
-  // handler covers the whole surface. Bookkeeping modals aren't nested,
-  // so a single window-level listener is fine — if we ever add nesting
-  // we'd need to stack them and only fire the top one.
-  React.useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  // Escape-to-dismiss — via the shared hook so this behaviour stays in
+  // lock-step with the inline modals in App.tsx / ItemDetailModal / etc.
+  useEscapeKey(onClose);
 
   return (
     <div className="fixed inset-0 bg-background/80 backdrop-blur-xs flex items-center justify-center z-100 p-md" onClick={onClose}>

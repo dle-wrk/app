@@ -15,6 +15,7 @@ import { Item, Transaction, Supplier, ProductionKit, SystemConfig, ViewType, Pro
 import { INITIAL_TRANSACTIONS, INITIAL_PRODUCTION_KITS, INITIAL_SYSTEM_CONFIG, INITIAL_BOM_ITEMS, INITIAL_PP_BOM_ITEMS, CSV_HEADER } from './mockData';
 import { logActivity } from './lib/activityLogger';
 import { optimisticUpdate, optimisticListDelete } from './lib/optimisticUpdate';
+import { useEscapeKey } from './lib/useEscapeKey';
 import { setToastHandler } from './lib/toast';
 import BOMManager from './components/BOMManager';
 import { mapDbRowsToItems } from './lib/mapDbItem';
@@ -440,6 +441,15 @@ export default function App() {
 
   // Book In State
   const [showBookInModal, setShowBookInModal] = useState<boolean>(false);
+
+  // Escape-to-close each of App's five inline modals. Each hook only
+  // binds a window listener while its own modal is open, so an Escape
+  // press dismisses whatever is on top and nothing else.
+  useEscapeKey(() => setShowAddModal(false), showAddModal);
+  useEscapeKey(() => { setShowImportModal(false); setCsvParsedPreview([]); }, showImportModal);
+  useEscapeKey(() => setShowBookInModal(false), showBookInModal);
+  useEscapeKey(() => setShowSupplierModal(false), showSupplierModal);
+  useEscapeKey(() => { setIsKitModalOpen(false); setEditingKit(null); }, isKitModalOpen);
   const [bookInPartNumber, setBookInPartNumber] = useState<string>('');
   const [bookInDescription, setBookInDescription] = useState<string>('');
   const [bookInCost, setBookInCost] = useState<number>(0);

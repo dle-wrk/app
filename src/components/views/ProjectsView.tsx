@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Plus, Folder, X, Link as LinkIcon, Trash2, Edit, Search, Calendar, Users, FileText, CheckCircle2, AlertTriangle, Activity } from 'lucide-react';
 import { Item, Project, JobCard } from '../../types';
+import { useEscapeKey } from '../../lib/useEscapeKey';
 
 interface ProjectsViewProps {
   projects: Project[];
@@ -38,6 +39,15 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [deletingProject, setDeletingProject] = useState<Project | null>(null);
+
+  // Escape-to-close each of this view's four inline modals. Guarded on
+  // the `enabled` flag so listeners only bind while the corresponding
+  // modal is open, and each closes only its own dialog rather than a
+  // deeper one.
+  useEscapeKey(() => setShowCreateModal(false), showCreateModal);
+  useEscapeKey(() => setEditingProject(null), !!editingProject);
+  useEscapeKey(() => setShowLinkModal(false), showLinkModal);
+  useEscapeKey(() => setDeletingProject(null), !!deletingProject);
 
   const [newProject, setNewProject] = useState({
     projectName: '',

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useEscapeKey } from '../lib/useEscapeKey';
 import { AlertTriangle, X, Loader2, TrendingDown, Package, Clock, RefreshCw } from 'lucide-react';
 
 interface Shortage {
@@ -45,6 +46,7 @@ export default function SupplierComparisonModal({
   const [comparisons, setComparisons] = useState<PriceComparison[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  useEscapeKey(onClose);
   const [selectedSupplier, setSelectedSupplier] = useState<string>('');
 
   useEffect(() => {

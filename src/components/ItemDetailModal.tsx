@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useEscapeKey } from '../lib/useEscapeKey';
 import { Item } from '../types';
 import {
   X,
@@ -85,6 +86,13 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete }: Ite
   const [isEditing, setIsEditing] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  // Escape closes the nested delete-confirm first (if open), else the
+  // whole item modal. The guard on `showDeleteConfirm` means we only
+  // bind the outer close listener when the confirm dialog is not open,
+  // so one Escape press never fires both.
+  useEscapeKey(() => setShowDeleteConfirm(false), showDeleteConfirm);
+  useEscapeKey(onClose, !showDeleteConfirm);
   const [deleteReferences, setDeleteReferences] = useState<{ [key: string]: number }>({});
   const [cascadeDelete, setCascadeDelete] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);

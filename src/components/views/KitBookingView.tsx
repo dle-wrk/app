@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Project } from '../../types';
 import ShortageToPOModal from '../ShortageToPOModal';
+import { useEscapeKey } from '../../lib/useEscapeKey';
 import {
   Package,
   AlertTriangle,
@@ -39,6 +40,9 @@ export default function KitBookingView({ projects, triggerToast }: KitBookingVie
   const [executing, setExecuting] = useState(false);
   const [showShortagePOModal, setShowShortagePOModal] = useState(false);
   const [showConfirmBooking, setShowConfirmBooking] = useState(false);
+
+  useEscapeKey(() => setShowConfirmBooking(false), showConfirmBooking);
+  useEscapeKey(() => setShowShortagePOModal(false), showShortagePOModal);
 
   useEffect(() => {
     if (projects.length > 0 && !projects.find(p => p.id === selectedProjectId)) {
