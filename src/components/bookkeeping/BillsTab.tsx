@@ -5,6 +5,7 @@ import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, addDay
 import { runOcr, OcrResult } from '../../lib/receiptOcr';
 import { LineItemsEditor, EditableLine, newEditableLine } from './LineItemsEditor';
 import { ErrorBoundary } from '../ErrorBoundary';
+import { confirmDialog } from '../../lib/confirmDialog';
 
 const STATUS_FILTERS = ['ALL', 'DRAFT', 'AWAITING_PAYMENT', 'PARTIAL', 'PAID', 'OVERDUE', 'VOID'];
 
@@ -64,7 +65,7 @@ export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
   };
 
   const handleVoid = async (id: number) => {
-    if (!confirm('Void this bill? This posts a reversing journal entry.')) return;
+    if (!(await confirmDialog({ title: 'Void bill', message: 'Void this bill? This posts a reversing journal entry.', confirmLabel: 'Void', destructive: true }))) return;
     setBusy(true);
     try {
       await apiPost(`/api/bills/${id}/void`);
@@ -79,7 +80,7 @@ export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Delete this bill? This action cannot be undone.')) return;
+    if (!(await confirmDialog({ title: 'Delete bill', message: 'Delete this bill? This action cannot be undone.', confirmLabel: 'Delete', destructive: true }))) return;
     setBusy(true);
     try {
       const res = await fetch(`/api/bills/${id}`, { method: 'DELETE' });
@@ -471,7 +472,8 @@ const ReceiptScanModal: React.FC<{
   };
 
   const remove = async () => {
-    if (!bill || !confirm('Remove the attached receipt?')) return;
+    if (!bill) return;
+    if (!(await confirmDialog({ title: 'Remove receipt', message: 'Remove the attached receipt?', confirmLabel: 'Remove', destructive: true }))) return;
     setSaving(true);
     try {
       const res = await fetch(`/api/bills/${bill.id}/receipt`, { method: 'DELETE' });

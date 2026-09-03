@@ -3,6 +3,7 @@ import { Eye, Trash2 } from 'lucide-react';
 import { Client } from '../../types';
 import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, EmptyState, SectionCard } from './shared';
 import { optimisticListDelete } from '../../lib/optimisticUpdate';
+import { confirmDialog } from '../../lib/confirmDialog';
 
 export const CustomersTab: React.FC<ModuleDataProps> = ({ clients, setClients, invoices, paymentsReceived, triggerToast }) => {
   const [viewing, setViewing] = useState<Client | null>(null);
@@ -34,13 +35,13 @@ export const CustomersTab: React.FC<ModuleDataProps> = ({ clients, setClients, i
       // Fallback: no setter available, do a synchronous delete + toast.
       // Shouldn't happen in production (BookkeepingView always passes it),
       // but keeps the tab usable if a caller forgets to wire it.
-      if (!confirm('Delete this customer? This action cannot be undone.')) return;
+      if (!(await confirmDialog({ title: 'Delete customer', message: 'Delete this customer? This action cannot be undone.', confirmLabel: 'Delete', destructive: true }))) return;
       const res = await fetch(`/api/clients/${id}`, { method: 'DELETE' });
       if (res.ok) triggerToast('Customer deleted.'); else triggerToast('Failed to delete customer', 'ERROR');
       setViewing(null);
       return;
     }
-    if (!confirm('Delete this customer? This action cannot be undone.')) return;
+    if (!(await confirmDialog({ title: 'Delete customer', message: 'Delete this customer? This action cannot be undone.', confirmLabel: 'Delete', destructive: true }))) return;
     const wasViewing = viewing?.id === id;
     if (wasViewing) setViewing(null);
     await optimisticListDelete({

@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Search, Filter, Download, RefreshCw, AlertCircle, CheckCircle2, RotateCcw } from 'lucide-react';
 import { fetchActivityLogs } from '../../lib/activityLogger';
+import { confirmDialog } from '../../lib/confirmDialog';
+import { showToast } from '../../lib/toast';
 
 interface ActivityLog {
   id: number;
@@ -93,13 +95,16 @@ export const ActivityLogsView: React.FC<ActivityLogsViewProps> = ({ currentUserE
       const itemSnapshot = details?.itemSnapshot ? JSON.parse(details.itemSnapshot) : null;
 
       if (!itemSnapshot) {
-        alert('Item snapshot not found. Cannot restore.');
+        showToast('Item snapshot not found. Cannot restore.', 'ERROR');
         return;
       }
 
-      if (!window.confirm(`Restore ${log.entity_id}? This will add it back to inventory.`)) {
-        return;
-      }
+      const ok = await confirmDialog({
+        title: 'Restore item',
+        message: `Restore ${log.entity_id}? This will add it back to inventory.`,
+        confirmLabel: 'Restore',
+      });
+      if (!ok) return;
 
       setRestoringId(log.id.toString());
 
@@ -113,12 +118,12 @@ export const ActivityLogsView: React.FC<ActivityLogsViewProps> = ({ currentUserE
         throw new Error('Failed to restore item');
       }
 
-      alert(`Successfully restored ${log.entity_id}`);
+      showToast(`Successfully restored ${log.entity_id}`, 'SUCCESS');
       setRestoringId(null);
       await fetchLogs();
     } catch (error) {
       console.error('Error restoring item:', error);
-      alert(`Failed to restore item: ${(error as any).message}`);
+      showToast(`Failed to restore item: ${(error as any).message}`, 'ERROR');
       setRestoringId(null);
     }
   };
@@ -129,13 +134,16 @@ export const ActivityLogsView: React.FC<ActivityLogsViewProps> = ({ currentUserE
       const projectSnapshot = details?.projectSnapshot ? JSON.parse(details.projectSnapshot) : null;
 
       if (!projectSnapshot) {
-        alert('Project snapshot not found. Cannot restore.');
+        showToast('Project snapshot not found. Cannot restore.', 'ERROR');
         return;
       }
 
-      if (!window.confirm(`Restore project "${details?.projectName}"? This will restore the project with all its data.`)) {
-        return;
-      }
+      const ok = await confirmDialog({
+        title: 'Restore project',
+        message: `Restore project "${details?.projectName}"? This will restore the project with all its data.`,
+        confirmLabel: 'Restore',
+      });
+      if (!ok) return;
 
       setRestoringId(log.id.toString());
 
@@ -149,12 +157,12 @@ export const ActivityLogsView: React.FC<ActivityLogsViewProps> = ({ currentUserE
         throw new Error('Failed to restore project');
       }
 
-      alert(`Successfully restored project "${details?.projectName}"`);
+      showToast(`Successfully restored project "${details?.projectName}"`, 'SUCCESS');
       setRestoringId(null);
       await fetchLogs();
     } catch (error) {
       console.error('Error restoring project:', error);
-      alert(`Failed to restore project: ${(error as any).message}`);
+      showToast(`Failed to restore project: ${(error as any).message}`, 'ERROR');
       setRestoringId(null);
     }
   };

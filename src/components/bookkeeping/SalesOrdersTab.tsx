@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Eye, Trash2 } from 'lucide-react';
 import { ClientOrder } from '../../types';
 import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, apiGet, apiDelete, DangerButton, EmptyState, SectionCard } from './shared';
+import { confirmDialog } from '../../lib/confirmDialog';
 
 export const SalesOrdersTab: React.FC<ModuleDataProps> = ({ clientOrders, clients, triggerToast, refresh }) => {
   const [viewing, setViewing] = useState<any>(null);
@@ -20,7 +21,7 @@ export const SalesOrdersTab: React.FC<ModuleDataProps> = ({ clientOrders, client
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Delete this sales order? This cannot be undone.')) return;
+    if (!(await confirmDialog({ title: 'Delete sales order', message: 'Delete this sales order? This cannot be undone.', confirmLabel: 'Delete', destructive: true }))) return;
     setBusy(true);
     try {
       await apiDelete(`/api/client-orders/${id}`);

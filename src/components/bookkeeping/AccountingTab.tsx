@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Plus, Ban, ChevronDown, ChevronRight as ChevronRightIcon } from 'lucide-react';
 import { Account } from '../../types';
 import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, apiGet, apiPost, apiPut, apiDelete, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
+import { confirmDialog } from '../../lib/confirmDialog';
 
 const ACCOUNT_TYPES = ['ASSET', 'LIABILITY', 'EQUITY', 'INCOME', 'EXPENSE'] as const;
 
@@ -38,7 +39,7 @@ const ChartOfAccountsPanel: React.FC<ModuleDataProps> = ({ accounts, triggerToas
   };
 
   const remove = async (acct: Account) => {
-    if (!confirm(`Delete account ${acct.code} ${acct.name}?`)) return;
+    if (!(await confirmDialog({ title: 'Delete account', message: `Delete account ${acct.code} ${acct.name}?`, confirmLabel: 'Delete', destructive: true }))) return;
     setBusy(acct.id);
     try {
       await apiDelete(`/api/accounts/${acct.id}`);

@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Plus, Ban } from 'lucide-react';
 import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, apiPost, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
+import { confirmDialog } from '../../lib/confirmDialog';
 
 export const ExpensesTab: React.FC<ModuleDataProps> = (props) => {
   const { expenses, triggerToast, refresh } = props;
@@ -13,7 +14,7 @@ export const ExpensesTab: React.FC<ModuleDataProps> = (props) => {
   }, [expenses]);
 
   const handleVoid = async (id: number) => {
-    if (!confirm('Void this expense? This reverses the ledger entry.')) return;
+    if (!(await confirmDialog({ title: 'Void expense', message: 'Void this expense? This reverses the ledger entry.', confirmLabel: 'Void', destructive: true }))) return;
     setBusy(id);
     try {
       await apiPost(`/api/expenses/${id}/void`);

@@ -5,6 +5,7 @@ import {
   ModuleDataProps, Modal, StatusPill, fmtDate, todayISO, apiGet, apiPost, apiPut, apiDelete,
   PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard,
 } from './shared';
+import { confirmDialog } from '../../lib/confirmDialog';
 
 // A dispatch note is a delivery note or a collection note for finished/final project products.
 // It is a fulfillment document only — no ledger posting, no automatic stock movement.
@@ -90,7 +91,7 @@ const DispatchNotesPanel: React.FC<ModuleDataProps & { type: DispatchNoteType }>
   };
 
   const doAction = async (id: number, action: 'issue' | 'complete' | 'cancel', confirmMsg?: string) => {
-    if (confirmMsg && !confirm(confirmMsg)) return;
+    if (confirmMsg && !(await confirmDialog(confirmMsg))) return;
     setBusy(true);
     try {
       await apiPost(`/api/dispatch-notes/${id}/${action}`);
@@ -105,7 +106,7 @@ const DispatchNotesPanel: React.FC<ModuleDataProps & { type: DispatchNoteType }>
   };
 
   const doDelete = async (id: number) => {
-    if (!confirm('Delete this draft note permanently?')) return;
+    if (!(await confirmDialog({ title: 'Delete draft note', message: 'Delete this draft note permanently?', confirmLabel: 'Delete', destructive: true }))) return;
     setBusy(true);
     try {
       await apiDelete(`/api/dispatch-notes/${id}`);

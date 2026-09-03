@@ -3,6 +3,7 @@ import { Plus, Eye, FileText, Trash2 } from 'lucide-react';
 import { PurchaseOrder, Item } from '../../types';
 import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, apiPost, apiPut, apiGet, apiDelete, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
 import { LineItemsEditor, EditableLine, newEditableLine } from './LineItemsEditor';
+import { confirmDialog } from '../../lib/confirmDialog';
 import { ErrorBoundary } from '../ErrorBoundary';
 
 export const PurchaseOrdersTab: React.FC<ModuleDataProps & { onConvertToBill?: (po: PurchaseOrder) => void }> = (props) => {
@@ -35,7 +36,7 @@ export const PurchaseOrdersTab: React.FC<ModuleDataProps & { onConvertToBill?: (
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Delete this draft purchase order? This cannot be undone.')) return;
+    if (!(await confirmDialog({ title: 'Delete draft PO', message: 'Delete this draft purchase order? This cannot be undone.', confirmLabel: 'Delete', destructive: true }))) return;
     setBusy(true);
     try {
       await apiDelete(`/api/purchase-orders/${id}`);

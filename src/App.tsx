@@ -16,6 +16,7 @@ import { INITIAL_TRANSACTIONS, INITIAL_PRODUCTION_KITS, INITIAL_SYSTEM_CONFIG, I
 import { logActivity } from './lib/activityLogger';
 import { optimisticUpdate, optimisticListDelete } from './lib/optimisticUpdate';
 import { useEscapeKey } from './lib/useEscapeKey';
+import { ConfirmDialogHost, confirmDialog } from './lib/confirmDialog';
 import { setToastHandler } from './lib/toast';
 import BOMManager from './components/BOMManager';
 import { mapDbRowsToItems } from './lib/mapDbItem';
@@ -694,7 +695,7 @@ export default function App() {
   const handleAddItem = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newItem.partNumber || !newItem.name) {
-      alert('Please fill out the Part Number and Name fields.');
+      triggerToast('Please fill out the Part Number and Name fields.', 'ERROR');
       return;
     }
 
@@ -849,19 +850,19 @@ export default function App() {
   const handleBookInItem = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!bookInPartNumber) {
-      alert('Please select or specify a valid Stock number.');
+      triggerToast('Please select or specify a valid Stock number.', 'ERROR');
       return;
     }
 
     const qtyVal = Number(bookInQty);
     if (isNaN(qtyVal) || qtyVal <= 0) {
-      alert('Please enter a valid quantity change greater than zero.');
+      triggerToast('Please enter a valid quantity change greater than zero.', 'ERROR');
       return;
     }
 
     const targetItem = items.find(i => i.partNumber === bookInPartNumber);
     if (!targetItem) {
-      alert(`SKU component "${bookInPartNumber}" not found in system.`);
+      triggerToast(`SKU component "${bookInPartNumber}" not found in system.`, 'ERROR');
       return;
     }
 
@@ -1856,7 +1857,13 @@ export default function App() {
                   setShowSupplierModal={setShowSupplierModal}
                   setEditingSupplier={setEditingSupplier}
                   onDeleteSupplier={async (s) => {
-                    if (!confirm(`Delete supplier "${s.name}" (${s.id})?\n\nThis is only allowed when no bills, POs, or inventory items reference the supplier.`)) return;
+                    const ok = await confirmDialog({
+                      title: 'Delete supplier',
+                      message: `Delete supplier "${s.name}" (${s.id})?\n\nThis is only allowed when no bills, POs, or inventory items reference the supplier.`,
+                      confirmLabel: 'Delete',
+                      destructive: true,
+                    });
+                    if (!ok) return;
                     await optimisticListDelete({
                       list: suppliers,
                       setList: setSuppliers,
@@ -2125,6 +2132,11 @@ if (currentView === 'alternates') {
           </div>
           <div className="truncate">© 2026 TRACKLAB IM</div>
         </footer>
+
+        {/* Global themed confirm-dialog host — registers a singleton
+            handler on mount so any part of the app can call
+            confirmDialog(...) instead of window.confirm(). */}
+        <ConfirmDialogHost />
 
         {/* Global floating notification Toast system */}
         {showToast && (

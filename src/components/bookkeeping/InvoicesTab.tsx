@@ -4,6 +4,7 @@ import { Invoice, InvoiceItem } from '../../types';
 import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, addDaysISO, apiPost, apiPut, apiDelete, apiGet, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
 import { LineItemsEditor, EditableLine, newEditableLine, lineTotals } from './LineItemsEditor';
 import { ErrorBoundary } from '../ErrorBoundary';
+import { confirmDialog } from '../../lib/confirmDialog';
 
 const STATUS_FILTERS = ['ALL', 'DRAFT', 'SENT', 'PARTIAL', 'PAID', 'OVERDUE', 'VOID'];
 
@@ -58,7 +59,7 @@ export const InvoicesTab: React.FC<ModuleDataProps> = (props) => {
   };
 
   const handleVoid = async (id: number) => {
-    if (!confirm('Void this invoice? This posts a reversing journal entry and cannot be undone.')) return;
+    if (!(await confirmDialog({ title: 'Void invoice', message: 'Void this invoice? This posts a reversing journal entry and cannot be undone.', confirmLabel: 'Void', destructive: true }))) return;
     setBusy(true);
     try {
       await apiPost(`/api/invoices/${id}/void`);
@@ -73,7 +74,7 @@ export const InvoicesTab: React.FC<ModuleDataProps> = (props) => {
   };
 
   const handleDeleteDraft = async (id: number) => {
-    if (!confirm('Delete this draft invoice permanently?')) return;
+    if (!(await confirmDialog({ title: 'Delete draft invoice', message: 'Delete this draft invoice permanently?', confirmLabel: 'Delete', destructive: true }))) return;
     setBusy(true);
     try {
       await apiDelete(`/api/invoices/${id}`);

@@ -5,6 +5,7 @@ import {
   Modal, fmtMoney, apiGet, apiPost, apiPut, apiDelete,
   PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass,
 } from '../bookkeeping/shared';
+import { confirmDialog } from '../../lib/confirmDialog';
 
 interface ProductionCostsViewProps {
   triggerToast: (msg: string, type?: any) => void;
@@ -55,7 +56,7 @@ export const ProductionCostsView: React.FC<ProductionCostsViewProps> = ({ trigge
   }, [products]);
 
   const handleDelete = async (p: ProductionProduct) => {
-    if (!confirm(`Delete ${p.modelNumber} from the catalog?`)) return;
+    if (!(await confirmDialog({ title: 'Delete product', message: `Delete ${p.modelNumber} from the catalog?`, confirmLabel: 'Delete', destructive: true }))) return;
     setBusy(true);
     try {
       await apiDelete(`/api/production-products/${p.id}`);

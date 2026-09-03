@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { BookOpen, ExternalLink, Plus, Pencil, Trash2, Save, X, Upload, Paperclip, FileText } from 'lucide-react';
 import { optimisticListDelete } from '../../lib/optimisticUpdate';
+import { confirmDialog } from '../../lib/confirmDialog';
 
 interface DocLink {
   id: number;
@@ -47,7 +48,7 @@ export const DocumentationView: React.FC<DocumentationViewProps> = ({ currentUse
   useEffect(() => { load(); }, [load]);
 
   const handleDelete = async (doc: DocLink) => {
-    if (!confirm(`Remove "${doc.title}" from the docs page? The linked file itself is not touched.`)) return;
+    if (!(await confirmDialog({ title: 'Remove doc link', message: `Remove "${doc.title}" from the docs page? The linked file itself is not touched.`, confirmLabel: 'Remove', destructive: true }))) return;
     await optimisticListDelete({
       list: docs,
       setList: setDocs,

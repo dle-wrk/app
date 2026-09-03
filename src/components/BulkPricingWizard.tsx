@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { confirmDialog } from '../lib/confirmDialog';
 import {
   Lock,
   Search,
@@ -179,7 +180,11 @@ export default function BulkPricingWizard({ items, onUpdatePrices, onShowNotific
       return;
     }
     if (!selectedEntries.length && targets.length > 15) {
-      const ok = window.confirm(`Query live prices for ${targets.length} parts? This uses up to ${targets.length * 2} of your daily supplier API calls. Tip: tick specific rows first to query only those.`);
+      const ok = await confirmDialog({
+        title: 'Query live prices',
+        message: `Query live prices for ${targets.length} parts? This uses up to ${targets.length * 2} of your daily supplier API calls.\n\nTip: tick specific rows first to query only those.`,
+        confirmLabel: `Query ${targets.length} parts`,
+      });
       if (!ok) return;
     }
 

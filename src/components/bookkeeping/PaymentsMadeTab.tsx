@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Plus, Ban, Eye } from 'lucide-react';
 import { PaymentMade } from '../../types';
 import { ModuleDataProps, Modal, fmtMoney, fmtDate, todayISO, apiPost, apiGet, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
+import { confirmDialog } from '../../lib/confirmDialog';
 
 export const PaymentsMadeTab: React.FC<ModuleDataProps> = (props) => {
   const { paymentsMade, triggerToast, refresh } = props;
@@ -21,7 +22,7 @@ export const PaymentsMadeTab: React.FC<ModuleDataProps> = (props) => {
   };
 
   const handleVoid = async (id: number) => {
-    if (!confirm('Void this payment? This un-applies it from any bills and reverses the ledger entry.')) return;
+    if (!(await confirmDialog({ title: 'Void payment', message: 'Void this payment? This un-applies it from any bills and reverses the ledger entry.', confirmLabel: 'Void', destructive: true }))) return;
     setBusy(true);
     try {
       await apiPost(`/api/payments-made/${id}/void`);
