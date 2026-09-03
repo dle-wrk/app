@@ -30,6 +30,7 @@ import { registerAutomationRoutes } from './src/lib/automationRoutes';
 import { registerProjectsRoutes } from './src/lib/projectsRoutes';
 import { registerClientsRoutes } from './src/lib/clientsRoutes';
 import { registerAssetsRoutes } from './src/lib/assetsRoutes';
+import { registerInventoryMetadataRoutes } from './src/lib/inventoryMetadataRoutes';
 
 import { pool, query, queryOne, exec, ensureSchema, close } from './src/lib/db';
 
@@ -177,6 +178,12 @@ registerClientsRoutes(app);
 // bom_structures — that's the raw parent-child graph, lives with the
 // inventory-metadata surface.
 registerAssetsRoutes(app);
+
+// Inventory-metadata surface: bom_structures (raw parent/child part graph)
+// and stock_ledger (append-log of warehouse movements — distinct from the
+// `transactions` table used by the BOOK-IN UI, which records user-facing
+// bookings).
+registerInventoryMetadataRoutes(app);
 
 
 // Helper functions for document numbering and mapping
@@ -659,164 +666,12 @@ app.post('/api/settings', async (req, res) => {
 // send-alert, enrich-missing-suppliers) lives in src/lib/automationRoutes.ts.
 
 
-app.get('/api/bom-structures', async (_req, res) => {
-  try {
-    const { rows } = await query('SELECT * FROM bom_structures ORDER BY id');
-    res.json(rows.map((row: any) => ({
-      id: row.id,
-      parentPartNumber: row.parent_part_number,
-      childPartNumber: row.child_part_number,
-      quantity: row.quantity,
-      description: row.description,
-      createdAt: row.created_at
-    })));
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-
-app.post('/api/bom-structures', async (req, res) => {
-  const { parentPartNumber, childPartNumber, quantity, description } = req.body;
-  if (!parentPartNumber || !childPartNumber) return res.status(400).json({ error: 'parentPartNumber and childPartNumber are required' });
-
-  try {
-    const row = await queryOne(`INSERT INTO bom_structures (parent_part_number, child_part_number, quantity, description)
-      VALUES ($1, $2, $3, $4) RETURNING *`,
-      [parentPartNumber, childPartNumber, quantity || 1, description || null]);
-    res.status(201).json({
-      id: row?.id,
-      parentPartNumber: row?.parent_part_number,
-      childPartNumber: row?.child_part_number,
-      quantity: row?.quantity,
-      description: row?.description,
-      createdAt: row?.created_at
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.put('/api/bom-structures/:id', async (req, res) => {
-  const id = parseInt(req.params.id);
-  const { parentPartNumber, childPartNumber, quantity, description } = req.body;
-  try {
-    const row = await queryOne(`UPDATE bom_structures SET
-      parent_part_number = COALESCE($1, parent_part_number),
-      child_part_number = COALESCE($2, child_part_number),
-      quantity = COALESCE($3, quantity),
-      description = COALESCE($4, description)
-      WHERE id = $5 RETURNING *`,
-      [parentPartNumber ?? null, childPartNumber ?? null, quantity ?? null, description ?? null, id]);
-    if (!row) return res.status(404).json({ error: 'BOM structure not found' });
-    res.json({
-      id: row.id,
-      parentPartNumber: row.parent_part_number,
-      childPartNumber: row.child_part_number,
-      quantity: row.quantity,
-      description: row.description,
-      createdAt: row.created_at
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.delete('/api/bom-structures/:id', async (req, res) => {
-  const id = parseInt(req.params.id);
-  try {
-    const { rowCount } = await query('DELETE FROM bom_structures WHERE id = $1', [id]);
-    if (rowCount === 0) return res.status(404).json({ error: 'BOM structure not found' });
-    res.json({ ok: true });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
+// Inventory-metadata surface (/api/bom-structures + /api/stock-ledger)
+// lives in src/lib/inventoryMetadataRoutes.ts.
 // Assets surface (/api/sub-assemblies, /api/fielded-assets) lives in
 // src/lib/assetsRoutes.ts.
 
 
-app.get('/api/stock-ledger', async (_req, res) => {
-  try {
-    const { rows } = await query('SELECT * FROM stock_ledger ORDER BY movement_date DESC');
-    res.json(rows.map((row: any) => ({
-      id: row.id,
-      itemSerialNumber: row.item_serial_number,
-      movementType: row.movement_type,
-      quantity: row.quantity,
-      movementDate: row.movement_date,
-      reference: row.reference,
-      notes: row.notes,
-      createdAt: row.created_at
-    })));
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/stock-ledger', async (req, res) => {
-  const { itemSerialNumber, movementType, quantity, movementDate, reference, notes } = req.body;
-  if (!movementType) return res.status(400).json({ error: 'movementType is required' });
-
-  try {
-    const row = await queryOne(`INSERT INTO stock_ledger (item_serial_number, movement_type, quantity, movement_date, reference, notes)
-      VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [itemSerialNumber || null, movementType, quantity || 0, movementDate || null, reference || null, notes || null]);
-    res.status(201).json({
-      id: row?.id,
-      itemSerialNumber: row?.item_serial_number,
-      movementType: row?.movement_type,
-      quantity: row?.quantity,
-      movementDate: row?.movement_date,
-      reference: row?.reference,
-      notes: row?.notes,
-      createdAt: row?.created_at
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.put('/api/stock-ledger/:id', async (req, res) => {
-  const id = parseInt(req.params.id);
-  const { itemSerialNumber, movementType, quantity, movementDate, reference, notes } = req.body;
-  try {
-    const row = await queryOne(`UPDATE stock_ledger SET
-      item_serial_number = COALESCE($1, item_serial_number),
-      movement_type = COALESCE($2, movement_type),
-      quantity = COALESCE($3, quantity),
-      movement_date = COALESCE($4, movement_date),
-      reference = COALESCE($5, reference),
-      notes = COALESCE($6, notes)
-      WHERE id = $7 RETURNING *`,
-      [itemSerialNumber ?? null, movementType ?? null, quantity ?? null, movementDate ?? null, reference ?? null, notes ?? null, id]);
-    if (!row) return res.status(404).json({ error: 'stock ledger entry not found' });
-    res.json({
-      id: row.id,
-      itemSerialNumber: row.item_serial_number,
-      movementType: row.movement_type,
-      quantity: row.quantity,
-      movementDate: row.movement_date,
-      reference: row.reference,
-      notes: row.notes,
-      createdAt: row.created_at
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.delete('/api/stock-ledger/:id', async (req, res) => {
-  const id = parseInt(req.params.id);
-  try {
-    const { rowCount } = await query('DELETE FROM stock_ledger WHERE id = $1', [id]);
-    if (rowCount === 0) return res.status(404).json({ error: 'stock ledger entry not found' });
-    res.json({ ok: true });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
 
 app.get('/api/raw-table/:name', async (req, res) => {
   const name = req.params.name;
