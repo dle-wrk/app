@@ -6,11 +6,11 @@ test('verify app navigation and rendering', async ({ page }) => {
 
   // Verify Dashboard
   await expect(page.locator('h3')).toContainText('Inventory Insights');
-  await page.screenshot({ path: '/home/jules/verification/screenshots/dashboard_v2.png' });
+  await page.screenshot({ path: test.info().outputPath('dashboard_v2.png') });
 
   // Navigate to Items
   await page.click('button:has-text("Items & Inventory")');
   await page.waitForTimeout(1000);
   await expect(page.locator('h3')).toContainText('Inventory items');
-  await page.screenshot({ path: '/home/jules/verification/screenshots/inventory_v2.png' });
+  await page.screenshot({ path: test.info().outputPath('inventory_v2.png') });
 });

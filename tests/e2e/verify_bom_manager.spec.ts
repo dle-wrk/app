@@ -74,13 +74,13 @@ test('verify enhanced BOM management in ProjectsView', async ({ page }) => {
   await commentInput.fill('Test Comment');
 
   // Sync
-  await page.screenshot({ path: '/home/jules/verification/screenshots/before_sync.png' });
+  await page.screenshot({ path: test.info().outputPath('before_sync.png') });
 
   // Click the Sync button natively
   await modal.locator('button:has-text("Sync")').click();
 
   await page.waitForTimeout(2000);
-  await page.screenshot({ path: '/home/jules/verification/screenshots/after_sync.png' });
+  await page.screenshot({ path: test.info().outputPath('after_sync.png') });
 
   // Verify toast
   await expect(page.locator('text=linked to project')).toBeVisible();
