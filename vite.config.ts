@@ -22,6 +22,14 @@ export default defineConfig(() => {
       {
         name: 'start-backend',
         configureServer(server) {
+          // Skip under vitest — its Vite instance also fires configureServer,
+          // and none of the unit test files hit the backend. Spawning a real
+          // Express server (pg pool + Sentry + exchange-rate poller) leaves
+          // ~22 file handles open after tests finish that vitest can't close
+          // within its 10s shutdown budget, producing "close timed out" noise
+          // on every `vitest run`. VITEST is set by vitest itself.
+          if (process.env.VITEST) return;
+
           console.log('Starting backend server...');
 
           // Cleanup port 3001 if in use
