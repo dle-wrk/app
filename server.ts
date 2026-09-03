@@ -29,6 +29,7 @@ import { registerProductionRoutes, ensureProductionCostsSchema } from './src/lib
 import { registerAutomationRoutes } from './src/lib/automationRoutes';
 import { registerProjectsRoutes } from './src/lib/projectsRoutes';
 import { registerClientsRoutes } from './src/lib/clientsRoutes';
+import { registerAssetsRoutes } from './src/lib/assetsRoutes';
 
 import { pool, query, queryOne, exec, ensureSchema, close } from './src/lib/db';
 
@@ -170,6 +171,12 @@ registerProjectsRoutes(app);
 // so a write against `customers` would create a row invoices/dispatches
 // can't reference.
 registerClientsRoutes(app);
+
+// Assets surface: sub-assemblies (grouped parent/child part rollups) and
+// fielded-assets (serial-numbered units at customer sites). Distinct from
+// bom_structures — that's the raw parent-child graph, lives with the
+// inventory-metadata surface.
+registerAssetsRoutes(app);
 
 
 // Helper functions for document numbering and mapping
@@ -726,167 +733,9 @@ app.delete('/api/bom-structures/:id', async (req, res) => {
   }
 });
 
-app.get('/api/sub-assemblies', async (_req, res) => {
-  try {
-    const { rows } = await query('SELECT * FROM sub_assemblies ORDER BY id');
-    res.json(rows.map((row: any) => ({
-      id: row.id,
-      assemblyName: row.assembly_name,
-      parentPartNumber: row.parent_part_number,
-      childPartNumber: row.child_part_number,
-      quantity: row.quantity,
-      description: row.description,
-      createdAt: row.created_at
-    })));
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
+// Assets surface (/api/sub-assemblies, /api/fielded-assets) lives in
+// src/lib/assetsRoutes.ts.
 
-app.post('/api/sub-assemblies', async (req, res) => {
-  const { assemblyName, parentPartNumber, childPartNumber, quantity, description } = req.body;
-  if (!assemblyName) return res.status(400).json({ error: 'assemblyName is required' });
-
-  try {
-    const row = await queryOne(`INSERT INTO sub_assemblies (assembly_name, parent_part_number, child_part_number, quantity, description)
-      VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [assemblyName, parentPartNumber || null, childPartNumber || null, quantity || 1, description || null]);
-    res.status(201).json({
-      id: row?.id,
-      assemblyName: row?.assembly_name,
-      parentPartNumber: row?.parent_part_number,
-      childPartNumber: row?.child_part_number,
-      quantity: row?.quantity,
-      description: row?.description,
-      createdAt: row?.created_at
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.put('/api/sub-assemblies/:id', async (req, res) => {
-  const id = parseInt(req.params.id);
-  const { assemblyName, parentPartNumber, childPartNumber, quantity, description } = req.body;
-  try {
-    const row = await queryOne(`UPDATE sub_assemblies SET
-      assembly_name = COALESCE($1, assembly_name),
-      parent_part_number = COALESCE($2, parent_part_number),
-      child_part_number = COALESCE($3, child_part_number),
-      quantity = COALESCE($4, quantity),
-      description = COALESCE($5, description)
-      WHERE id = $6 RETURNING *`,
-      [assemblyName ?? null, parentPartNumber ?? null, childPartNumber ?? null, quantity ?? null, description ?? null, id]);
-    if (!row) return res.status(404).json({ error: 'sub assembly not found' });
-    res.json({
-      id: row.id,
-      assemblyName: row.assembly_name,
-      parentPartNumber: row.parent_part_number,
-      childPartNumber: row.child_part_number,
-      quantity: row.quantity,
-      description: row.description,
-      createdAt: row.created_at
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.delete('/api/sub-assemblies/:id', async (req, res) => {
-  const id = parseInt(req.params.id);
-  try {
-    const { rowCount } = await query('DELETE FROM sub_assemblies WHERE id = $1', [id]);
-    if (rowCount === 0) return res.status(404).json({ error: 'sub assembly not found' });
-    res.json({ ok: true });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/fielded-assets', async (_req, res) => {
-  try {
-    const { rows } = await query('SELECT * FROM fielded_assets ORDER BY id');
-    res.json(rows.map((row: any) => ({
-      id: row.id,
-      clientId: row.client_id,
-      assetTag: row.asset_tag,
-      serialNumber: row.serial_number,
-      installedDate: row.installed_date,
-      status: row.status,
-      location: row.location,
-      notes: row.notes,
-      createdAt: row.created_at
-    })));
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/fielded-assets', async (req, res) => {
-  const { clientId, assetTag, serialNumber, installedDate, status, location, notes } = req.body;
-  if (!assetTag) return res.status(400).json({ error: 'assetTag is required' });
-
-  try {
-    const row = await queryOne(`INSERT INTO fielded_assets (client_id, asset_tag, serial_number, installed_date, status, location, notes)
-      VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-      [clientId || null, assetTag, serialNumber || null, installedDate || null, status || 'ACTIVE', location || null, notes || null]);
-    res.status(201).json({
-      id: row?.id,
-      clientId: row?.client_id,
-      assetTag: row?.asset_tag,
-      serialNumber: row?.serial_number,
-      installedDate: row?.installed_date,
-      status: row?.status,
-      location: row?.location,
-      notes: row?.notes,
-      createdAt: row?.created_at
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.put('/api/fielded-assets/:id', async (req, res) => {
-  const id = parseInt(req.params.id);
-  const { clientId, assetTag, serialNumber, installedDate, status, location, notes } = req.body;
-  try {
-    const row = await queryOne(`UPDATE fielded_assets SET
-      client_id = COALESCE($1, client_id),
-      asset_tag = COALESCE($2, asset_tag),
-      serial_number = COALESCE($3, serial_number),
-      installed_date = COALESCE($4, installed_date),
-      status = COALESCE($5, status),
-      location = COALESCE($6, location),
-      notes = COALESCE($7, notes)
-      WHERE id = $8 RETURNING *`,
-      [clientId ?? null, assetTag ?? null, serialNumber ?? null, installedDate ?? null, status ?? null, location ?? null, notes ?? null, id]);
-    if (!row) return res.status(404).json({ error: 'fielded asset not found' });
-    res.json({
-      id: row.id,
-      clientId: row.client_id,
-      assetTag: row.asset_tag,
-      serialNumber: row.serial_number,
-      installedDate: row.installed_date,
-      status: row.status,
-      location: row.location,
-      notes: row.notes,
-      createdAt: row.created_at
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.delete('/api/fielded-assets/:id', async (req, res) => {
-  const id = parseInt(req.params.id);
-  try {
-    const { rowCount } = await query('DELETE FROM fielded_assets WHERE id = $1', [id]);
-    if (rowCount === 0) return res.status(404).json({ error: 'fielded asset not found' });
-    res.json({ ok: true });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
 
 app.get('/api/stock-ledger', async (_req, res) => {
   try {
