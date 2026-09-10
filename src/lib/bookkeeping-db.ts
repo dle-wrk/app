@@ -85,7 +85,7 @@ export async function ensureBookkeepingSchema() {
   await exec(`CREATE TABLE IF NOT EXISTS invoices (
     id SERIAL PRIMARY KEY,
     invoice_number TEXT UNIQUE NOT NULL,
-    customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL,
+    client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL,
     client_order_id INTEGER REFERENCES client_orders(id) ON DELETE SET NULL,
     invoice_date DATE NOT NULL DEFAULT CURRENT_DATE,
     due_date DATE,
@@ -121,7 +121,7 @@ export async function ensureBookkeepingSchema() {
   await exec(`CREATE TABLE IF NOT EXISTS payments_received (
     id SERIAL PRIMARY KEY,
     payment_number TEXT UNIQUE NOT NULL,
-    customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL,
+    client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL,
     payment_date DATE NOT NULL DEFAULT CURRENT_DATE,
     amount NUMERIC(14,2) NOT NULL,
     unallocated_amount NUMERIC(14,2) DEFAULT 0,
@@ -270,7 +270,7 @@ export async function ensureBookkeepingSchema() {
     id SERIAL PRIMARY KEY,
     note_number TEXT UNIQUE NOT NULL,
     note_type TEXT NOT NULL CHECK (note_type IN ('DELIVERY','COLLECTION')),
-    customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL,
+    client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL,
     client_order_id INTEGER REFERENCES client_orders(id) ON DELETE SET NULL,
     invoice_id INTEGER REFERENCES invoices(id) ON DELETE SET NULL,
     note_date DATE NOT NULL DEFAULT CURRENT_DATE,
@@ -302,6 +302,21 @@ export async function ensureBookkeepingSchema() {
   await exec(`ALTER TABLE clients ADD COLUMN IF NOT EXISTS opening_balance NUMERIC(14,2) DEFAULT 0`).catch(() => {});
   await exec(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS payment_terms_days INTEGER DEFAULT 30`).catch(() => {});
 
+  // --- Sales-order verification document (POP / customer PO attachment) ------
+  // Each client_order can carry ONE attached proof-of-purchase / purchase-order
+  // document (typically a PDF from the client's system). Stored inline as bytea
+  // so we don't have to introduce object storage for a small artifact that gets
+  // fetched at most a few times per order. Two booleans track whether a human
+  // has visually reviewed and confirmed the document matches the order — kept
+  // deliberately manual because the auto-match heuristic isn't a priority.
+  await exec(`ALTER TABLE client_orders ADD COLUMN IF NOT EXISTS verification_doc_data BYTEA`).catch(() => {});
+  await exec(`ALTER TABLE client_orders ADD COLUMN IF NOT EXISTS verification_doc_mime TEXT`).catch(() => {});
+  await exec(`ALTER TABLE client_orders ADD COLUMN IF NOT EXISTS verification_doc_filename TEXT`).catch(() => {});
+  await exec(`ALTER TABLE client_orders ADD COLUMN IF NOT EXISTS verification_doc_uploaded_at TIMESTAMP`).catch(() => {});
+  await exec(`ALTER TABLE client_orders ADD COLUMN IF NOT EXISTS verified BOOLEAN DEFAULT FALSE`).catch(() => {});
+  await exec(`ALTER TABLE client_orders ADD COLUMN IF NOT EXISTS verified_at TIMESTAMP`).catch(() => {});
+  await exec(`ALTER TABLE client_orders ADD COLUMN IF NOT EXISTS verified_by TEXT`).catch(() => {});
+
   // Widen line unit prices from NUMERIC(14,4) to NUMERIC(18,7). Component costs
   // are genuinely sub-cent (0402 resistors at R0.0871), and at 4 dp Postgres
   // silently rounded a 7 dp entry on save. Purely a widening change — more
@@ -322,6 +337,7 @@ export async function ensureBookkeepingSchema() {
   await exec(`CREATE SEQUENCE IF NOT EXISTS je_seq`).catch(() => {});
   await exec(`CREATE SEQUENCE IF NOT EXISTS dispatch_delivery_seq`).catch(() => {});
   await exec(`CREATE SEQUENCE IF NOT EXISTS dispatch_collection_seq`).catch(() => {});
+  await exec(`CREATE SEQUENCE IF NOT EXISTS sales_order_seq`).catch(() => {});
 
   // --- Default Chart of Accounts (seeded once) ---------------------------------
   const acctCount = await queryOne<{ count: string }>(`SELECT COUNT(*) as count FROM accounts`);

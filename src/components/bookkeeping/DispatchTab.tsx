@@ -47,7 +47,7 @@ export const DispatchTab: React.FC<ModuleDataProps> = (props) => {
 };
 
 const DispatchNotesPanel: React.FC<ModuleDataProps & { type: DispatchNoteType }> = (props) => {
-  const { type, clients, triggerToast } = props;
+  const { type, clients, clientOrders, triggerToast } = props;
   const meta = TYPE_META[type];
   const [rows, setRows] = useState<DispatchNote[]>([]);
   const [loading, setLoading] = useState(true);
@@ -181,6 +181,7 @@ const DispatchNotesPanel: React.FC<ModuleDataProps & { type: DispatchNoteType }>
         <DispatchViewModal
           note={viewing}
           clientName={clientName(viewing.clientId)}
+          sourceOrder={viewing.clientOrderId ? clientOrders.find(o => o.id === viewing.clientOrderId) : undefined}
           onClose={() => setViewing(null)}
           onEdit={() => { openEdit(viewing); setViewing(null); }}
           onIssue={() => doAction(viewing.id, 'issue')}
@@ -375,9 +376,10 @@ const DispatchEditorModal: React.FC<ModuleDataProps & { type: DispatchNoteType; 
 // ============================================================================
 
 const DispatchViewModal: React.FC<{
-  note: DispatchNote; clientName: string; onClose: () => void; onEdit: () => void;
+  note: DispatchNote; clientName: string; sourceOrder?: import('../../types').ClientOrder;
+  onClose: () => void; onEdit: () => void;
   onIssue: () => void; onComplete: () => void; onCancel: () => void; onDelete: () => void; busy: boolean;
-}> = ({ note, clientName, onClose, onEdit, onIssue, onComplete, onCancel, onDelete, busy }) => {
+}> = ({ note, clientName, sourceOrder, onClose, onEdit, onIssue, onComplete, onCancel, onDelete, busy }) => {
   const meta = TYPE_META[note.noteType];
 
   const printNote = () => {
@@ -388,15 +390,28 @@ const DispatchViewModal: React.FC<{
         <td style="padding:6px 8px;border-bottom:1px solid #ddd;text-align:right">${it.quantity}</td>
         <td style="padding:6px 8px;border-bottom:1px solid #ddd;font-family:monospace">${escapeHtml(it.serialNumbers || '')}</td>
       </tr>`).join('');
+    const verifiedChip = sourceOrder?.verified
+      ? `<div style="margin-top:8px;padding:6px 10px;background:#f0fdf4;border:1px solid #4ade80;border-radius:4px;font-size:11px;color:#16a34a;display:inline-block"><strong>✓ POP/PO verified</strong>${sourceOrder.verifiedAt ? ` — ${fmtDate(sourceOrder.verifiedAt)}` : ''}</div>`
+      : sourceOrder?.hasVerificationDoc
+        ? `<div style="margin-top:8px;padding:6px 10px;background:#fefce8;border:1px solid #eab308;border-radius:4px;font-size:11px;color:#a16207;display:inline-block">POP/PO attached, pending verification</div>`
+        : '';
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>${note.noteNumber}</title></head>
       <body style="font-family:Arial,Helvetica,sans-serif;color:#111;max-width:760px;margin:24px auto;padding:0 16px">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111;padding-bottom:12px;margin-bottom:16px">
-          <div><h1 style="margin:0;font-size:22px">${meta.label.toUpperCase()}</h1>
-          <div style="font-family:monospace;font-size:14px;margin-top:4px">${note.noteNumber}</div></div>
-          <div style="text-align:right;font-size:12px">
+        <div style="border-bottom:3px solid #f7912b;padding-bottom:12px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:flex-end">
+          <div>
+            <div style="font-size:26px;font-weight:900;color:#f7912b;letter-spacing:-0.5px">TRACKLAB</div>
+            <div style="font-size:10px;color:#666;text-transform:uppercase;letter-spacing:1px;margin-top:2px">Inventory · Manufacturing · Compliance</div>
+          </div>
+          <div style="text-align:right"><h2 style="margin:0;font-size:18px;font-weight:700">${meta.label.toUpperCase()}</h2>
+          <div style="font-family:monospace;font-size:13px;margin-top:4px;color:#f7912b">${note.noteNumber}</div></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:16px">
+          <div></div>
+          <div style="text-align:right">
             <div><strong>Date:</strong> ${fmtDate(note.noteDate)}</div>
             ${note.scheduledDate ? `<div><strong>${note.noteType === 'DELIVERY' ? 'Delivery' : 'Collection'} date:</strong> ${fmtDate(note.scheduledDate)}</div>` : ''}
             <div><strong>Status:</strong> ${note.status}</div>
+            ${verifiedChip}
           </div>
         </div>
         <div style="display:flex;gap:32px;font-size:12px;margin-bottom:16px">
@@ -437,6 +452,21 @@ const DispatchViewModal: React.FC<{
         <StatusPill status={note.status} />
         <span className="text-xs text-on-surface-variant">{fmtDate(note.noteDate)}</span>
         {note.orderNumber && <span className="text-[10px] text-outline font-mono">Order {note.orderNumber}</span>}
+        {sourceOrder?.verified && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-green-500/10 text-green-400 border border-green-500/20" title={`Verified ${sourceOrder.verifiedAt ? fmtDate(sourceOrder.verifiedAt) : ''}`}>
+            <CheckCircle2 className="w-3 h-3" /> POP VERIFIED
+          </span>
+        )}
+        {sourceOrder && !sourceOrder.verified && sourceOrder.hasVerificationDoc && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-yellow-500/10 text-yellow-500 border border-yellow-500/20">
+            POP ATTACHED · UNVERIFIED
+          </span>
+        )}
+        {sourceOrder && !sourceOrder.hasVerificationDoc && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-error/10 text-error border border-error/20">
+            NO POP
+          </span>
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-3 text-xs mb-md">

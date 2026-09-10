@@ -19,7 +19,37 @@
 // Dependencies deliberately narrow: only the shared db helpers.
 
 import type { Express } from 'express';
-import { query, queryOne } from './db';
+import { pool, query, queryOne } from './db';
+import { nextDocNumber } from './bookkeeping-db';
+
+// Client-order row → camelCase JSON. Only ONE definition of the shape lives
+// here — every endpoint that returns a client_order (list, create, update,
+// verify-toggle, doc-upload) funnels through this so the fields never drift.
+// verification_doc_data is intentionally never emitted; the caller downloads
+// the bytea via GET /:id/document instead.
+function mapClientOrder(row: any) {
+  return {
+    id: row.id,
+    clientId: row.client_id,
+    orderNumber: row.order_number,
+    orderDate: row.order_date,
+    requiredDate: row.required_date,
+    status: row.status,
+    currency: row.currency,
+    subtotal: row.subtotal,
+    tax: row.tax,
+    total: row.total,
+    notes: row.notes,
+    verificationDocMime: row.verification_doc_mime,
+    verificationDocFilename: row.verification_doc_filename,
+    verificationDocUploadedAt: row.verification_doc_uploaded_at,
+    hasVerificationDoc: !!row.verification_doc_mime,
+    verified: !!row.verified,
+    verifiedAt: row.verified_at,
+    verifiedBy: row.verified_by,
+    createdAt: row.created_at,
+  };
+}
 
 export function registerClientsRoutes(app: Express): void {
   // ---------------------------------------------------------------------------
@@ -119,52 +149,54 @@ export function registerClientsRoutes(app: Express): void {
   // ---------------------------------------------------------------------------
   app.get('/api/client-orders', async (_req, res) => {
     try {
-      const { rows } = await query('SELECT * FROM client_orders ORDER BY id');
-      res.json(rows.map((row: any) => ({
-        id: row.id,
-        clientId: row.client_id,
-        orderNumber: row.order_number,
-        orderDate: row.order_date,
-        requiredDate: row.required_date,
-        status: row.status,
-        currency: row.currency,
-        subtotal: row.subtotal,
-        tax: row.tax,
-        total: row.total,
-        notes: row.notes,
-        createdAt: row.created_at,
-      })));
+      // Deliberately excludes verification_doc_data from the list response —
+      // the bytea can be many MB and every list-consumer only needs to know
+      // whether a doc is present (via the mime/filename/uploaded_at fields).
+      // Callers that need the raw bytes go through GET /:id/document.
+      const { rows } = await query(`SELECT id, client_id, order_number, order_date, required_date, status, currency, subtotal, tax, total, notes, verification_doc_mime, verification_doc_filename, verification_doc_uploaded_at, verified, verified_at, verified_by, created_at FROM client_orders ORDER BY id`);
+      res.json(rows.map(mapClientOrder));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
 
+  // Creates a client order + (optionally) its line items in one round-trip.
+  // orderNumber is now optional — when omitted, the server generates
+  // "SO-YYYY-NNNN" via the sales_order_seq sequence so the UI doesn't have to
+  // guess. If `items` is present, each row is inserted under the new order id
+  // inside the same transaction so a failure part-way through doesn't leave
+  // an order with missing lines.
   app.post('/api/client-orders', async (req, res) => {
-    const { clientId, orderNumber, orderDate, requiredDate, status, currency, subtotal, tax, total, notes } = req.body;
-    if (!orderNumber) return res.status(400).json({ error: 'orderNumber is required' });
+    const { clientId, orderNumber, orderDate, requiredDate, status, currency, subtotal, tax, total, notes, items } = req.body;
 
+    const client = await pool.connect();
     try {
-      const row = await queryOne(
+      await client.query('BEGIN');
+      const finalOrderNumber = orderNumber || await nextDocNumber(client, 'SO', 'sales_order_seq');
+      const { rows: orderRows } = await client.query(
         `INSERT INTO client_orders (client_id, order_number, order_date, required_date, status, currency, subtotal, tax, total, notes)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
-        [clientId || null, orderNumber, orderDate || null, requiredDate || null, status || 'DRAFT', currency || 'ZAR', subtotal || 0, tax || 0, total || 0, notes || null]
+        [clientId || null, finalOrderNumber, orderDate || null, requiredDate || null, status || 'DRAFT', currency || 'ZAR', subtotal || 0, tax || 0, total || 0, notes || null]
       );
-      res.status(201).json({
-        id: row?.id,
-        clientId: row?.client_id,
-        orderNumber: row?.order_number,
-        orderDate: row?.order_date,
-        requiredDate: row?.required_date,
-        status: row?.status,
-        currency: row?.currency,
-        subtotal: row?.subtotal,
-        tax: row?.tax,
-        total: row?.total,
-        notes: row?.notes,
-        createdAt: row?.created_at,
-      });
+      const order = orderRows[0];
+
+      if (Array.isArray(items)) {
+        for (const it of items) {
+          await client.query(
+            `INSERT INTO client_order_items (client_order_id, part_number, description, quantity, unit_price, line_total)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [order.id, it.partNumber || null, it.description || '', it.quantity || 1, it.unitPrice || 0, it.lineTotal || 0]
+          );
+        }
+      }
+
+      await client.query('COMMIT');
+      res.status(201).json(mapClientOrder(order));
     } catch (err: any) {
+      await client.query('ROLLBACK').catch(() => {});
       res.status(500).json({ error: err.message });
+    } finally {
+      client.release();
     }
   });
 
@@ -188,20 +220,7 @@ export function registerClientsRoutes(app: Express): void {
         [clientId ?? null, orderNumber ?? null, orderDate ?? null, requiredDate ?? null, status ?? null, currency ?? null, subtotal ?? null, tax ?? null, total ?? null, notes ?? null, id]
       );
       if (!row) return res.status(404).json({ error: 'client order not found' });
-      res.json({
-        id: row.id,
-        clientId: row.client_id,
-        orderNumber: row.order_number,
-        orderDate: row.order_date,
-        requiredDate: row.required_date,
-        status: row.status,
-        currency: row.currency,
-        subtotal: row.subtotal,
-        tax: row.tax,
-        total: row.total,
-        notes: row.notes,
-        createdAt: row.created_at,
-      });
+      res.json(mapClientOrder(row));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -213,6 +232,115 @@ export function registerClientsRoutes(app: Express): void {
       const { rowCount } = await query('DELETE FROM client_orders WHERE id = $1', [id]);
       if (rowCount === 0) return res.status(404).json({ error: 'client order not found' });
       res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Verification document (POP / customer PO attachment) — one document per
+  // client_order. Upload accepts base64-encoded JSON (same shape the bill-
+  // receipt scan flow uses) rather than multipart, keeping the whole
+  // clientsRoutes surface middleware-free. The download endpoint streams the
+  // raw bytea back with the stored mime type so a browser can open it inline.
+  // ---------------------------------------------------------------------------
+  app.post('/api/client-orders/:id/document', async (req, res) => {
+    const id = parseInt(req.params.id);
+    const { data, mime, filename } = req.body ?? {};
+    if (!data || !mime || !filename) {
+      return res.status(400).json({ error: 'data (base64), mime, and filename are required' });
+    }
+    // 20MB ceiling matches the express.json limit set in server.ts; anything
+    // bigger would have been rejected by the body parser before reaching us.
+    // Reject early with a clearer message when we can spot it in-handler.
+    const buf = Buffer.from(data, 'base64');
+    if (buf.length === 0) return res.status(400).json({ error: 'data decoded to zero bytes' });
+    if (buf.length > 20 * 1024 * 1024) return res.status(413).json({ error: 'document exceeds 20MB limit' });
+
+    try {
+      const row = await queryOne(
+        `UPDATE client_orders SET
+           verification_doc_data = $1,
+           verification_doc_mime = $2,
+           verification_doc_filename = $3,
+           verification_doc_uploaded_at = now()
+         WHERE id = $4 RETURNING *`,
+        [buf, mime, filename, id]
+      );
+      if (!row) return res.status(404).json({ error: 'client order not found' });
+      res.status(201).json(mapClientOrder(row));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/client-orders/:id/document', async (req, res) => {
+    const id = parseInt(req.params.id);
+    try {
+      const row = await queryOne(
+        `SELECT verification_doc_data, verification_doc_mime, verification_doc_filename FROM client_orders WHERE id = $1`,
+        [id]
+      );
+      if (!row || !row.verification_doc_data) return res.status(404).json({ error: 'no document on this order' });
+      res.setHeader('Content-Type', row.verification_doc_mime || 'application/octet-stream');
+      // inline so the browser opens PDFs / images in a new tab; add filename
+      // as an attachment hint so Save-As uses the original name.
+      res.setHeader('Content-Disposition', `inline; filename="${(row.verification_doc_filename || 'document').replace(/"/g, '')}"`);
+      res.send(row.verification_doc_data);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete('/api/client-orders/:id/document', async (req, res) => {
+    const id = parseInt(req.params.id);
+    try {
+      // Also un-verifies the order — a verify tick against a document that no
+      // longer exists is meaningless, and forcing the reviewer to re-tick
+      // after a new upload is the safer default.
+      const row = await queryOne(
+        `UPDATE client_orders SET
+           verification_doc_data = NULL,
+           verification_doc_mime = NULL,
+           verification_doc_filename = NULL,
+           verification_doc_uploaded_at = NULL,
+           verified = FALSE,
+           verified_at = NULL,
+           verified_by = NULL
+         WHERE id = $1 RETURNING *`,
+        [id]
+      );
+      if (!row) return res.status(404).json({ error: 'client order not found' });
+      res.json(mapClientOrder(row));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put('/api/client-orders/:id/verify', async (req, res) => {
+    const id = parseInt(req.params.id);
+    const { verified, verifiedBy } = req.body ?? {};
+    if (typeof verified !== 'boolean') {
+      return res.status(400).json({ error: 'verified (boolean) is required' });
+    }
+    try {
+      // When flipping true, stamp timestamp + user; when flipping false, clear
+      // both so the audit trail doesn't stale-lock old signatures onto a doc
+      // that's since been re-uploaded.
+      const row = await queryOne(
+        verified
+          ? `UPDATE client_orders SET verified = TRUE, verified_at = now(), verified_by = $1 WHERE id = $2 AND verification_doc_data IS NOT NULL RETURNING *`
+          : `UPDATE client_orders SET verified = FALSE, verified_at = NULL, verified_by = NULL WHERE id = $2 RETURNING *`,
+        [verifiedBy || null, id]
+      );
+      if (!row) {
+        // Distinguish "no such order" from "can't verify without a doc"
+        // — the latter is a common mistake worth calling out explicitly.
+        const exists = await queryOne(`SELECT id FROM client_orders WHERE id = $1`, [id]);
+        if (!exists) return res.status(404).json({ error: 'client order not found' });
+        return res.status(400).json({ error: 'cannot verify: no document attached' });
+      }
+      res.json(mapClientOrder(row));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

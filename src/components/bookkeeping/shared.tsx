@@ -24,6 +24,11 @@ export interface ModuleDataProps {
   // update them. Tabs that mutate a client or supplier must call these
   // setters directly (rollback on failure) or the UI stays stale.
   setClients?: React.Dispatch<React.SetStateAction<Client[]>>;
+  // Same rationale as setClients — client_orders are owned by App state, so a
+  // tab that creates or deletes a sales order needs to update it locally
+  // (refresh() only re-fetches the bookkeeping bootstrap, which excludes
+  // clientOrders entirely).
+  setClientOrders?: React.Dispatch<React.SetStateAction<ClientOrder[]>>;
 }
 
 // ============================================================================

@@ -135,6 +135,17 @@ export interface ClientOrder {
   tax: number;
   total: number;
   notes?: string;
+  // Verification document (POP / customer PO) + reviewer sign-off.
+  // Backend never sends the raw bytea in list responses; the metadata below
+  // is enough to render "has doc?" / "verified?" chips. Full file is fetched
+  // on demand via GET /api/client-orders/:id/document.
+  verificationDocMime?: string;
+  verificationDocFilename?: string;
+  verificationDocUploadedAt?: string;
+  hasVerificationDoc?: boolean;
+  verified?: boolean;
+  verifiedAt?: string;
+  verifiedBy?: string;
   createdAt: string;
 }
 
