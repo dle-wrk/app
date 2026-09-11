@@ -6,6 +6,7 @@ import {
   PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard,
 } from './shared';
 import { confirmDialog } from '../../lib/confirmDialog';
+import { renderBrandHeader, waitForBrandImage } from '../../lib/printBrand';
 
 // A dispatch note is a delivery note or a collection note for finished/final project products.
 // It is a fulfillment document only — no ledger posting, no automatic stock movement.
@@ -418,7 +419,7 @@ const DispatchViewModal: React.FC<{
 }> = ({ note, clientName, sourceOrder, onClose, onEdit, onIssue, onComplete, onCancel, onDelete, busy }) => {
   const meta = TYPE_META[note.noteType];
 
-  const printNote = () => {
+  const printNote = async () => {
     const rowsHtml = (note.items || []).map((it: DispatchNoteItem) => `
       <tr>
         <td style="padding:6px 8px;border-bottom:1px solid #ddd;font-family:monospace">${it.partNumber || ''}</td>
@@ -433,14 +434,7 @@ const DispatchViewModal: React.FC<{
         : '';
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>${note.noteNumber}</title></head>
       <body style="font-family:Arial,Helvetica,sans-serif;color:#111;max-width:760px;margin:24px auto;padding:0 16px">
-        <div style="border-bottom:3px solid #f7912b;padding-bottom:12px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:flex-end">
-          <div>
-            <div style="font-size:26px;font-weight:900;color:#f7912b;letter-spacing:-0.5px">TRACKLAB</div>
-            <div style="font-size:10px;color:#666;text-transform:uppercase;letter-spacing:1px;margin-top:2px">Inventory · Manufacturing · Compliance</div>
-          </div>
-          <div style="text-align:right"><h2 style="margin:0;font-size:18px;font-weight:700">${meta.label.toUpperCase()}</h2>
-          <div style="font-family:monospace;font-size:13px;margin-top:4px;color:#f7912b">${note.noteNumber}</div></div>
-        </div>
+        ${renderBrandHeader({ title: meta.label, number: note.noteNumber })}
         <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:16px">
           <div></div>
           <div style="text-align:right">
@@ -479,6 +473,7 @@ const DispatchViewModal: React.FC<{
     w.document.write(html);
     w.document.close();
     w.focus();
+    await waitForBrandImage(w);
     w.print();
   };
 

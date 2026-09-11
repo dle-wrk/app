@@ -4,6 +4,7 @@ import { ClientOrder } from '../../types';
 import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, apiGet, apiPost, apiDelete, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
 import { LineItemsEditor, EditableLine, newEditableLine, lineTotals } from './LineItemsEditor';
 import { confirmDialog } from '../../lib/confirmDialog';
+import { renderBrandHeader, waitForBrandImage } from '../../lib/printBrand';
 
 const STATUS_FILTERS = ['ALL', 'DRAFT', 'APPROVED', 'FULFILLED', 'CANCELLED'];
 
@@ -412,7 +413,7 @@ const SalesOrderViewModal: React.FC<{
     }
   };
 
-  const openPrint = () => {
+  const openPrint = async () => {
     // Opens a new tab with a printable summary. Rendered inline (no lib) so
     // it works offline and doesn't add an html2pdf dependency for a doc that
     // the browser's own print dialog already handles cleanly.
@@ -423,7 +424,10 @@ const SalesOrderViewModal: React.FC<{
     w.document.write(html);
     w.document.close();
     w.focus();
-    setTimeout(() => w.print(), 250);
+    // Wait for the brand logo image before firing print so the printed
+    // page never comes out with a blank spot where the header should be.
+    await waitForBrandImage(w);
+    w.print();
   };
 
   return (
@@ -579,16 +583,7 @@ function renderPrintableSalesOrder(order: any, clientName: string): string {
   .footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid #ddd; font-size: 10px; color: #999; text-align: center; }
   @media print { body { padding: 20px; } }
 </style></head><body>
-  <div class="brand">
-    <div>
-      <h1>TRACKLAB</h1>
-      <div class="tagline">Inventory · Manufacturing · Compliance</div>
-    </div>
-    <div class="doc-type">
-      <h2>Sales Order</h2>
-      <div class="num">${escapeHtml(order.orderNumber)}</div>
-    </div>
-  </div>
+  ${renderBrandHeader({ title: 'Sales Order', number: order.orderNumber })}
 
   <div class="grid">
     <div>

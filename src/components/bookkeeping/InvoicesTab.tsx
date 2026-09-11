@@ -5,6 +5,7 @@ import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, addDay
 import { LineItemsEditor, EditableLine, newEditableLine, lineTotals } from './LineItemsEditor';
 import { ErrorBoundary } from '../ErrorBoundary';
 import { confirmDialog } from '../../lib/confirmDialog';
+import { renderBrandHeader, waitForBrandImage } from '../../lib/printBrand';
 
 const STATUS_FILTERS = ['ALL', 'DRAFT', 'SENT', 'PARTIAL', 'PAID', 'OVERDUE', 'VOID'];
 
@@ -477,7 +478,7 @@ const QuickPaymentModal: React.FC<{ invoice: Invoice; accounts: ModuleDataProps[
 // "DRAFT" watermark so a print-and-send accident on a non-finalised invoice
 // is obvious rather than hidden.
 // ---------------------------------------------------------------------------
-function printInvoice(inv: any, clientName: string): void {
+async function printInvoice(inv: any, clientName: string): Promise<void> {
   const money = (n: number) => fmtMoney(n, inv.currency);
   const items = (inv.items || []) as InvoiceItem[];
   const rows = items.map((it) => `
@@ -525,16 +526,7 @@ function printInvoice(inv: any, clientName: string): void {
 </style></head><body>
   ${inv.status === 'DRAFT' ? '<div class="draft-watermark">DRAFT</div>' : ''}
   <div class="content">
-    <div class="brand">
-      <div>
-        <h1>TRACKLAB</h1>
-        <div class="tagline">Inventory · Manufacturing · Compliance</div>
-      </div>
-      <div class="doc-type">
-        <h2>${inv.isWarrantyClaim ? 'Warranty Invoice' : 'Tax Invoice'}</h2>
-        <div class="num">${escapeHtml(inv.invoiceNumber)}</div>
-      </div>
-    </div>
+    ${renderBrandHeader({ title: inv.isWarrantyClaim ? 'Warranty Invoice' : 'Tax Invoice', number: inv.invoiceNumber })}
 
     <div class="grid">
       <div>
@@ -594,7 +586,9 @@ function printInvoice(inv: any, clientName: string): void {
   w.document.write(html);
   w.document.close();
   w.focus();
-  setTimeout(() => w.print(), 250);
+  // Wait for the logo before firing print. See printBrand.ts header for why.
+  await waitForBrandImage(w);
+  w.print();
 }
 
 function escapeHtml(s: any): string {
