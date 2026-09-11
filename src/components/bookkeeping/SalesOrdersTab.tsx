@@ -4,7 +4,6 @@ import { ClientOrder } from '../../types';
 import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, apiGet, apiPost, apiDelete, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
 import { LineItemsEditor, EditableLine, newEditableLine, lineTotals } from './LineItemsEditor';
 import { confirmDialog } from '../../lib/confirmDialog';
-import { optimisticListDelete } from '../../lib/optimisticUpdate';
 
 const STATUS_FILTERS = ['ALL', 'DRAFT', 'APPROVED', 'FULFILLED', 'CANCELLED'];
 
@@ -13,7 +12,11 @@ const STATUS_FILTERS = ['ALL', 'DRAFT', 'APPROVED', 'FULFILLED', 'CANCELLED'];
 // scanned-page images; larger and we prompt the user to trim.
 const DOC_MAX_BYTES = 10 * 1024 * 1024;
 
-export const SalesOrdersTab: React.FC<ModuleDataProps> = (props) => {
+interface SalesOrdersTabExtras {
+  onCreateDispatch?: (orderId: number, noteType: 'DELIVERY' | 'COLLECTION') => void;
+}
+
+export const SalesOrdersTab: React.FC<ModuleDataProps & SalesOrdersTabExtras> = (props) => {
   const { clientOrders, setClientOrders, clients, items, taxRates, triggerToast, refresh } = props;
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [showEditor, setShowEditor] = useState(false);
@@ -40,27 +43,39 @@ export const SalesOrdersTab: React.FC<ModuleDataProps> = (props) => {
     }
   };
 
+  // Deliberately NOT using optimisticListDelete here: the server can reject
+  // this delete with a business-logic 409 when the order has linked invoices,
+  // dispatch notes, or build jobs, and the specific message from the server
+  // ("2 invoices, 1 delivery/collection note" etc.) is far more useful than a
+  // generic "failed to delete" toast. Handled inline so the specific message
+  // reaches the user.
   const handleDelete = async (id: number) => {
-    if (!setClientOrders) {
-      // Fallback when the setter isn't threaded through (shouldn't happen in
-      // practice — BookkeepingView always passes it). Keeps the tab usable.
-      if (!(await confirmDialog({ title: 'Delete sales order', message: 'Delete this sales order? This cannot be undone.', confirmLabel: 'Delete', destructive: true }))) return;
-      await apiDelete(`/api/client-orders/${id}`);
-      triggerToast('Sales order deleted.');
-      await refresh();
-      setViewing(null);
-      return;
-    }
-    if (!(await confirmDialog({ title: 'Delete sales order', message: 'Delete this sales order? This cannot be undone.', confirmLabel: 'Delete', destructive: true }))) return;
+    if (!(await confirmDialog({
+      title: 'Delete sales order',
+      message: 'Delete this sales order? This cannot be undone.\n\nIf any invoices, delivery/collection notes, or build jobs reference this order, the delete will be blocked — void those first.',
+      confirmLabel: 'Delete',
+      destructive: true,
+    }))) return;
+
+    const snap = clientOrders;
+    if (setClientOrders) setClientOrders(prev => prev.filter(o => o.id !== id));
     setViewing(null);
-    await optimisticListDelete({
-      list: clientOrders,
-      setList: setClientOrders,
-      matches: o => o.id === id,
-      request: () => fetch(`/api/client-orders/${id}`, { method: 'DELETE' }),
-      successMsg: 'Sales order deleted.',
-      errorMsg: 'Failed to delete sales order',
-    });
+
+    try {
+      const res = await fetch(`/api/client-orders/${id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        const msg = body?.error || `Failed to delete sales order (${res.status})`;
+        if (setClientOrders) setClientOrders(snap);
+        triggerToast(msg, 'ERROR');
+        return;
+      }
+      triggerToast('Sales order deleted.');
+      if (!setClientOrders) await refresh();
+    } catch (err: any) {
+      if (setClientOrders) setClientOrders(snap);
+      triggerToast(err?.message || 'Failed to delete sales order', 'ERROR');
+    }
   };
 
   // Refresh a single order from the server (used after doc upload / verify
@@ -172,6 +187,10 @@ export const SalesOrdersTab: React.FC<ModuleDataProps> = (props) => {
           onClose={() => setViewing(null)}
           onDelete={() => handleDelete(viewing.id)}
           onDocChanged={() => refetchOrder(viewing.id)}
+          onCreateDispatch={props.onCreateDispatch ? (noteType) => {
+            setViewing(null);
+            props.onCreateDispatch!(viewing.id, noteType);
+          } : undefined}
         />
       )}
     </div>
@@ -316,9 +335,10 @@ const SalesOrderViewModal: React.FC<{
   setBusy: (b: boolean) => void;
   triggerToast: (msg: string, type?: any) => void;
   onClose: () => void;
+  onCreateDispatch?: (noteType: 'DELIVERY' | 'COLLECTION') => void;
   onDelete: () => void;
   onDocChanged: () => void;
-}> = ({ order, clientName, busy, setBusy, triggerToast, onClose, onDelete, onDocChanged }) => {
+}> = ({ order, clientName, busy, setBusy, triggerToast, onClose, onDelete, onDocChanged, onCreateDispatch }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleUpload = async (file: File) => {
@@ -375,10 +395,12 @@ const SalesOrderViewModal: React.FC<{
     }
     setBusy(true);
     try {
+      // verifiedBy is now derived from the session user on the server, not
+      // trusted from the client — see clientsRoutes.ts PUT /verify handler.
       const res = await fetch(`/api/client-orders/${order.id}/verify`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ verified: target, verifiedBy: 'me' }),
+        body: JSON.stringify({ verified: target }),
       });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Failed to update verification');
       triggerToast(target ? 'Order marked verified.' : 'Verification cleared.');
@@ -492,12 +514,15 @@ const SalesOrderViewModal: React.FC<{
       </SectionCard>
 
       <div className="flex items-center justify-between pt-md mt-md border-t border-outline-variant/20 gap-sm flex-wrap">
-        <div className="flex items-center gap-sm">
+        <div className="flex items-center gap-sm flex-wrap">
           <DangerButton icon={<Trash2 className="w-3.5 h-3.5" />} onClick={onDelete} disabled={busy}>Delete</DangerButton>
           <SecondaryButton icon={<Printer className="w-3.5 h-3.5" />} onClick={openPrint}>Print</SecondaryButton>
-          <span className="text-[10px] text-outline inline-flex items-center gap-1">
-            <Truck className="w-3 h-3" /> Create a delivery/collection note from this order in Sales → Delivery &amp; Collection.
-          </span>
+          {onCreateDispatch && (
+            <>
+              <SecondaryButton icon={<Truck className="w-3.5 h-3.5" />} onClick={() => onCreateDispatch('DELIVERY')}>Create Delivery Note</SecondaryButton>
+              <SecondaryButton icon={<Truck className="w-3.5 h-3.5" />} onClick={() => onCreateDispatch('COLLECTION')}>Create Collection Note</SecondaryButton>
+            </>
+          )}
         </div>
         <div className="w-56 space-y-1 text-xs">
           <div className="flex justify-between text-on-surface-variant"><span>Subtotal</span><span className="font-mono">{fmtMoney(order.subtotal, order.currency)}</span></div>

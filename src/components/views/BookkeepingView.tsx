@@ -107,6 +107,11 @@ export const BookkeepingView: React.FC<BookkeepingViewProps> = ({
   const [productionItems, setProductionItems] = useState<Item[]>([]);
 
   const [prefillFromPO, setPrefillFromPO] = useState<PurchaseOrder | null>(null);
+  // When the user clicks "Create Delivery Note" from a sales order, we set
+  // this to the order id + type; DispatchTab opens its editor with those
+  // fields pre-filled and clears the state once consumed so a later manual
+  // "+ New" click doesn't re-open with stale prefill data.
+  const [dispatchPrefill, setDispatchPrefill] = useState<{ orderId: number; noteType: 'DELIVERY' | 'COLLECTION' } | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -187,10 +192,24 @@ export const BookkeepingView: React.FC<BookkeepingViewProps> = ({
             ))}
           </div>
           {salesSub === 'CUSTOMERS' && <CustomersTab {...moduleData} />}
-          {salesSub === 'ORDERS' && <SalesOrdersTab {...moduleData} />}
+          {salesSub === 'ORDERS' && (
+            <SalesOrdersTab
+              {...moduleData}
+              onCreateDispatch={(orderId, noteType) => {
+                setDispatchPrefill({ orderId, noteType });
+                setSalesSub('DISPATCH');
+              }}
+            />
+          )}
           {salesSub === 'INVOICES' && <InvoicesTab {...moduleData} />}
           {salesSub === 'PAYMENTS' && <PaymentsReceivedTab {...moduleData} />}
-          {salesSub === 'DISPATCH' && <DispatchTab {...moduleData} />}
+          {salesSub === 'DISPATCH' && (
+            <DispatchTab
+              {...moduleData}
+              prefillFromOrder={dispatchPrefill}
+              onPrefillConsumed={() => setDispatchPrefill(null)}
+            />
+          )}
         </div>
       )}
 

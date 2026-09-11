@@ -25,8 +25,16 @@ interface EditableItem {
 
 const newItem = (): EditableItem => ({ key: `I${Date.now()}${Math.random().toString(36).slice(2, 6)}`, partNumber: '', description: '', quantity: 1, serialNumbers: '' });
 
-export const DispatchTab: React.FC<ModuleDataProps> = (props) => {
-  const [type, setType] = useState<DispatchNoteType>('DELIVERY');
+interface DispatchTabExtras {
+  prefillFromOrder?: { orderId: number; noteType: 'DELIVERY' | 'COLLECTION' } | null;
+  onPrefillConsumed?: () => void;
+}
+
+export const DispatchTab: React.FC<ModuleDataProps & DispatchTabExtras> = (props) => {
+  // When arriving with a prefill payload (e.g. from a sales order's
+  // "Create Delivery Note" button), initialise on the matching note type
+  // so the editor opens in the right list. Falls back to DELIVERY otherwise.
+  const [type, setType] = useState<DispatchNoteType>(props.prefillFromOrder?.noteType ?? 'DELIVERY');
   return (
     <div className="space-y-4">
       <div className="flex gap-1 bg-surface-container-high/40 p-1 rounded-lg w-fit">
@@ -46,8 +54,8 @@ export const DispatchTab: React.FC<ModuleDataProps> = (props) => {
   );
 };
 
-const DispatchNotesPanel: React.FC<ModuleDataProps & { type: DispatchNoteType }> = (props) => {
-  const { type, clients, clientOrders, triggerToast } = props;
+const DispatchNotesPanel: React.FC<ModuleDataProps & { type: DispatchNoteType } & DispatchTabExtras> = (props) => {
+  const { type, clients, clientOrders, triggerToast, prefillFromOrder, onPrefillConsumed } = props;
   const meta = TYPE_META[type];
   const [rows, setRows] = useState<DispatchNote[]>([]);
   const [loading, setLoading] = useState(true);
@@ -68,6 +76,26 @@ const DispatchNotesPanel: React.FC<ModuleDataProps & { type: DispatchNoteType }>
     }
   };
   useEffect(() => { load(); }, [type]);
+
+  // Cross-tab prefill: when the user clicks "Create Delivery Note" from a
+  // sales order, the parent BookkeepingView sets prefillFromOrder + switches
+  // salesSub. The parent also remounts this panel via key={type}, so we know
+  // this effect fires once with a fresh prefillFromOrder. Open the editor
+  // seeded with the source order's client + order ids, then tell the parent
+  // we consumed the prefill so a subsequent manual "+ New" click doesn't
+  // reopen with stale data.
+  useEffect(() => {
+    if (!prefillFromOrder) return;
+    if (prefillFromOrder.noteType !== type) return;
+    const src = clientOrders.find(o => o.id === prefillFromOrder.orderId);
+    if (!src) return;
+    setEditing({ clientId: src.clientId, clientOrderId: src.id } as unknown as DispatchNote);
+    setShowEditor(true);
+    onPrefillConsumed?.();
+    // Intentionally not depending on prefillFromOrder inside the effect
+    // beyond mount — parent handles clearing via the callback.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const clientName = (id?: number) => clients.find(c => c.id === id)?.clientName || 'Unassigned';
 

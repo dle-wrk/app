@@ -226,9 +226,45 @@ export function registerClientsRoutes(app: Express): void {
     }
   });
 
+  // Delete a sales order. Refuses when other financial or fulfillment
+  // records already reference it — silently orphaning an invoice's SO link
+  // (which is what ON DELETE SET NULL would do) is worse than making the
+  // user unlink or void those first. Returns 409 with per-entity counts so
+  // the UI can show the user exactly what's blocking.
   app.delete('/api/client-orders/:id', async (req, res) => {
     const id = parseInt(req.params.id);
     try {
+      // Check every table that references client_orders.id via a nullable FK.
+      // Cascading tables (client_order_items, order_fulfillment) are omitted —
+      // those go away with the parent on purpose. Anything with financial or
+      // fulfillment implications gets counted here.
+      const references: Record<string, string> = {
+        invoices: 'invoice',
+        dispatch_notes: 'delivery/collection note',
+        build_jobs: 'build job',
+      };
+      const blockers: { entity: string; count: number }[] = [];
+      for (const [table, label] of Object.entries(references)) {
+        try {
+          const row = await queryOne<{ count: string }>(
+            `SELECT COUNT(*)::text as count FROM ${table} WHERE client_order_id = $1`,
+            [id]
+          );
+          const n = Number(row?.count ?? 0);
+          if (n > 0) blockers.push({ entity: label, count: n });
+        } catch {
+          // Table doesn't exist in this deployment — skip. build_jobs may
+          // not exist on older instances; better to allow the delete than
+          // hard-fail on a missing table.
+        }
+      }
+      if (blockers.length > 0) {
+        const summary = blockers.map(b => `${b.count} ${b.entity}${b.count > 1 ? 's' : ''}`).join(', ');
+        return res.status(409).json({
+          error: `Cannot delete: this sales order is referenced by ${summary}. Void or delete those first, then retry.`,
+          blockers,
+        });
+      }
       const { rowCount } = await query('DELETE FROM client_orders WHERE id = $1', [id]);
       if (rowCount === 0) return res.status(404).json({ error: 'client order not found' });
       res.json({ ok: true });
@@ -317,12 +353,17 @@ export function registerClientsRoutes(app: Express): void {
     }
   });
 
-  app.put('/api/client-orders/:id/verify', async (req, res) => {
+  app.put('/api/client-orders/:id/verify', async (req: any, res) => {
     const id = parseInt(req.params.id);
-    const { verified, verifiedBy } = req.body ?? {};
+    const { verified } = req.body ?? {};
     if (typeof verified !== 'boolean') {
       return res.status(400).json({ error: 'verified (boolean) is required' });
     }
+    // verifiedBy is now taken from the session user (attachSessionUser
+    // middleware populates req.user) rather than trusting a client-supplied
+    // field. Prevents a spoofed "verified by" audit trail — every stamp is
+    // whoever actually clicked the button.
+    const verifiedBy = req.user?.email ?? 'unknown';
     try {
       // When flipping true, stamp timestamp + user; when flipping false, clear
       // both so the audit trail doesn't stale-lock old signatures onto a doc
@@ -331,7 +372,7 @@ export function registerClientsRoutes(app: Express): void {
         verified
           ? `UPDATE client_orders SET verified = TRUE, verified_at = now(), verified_by = $1 WHERE id = $2 AND verification_doc_data IS NOT NULL RETURNING *`
           : `UPDATE client_orders SET verified = FALSE, verified_at = NULL, verified_by = NULL WHERE id = $2 RETURNING *`,
-        [verifiedBy || null, id]
+        [verifiedBy, id]
       );
       if (!row) {
         // Distinguish "no such order" from "can't verify without a doc"
