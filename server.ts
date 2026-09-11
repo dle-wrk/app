@@ -856,6 +856,12 @@ async function runSchemaBootstrap() {
       ip_address TEXT
     )`).catch(() => {});
     await exec(`CREATE INDEX IF NOT EXISTS user_sessions_email_idx ON user_sessions (user_email)`).catch(() => {});
+    // Track real user activity separately from last_seen (which the client's
+    // session/verify polling bumps every ~30s and would defeat idle detection).
+    // Rows that predate this column read NULL — attachSessionUser treats NULL
+    // as "not yet observed active" and gives the session one grace window
+    // before enforcing the idle timeout.
+    await exec(`ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP`).catch(() => {});
     // Password reset tokens. Bcrypt-hashed at rest (like the passwords they
     // reset) so a DB read alone can't be turned into an account takeover.
     // One row per issued token; expired/used rows stay for audit.

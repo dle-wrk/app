@@ -66,21 +66,50 @@ export async function verifyAndUpgradePassword(
 // Middlewares.
 // ---------------------------------------------------------------------------
 
+// Idle timeout: sessions where last_activity is older than this window are
+// treated as expired. Currently 24 hours per the product decision — extend
+// only after weighing the security/UX tradeoff.
+export const SESSION_IDLE_MS = 24 * 60 * 60 * 1000;
+
+// Paths that shouldn't count as user activity. session/verify runs on a
+// 30s heartbeat and exchange-rate refreshes every few minutes — both would
+// keep last_activity fresh forever and defeat idle detection.
+const POLLING_PATHS = new Set([
+  '/api/session/verify',
+  '/api/exchange-rate',
+]);
+
 // Attach req.user if a valid session ID is presented via X-Session-Id header
-// or body.sessionId. Silent no-op for anonymous requests.
+// or body.sessionId. Silent no-op for anonymous requests. Idle sessions
+// (last_activity > SESSION_IDLE_MS ago) are treated as if no session was
+// presented; the row itself is left for /api/session/verify to reap so that
+// endpoint can report the specific 'idle_timeout' reason to the client.
 export async function attachSessionUser(req: any, _res: Response, next: NextFunction): Promise<void> {
   try {
     const sessionId = String(req.headers?.['x-session-id'] ?? req.body?.sessionId ?? '');
     if (!sessionId) return next();
-    const row = await queryOne<{ id: number; email: string; role: string; status: string }>(
-      `SELECT u.id, u.email, u.role, u.status
+    const row = await queryOne<{ id: number; email: string; role: string; status: string; last_activity: string | null }>(
+      `SELECT u.id, u.email, u.role, u.status, s.last_activity
          FROM user_sessions s
          JOIN users u ON u.id = s.user_id
         WHERE s.id = $1`,
       [sessionId]
     );
     if (row && row.status === 'ACTIVE') {
-      req.user = { id: row.id, email: row.email, role: (row.role || '').toLowerCase() };
+      // Idle check: NULL last_activity (row predates the migration) gets a
+      // grace window — the very next request updates it, so the timer starts
+      // from first contact after deploy rather than kicking everyone off.
+      const idleMs = row.last_activity ? Date.now() - new Date(row.last_activity).getTime() : 0;
+      if (idleMs < SESSION_IDLE_MS) {
+        req.user = { id: row.id, email: row.email, role: (row.role || '').toLowerCase() };
+        // Bump last_activity on real API calls only — polling paths would
+        // otherwise keep every idle session alive forever. Fire-and-forget:
+        // a slow update shouldn't hold up the actual request.
+        if (!POLLING_PATHS.has(req.path)) {
+          void query(`UPDATE user_sessions SET last_activity = CURRENT_TIMESTAMP WHERE id = $1`, [sessionId])
+            .catch(() => {});
+        }
+      }
     }
   } catch (err: any) {
     console.warn('attachSessionUser failed:', err.message);
@@ -279,12 +308,24 @@ export function registerAuthRoutes(app: Express): void {
         res.setHeader('Retry-After', String(check.retryAfter));
         return res.status(429).json({ error: 'Too many verify calls' });
       }
-      const row = await queryOne<{ user_email: string }>(
-        `SELECT user_email FROM user_sessions WHERE id = $1`,
+      const row = await queryOne<{ user_email: string; last_activity: string | null }>(
+        `SELECT user_email, last_activity FROM user_sessions WHERE id = $1`,
         [sessionId]
       );
       if (!row) return res.json({ active: false, reason: 'signed_in_elsewhere' });
-      // Cheap heartbeat so we could add an idle-timeout later without another table.
+
+      // Idle timeout — reap the row here so admin views don't keep showing
+      // it as an active session, and report the specific reason so the
+      // client can toast "signed out due to inactivity" instead of the
+      // misleading "signed in from another device".
+      const lastActivityMs = row.last_activity ? new Date(row.last_activity).getTime() : Date.now();
+      if (Date.now() - lastActivityMs >= SESSION_IDLE_MS) {
+        await query(`DELETE FROM user_sessions WHERE id = $1`, [sessionId]).catch(() => {});
+        return res.json({ active: false, reason: 'idle_timeout' });
+      }
+
+      // Heartbeat — keeps last_seen fresh but deliberately does NOT touch
+      // last_activity (the polling path is excluded from activity tracking).
       await query(`UPDATE user_sessions SET last_seen = CURRENT_TIMESTAMP WHERE id = $1`, [sessionId]).catch(() => {});
       res.json({ active: true, email: row.user_email });
     } catch (err: any) {

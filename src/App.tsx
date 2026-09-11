@@ -140,7 +140,7 @@ export default function App() {
     triggerToast('Password updated.', 'SUCCESS');
   };
 
-  const handleLogout = (opts?: { kicked?: boolean }) => {
+  const handleLogout = (opts?: { kicked?: boolean; reason?: 'idle_timeout' | 'signed_in_elsewhere' }) => {
     const email = currentUser?.email;
     const sessionId = localStorage.getItem('sessionId');
     localStorage.removeItem('userLoggedIn');
@@ -149,6 +149,8 @@ export default function App() {
     setCurrentUser(null);
     setIsAuthenticated(false);
     // Tell the server to drop the row too so it's gone from admin views.
+    // Skip when kicked — the server either already deleted the row (idle
+    // timeout, elsewhere-login) or the session id is invalid.
     if (sessionId && !opts?.kicked) {
       fetch('/api/session/logout', {
         method: 'POST',
@@ -156,11 +158,16 @@ export default function App() {
         body: JSON.stringify({ sessionId }),
       }).catch(() => {});
     }
-    if (email) logActivity({ userEmail: email, action: 'LOGOUT', details: opts?.kicked ? { kicked: true } : undefined });
-    triggerToast(
-      opts?.kicked ? 'Signed out — this account signed in from another device' : 'Logged out successfully',
-      opts?.kicked ? 'WARNING' : 'SUCCESS'
-    );
+    if (email) logActivity({ userEmail: email, action: 'LOGOUT', details: opts?.kicked ? { kicked: true, reason: opts.reason } : undefined });
+    // Per-reason toasts so a user who was idle for 24h doesn't see a
+    // confusing "signed in from another device" message they can't square
+    // with what actually happened.
+    const message = opts?.reason === 'idle_timeout'
+      ? 'Signed out — inactive for 24 hours'
+      : opts?.kicked
+        ? 'Signed out — this account signed in from another device'
+        : 'Logged out successfully';
+    triggerToast(message, opts?.kicked ? 'WARNING' : 'SUCCESS');
   };
 
   // Poll the server periodically. When another device logs into the same
@@ -187,7 +194,11 @@ export default function App() {
         });
         if (!res.ok) return;
         const data = await res.json();
-        if (!cancelled && data && data.active === false) handleLogout({ kicked: true });
+        if (!cancelled && data && data.active === false) {
+          // reason may be 'idle_timeout' | 'signed_in_elsewhere' — pass it
+          // through so handleLogout picks the right user-facing message.
+          handleLogout({ kicked: true, reason: data.reason });
+        }
       } catch { /* fail open — network hiccups shouldn't kick the user */ }
     };
     check();
