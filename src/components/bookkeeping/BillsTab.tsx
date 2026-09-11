@@ -21,7 +21,7 @@ interface PrefillFromScan {
 }
 
 export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrder | null; onPrefillConsumed?: () => void }> = (props) => {
-  const { bills, triggerToast, refresh, prefillFromPO, onPrefillConsumed } = props;
+  const { bills, setBills, triggerToast, refresh, prefillFromPO, onPrefillConsumed } = props;
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [showEditor, setShowEditor] = useState(!!prefillFromPO);
   const [viewing, setViewing] = useState<any>(null);
@@ -66,29 +66,31 @@ export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
 
   const handleVoid = async (id: number) => {
     if (!(await confirmDialog({ title: 'Void bill', message: 'Void this bill? This posts a reversing journal entry.', confirmLabel: 'Void', destructive: true }))) return;
-    setBusy(true);
+    const snap = bills;
+    setBills?.(prev => prev.map(b => b.id === id ? { ...b, status: 'VOID', balanceDue: 0 } : b));
+    setViewing(null);
     try {
       await apiPost(`/api/bills/${id}/void`);
       triggerToast('Bill voided.');
-      await refresh();
-      setViewing(null);
+      void refresh();
     } catch (err: any) {
+      setBills?.(snap);
       triggerToast(err.message || 'Failed to void bill', 'ERROR');
-    } finally {
-      setBusy(false);
     }
   };
 
   const handleDelete = async (id: number) => {
     if (!(await confirmDialog({ title: 'Delete bill', message: 'Delete this bill? This action cannot be undone.', confirmLabel: 'Delete', destructive: true }))) return;
-    setBusy(true);
+    const snap = bills;
+    setBills?.(prev => prev.filter(b => b.id !== id));
+    setViewing(null);
     try {
       const res = await fetch(`/api/bills/${id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error((await res.json()).error || 'Failed to delete');
       triggerToast('Bill deleted.');
-      await refresh();
-      setViewing(null);
+      void refresh();
     } catch (err: any) {
+      setBills?.(snap);
       triggerToast(err.message || 'Failed to delete bill', 'ERROR');
     } finally {
       setBusy(false);

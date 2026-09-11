@@ -150,7 +150,9 @@ export const BookkeepingView: React.FC<BookkeepingViewProps> = ({
 
   const moduleData = {
     accounts, taxRates, invoices, paymentsReceived, purchaseOrders, bills, paymentsMade, expenses,
-    clients, setClients, suppliers, items: productionItems.length > 0 ? productionItems : items, clientOrders, setClientOrders, triggerToast, refresh,
+    clients, setClients, suppliers, items: productionItems.length > 0 ? productionItems : items, clientOrders, setClientOrders,
+    setInvoices, setBills, setPaymentsReceived, setPaymentsMade, setExpenses,
+    triggerToast, refresh,
   };
 
   if (loading) {

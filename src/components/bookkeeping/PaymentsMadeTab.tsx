@@ -5,7 +5,7 @@ import { ModuleDataProps, Modal, fmtMoney, fmtDate, todayISO, apiPost, apiGet, P
 import { confirmDialog } from '../../lib/confirmDialog';
 
 export const PaymentsMadeTab: React.FC<ModuleDataProps> = (props) => {
-  const { paymentsMade, triggerToast, refresh } = props;
+  const { paymentsMade, setPaymentsMade, triggerToast, refresh } = props;
   const [showCreate, setShowCreate] = useState(false);
   const [viewing, setViewing] = useState<any>(null);
   const [busy, setBusy] = useState(false);
@@ -23,16 +23,16 @@ export const PaymentsMadeTab: React.FC<ModuleDataProps> = (props) => {
 
   const handleVoid = async (id: number) => {
     if (!(await confirmDialog({ title: 'Void payment', message: 'Void this payment? This un-applies it from any bills and reverses the ledger entry.', confirmLabel: 'Void', destructive: true }))) return;
-    setBusy(true);
+    const snap = paymentsMade;
+    setPaymentsMade?.(prev => prev.filter(p => p.id !== id));
+    setViewing(null);
     try {
       await apiPost(`/api/payments-made/${id}/void`);
       triggerToast('Payment voided.');
-      await refresh();
-      setViewing(null);
+      void refresh();
     } catch (err: any) {
+      setPaymentsMade?.(snap);
       triggerToast(err.message || 'Failed to void payment', 'ERROR');
-    } finally {
-      setBusy(false);
     }
   };
 

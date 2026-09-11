@@ -1133,16 +1133,19 @@ export default function App() {
   };
 
   // Wholesale 1000-unit bulk pricing state updater
+  // Optimistic bulk price update — snapshot the whole items list, apply
+  // the new prices locally so the UI reflects the change instantly, then
+  // POST /api/items/bulk in the background. Rolls the entire list back on
+  // failure and surfaces the specific server error. Previously blocked the
+  // UI until the round-trip completed, which for a large price batch
+  // (hundreds of items) felt like the app had frozen.
   const handleUpdateBulkPrices = async (updatedPrices: { partNumber: string; price: number }[]) => {
     const priceMap = new Map(updatedPrices.map(u => [u.partNumber, u.price]));
     const affectedItems: Item[] = [];
 
     const newItems = items.map(item => {
       if (priceMap.has(item.partNumber)) {
-        const updated = {
-          ...item,
-          price: priceMap.get(item.partNumber)!
-        };
+        const updated = { ...item, price: priceMap.get(item.partNumber)! };
         affectedItems.push(updated);
         return updated;
       }
@@ -1150,6 +1153,9 @@ export default function App() {
     });
 
     if (affectedItems.length === 0) return;
+
+    const snap = items;
+    setItems(newItems);
 
     try {
       const payloads = affectedItems.map(i => mapItemToPayload(i));
@@ -1161,15 +1167,15 @@ export default function App() {
       if (!res.ok) {
         const text = await res.text().catch(() => 'unknown error');
         console.error('Failed to persist bulk prices to DB:', res.status, text);
-        triggerToast("Failed to save price updates to database.");
+        setItems(snap);
+        triggerToast(`Failed to save price updates: ${text.slice(0, 120)}`, 'ERROR');
         return;
       }
-
-      setItems(newItems);
-      triggerToast("Bulk prices successfully synchronized.");
+      triggerToast(`Bulk prices synchronized — ${affectedItems.length} item${affectedItems.length === 1 ? '' : 's'} updated.`);
     } catch (err) {
       console.error('Error saving bulk prices to DB:', err);
-      triggerToast("Network error: Bulk price update failed.");
+      setItems(snap);
+      triggerToast('Network error: bulk price update failed. Changes reverted.', 'ERROR');
     }
   };
 

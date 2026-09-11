@@ -29,6 +29,17 @@ export interface ModuleDataProps {
   // (refresh() only re-fetches the bookkeeping bootstrap, which excludes
   // clientOrders entirely).
   setClientOrders?: React.Dispatch<React.SetStateAction<ClientOrder[]>>;
+  // Per-entity setters so tabs can flip an invoice/bill/payment/expense
+  // status optimistically without waiting for a full bookkeeping bootstrap
+  // refresh. Callers still trigger refresh() in the background so aggregate
+  // totals (outstanding, overdue, unallocated) reconcile with the server.
+  // All optional so callers that don't need them (Overview, Accounting,
+  // Production, Reports) don't have to receive plumbing they never use.
+  setInvoices?: React.Dispatch<React.SetStateAction<Invoice[]>>;
+  setBills?: React.Dispatch<React.SetStateAction<Bill[]>>;
+  setPaymentsReceived?: React.Dispatch<React.SetStateAction<PaymentReceived[]>>;
+  setPaymentsMade?: React.Dispatch<React.SetStateAction<PaymentMade[]>>;
+  setExpenses?: React.Dispatch<React.SetStateAction<Expense[]>>;
 }
 
 // ============================================================================

@@ -4,7 +4,7 @@ import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, apiPos
 import { confirmDialog } from '../../lib/confirmDialog';
 
 export const ExpensesTab: React.FC<ModuleDataProps> = (props) => {
-  const { expenses, triggerToast, refresh } = props;
+  const { expenses, setExpenses, triggerToast, refresh } = props;
   const [showCreate, setShowCreate] = useState(false);
   const [busy, setBusy] = useState<number | null>(null);
 
@@ -15,15 +15,15 @@ export const ExpensesTab: React.FC<ModuleDataProps> = (props) => {
 
   const handleVoid = async (id: number) => {
     if (!(await confirmDialog({ title: 'Void expense', message: 'Void this expense? This reverses the ledger entry.', confirmLabel: 'Void', destructive: true }))) return;
-    setBusy(id);
+    const snap = expenses;
+    setExpenses?.(prev => prev.map(e => e.id === id ? { ...e, status: 'VOID' } : e));
     try {
       await apiPost(`/api/expenses/${id}/void`);
       triggerToast('Expense voided.');
-      await refresh();
+      void refresh();
     } catch (err: any) {
+      setExpenses?.(snap);
       triggerToast(err.message || 'Failed to void expense', 'ERROR');
-    } finally {
-      setBusy(null);
     }
   };
 

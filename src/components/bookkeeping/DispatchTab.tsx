@@ -118,33 +118,41 @@ const DispatchNotesPanel: React.FC<ModuleDataProps & { type: DispatchNoteType } 
     }
   };
 
+  // Optimistic status transitions. Each action maps to a target status the
+  // server will assign; we flip the row locally so the badge changes on
+  // click, then reconcile on failure. `completed_at` is stamped server-side
+  // on complete but not shown in the list view, so we don't try to guess it.
+  const ACTION_TARGET: Record<'issue' | 'complete' | 'cancel', DispatchNote['status']> = {
+    issue: 'ISSUED',
+    complete: 'COMPLETED',
+    cancel: 'CANCELLED',
+  };
   const doAction = async (id: number, action: 'issue' | 'complete' | 'cancel', confirmMsg?: string) => {
     if (confirmMsg && !(await confirmDialog(confirmMsg))) return;
-    setBusy(true);
+    const snap = rows;
+    const targetStatus = ACTION_TARGET[action];
+    setRows(prev => prev.map(r => r.id === id ? { ...r, status: targetStatus } : r));
+    setViewing(null);
     try {
       await apiPost(`/api/dispatch-notes/${id}/${action}`);
       triggerToast(`${meta.label} ${action === 'issue' ? 'issued' : action === 'complete' ? 'marked complete' : 'cancelled'}.`);
-      setViewing(null);
-      await load();
     } catch (err: any) {
+      setRows(snap);
       triggerToast(err.message || `Failed to ${action}`, 'ERROR');
-    } finally {
-      setBusy(false);
     }
   };
 
   const doDelete = async (id: number) => {
     if (!(await confirmDialog({ title: 'Delete draft note', message: 'Delete this draft note permanently?', confirmLabel: 'Delete', destructive: true }))) return;
-    setBusy(true);
+    const snap = rows;
+    setRows(prev => prev.filter(r => r.id !== id));
+    setViewing(null);
     try {
       await apiDelete(`/api/dispatch-notes/${id}`);
       triggerToast('Draft note deleted.');
-      setViewing(null);
-      await load();
     } catch (err: any) {
+      setRows(snap);
       triggerToast(err.message || 'Failed to delete', 'ERROR');
-    } finally {
-      setBusy(false);
     }
   };
 

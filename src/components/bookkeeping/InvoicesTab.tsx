@@ -9,7 +9,7 @@ import { confirmDialog } from '../../lib/confirmDialog';
 const STATUS_FILTERS = ['ALL', 'DRAFT', 'SENT', 'PARTIAL', 'PAID', 'OVERDUE', 'VOID'];
 
 export const InvoicesTab: React.FC<ModuleDataProps> = (props) => {
-  const { invoices, clients, items, taxRates, triggerToast, refresh } = props;
+  const { invoices, setInvoices, clients, items, taxRates, triggerToast, refresh } = props;
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [showEditor, setShowEditor] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
@@ -67,33 +67,40 @@ export const InvoicesTab: React.FC<ModuleDataProps> = (props) => {
 
   const clientName = (id?: number) => clients.find(c => c.id === id)?.clientName || 'Unassigned';
 
+  // Optimistic void: flip the row's status to VOID immediately + zero the
+  // balance_due so the "outstanding" tile stops counting it. Trigger a
+  // background refresh() to reconcile the aggregate totals (which include
+  // the reversing journal entry the server posts). If the void fails, the
+  // snapshot restores the row and an error toast surfaces.
   const handleVoid = async (id: number) => {
     if (!(await confirmDialog({ title: 'Void invoice', message: 'Void this invoice? This posts a reversing journal entry and cannot be undone.', confirmLabel: 'Void', destructive: true }))) return;
-    setBusy(true);
+    const snap = invoices;
+    setInvoices?.(prev => prev.map(i => i.id === id ? { ...i, status: 'VOID', balanceDue: 0 } : i));
+    setViewingInvoice(null);
     try {
       await apiPost(`/api/invoices/${id}/void`);
       triggerToast('Invoice voided.');
-      await refresh();
-      setViewingInvoice(null);
+      // Fire and forget — refresh reconciles totals but we already gave the
+      // user their visual feedback.
+      void refresh();
     } catch (err: any) {
+      setInvoices?.(snap);
       triggerToast(err.message || 'Failed to void invoice', 'ERROR');
-    } finally {
-      setBusy(false);
     }
   };
 
   const handleDeleteDraft = async (id: number) => {
     if (!(await confirmDialog({ title: 'Delete draft invoice', message: 'Delete this draft invoice permanently?', confirmLabel: 'Delete', destructive: true }))) return;
-    setBusy(true);
+    const snap = invoices;
+    setInvoices?.(prev => prev.filter(i => i.id !== id));
+    setViewingInvoice(null);
     try {
       await apiDelete(`/api/invoices/${id}`);
       triggerToast('Draft invoice deleted.');
-      await refresh();
-      setViewingInvoice(null);
+      void refresh();
     } catch (err: any) {
+      setInvoices?.(snap);
       triggerToast(err.message || 'Failed to delete invoice', 'ERROR');
-    } finally {
-      setBusy(false);
     }
   };
 

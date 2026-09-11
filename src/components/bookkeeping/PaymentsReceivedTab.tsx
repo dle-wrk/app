@@ -5,7 +5,7 @@ import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, apiPos
 import { confirmDialog } from '../../lib/confirmDialog';
 
 export const PaymentsReceivedTab: React.FC<ModuleDataProps> = (props) => {
-  const { paymentsReceived, triggerToast, refresh } = props;
+  const { paymentsReceived, setPaymentsReceived, triggerToast, refresh } = props;
   const [showCreate, setShowCreate] = useState(false);
   const [viewing, setViewing] = useState<any>(null);
   const [busy, setBusy] = useState(false);
@@ -23,16 +23,20 @@ export const PaymentsReceivedTab: React.FC<ModuleDataProps> = (props) => {
 
   const handleVoid = async (id: number) => {
     if (!(await confirmDialog({ title: 'Void payment', message: 'Void this payment? This un-applies it from any invoices and reverses the ledger entry.', confirmLabel: 'Void', destructive: true }))) return;
-    setBusy(true);
+    const snap = paymentsReceived;
+    // Payments don't have a status column that changes on void; the server
+    // just deletes/marks it un-applied. Simplest optimistic move: remove
+    // the row from the local list. refresh() reconciles any invoice
+    // balances that flipped back to OVERDUE / PARTIAL.
+    setPaymentsReceived?.(prev => prev.filter(p => p.id !== id));
+    setViewing(null);
     try {
       await apiPost(`/api/payments-received/${id}/void`);
       triggerToast('Payment voided.');
-      await refresh();
-      setViewing(null);
+      void refresh();
     } catch (err: any) {
+      setPaymentsReceived?.(snap);
       triggerToast(err.message || 'Failed to void payment', 'ERROR');
-    } finally {
-      setBusy(false);
     }
   };
 
