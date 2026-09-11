@@ -27,6 +27,7 @@ import BulkPricingWizard from './components/BulkPricingWizard';
 import ItemDetailModal, { deriveMetric, deriveImperial } from './components/ItemDetailModal';
 import ProductionKitsManager from './components/ProductionKitsManager';
 import Login from './components/Login';
+import MustChangePasswordModal from './components/MustChangePasswordModal';
 import ResetPassword from './components/ResetPassword';
 import { Sidebar } from './components/Sidebar';
 import { DashboardView } from './components/views/DashboardView';
@@ -115,6 +116,28 @@ export default function App() {
     } finally {
       setIsLoginLoading(false);
     }
+  };
+
+  // Called from MustChangePasswordModal when the user submits a new password
+  // for the "first login on default 'tracklab' placeholder" flow. Server
+  // handles validation (correct current password, forbidden defaults);
+  // on success we clear the flag locally + in persisted state so the modal
+  // unmounts and the user can use the app normally.
+  const handleChangePassword = async (currentPassword: string, newPassword: string): Promise<void> => {
+    const res = await fetch('/api/auth/change-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ currentPassword, newPassword }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body?.error || `Failed to change password (${res.status})`);
+    }
+    // Persist cleared flag so a page reload doesn't re-open the modal.
+    const updated = { ...(currentUser || {}), mustChangePassword: false };
+    setCurrentUser(updated);
+    localStorage.setItem('currentUser', JSON.stringify(updated));
+    triggerToast('Password updated.', 'SUCCESS');
   };
 
   const handleLogout = (opts?: { kicked?: boolean }) => {
@@ -2160,6 +2183,17 @@ if (currentView === 'alternates') {
             handler on mount so any part of the app can call
             confirmDialog(...) instead of window.confirm(). */}
         <ConfirmDialogHost />
+
+        {/* Mandatory password change on first login with default 'tracklab'.
+            Server sets currentUser.mustChangePassword=true when the row was
+            reset. Modal has no dismiss path except signing out, so the user
+            can't slip past it into the app. */}
+        {currentUser?.mustChangePassword && (
+          <MustChangePasswordModal
+            onSubmit={handleChangePassword}
+            onSignOut={() => handleLogout()}
+          />
+        )}
 
         {/* Global floating notification Toast system.
             Per-severity styling: green for SUCCESS, red for ERROR,

@@ -839,6 +839,11 @@ async function runSchemaBootstrap() {
     await exec(`ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`).catch(() => {});
     await exec(`ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`).catch(() => {});
     await exec(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login TIMESTAMP`).catch(() => {});
+    // Forced-change flag: set to TRUE when an admin (or the bulk reset SQL)
+    // stamps a placeholder password on a row. The next successful login
+    // returns { mustChangePassword: true } and the client blocks further
+    // navigation until POST /api/auth/change-password clears it.
+    await exec(`ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT FALSE`).catch(() => {});
     // One row per active login. A new login for the same email deletes prior
     // rows, so any older device polling /api/session/verify gets kicked out.
     await exec(`CREATE TABLE IF NOT EXISTS user_sessions (

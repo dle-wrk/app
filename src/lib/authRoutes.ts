@@ -191,7 +191,7 @@ export function registerAuthRoutes(app: Express): void {
 
       try {
         const { rows } = await query(
-          `SELECT id, email, first_name, last_name, role, status, password FROM users WHERE email = $1`,
+          `SELECT id, email, first_name, last_name, role, status, password, must_change_password FROM users WHERE email = $1`,
           [normalizedEmail]
         );
         if (rows.length === 0) {
@@ -242,6 +242,10 @@ export function registerAuthRoutes(app: Express): void {
           role: user.role,
           status: user.status,
           sessionId,
+          // Client renders a mandatory change-password modal when this is
+          // true. Coerced to bool because the column can be null on rows
+          // that predate the ALTER TABLE migration.
+          mustChangePassword: !!user.must_change_password,
         });
       } catch (dbErr: any) {
         // DB unreachable / rejecting queries. Previously this was 401 which
@@ -408,6 +412,57 @@ export function registerAuthRoutes(app: Express): void {
       res.json({ ok: true, message: 'Password updated. Please sign in.' });
     } catch (err: any) {
       console.error('[reset-password] failed:', err.message);
+      res.status(503).json({ error: 'Service unavailable — please try again shortly' });
+    }
+  });
+
+  // -------------------- POST /api/auth/change-password --------------------
+  // Authenticated password change — used both for the "first login with
+  // default password, must change" flow and for a user voluntarily rotating
+  // their password from account settings. Requires an active session
+  // (attachSessionUser populates req.user) and the current password so a
+  // stolen session token alone can't lock the real user out.
+  app.post('/api/auth/change-password', validateBody(z.object({
+    currentPassword: z.string().min(1).max(200),
+    newPassword: z.string().min(8).max(200),
+  })), async (req: any, res) => {
+    if (!req.user) return res.status(401).json({ error: 'Sign in required' });
+
+    const { currentPassword, newPassword } = req.body as { currentPassword: string; newPassword: string };
+
+    // Reject the default placeholder password as the new password. Case-
+    // insensitive because a user retyping "Tracklab" thinking it's clever
+    // would immediately be un-forced-to-change on their next login and
+    // defeat the whole flow.
+    if (newPassword.trim().toLowerCase() === 'tracklab') {
+      return res.status(400).json({ error: '"tracklab" is the default placeholder — choose a different password.' });
+    }
+    if (newPassword === currentPassword) {
+      return res.status(400).json({ error: 'New password must be different from the current password.' });
+    }
+
+    try {
+      const stored = await queryOne<{ password: string | null }>(
+        `SELECT password FROM users WHERE id = $1`,
+        [req.user.id]
+      );
+      if (!stored) return res.status(404).json({ error: 'User not found' });
+
+      const match = await verifyAndUpgradePassword(req.user.id, currentPassword, stored.password);
+      if (!match) return res.status(401).json({ error: 'Current password is incorrect' });
+
+      const hashed = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+      await query(
+        `UPDATE users SET password = $1, must_change_password = FALSE, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+        [hashed, req.user.id]
+      );
+      // Deliberately do NOT invalidate other sessions here — the reset-
+      // password (email-token) flow does, because that path implies "someone
+      // else might have gotten access". A voluntary rotation from a signed-
+      // in device is a different threat model.
+      res.json({ ok: true });
+    } catch (err: any) {
+      console.error('[change-password] failed:', err.message);
       res.status(503).json({ error: 'Service unavailable — please try again shortly' });
     }
   });
