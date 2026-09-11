@@ -162,7 +162,7 @@ export default function Login({ onLogin, isLoading = false }: LoginProps) {
           <form onSubmit={handleSubmit} className="space-y-5">
             {/* Email Field */}
             <div>
-              <label className="block text-xs font-bold text-on-surface mb-2 uppercase tracking-wider">
+              <label htmlFor="login-email" className="block text-xs font-bold text-on-surface mb-2 uppercase tracking-wider">
                 Email Address
               </label>
               <div className={`relative rounded-lg border-2 transition-all ${
@@ -174,6 +174,8 @@ export default function Login({ onLogin, isLoading = false }: LoginProps) {
                   focused === 'email' ? 'text-primary' : 'text-on-surface-variant'
                 }`} />
                 <input
+                  id="login-email"
+                  name="email"
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
@@ -189,7 +191,7 @@ export default function Login({ onLogin, isLoading = false }: LoginProps) {
 
             {/* Password Field */}
             <div>
-              <label className="block text-xs font-bold text-on-surface mb-2 uppercase tracking-wider">
+              <label htmlFor="login-password" className="block text-xs font-bold text-on-surface mb-2 uppercase tracking-wider">
                 Password
               </label>
               <div className={`relative rounded-lg border-2 transition-all ${
@@ -201,6 +203,8 @@ export default function Login({ onLogin, isLoading = false }: LoginProps) {
                   focused === 'password' ? 'text-primary' : 'text-on-surface-variant'
                 }`} />
                 <input
+                  id="login-password"
+                  name="password"
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}

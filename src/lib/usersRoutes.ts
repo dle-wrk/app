@@ -8,9 +8,22 @@
 import type { Express } from 'express';
 import { z } from 'zod';
 import bcrypt from 'bcryptjs';
+import { randomBytes } from 'node:crypto';
 import { query, queryOne } from './db';
 import { CreateUserSchema, UpdateUserSchema, validateBody } from './serverUtils';
 import { requireAdmin, BCRYPT_ROUNDS } from './authRoutes';
+
+// Random human-typable temp password. Avoids ambiguous chars (0/O, 1/l/I)
+// because these get read out over Slack / chat and dictated over the
+// phone. 12 chars from a 54-char alphabet ≈ 69 bits of entropy — plenty
+// for a single-use temp password that gets rotated on first login.
+function generateTempPassword(): string {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+  const bytes = randomBytes(12);
+  let out = '';
+  for (let i = 0; i < 12; i++) out += alphabet[bytes[i] % alphabet.length];
+  return out;
+}
 
 // Default role→permission grants used by the one-shot seeder. Kept alongside
 // the seeder route rather than in a config file — this is boot-time data, not
@@ -109,6 +122,48 @@ export function registerUsersRoutes(app: Express): void {
       console.log(`[PUT /api/users] Updated user: ${id}`);
       res.json(rows[0]);
     } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Admin-driven password reset. Generates a fresh random temp password,
+  // stores its bcrypt hash, flips must_change_password=true, and drops
+  // any live sessions for that user so a still-signed-in tab gets kicked
+  // to login on its next verify. The plaintext temp password is only
+  // ever surfaced ONCE — in the response body — so the admin can share
+  // it out-of-band with the target user; it's never persisted anywhere
+  // else and can't be recovered later. If the admin loses it, run this
+  // endpoint again for a new one.
+  app.post('/api/users/:id/reset-password', requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (!id || Number.isNaN(id)) return res.status(400).json({ error: 'invalid user id' });
+
+      const user = await queryOne<{ id: number; email: string; status: string }>(
+        `SELECT id, email, status FROM users WHERE id = $1`,
+        [id]
+      );
+      if (!user) return res.status(404).json({ error: 'User not found' });
+
+      const tempPassword = generateTempPassword();
+      const hashed = await bcrypt.hash(tempPassword, BCRYPT_ROUNDS);
+      await query(
+        `UPDATE users
+            SET password = $1,
+                must_change_password = TRUE,
+                status = 'ACTIVE',
+                updated_at = CURRENT_TIMESTAMP
+          WHERE id = $2`,
+        [hashed, id]
+      );
+      // Kick any live sessions for this user so someone signed in on a
+      // stale device gets bounced back to login on the next verify poll.
+      await query(`DELETE FROM user_sessions WHERE user_id = $1`, [id]).catch(() => {});
+
+      console.log(`[users] Admin ${(req as any).user?.email || 'unknown'} reset password for user ${id} (${user.email})`);
+      res.json({ ok: true, email: user.email, tempPassword });
+    } catch (err: any) {
+      console.error('[users:reset-password] failed:', err.message);
       res.status(500).json({ error: err.message });
     }
   });

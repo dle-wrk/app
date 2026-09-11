@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, Trash2, Edit2, User as UserIcon, Search, Shield, CheckCircle2, XCircle, Clock, KeyRound, Users as UsersIcon, AlertTriangle } from 'lucide-react';
+import { Plus, Trash2, Edit2, User as UserIcon, Search, Shield, CheckCircle2, XCircle, Clock, KeyRound, Users as UsersIcon, AlertTriangle, Copy, RefreshCw } from 'lucide-react';
 import { User, UserRole, UserStatus } from '../types';
 import { optimisticListDelete } from '../lib/optimisticUpdate';
 
@@ -63,6 +63,15 @@ export default function UserManagement({ triggerToast }: UserManagementProps) {
   const [roleFilter, setRoleFilter] = useState<UserRole | 'all'>('all');
   const [statusFilter, setStatusFilter] = useState<UserStatus | 'all'>('all');
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  // Password-reset flow: confirmResetUser holds the row we're confirming
+  // (inline confirm — same UX as the delete button). resetResult holds
+  // the { email, tempPassword } returned by the server so the admin can
+  // read/copy the plaintext password ONE time before it's gone from
+  // memory. There is no way to recover it — a second reset generates a
+  // fresh one.
+  const [confirmResetUser, setConfirmResetUser] = useState<User | null>(null);
+  const [resetting, setResetting] = useState<number | null>(null);
+  const [resetResult, setResetResult] = useState<{ email: string; tempPassword: string } | null>(null);
   const [showPasswordReset, setShowPasswordReset] = useState(false);
   const [formData, setFormData] = useState<Partial<User> & { password?: string }>({
     email: '',
@@ -198,6 +207,29 @@ export default function UserManagement({ triggerToast }: UserManagementProps) {
       successMsg: 'User deleted',
       errorMsg: 'Failed to delete user',
     });
+  };
+
+  // Reset a user's password to a fresh random temp password (server-side)
+  // and pop a modal showing the plaintext ONCE so the admin can share it
+  // with the target user out-of-band. The user then logs in with it and
+  // hits the mandatory change-password modal to pick their own.
+  const handleResetPassword = async (user: User) => {
+    if (!user.id) return;
+    setResetting(user.id);
+    setConfirmResetUser(null);
+    try {
+      const res = await fetch(`/api/users/${user.id}/reset-password`, { method: 'POST' });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        triggerToast(body?.error || `Failed to reset password (${res.status})`, 'error');
+        return;
+      }
+      setResetResult({ email: body.email, tempPassword: body.tempPassword });
+    } catch (err: any) {
+      triggerToast(err?.message || 'Failed to reset password', 'error');
+    } finally {
+      setResetting(null);
+    }
   };
 
   // Filtered + searched users
@@ -576,8 +608,35 @@ export default function UserManagement({ triggerToast }: UserManagementProps) {
                             No
                           </button>
                         </div>
+                      ) : confirmResetUser?.id === user.id ? (
+                        <div className="flex justify-end items-center gap-xs">
+                          <span className="text-[10px] text-amber-400 font-bold flex items-center gap-1">
+                            <KeyRound className="w-3 h-3" />
+                            Reset password?
+                          </span>
+                          <button
+                            onClick={() => handleResetPassword(user)}
+                            disabled={resetting === user.id}
+                            className="px-2 py-1 rounded text-[10px] font-bold bg-amber-500 text-black hover:brightness-110 transition-all disabled:opacity-50"
+                          >
+                            {resetting === user.id ? '…' : 'Yes'}
+                          </button>
+                          <button
+                            onClick={() => setConfirmResetUser(null)}
+                            className="px-2 py-1 rounded text-[10px] font-bold bg-surface-container-high text-on-surface hover:bg-surface-variant transition-all"
+                          >
+                            No
+                          </button>
+                        </div>
                       ) : (
                         <div className="flex justify-end gap-xs">
+                          <button
+                            onClick={() => setConfirmResetUser(user)}
+                            className="p-1.5 text-amber-400 hover:bg-amber-500/10 rounded transition-colors"
+                            title="Reset password to temporary — user picks new one on next login"
+                          >
+                            <KeyRound className="w-4 h-4" />
+                          </button>
                           <button
                             onClick={() => handleEdit(user)}
                             className="p-1.5 text-blue-400 hover:bg-blue-500/10 rounded transition-colors"
@@ -624,6 +683,65 @@ export default function UserManagement({ triggerToast }: UserManagementProps) {
           </div>
         </div>
       </div>
+
+      {/* Post-reset modal — shows the plaintext temp password ONCE. Closing
+          this modal is the point where the password leaves memory forever;
+          if the admin dismisses without copying it, they have to run the
+          reset again for a new one. Deliberately no Escape close: the
+          admin should acknowledge with the explicit button so a
+          keyboard-slip doesn't wipe the password before it's captured. */}
+      {resetResult && (
+        <div
+          className="fixed inset-0 z-[200] bg-background/90 backdrop-blur-sm flex items-center justify-center p-md"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="bg-surface-container rounded-xl border border-amber-500/40 max-w-[520px] w-full shadow-2xl">
+            <div className="px-lg py-md border-b border-outline-variant flex items-center gap-sm bg-amber-500/10">
+              <KeyRound className="w-5 h-5 text-amber-400" />
+              <div>
+                <h3 className="font-bold text-sm text-on-surface">Temporary password for {resetResult.email}</h3>
+                <p className="text-[10px] text-outline mt-0.5">Copy it now — this is the only time it's shown.</p>
+              </div>
+            </div>
+            <div className="px-lg py-md space-y-md">
+              <div className="p-md bg-surface-container-high rounded-lg border border-outline-variant/40">
+                <label className="block text-[10px] text-outline uppercase tracking-wider mb-2">Password</label>
+                <div className="flex items-center gap-sm">
+                  <code className="flex-1 font-mono text-base text-primary bg-surface-container-low px-3 py-2 rounded border border-outline-variant/40 select-all">
+                    {resetResult.tempPassword}
+                  </code>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(resetResult.tempPassword).then(
+                        () => triggerToast('Copied to clipboard', 'success'),
+                        () => triggerToast('Copy failed — select and copy manually', 'error'),
+                      );
+                    }}
+                    className="p-2 rounded bg-primary text-on-primary hover:brightness-110 transition-all"
+                    title="Copy to clipboard"
+                  >
+                    <Copy className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+              <div className="text-xs text-on-surface-variant space-y-1 leading-relaxed">
+                <p><strong>Give this to {resetResult.email} out-of-band</strong> (Slack DM, SMS, in person). Do not email it to a shared inbox.</p>
+                <p>On their next login they'll be prompted to pick their own password. Any device they were already signed in on has been logged out.</p>
+              </div>
+            </div>
+            <div className="px-lg py-md border-t border-outline-variant flex justify-end">
+              <button
+                type="button"
+                onClick={() => setResetResult(null)}
+                className="px-4 py-2 rounded-lg bg-primary text-on-primary text-xs font-bold hover:brightness-110 active:scale-95 transition-all"
+              >
+                I've saved it
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
