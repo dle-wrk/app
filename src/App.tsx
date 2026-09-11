@@ -1648,7 +1648,9 @@ export default function App() {
               {currentView.replace('_', ' ')}
             </h2>
 
-            {/* Quick search input — form-wrapped so Enter navigates explicitly. */}
+            {/* Quick search input — form-wrapped so Enter navigates explicitly.
+                onKeyDown belt-and-braces because some browsers don't fire submit
+                on Enter for single-input forms with type=search. */}
             <form
               onSubmit={(e) => { e.preventDefault(); if (searchQuery.trim() !== '') setView('search'); }}
               className="hidden md:flex items-center bg-surface-container-high rounded-full px-md py-1 border border-outline-variant w-96 font-mono text-[13px]"
@@ -1657,7 +1659,7 @@ export default function App() {
               <input
                 id="search-input"
                 className="bg-transparent border-none focus:outline-none focus:ring-0 text-xs w-full text-on-surface"
-                placeholder="Search SKU, name, ID... (⌘K)"
+                placeholder="Search SKU, name, ID... press ↵ to open"
                 // 'search' + off-name + all-off keeps password managers out of
                 // this field. Without them Chrome autofilled the user's login
                 // email here whenever a page mounted a password input (e.g. the
@@ -1669,9 +1671,18 @@ export default function App() {
                 data-lpignore="true"
                 value={searchQuery}
                 onChange={handleSearchChange}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && searchQuery.trim() !== '') {
+                    e.preventDefault();
+                    setView('search');
+                  }
+                }}
               />
+              {/* Reads Enter, not ⌘K — ⌘K opens the command palette (a superset),
+                  and pointing the search-bar hint at that used to make users
+                  press ⌘K expecting a focus-jump that never happened. */}
               <span className="text-[10px] text-outline ml-sm opacity-50 bg-surface-container-lowest px-1.5 py-0.5 rounded border border-outline-variant">
-                ⌘K
+                ↵
               </span>
             </form>
           </div>

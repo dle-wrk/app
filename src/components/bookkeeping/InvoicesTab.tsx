@@ -49,6 +49,13 @@ export const InvoicesTab: React.FC<ModuleDataProps> = (props) => {
     try {
       await apiPost(`/api/invoices/${id}/finalize`);
       triggerToast('Invoice sent and posted to the ledger.');
+      // Grab the refreshed invoice (which now has status=SENT + finalized
+      // journal id) so we can hand it straight into the printable window.
+      // Failing to fetch just skips the print — status change already happened.
+      try {
+        const fresh = await apiGet(`/api/invoices/${id}`);
+        if (fresh) printInvoice(fresh, clientName(fresh.clientId));
+      } catch { /* swallow — finalize succeeded, print is bonus */ }
       await refresh();
       setViewingInvoice(null);
     } catch (err: any) {
@@ -57,6 +64,8 @@ export const InvoicesTab: React.FC<ModuleDataProps> = (props) => {
       setBusy(false);
     }
   };
+
+  const clientName = (id?: number) => clients.find(c => c.id === id)?.clientName || 'Unassigned';
 
   const handleVoid = async (id: number) => {
     if (!(await confirmDialog({ title: 'Void invoice', message: 'Void this invoice? This posts a reversing journal entry and cannot be undone.', confirmLabel: 'Void', destructive: true }))) return;
@@ -210,11 +219,23 @@ export const InvoicesTab: React.FC<ModuleDataProps> = (props) => {
           </div>
           {viewingInvoice.notes && <p className="text-xs text-on-surface-variant mb-md italic">{viewingInvoice.notes}</p>}
           <div className="flex flex-wrap gap-2 justify-end pt-2 border-t border-outline-variant/20">
+            {/* Print is available on any status so the user can pull a hard copy
+                after payment / warranty claims / reprint requests. Draft prints
+                are watermarked implicitly by the DRAFT status pill in the header. */}
+            <SecondaryButton
+              icon={<Printer className="w-3.5 h-3.5" />}
+              onClick={() => printInvoice(viewingInvoice, clientName(viewingInvoice.clientId))}
+            >
+              Print
+            </SecondaryButton>
             {viewingInvoice.status === 'DRAFT' && (
               <>
                 <SecondaryButton onClick={() => { openEdit(viewingInvoice); setViewingInvoice(null); }}>Edit</SecondaryButton>
                 <DangerButton onClick={() => handleDeleteDraft(viewingInvoice.id)} disabled={busy}>Delete</DangerButton>
-                <PrimaryButton icon={<Printer className="w-3.5 h-3.5" />} onClick={() => handleFinalize(viewingInvoice.id)} disabled={busy}>Finalize & Print</PrimaryButton>
+                {/* Renamed from "Finalize & Print" — it changes DRAFT → SENT and
+                    posts to the ledger. The auto-print piggybacks on that
+                    transition for the client-facing hard copy. */}
+                <PrimaryButton icon={<Printer className="w-3.5 h-3.5" />} onClick={() => handleFinalize(viewingInvoice.id)} disabled={busy}>Finalize &amp; Send</PrimaryButton>
               </>
             )}
             {['SENT', 'PARTIAL', 'OVERDUE'].includes(viewingInvoice.status) && (
@@ -441,3 +462,134 @@ const QuickPaymentModal: React.FC<{ invoice: Invoice; accounts: ModuleDataProps[
     </Modal>
   );
 };
+
+// ---------------------------------------------------------------------------
+// Printable invoice — TRACKLAB-branded HTML opened in a new tab.
+// Same pattern as the sales-order and dispatch-note prints: inline HTML +
+// window.print(), no library dependency. Draft invoices print with a big
+// "DRAFT" watermark so a print-and-send accident on a non-finalised invoice
+// is obvious rather than hidden.
+// ---------------------------------------------------------------------------
+function printInvoice(inv: any, clientName: string): void {
+  const money = (n: number) => fmtMoney(n, inv.currency);
+  const items = (inv.items || []) as InvoiceItem[];
+  const rows = items.map((it) => `
+    <tr>
+      <td>${it.partNumber ? `<span class="pn">${escapeHtml(it.partNumber)}</span> ` : ''}${escapeHtml(it.description)}</td>
+      <td class="num">${it.quantity}</td>
+      <td class="num">${escapeHtml(money(it.unitPrice))}</td>
+      <td class="num strong">${escapeHtml(money(it.lineTotal))}</td>
+    </tr>
+  `).join('');
+
+  const balanceDue = Number(inv.balanceDue ?? 0);
+  const amountPaid = Number(inv.amountPaid ?? 0);
+
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(inv.invoiceNumber)}</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #111; margin: 0; padding: 40px; position: relative; }
+  .brand { border-bottom: 3px solid #f7912b; padding-bottom: 16px; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: flex-end; }
+  .brand h1 { margin: 0; font-size: 28px; letter-spacing: -0.5px; color: #f7912b; font-weight: 900; }
+  .brand .tagline { font-size: 11px; color: #666; letter-spacing: 1px; text-transform: uppercase; }
+  .brand .doc-type { text-align: right; }
+  .brand .doc-type h2 { margin: 0; font-size: 20px; font-weight: 700; }
+  .brand .doc-type .num { font-family: ui-monospace, monospace; font-size: 14px; color: #f7912b; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px; }
+  .grid .label { font-size: 10px; text-transform: uppercase; color: #666; letter-spacing: 1px; margin-bottom: 4px; }
+  .grid .val { font-size: 13px; font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  th { text-align: left; font-size: 10px; text-transform: uppercase; color: #666; padding: 8px 6px; border-bottom: 2px solid #333; }
+  td { padding: 10px 6px; border-bottom: 1px solid #ddd; font-size: 12px; vertical-align: top; }
+  td.num { text-align: right; font-family: ui-monospace, monospace; }
+  td.strong { font-weight: 700; }
+  .pn { font-family: ui-monospace, monospace; font-size: 10px; color: #f7912b; }
+  .totals { margin-top: 16px; display: flex; justify-content: flex-end; }
+  .totals table { width: 280px; }
+  .totals td { padding: 6px 4px; border: 0; font-size: 12px; }
+  .totals tr.total td { font-size: 15px; font-weight: 800; border-top: 2px solid #333; padding-top: 10px; }
+  .totals tr.balance td { color: ${balanceDue > 0 ? '#c2410c' : '#166534'}; font-weight: 700; padding-top: 6px; }
+  .notes { margin-top: 16px; padding: 12px; background: #fafafa; border-left: 3px solid #f7912b; font-size: 12px; }
+  .paystub { margin-top: 24px; padding: 12px 16px; border: 1px dashed #999; border-radius: 6px; font-size: 11px; }
+  .footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid #ddd; font-size: 10px; color: #999; text-align: center; }
+  .draft-watermark { position: fixed; top: 40%; left: 50%; transform: translate(-50%, -50%) rotate(-30deg); font-size: 140px; font-weight: 900; color: rgba(200,50,50,0.08); letter-spacing: 8px; pointer-events: none; z-index: 0; }
+  .content { position: relative; z-index: 1; }
+  @media print { body { padding: 20px; } }
+</style></head><body>
+  ${inv.status === 'DRAFT' ? '<div class="draft-watermark">DRAFT</div>' : ''}
+  <div class="content">
+    <div class="brand">
+      <div>
+        <h1>TRACKLAB</h1>
+        <div class="tagline">Inventory · Manufacturing · Compliance</div>
+      </div>
+      <div class="doc-type">
+        <h2>${inv.isWarrantyClaim ? 'Warranty Invoice' : 'Tax Invoice'}</h2>
+        <div class="num">${escapeHtml(inv.invoiceNumber)}</div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div>
+        <div class="label">Bill To</div>
+        <div class="val">${escapeHtml(clientName)}</div>
+      </div>
+      <div>
+        <div class="label">Status</div>
+        <div class="val">${escapeHtml(inv.status)}</div>
+      </div>
+      <div>
+        <div class="label">Invoice Date</div>
+        <div class="val">${escapeHtml(fmtDate(inv.invoiceDate))}</div>
+      </div>
+      <div>
+        <div class="label">Due Date</div>
+        <div class="val">${escapeHtml(inv.dueDate ? fmtDate(inv.dueDate) : '—')}</div>
+      </div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Description</th>
+          <th style="text-align:right">Qty</th>
+          <th style="text-align:right">Unit Price</th>
+          <th style="text-align:right">Total</th>
+        </tr>
+      </thead>
+      <tbody>${rows || '<tr><td colspan="4" style="text-align:center;color:#999;padding:20px">No line items</td></tr>'}</tbody>
+    </table>
+
+    <div class="totals">
+      <table>
+        <tr><td>Subtotal</td><td class="num">${escapeHtml(money(inv.subtotal))}</td></tr>
+        <tr><td>Tax</td><td class="num">${escapeHtml(money(inv.taxTotal))}</td></tr>
+        <tr class="total"><td>Total</td><td class="num">${escapeHtml(money(inv.total))}</td></tr>
+        ${amountPaid > 0 ? `<tr><td>Paid</td><td class="num" style="color:#166534">${escapeHtml(money(amountPaid))}</td></tr>` : ''}
+        <tr class="balance"><td>Balance Due</td><td class="num">${escapeHtml(money(balanceDue))}</td></tr>
+      </table>
+    </div>
+
+    ${inv.notes ? `<div class="notes"><strong>Notes:</strong> ${escapeHtml(inv.notes)}</div>` : ''}
+
+    ${balanceDue > 0 ? `<div class="paystub">
+      <strong>Payment reference:</strong> ${escapeHtml(inv.invoiceNumber)}<br>
+      Please quote this reference when making payment so we can allocate it correctly.
+    </div>` : ''}
+
+    <div class="footer">TRACKLAB IM · ${escapeHtml(fmtDate(inv.invoiceDate))} · Generated ${escapeHtml(new Date().toLocaleString())}</div>
+  </div>
+</body></html>`;
+
+  const w = window.open('', '_blank', 'width=900,height=1000');
+  if (!w) return;
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+  w.focus();
+  setTimeout(() => w.print(), 250);
+}
+
+function escapeHtml(s: any): string {
+  return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as Record<string, string>)[c]);
+}
