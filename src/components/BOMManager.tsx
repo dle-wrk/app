@@ -99,20 +99,46 @@ export default function BOMManager({
     });
   };
 
+  // A BOM line counts as "voided" — i.e. deliberately not populated on the
+  // PCB — when the stock reference matches one of the industry-standard
+  // do-not-fit conventions, is a placeholder test code, or has zero/blank
+  // fields. These rows must NOT trigger shortage math because there's no
+  // real part expected. They still appear in the audit table so the user
+  // can see them, just with a distinct badge.
+  //
+  // The list intentionally covers the common tribal conventions (DNF, DNP,
+  // "do not populate", NC = not connected). Test-prefix codes (TEST-001,
+  // TEST-*, X-*) are treated the same — they're scaffolding rows a CAD
+  // engineer leaves in during design and doesn't source.
+  const VOIDED_STOCK_CODES = new Set(['DNF', 'DNP', 'DO NOT FIT', 'DO NOT POPULATE', 'NC', 'NA', 'N/A', 'NONE']);
+  const isVoidedBomLine = (stockCode: string, quantity: number): boolean => {
+    const trimmed = String(stockCode || '').trim();
+    if (!trimmed) return true;
+    if (quantity <= 0) return true;
+    const upper = trimmed.toUpperCase();
+    if (VOIDED_STOCK_CODES.has(upper)) return true;
+    if (/^(TEST|PLACEHOLDER|TBD|XXX)[-_ ]?\d*$/i.test(trimmed)) return true;
+    return false;
+  };
+
   // Perform a live, reactive inventory audit
   const auditResults = projectBOM.map(line => {
+    const isVoided = isVoidedBomLine(line.stockCode, line.quantity);
     const isSubstituted = substitutions[line.stockCode];
     const resolvedCode = isSubstituted || line.stockCode;
     const inventoryItem = items.find(i => i.partNumber === resolvedCode);
-    
+
     const requiredTotal = line.quantity * pcbQty;
     const currentStock = inventoryItem ? inventoryItem.stockLevel : 0;
     const remainingStock = currentStock - requiredTotal;
-    const isShortage = remainingStock < 0;
+    // Voided lines never count as shortages, regardless of what stock math
+    // says. There's no part to source and no PCB position to fill.
+    const isShortage = !isVoided && remainingStock < 0;
     const isPrimaryReplenished = line.stockCode !== resolvedCode;
 
     return {
       line,
+      isVoided,
       isSubstituted,
       resolvedCode,
       inventoryItem,
@@ -126,6 +152,7 @@ export default function BOMManager({
   });
 
   const totalShortagesCount = auditResults.filter(r => r.isShortage).length;
+  const totalVoidedCount = auditResults.filter(r => r.isVoided).length;
 
   const [showBookOutConfirm, setShowBookOutConfirm] = useState(false);
   useEscapeKey(() => setShowBookOutConfirm(false), showBookOutConfirm);
@@ -283,18 +310,29 @@ export default function BOMManager({
               Sourcing Diagnostics
             </h4>
             
-            <div className="grid grid-cols-2 gap-sm">
-              <div className="bg-surface-container-high/40 p-sm rounded-lg border border-outline-variant/60 flex flex-col justify-between">
+            <div className="grid grid-cols-3 gap-sm">
+              <div className="bg-surface-container-high/40 p-sm rounded-lg border border-outline-variant/60 flex flex-col justify-between" title="Lines with real parts but insufficient stock. Voided lines (DNF, TEST-*, blank) are excluded.">
                 <span className="text-[9px] text-outline font-label-caps uppercase leading-none block mb-1">Stock Shortages</span>
                 <span className={`text-xl font-black font-mono leading-none ${totalShortagesCount > 0 ? 'text-tertiary animate-pulse' : 'text-green-400'}`}>
                   {totalShortagesCount}
                 </span>
               </div>
 
-              <div className="bg-surface-container-high/40 p-sm rounded-lg border border-outline-variant/60 flex flex-col justify-between">
-                <span className="text-[9px] text-outline font-label-caps uppercase leading-none block mb-1">Substitutions Active</span>
+              <div className="bg-surface-container-high/40 p-sm rounded-lg border border-outline-variant/60 flex flex-col justify-between" title="Substitute parts you've swapped in for shortages.">
+                <span className="text-[9px] text-outline font-label-caps uppercase leading-none block mb-1">Subs Active</span>
                 <span className="text-xl font-black font-mono leading-none text-primary">
                   {Object.keys(substitutions).length}
+                </span>
+              </div>
+
+              {/* Voided count — informational only. These lines are DNF, DNP,
+                  test placeholders, or zero-quantity rows and don't need
+                  sourcing. Grey styling so the eye doesn't read this as an
+                  alarm state alongside the red shortage tile. */}
+              <div className="bg-surface-container-high/40 p-sm rounded-lg border border-outline-variant/60 flex flex-col justify-between" title="Do-not-fit / do-not-populate / test-placeholder / zero-qty lines. Not sourced.">
+                <span className="text-[9px] text-outline font-label-caps uppercase leading-none block mb-1">Voided</span>
+                <span className={`text-xl font-black font-mono leading-none ${totalVoidedCount > 0 ? 'text-outline' : 'text-green-400'}`}>
+                  {totalVoidedCount}
                 </span>
               </div>
             </div>
@@ -355,12 +393,16 @@ export default function BOMManager({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-outline-variant/30 text-xs">
-                  {auditResults.map(({ line, isSubstituted, resolvedCode, inventoryItem, requiredTotal, currentStock, remainingStock, isShortage, isPrimaryReplenished, shortageAmount }) => {
+                  {auditResults.map(({ line, isVoided, isSubstituted, resolvedCode, inventoryItem, requiredTotal, currentStock, remainingStock, isShortage, isPrimaryReplenished, shortageAmount }) => {
                     // Check if alternates are available for substitution
                     const altOptions = getAlternatesFor(line.stockCode);
-                    
+
                     return (
-                      <tr key={line.id} className={`hover:bg-surface-variant/20 transition-all ${isShortage ? 'bg-red-500/5' : ''}`}>
+                      <tr key={line.id} className={`hover:bg-surface-variant/20 transition-all ${
+                        isVoided ? 'opacity-60 bg-surface-container-highest/20'
+                        : isShortage ? 'bg-red-500/5'
+                        : ''
+                      }`}>
                         
                         {/* SKU Reference with hover tooltips */}
                         <td className="px-lg py-3" data-label="Part">
@@ -406,7 +448,15 @@ export default function BOMManager({
 
                         {/* Status checks */}
                         <td className="px-lg py-3 text-center" data-label="Status">
-                          {isShortage ? (
+                          {isVoided ? (
+                            <span
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-outline-variant/20 text-outline border border-outline-variant/40 font-mono"
+                              title="Voided line — do-not-fit, test placeholder, or zero quantity. Not counted as a shortage."
+                            >
+                              <CornerDownRight className="w-3 h-3" />
+                              VOIDED
+                            </span>
+                          ) : isShortage ? (
                             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-red-500/10 text-red-400 border border-red-500/15 font-mono">
                               <AlertCircle className="w-3 h-3" />
                               SHORTAGE: -{shortageAmount}
