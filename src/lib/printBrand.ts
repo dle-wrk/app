@@ -34,8 +34,21 @@ export interface DocTypeBlock {
 // Renders the header HTML block. Height budget: ~72px so it doesn't
 // eat too much of the printable page. maxWidth on the img is what
 // caps the visible logo size — the source file can be any resolution.
+//
+// Missing-file fallback: an inline onerror handler on the <img> replaces
+// the whole element with a styled text span reading "TRACKLAB". This
+// avoids Chrome's default broken-image icon (which used to sit next to
+// the alt text and made the header look corrupt when the file wasn't
+// deployed yet). With this handler, a print with no logo file installed
+// still looks clean — just the text word in the same orange colour.
 export function renderBrandHeader(doc: DocTypeBlock): string {
   const esc = (s: string) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as Record<string, string>)[c]);
+  // Note: onerror handler assigns a fully-styled replacement span so
+  // the fallback matches the visual weight of the intended logo. Done
+  // inline (not via a shared function in the outer document) because
+  // window.open + document.write creates an isolated JS context that
+  // can't reach parent-tab code.
+  const onErrorFallback = "this.outerHTML='<span style=&quot;font-size:32px;font-weight:900;color:#f7912b;letter-spacing:-1px;font-family:-apple-system,BlinkMacSystemFont,\\u0027Segoe UI\\u0027,sans-serif&quot;>TRACKLAB</span>'";
   return `
   <div class="brand" style="border-bottom:3px solid #f7912b;padding-bottom:16px;margin-bottom:24px;display:flex;justify-content:space-between;align-items:flex-end;gap:24px">
     <div style="flex:0 1 auto">
@@ -43,7 +56,8 @@ export function renderBrandHeader(doc: DocTypeBlock): string {
         src="${LOGO_URL}"
         alt="TRACKLAB"
         class="brand-logo"
-        style="display:block;max-width:240px;max-height:60px;width:auto;height:auto;font-size:28px;font-weight:900;color:#f7912b;letter-spacing:-0.5px"
+        onerror="${onErrorFallback}"
+        style="display:block;max-width:240px;max-height:60px;width:auto;height:auto"
       />
       <div class="tagline" style="font-size:10px;color:#666;letter-spacing:1px;text-transform:uppercase;margin-top:4px">
         Inventory · Manufacturing · Compliance
