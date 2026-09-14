@@ -443,9 +443,44 @@ export function registerBookkeepingRoutes(app: Express) {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      const existing = await client.query(`SELECT status FROM invoices WHERE id = $1`, [id]);
+      // Editing rules (broadened from the original DRAFT-only stance):
+      //   - DRAFT: unchanged flow, no ledger to worry about.
+      //   - SENT / OVERDUE with zero payments: allow. We reverse the
+      //     previously-posted journal entry so the ledger nets to nothing
+      //     from the original finalise, then re-run the standard finalise
+      //     path at the end which posts a fresh journal + restores the
+      //     SENT status. Same reasoning as void's payment check applies:
+      //     if money has already been collected against this row the
+      //     allocations reference amounts that would silently shift, so
+      //     the operator must void the payment(s) first.
+      //   - PARTIAL / PAID / VOID: refuse. PARTIAL/PAID always have
+      //     payments; VOID has already been reversed.
+      const existing = await client.query(`SELECT status, journal_entry_id, invoice_number, amount_paid FROM invoices WHERE id = $1`, [id]);
       if (!existing.rows.length) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'invoice not found' }); }
-      if (existing.rows[0].status !== 'DRAFT') { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Only DRAFT invoices can be edited. Void and recreate instead.' }); }
+      const priorStatus = existing.rows[0].status as string;
+      const priorJournal = existing.rows[0].journal_entry_id as number | null;
+      const priorInvoiceNumber = existing.rows[0].invoice_number as string;
+      const priorAmountPaid = parseFloat(existing.rows[0].amount_paid) || 0;
+      const EDITABLE_STATUSES = new Set(['DRAFT', 'SENT', 'OVERDUE']);
+      if (!EDITABLE_STATUSES.has(priorStatus)) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: `Cannot edit an invoice with status ${priorStatus}. Void payments and start again if you need to revise.` });
+      }
+      if (priorStatus !== 'DRAFT' && priorAmountPaid > 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Cannot edit an invoice with payments applied. Void the payment(s) first.' });
+      }
+      // Reverse the prior journal entry BEFORE we mutate the row. If
+      // the caller is downgrading a SENT invoice back to DRAFT, we still
+      // want the ledger unwound; the DRAFT save path won't re-post a
+      // journal entry, so this is the right (and only) place to do it.
+      if (priorStatus !== 'DRAFT' && priorJournal) {
+        await reverseJournalEntry(client, priorJournal, { sourceType: 'REVERSAL', sourceId: id, memo: `Revise invoice ${priorInvoiceNumber}` });
+        // Clear the pointer so the follow-up finalise (if the caller
+        // asked for status SENT) inserts a fresh one rather than
+        // overwriting the field non-atomically.
+        await client.query(`UPDATE invoices SET journal_entry_id = NULL WHERE id = $1`, [id]);
+      }
 
       const computedLines = await Promise.all(body.items.map(async (item) => {
         const taxPct = await resolveTaxPercent(item.taxRateId);
@@ -453,9 +488,16 @@ export function registerBookkeepingRoutes(app: Express) {
       }));
       const { subtotal, taxTotal, total } = computeDocumentTotals(computedLines, body.discountTotal || 0);
 
+      // Resolve the status the row should carry after this update. If the
+      // caller says SENT, finalizeInvoiceInTx below overwrites this to
+      // SENT anyway; but if they save the edit as DRAFT (the "reopen and
+      // fix" flow) we need to explicitly demote the row here — otherwise
+      // it stays SENT/OVERDUE with a reversed journal, which is worse
+      // than the state we started in.
+      const nextStatus = body.status === 'DRAFT' ? 'DRAFT' : priorStatus === 'DRAFT' ? 'DRAFT' : priorStatus;
       await client.query(
-        `UPDATE invoices SET client_id=$1, client_order_id=$2, invoice_date=$3, due_date=$4, currency=$5, subtotal=$6, tax_total=$7, discount_total=$8, total=$9, balance_due=$10, notes=$11, terms=$12, is_warranty_claim=$13, updated_at=CURRENT_TIMESTAMP WHERE id=$14`,
-        [body.clientId || null, body.clientOrderId || null, body.invoiceDate || new Date().toISOString().slice(0, 10), body.dueDate || null, body.currency || 'ZAR', subtotal, taxTotal, body.discountTotal || 0, total, total, body.notes || null, body.terms || null, body.isWarrantyClaim ?? false, id]
+        `UPDATE invoices SET client_id=$1, client_order_id=$2, invoice_date=$3, due_date=$4, currency=$5, subtotal=$6, tax_total=$7, discount_total=$8, total=$9, balance_due=$10, notes=$11, terms=$12, is_warranty_claim=$13, status=$14, updated_at=CURRENT_TIMESTAMP WHERE id=$15`,
+        [body.clientId || null, body.clientOrderId || null, body.invoiceDate || new Date().toISOString().slice(0, 10), body.dueDate || null, body.currency || 'ZAR', subtotal, taxTotal, body.discountTotal || 0, total, total, body.notes || null, body.terms || null, body.isWarrantyClaim ?? false, nextStatus, id]
       );
       await client.query(`DELETE FROM invoice_items WHERE invoice_id = $1`, [id]);
       const insertedItems: any[] = [];

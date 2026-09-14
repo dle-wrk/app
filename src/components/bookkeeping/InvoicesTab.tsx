@@ -251,6 +251,14 @@ export const InvoicesTab: React.FC<ModuleDataProps> = (props) => {
                 <PrimaryButton icon={<Printer className="w-3.5 h-3.5" />} onClick={() => handleFinalize(viewingInvoice.id)} disabled={busy}>Finalize &amp; Send</PrimaryButton>
               </>
             )}
+            {['SENT', 'OVERDUE'].includes(viewingInvoice.status) && viewingInvoice.amountPaid === 0 && (
+              // Editing a posted invoice: server reverses the original
+              // journal entry and posts a fresh one from the saved
+              // changes, so long as no payments have been applied.
+              // PARTIAL/PAID never surface here (they always have
+              // payments); we still gate on amountPaid to be defensive.
+              <SecondaryButton onClick={() => { openEdit(viewingInvoice); setViewingInvoice(null); }}>Edit</SecondaryButton>
+            )}
             {['SENT', 'PARTIAL', 'OVERDUE'].includes(viewingInvoice.status) && (
               <>
                 <PrimaryButton icon={<Wallet className="w-3.5 h-3.5" />} onClick={() => { setPayingInvoice(viewingInvoice); setViewingInvoice(null); }}>Record Payment</PrimaryButton>
@@ -323,8 +331,20 @@ const InvoiceEditorModal: React.FC<ModuleDataProps & { initial: Invoice | null; 
   const safeItems = Array.isArray(items) ? items : [];
   const safeTaxRates = Array.isArray(taxRates) ? taxRates : [];
 
+  // "Editing a posted invoice" mode: the row's already on the ledger,
+  // so a save will reverse the previous journal entry and post a fresh
+  // one. Downgrading to DRAFT is intentionally left out here — a user
+  // who opened Edit on a SENT invoice wants to revise + resend, not
+  // demote. Anyone actually wanting the demote path can use Void.
+  const isPostedEdit = !!initial && ['SENT', 'OVERDUE'].includes(String(initial.status));
+
   return (
-    <Modal title={initial ? `Edit ${initial.invoiceNumber}` : 'New Invoice'} subtitle="Draft first, then finalize to post to the ledger and (optionally) deduct stock." onClose={onClose} maxWidth="max-w-4xl">
+    <Modal
+      title={initial ? `Edit ${initial.invoiceNumber}` : 'New Invoice'}
+      subtitle={isPostedEdit ? 'Editing a posted invoice — saving will reverse the original ledger entry and post a fresh one.' : 'Draft first, then finalize to post to the ledger and (optionally) deduct stock.'}
+      onClose={onClose}
+      maxWidth="max-w-4xl"
+    >
       <div className="grid md:grid-cols-4 gap-3 mb-md">
         <div className="md:col-span-2">
           <FieldLabel>Customer</FieldLabel>
@@ -394,8 +414,16 @@ const InvoiceEditorModal: React.FC<ModuleDataProps & { initial: Invoice | null; 
 
       <div className="flex justify-end gap-2 pt-md mt-md border-t border-outline-variant/20">
         <SecondaryButton onClick={onClose}>Cancel</SecondaryButton>
-        <SecondaryButton onClick={() => submit('DRAFT')} disabled={!!saving}>{saving === 'DRAFT' ? 'Saving...' : 'Save Draft'}</SecondaryButton>
-        <PrimaryButton icon={<Printer className="w-3.5 h-3.5" />} onClick={() => submit('SENT')} disabled={!!saving}>{saving === 'SENT' ? 'Printing...' : 'Finalize & Print'}</PrimaryButton>
+        {/* Save-as-draft is only offered for genuinely new or already-
+            draft invoices. Editing a posted invoice always re-posts —
+            the "reopen and demote" flow doesn't earn its complexity
+            when Void already exists for that case. */}
+        {!isPostedEdit && (
+          <SecondaryButton onClick={() => submit('DRAFT')} disabled={!!saving}>{saving === 'DRAFT' ? 'Saving...' : 'Save Draft'}</SecondaryButton>
+        )}
+        <PrimaryButton icon={<Printer className="w-3.5 h-3.5" />} onClick={() => submit('SENT')} disabled={!!saving}>
+          {saving === 'SENT' ? (isPostedEdit ? 'Reposting...' : 'Printing...') : (isPostedEdit ? 'Save & Repost' : 'Finalize & Print')}
+        </PrimaryButton>
       </div>
     </Modal>
   );
