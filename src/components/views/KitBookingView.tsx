@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Project } from '../../types';
 import ShortageToPOModal from '../ShortageToPOModal';
 import { useEscapeKey } from '../../lib/useEscapeKey';
@@ -11,7 +11,9 @@ import {
   Loader2,
   Layers,
   ArrowRightLeft,
-  ShoppingCart
+  ShoppingCart,
+  Search,
+  X
 } from 'lucide-react';
 
 interface AuditResult {
@@ -40,6 +42,22 @@ export default function KitBookingView({ projects, triggerToast }: KitBookingVie
   const [executing, setExecuting] = useState(false);
   const [showShortagePOModal, setShowShortagePOModal] = useState(false);
   const [showConfirmBooking, setShowConfirmBooking] = useState(false);
+  const [search, setSearch] = useState('');
+  // Filter is a display-only lens over the audit — shortage math, the PO
+  // modal, and the booking button all keep operating on the full result
+  // set so a search box can't silently hide something the operator needs
+  // to see before pressing "Process Booking".
+  const filteredResults = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return auditResults;
+    return auditResults.filter(r =>
+      (r.component_id || '').toLowerCase().includes(q) ||
+      (r.resolved_part_number || '').toLowerCase().includes(q) ||
+      (r.description || '').toLowerCase().includes(q) ||
+      (r.comment || '').toLowerCase().includes(q) ||
+      (r.designator || '').toLowerCase().includes(q)
+    );
+  }, [auditResults, search]);
 
   useEscapeKey(() => setShowConfirmBooking(false), showConfirmBooking);
   useEscapeKey(() => setShowShortagePOModal(false), showShortagePOModal);
@@ -161,12 +179,39 @@ export default function KitBookingView({ projects, triggerToast }: KitBookingVie
       </div>
 
       <div className="bg-surface-container rounded-xl border border-outline-variant overflow-hidden shadow-xl">
-        <div className="px-lg py-sm border-b border-outline-variant bg-surface-container-high/30 flex justify-between items-center text-xs">
+        <div className="px-lg py-sm border-b border-outline-variant bg-surface-container-high/30 flex flex-wrap justify-between items-center gap-sm text-xs">
           <span className="font-mono text-xs uppercase tracking-tight font-black text-on-surface-variant flex items-center gap-1.5">
             <Layers className="w-4 h-4 text-primary" />
             Live Inventory Audit
+            {search.trim() && (
+              <span className="ml-2 text-[10px] font-mono text-outline normal-case tracking-normal">
+                showing {filteredResults.length} of {auditResults.length}
+              </span>
+            )}
           </span>
-          {loading && <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />}
+          <div className="flex items-center gap-sm">
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-outline pointer-events-none" />
+              <input
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search part, description, designator…"
+                className="bg-surface-container-high border border-outline-variant rounded pl-7 pr-7 py-1.5 text-xs text-on-surface outline-none focus:border-primary w-[280px] placeholder:text-outline/60"
+              />
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch('')}
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 text-outline hover:text-on-surface p-0.5"
+                  title="Clear search"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+            {loading && <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />}
+          </div>
         </div>
 
         <div className="overflow-x-auto">
@@ -183,7 +228,7 @@ export default function KitBookingView({ projects, triggerToast }: KitBookingVie
               </tr>
             </thead>
             <tbody className="divide-y divide-outline-variant/30 text-xs">
-              {auditResults.map((res) => (
+              {filteredResults.map((res) => (
                 <tr key={res.component_id} className={`hover:bg-surface-variant/20 transition-all ${res.shortage_qty > 0 ? 'bg-red-500/5' : ''}`}>
                   <td className="px-lg py-3" data-label="Part">
                     <div className="font-mono font-bold text-primary">{res.component_id}</div>
@@ -283,6 +328,13 @@ export default function KitBookingView({ projects, triggerToast }: KitBookingVie
                 <tr>
                   <td colSpan={7} className="px-lg py-12 text-center text-outline italic font-mono">
                     No BOM data found for the selected project.
+                  </td>
+                </tr>
+              )}
+              {auditResults.length > 0 && filteredResults.length === 0 && !loading && (
+                <tr>
+                  <td colSpan={7} className="px-lg py-12 text-center text-outline italic font-mono">
+                    No components match "{search}".
                   </td>
                 </tr>
               )}
