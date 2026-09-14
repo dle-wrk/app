@@ -259,6 +259,12 @@ export async function ensureBookkeepingSchema() {
   // the GL posting is unchanged — so the accounting treatment can be refined later
   // (e.g. routing warranty claims to a dedicated income/expense account).
   await exec(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS is_warranty_claim BOOLEAN DEFAULT FALSE`).catch(() => {});
+  // Per-line tax-inclusive flag. When TRUE, unit_price already contains
+  // the tax; we back-calculate tax_amount = gross × rate / (100 + rate)
+  // and base = gross − tax. Defaults FALSE so every existing row stays
+  // exclusive (the historical behaviour) and no reporting numbers shift
+  // retroactively.
+  await exec(`ALTER TABLE invoice_items ADD COLUMN IF NOT EXISTS tax_inclusive BOOLEAN DEFAULT FALSE`).catch(() => {});
 
   // --- Dispatch notes: delivery & collection of final project products ---------
   // Fulfillment documents (not accounting entries): they record which finished goods
@@ -645,6 +651,7 @@ export const mapInvoiceItem = (r: any) => ({
   taxAmount: parseFloat(r.tax_amount) || 0,
   lineTotal: parseFloat(r.line_total) || 0,
   deductStock: r.deduct_stock,
+  taxInclusive: !!r.tax_inclusive,
 });
 
 export const mapPaymentReceived = (r: any) => ({
@@ -831,16 +838,35 @@ export interface RawLineInput {
   quantity: number;
   unitPrice: number;
   taxRatePercent?: number;
+  // When true, unitPrice is treated as VAT-inclusive: gross = qty × price,
+  // tax = gross × rate / (100 + rate), base = gross − tax. Defaults false
+  // (exclusive) so callers that don't know about this flag keep their
+  // historical behaviour byte-for-byte.
+  taxInclusive?: boolean;
 }
 
 export function computeLineTotals(line: RawLineInput) {
   const qty = Number(line.quantity) || 0;
   const price = Number(line.unitPrice) || 0;
   const taxPct = Number(line.taxRatePercent) || 0;
-  const base = qty * price;
-  const taxAmount = Math.round(base * (taxPct / 100) * 100) / 100;
+  const inclusive = !!line.taxInclusive;
+  const gross = qty * price;
+  let base: number;
+  let taxAmount: number;
+  if (inclusive && taxPct > 0) {
+    // Inclusive: the unit price the user typed already contains the tax.
+    // Split it out — tax comes off the top, base is what's left. When
+    // taxPct is 0 there's nothing to strip and inclusive/exclusive
+    // collapse to the same thing, so we skip the branch to avoid
+    // divide-by-zero-flavoured floating-point noise.
+    taxAmount = Math.round((gross * taxPct / (100 + taxPct)) * 100) / 100;
+    base = Math.round((gross - taxAmount) * 100) / 100;
+  } else {
+    base = Math.round(gross * 100) / 100;
+    taxAmount = Math.round(gross * (taxPct / 100) * 100) / 100;
+  }
   const lineTotal = Math.round((base + taxAmount) * 100) / 100;
-  return { base: Math.round(base * 100) / 100, taxAmount, lineTotal };
+  return { base, taxAmount, lineTotal };
 }
 
 export function computeDocumentTotals(lines: Array<{ base: number; taxAmount: number }>, discountTotal = 0) {

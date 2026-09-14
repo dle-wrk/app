@@ -49,6 +49,10 @@ const LineItemSchema = z.object({
     if (v === null || v === undefined || v === '') return null;
     return Number(v);
   }, z.number().nullable().optional()),
+  taxInclusive: z.preprocess((v) => {
+    if (typeof v === 'string') return v === 'true' || v === 'on';
+    return v;
+  }, z.boolean().optional()),
 });
 
 const InvoiceCreateSchema = z.object({
@@ -390,7 +394,7 @@ export function registerBookkeepingRoutes(app: Express) {
 
       const computedLines = await Promise.all(body.items.map(async (item) => {
         const taxPct = await resolveTaxPercent(item.taxRateId);
-        return { ...item, ...computeLineTotals({ ...item, taxRatePercent: taxPct }), taxPct };
+        return { ...item, ...computeLineTotals({ ...item, taxRatePercent: taxPct, taxInclusive: !!item.taxInclusive }), taxPct };
       }));
       const { subtotal, taxTotal, total } = computeDocumentTotals(computedLines, body.discountTotal || 0);
 
@@ -408,9 +412,9 @@ export function registerBookkeepingRoutes(app: Express) {
       const insertedItems: any[] = [];
       for (const line of computedLines) {
         const itemRes = await client.query(
-          `INSERT INTO invoice_items (invoice_id, part_number, description, quantity, unit_price, tax_rate_id, tax_amount, line_total, deduct_stock)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-          [invoiceId, line.partNumber || null, line.description, line.quantity, line.unitPrice, line.taxRateId || null, line.taxAmount, line.lineTotal, !!line.deductStock]
+          `INSERT INTO invoice_items (invoice_id, part_number, description, quantity, unit_price, tax_rate_id, tax_amount, line_total, deduct_stock, tax_inclusive)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+          [invoiceId, line.partNumber || null, line.description, line.quantity, line.unitPrice, line.taxRateId || null, line.taxAmount, line.lineTotal, !!line.deductStock, !!line.taxInclusive]
         );
         insertedItems.push(itemRes.rows[0]);
       }
@@ -445,7 +449,7 @@ export function registerBookkeepingRoutes(app: Express) {
 
       const computedLines = await Promise.all(body.items.map(async (item) => {
         const taxPct = await resolveTaxPercent(item.taxRateId);
-        return { ...item, ...computeLineTotals({ ...item, taxRatePercent: taxPct }) };
+        return { ...item, ...computeLineTotals({ ...item, taxRatePercent: taxPct, taxInclusive: !!item.taxInclusive }) };
       }));
       const { subtotal, taxTotal, total } = computeDocumentTotals(computedLines, body.discountTotal || 0);
 
@@ -457,9 +461,9 @@ export function registerBookkeepingRoutes(app: Express) {
       const insertedItems: any[] = [];
       for (const line of computedLines) {
         const itemRes = await client.query(
-          `INSERT INTO invoice_items (invoice_id, part_number, description, quantity, unit_price, tax_rate_id, tax_amount, line_total, deduct_stock)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-          [id, line.partNumber || null, line.description, line.quantity, line.unitPrice, line.taxRateId || null, line.taxAmount, line.lineTotal, !!line.deductStock]
+          `INSERT INTO invoice_items (invoice_id, part_number, description, quantity, unit_price, tax_rate_id, tax_amount, line_total, deduct_stock, tax_inclusive)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+          [id, line.partNumber || null, line.description, line.quantity, line.unitPrice, line.taxRateId || null, line.taxAmount, line.lineTotal, !!line.deductStock, !!line.taxInclusive]
         );
         insertedItems.push(itemRes.rows[0]);
       }

@@ -27,6 +27,11 @@ export interface EditableLine {
   deductStock?: boolean;
   receiveStock?: boolean;
   accountId?: number | null;
+  // When true, unitPrice already contains the tax — see computeLineTotals
+  // in bookkeeping-db.ts for the split formula. Client-side math here
+  // mirrors that server-side function so the summary in this editor and
+  // what the backend stores stay in agreement.
+  taxInclusive?: boolean;
 }
 
 export function newEditableLine(): EditableLine {
@@ -35,9 +40,18 @@ export function newEditableLine(): EditableLine {
 
 export function lineTotals(line: EditableLine, taxRates: TaxRate[]) {
   const taxPct = taxRates.find(t => t.id === line.taxRateId)?.rate || 0;
-  const base = (Number(line.quantity) || 0) * (Number(line.unitPrice) || 0);
-  const taxAmount = Math.round(base * (taxPct / 100) * 100) / 100;
-  return { base: Math.round(base * 100) / 100, taxAmount, lineTotal: Math.round((base + taxAmount) * 100) / 100 };
+  const inclusive = !!line.taxInclusive;
+  const gross = (Number(line.quantity) || 0) * (Number(line.unitPrice) || 0);
+  let base: number;
+  let taxAmount: number;
+  if (inclusive && taxPct > 0) {
+    taxAmount = Math.round((gross * taxPct / (100 + taxPct)) * 100) / 100;
+    base = Math.round((gross - taxAmount) * 100) / 100;
+  } else {
+    base = Math.round(gross * 100) / 100;
+    taxAmount = Math.round(gross * (taxPct / 100) * 100) / 100;
+  }
+  return { base, taxAmount, lineTotal: Math.round((base + taxAmount) * 100) / 100 };
 }
 
 interface LineItemsEditorProps {
@@ -286,6 +300,23 @@ export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChang
                       <option value="">No tax</option>
                       {taxRates.map(tr => <option key={tr.id} value={tr.id}>{tr.name}</option>)}
                     </select>
+                    {/* Inclusive toggle. Only meaningful when a rate is
+                        selected — with "No tax" the two modes collapse
+                        so the checkbox stays disabled + unchecked to
+                        avoid a stored flag that changes nothing. */}
+                    <label
+                      className={`flex items-center gap-1.5 mt-1.5 text-[10px] ${line.taxRateId ? 'text-outline hover:text-on-surface cursor-pointer' : 'text-outline/40 cursor-not-allowed'}`}
+                      title={line.taxRateId ? 'When on, the Unit Price above already includes tax. The system will back-calculate the tax from the gross.' : 'Pick a tax rate first.'}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={!!line.taxInclusive && !!line.taxRateId}
+                        disabled={!line.taxRateId}
+                        onChange={(e) => update(line.key, { taxInclusive: e.target.checked })}
+                        className="w-3 h-3 accent-primary"
+                      />
+                      Unit price includes tax
+                    </label>
                   </div>
                 </div>
 

@@ -288,7 +288,7 @@ const InvoiceEditorModal: React.FC<ModuleDataProps & { initial: Invoice | null; 
   const [isWarrantyClaim, setIsWarrantyClaim] = useState<boolean>(initial?.isWarrantyClaim ?? false);
   const [lines, setLines] = useState<EditableLine[]>(
     initial?.items?.length
-      ? initial.items.map(it => ({ key: `L${it.id}`, partNumber: it.partNumber, description: it.description, quantity: it.quantity, unitPrice: it.unitPrice, taxRateId: it.taxRateId ?? null, deductStock: it.deductStock }))
+      ? initial.items.map(it => ({ key: `L${it.id}`, partNumber: it.partNumber, description: it.description, quantity: it.quantity, unitPrice: it.unitPrice, taxRateId: it.taxRateId ?? null, deductStock: it.deductStock, taxInclusive: (it as any).taxInclusive ?? false }))
       : [newEditableLine()]
   );
   const [saving, setSaving] = useState<'DRAFT' | 'SENT' | null>(null);
@@ -303,7 +303,7 @@ const InvoiceEditorModal: React.FC<ModuleDataProps & { initial: Invoice | null; 
       const payload = {
         clientId: clientId ? Number(clientId) : null,
         invoiceDate, dueDate, currency, notes, terms, status, isWarrantyClaim,
-        items: validLines.map(l => ({ partNumber: l.partNumber || undefined, description: l.description, quantity: l.quantity, unitPrice: l.unitPrice, taxRateId: l.taxRateId || undefined, deductStock: !!l.deductStock })),
+        items: validLines.map(l => ({ partNumber: l.partNumber || undefined, description: l.description, quantity: l.quantity, unitPrice: l.unitPrice, taxRateId: l.taxRateId || undefined, deductStock: !!l.deductStock, taxInclusive: !!l.taxInclusive })),
       };
       if (initial) {
         await apiPut(`/api/invoices/${initial.id}`, payload);
