@@ -1831,6 +1831,7 @@ export default function App() {
                 <KitBookingView
                   projects={projects}
                   triggerToast={triggerToast}
+                  currentUser={currentUser}
                 />
               );
             }

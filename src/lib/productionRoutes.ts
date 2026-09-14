@@ -24,6 +24,7 @@
 import type { Express } from 'express';
 import { z } from 'zod';
 import { pool, query, queryOne, exec } from './db';
+import { requireAdmin } from './authRoutes';
 
 // --- Finished-goods catalogue --------------------------------------------
 // Seeded once from Tracklab_Production_Costs_2026-04-30.xlsx; editable
@@ -999,6 +1000,215 @@ export function registerProductionRoutes(app: Express): void {
       res.json({ ok: true, auditResults });
     } catch (err: any) {
       await client.query('ROLLBACK');
+      res.status(400).json({ error: err.message });
+    } finally {
+      client.release();
+    }
+  });
+
+  // --- Admin BOM editor ---------------------------------------------------
+  // Admins-only surface for editing the raw BOM rows that feed every
+  // manufacturing / kit-booking view. All those views read live from these
+  // same db_bom_* tables at request time, so a successful save here shows
+  // up everywhere on the next fetch — no cache to invalidate, no follow-up
+  // writes to other tables. The heavy lifting is table-shape variance:
+  // legacy tables (db_bom, db_bom_tcu06, db_bom_ncu04, db_bom_loradongle)
+  // carry only 4 columns; the newer per-project tables have 8. We handle
+  // that by (a) reporting each row with its source table so the client can
+  // know what's editable, and (b) INSERTing new rows into the canonical
+  // per-project table (creating it if missing).
+  //
+  // Row identity uses postgres's system `ctid` — stable within a
+  // transaction, sufficient across a normal edit session, and it means we
+  // don't have to invent a synthetic primary key on schemas we can't
+  // touch. Clients round-trip {table, ctid} back to us on save.
+
+  // Column set for the canonical per-project table. Any new row lands here.
+  const CANONICAL_COLS = ['project_name', 'internal_stock_number', 'qty_per_unit', 'ref_des', 'description', 'comment', 'footprint', 'libref'] as const;
+
+  // The same table set auditKitStock consults, in the same order — so the
+  // edit view and the audit view stay in agreement on which rows exist.
+  async function bomTablesForProject(projectId: number): Promise<string[]> {
+    const { rows: tables } = await query<{ tablename: string }>(
+      `SELECT c.relname as tablename FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relname LIKE 'db_bom%'`
+    );
+    return tables
+      .map(t => t.tablename)
+      .filter(t =>
+        t === 'db_bom' ||
+        t === 'db_bom_ncu04' ||
+        t === 'db_bom_loradongle' ||
+        t === `db_bom_project_${projectId}`
+      );
+  }
+
+  async function columnsOf(table: string): Promise<Set<string>> {
+    const { rows } = await query<{ column_name: string }>(
+      `SELECT column_name FROM information_schema.columns WHERE table_name = $1`,
+      [table]
+    );
+    return new Set(rows.map(r => r.column_name));
+  }
+
+  async function ensureCanonicalTable(projectId: number): Promise<string> {
+    const table = `db_bom_project_${projectId}`;
+    // CREATE TABLE IF NOT EXISTS with the canonical column set. text
+    // everywhere — matches every existing per-project table's schema.
+    await exec(`CREATE TABLE IF NOT EXISTS "${table}" (
+      project_name text,
+      internal_stock_number text,
+      qty_per_unit integer,
+      ref_des text,
+      description text,
+      comment text,
+      footprint text,
+      libref text
+    )`);
+    return table;
+  }
+
+  app.get('/api/kit-booking/bom/:projectId', requireAdmin, async (req, res) => {
+    const projectId = Number(req.params.projectId);
+    if (!projectId || Number.isNaN(projectId)) return res.status(400).json({ error: 'invalid projectId' });
+    try {
+      const tables = await bomTablesForProject(projectId);
+      const out: any[] = [];
+      for (const t of tables) {
+        // ctid::text serialises as e.g. "(0,3)"; we round-trip that string
+        // back to the DELETE/UPDATE unchanged and postgres accepts it.
+        const { rows } = await query(`SELECT ctid::text as ctid, * FROM "${t}"`);
+        for (const r of rows as any[]) {
+          const rowProject = parseInt(String(r.project_name ?? '')) || 1;
+          if (rowProject !== projectId) continue;
+          out.push({
+            id: `${t}::${r.ctid}`,
+            _table: t,
+            _ctid: r.ctid,
+            stockCode: String(r.internal_stock_number || r.stock_code || ''),
+            quantity: parseInt(r.qty_per_unit || r.quantity || '1') || 1,
+            designator: String(r.ref_des || r.designator || ''),
+            description: String(r.description || ''),
+            comment: String(r.comment || ''),
+            footprint: String(r.footprint || ''),
+            libref: String(r.libref || ''),
+          });
+        }
+      }
+      res.json(out);
+    } catch (err: any) {
+      console.error('[bom:list] failed:', err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Body shape: { updates: [{id, stockCode, quantity, designator, description, comment, footprint, libref}],
+  //               deletes: [id],
+  //               inserts: [{stockCode, quantity, designator, description, comment, footprint, libref}] }
+  const BomEditBody = z.object({
+    updates: z.array(z.object({
+      id: z.string().min(1),
+      stockCode: z.string().max(200).default(''),
+      quantity: z.coerce.number().int().min(0).max(1_000_000).default(1),
+      designator: z.string().max(1000).default(''),
+      description: z.string().max(1000).default(''),
+      comment: z.string().max(1000).default(''),
+      footprint: z.string().max(200).default(''),
+      libref: z.string().max(200).default(''),
+    })).default([]),
+    deletes: z.array(z.string().min(1)).default([]),
+    inserts: z.array(z.object({
+      stockCode: z.string().min(1).max(200),
+      quantity: z.coerce.number().int().min(0).max(1_000_000).default(1),
+      designator: z.string().max(1000).default(''),
+      description: z.string().max(1000).default(''),
+      comment: z.string().max(1000).default(''),
+      footprint: z.string().max(200).default(''),
+      libref: z.string().max(200).default(''),
+    })).default([]),
+  });
+
+  app.post('/api/kit-booking/bom/:projectId', requireAdmin, async (req, res) => {
+    const projectId = Number(req.params.projectId);
+    if (!projectId || Number.isNaN(projectId)) return res.status(400).json({ error: 'invalid projectId' });
+
+    const parsed = BomEditBody.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'invalid body', details: parsed.error.flatten() });
+    const { updates, deletes, inserts } = parsed.data;
+
+    // Parse "table::ctid" once, so a malformed id fails before we start
+    // mutating anything.
+    const parseId = (id: string): { table: string; ctid: string } | null => {
+      const idx = id.indexOf('::');
+      if (idx < 0) return null;
+      const table = id.slice(0, idx);
+      const ctid = id.slice(idx + 2);
+      if (!/^db_bom[a-z0-9_]*$/.test(table)) return null; // only db_bom* tables
+      if (!/^\(\d+,\d+\)$/.test(ctid)) return null;       // "(0,3)" form
+      return { table, ctid };
+    };
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // DELETEs first — no dependency on other operations, and doing them
+      // first keeps the update path from having to skip rows the user
+      // deleted in the same save.
+      for (const id of deletes) {
+        const parsedId = parseId(id);
+        if (!parsedId) throw new Error(`invalid row id: ${id}`);
+        await client.query(`DELETE FROM "${parsedId.table}" WHERE ctid = $1::tid`, [parsedId.ctid]);
+      }
+
+      // UPDATEs — only touch columns that actually exist on the target
+      // table. Legacy tables (db_bom, db_bom_tcu06, db_bom_ncu04,
+      // db_bom_loradongle) carry only 4 cols; description/comment/
+      // footprint/libref get silently dropped rather than erroring the
+      // whole save.
+      for (const u of updates) {
+        const parsedId = parseId(u.id);
+        if (!parsedId) throw new Error(`invalid row id: ${u.id}`);
+        const cols = await columnsOf(parsedId.table);
+        const sets: string[] = [];
+        const vals: any[] = [];
+        const push = (col: string, val: any) => {
+          if (!cols.has(col)) return;
+          sets.push(`"${col}" = $${sets.length + 1}`);
+          vals.push(val);
+        };
+        push('internal_stock_number', u.stockCode);
+        push('qty_per_unit', u.quantity);
+        push('ref_des', u.designator);
+        push('description', u.description);
+        push('comment', u.comment);
+        push('footprint', u.footprint);
+        push('libref', u.libref);
+        if (sets.length === 0) continue; // nothing to update
+        vals.push(parsedId.ctid);
+        await client.query(
+          `UPDATE "${parsedId.table}" SET ${sets.join(', ')} WHERE ctid = $${sets.length + 1}::tid`,
+          vals
+        );
+      }
+
+      // INSERTs — always into the canonical per-project table so we don't
+      // spread new rows across legacy shapes.
+      if (inserts.length > 0) {
+        const table = await ensureCanonicalTable(projectId);
+        for (const i of inserts) {
+          await client.query(
+            `INSERT INTO "${table}" (${CANONICAL_COLS.map(c => `"${c}"`).join(',')}) VALUES (${CANONICAL_COLS.map((_, k) => `$${k + 1}`).join(',')})`,
+            [String(projectId), i.stockCode, i.quantity, i.designator, i.description, i.comment, i.footprint, i.libref]
+          );
+        }
+      }
+
+      await client.query('COMMIT');
+      console.log(`[bom:save] project=${projectId} updates=${updates.length} deletes=${deletes.length} inserts=${inserts.length} by=${(req as any).user?.email || 'unknown'}`);
+      res.json({ ok: true, applied: { updates: updates.length, deletes: deletes.length, inserts: inserts.length } });
+    } catch (err: any) {
+      await client.query('ROLLBACK').catch(() => {});
+      console.error('[bom:save] failed:', err.message);
       res.status(400).json({ error: err.message });
     } finally {
       client.release();

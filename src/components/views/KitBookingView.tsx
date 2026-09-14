@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Project } from '../../types';
 import ShortageToPOModal from '../ShortageToPOModal';
+import BomLineEditorModal from '../BomLineEditorModal';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import {
   Package,
@@ -13,7 +14,9 @@ import {
   ArrowRightLeft,
   ShoppingCart,
   Search,
-  X
+  X,
+  Pencil,
+  Plus,
 } from 'lucide-react';
 
 interface AuditResult {
@@ -31,10 +34,18 @@ interface AuditResult {
 
 interface KitBookingViewProps {
   projects: Project[];
-  triggerToast: (msg: string) => void;
+  triggerToast: (msg: string, type?: string) => void;
+  currentUser?: { role?: string } | null;
 }
 
-export default function KitBookingView({ projects, triggerToast }: KitBookingViewProps) {
+export default function KitBookingView({ projects, triggerToast, currentUser }: KitBookingViewProps) {
+  // Admin gate for the BOM editor. The endpoints themselves are
+  // admin-gated too — this just hides the affordance for non-admins so
+  // they don't get error toasts trying to open something they can't use.
+  const isAdmin = String(currentUser?.role || '').toLowerCase() === 'admin';
+  // stockCode of the audit row currently being edited, or the sentinel
+  // '' for "add a brand-new BOM line". null means the editor is closed.
+  const [editorStockCode, setEditorStockCode] = useState<string | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<number>(projects[0]?.id || 1);
   const [buildQty, setBuildQty] = useState<number>(1);
   const [auditResults, setAuditResults] = useState<AuditResult[]>([]);
@@ -190,6 +201,25 @@ export default function KitBookingView({ projects, triggerToast }: KitBookingVie
             )}
           </span>
           <div className="flex items-center gap-sm">
+            {isAdmin && (
+              <>
+                <span
+                  className="text-[10px] font-mono uppercase tracking-wider text-outline/70 italic hidden md:inline"
+                  title="As an admin, double-click any row in the audit to edit its underlying BOM entries."
+                >
+                  double-click a row to edit
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setEditorStockCode('')}
+                  className="h-8 px-3 rounded-lg flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider border border-primary/40 text-primary hover:bg-primary/10 active:scale-95"
+                  title="Add a new BOM line to this project"
+                >
+                  <Plus className="w-3 h-3" />
+                  Add line
+                </button>
+              </>
+            )}
             <div className="relative">
               <Search className="w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-outline pointer-events-none" />
               <input
@@ -229,7 +259,12 @@ export default function KitBookingView({ projects, triggerToast }: KitBookingVie
             </thead>
             <tbody className="divide-y divide-outline-variant/30 text-xs">
               {filteredResults.map((res) => (
-                <tr key={res.component_id} className={`hover:bg-surface-variant/20 transition-all ${res.shortage_qty > 0 ? 'bg-red-500/5' : ''}`}>
+                <tr
+                  key={res.component_id}
+                  onDoubleClick={isAdmin ? () => setEditorStockCode(res.component_id) : undefined}
+                  className={`transition-all ${res.shortage_qty > 0 ? 'bg-red-500/5' : ''} ${isAdmin ? 'hover:bg-primary/10 cursor-pointer' : 'hover:bg-surface-variant/20'}`}
+                  title={isAdmin ? 'Double-click to edit this BOM line' : undefined}
+                >
                   <td className="px-lg py-3" data-label="Part">
                     <div className="font-mono font-bold text-primary">{res.component_id}</div>
                     {res.designator && (
@@ -384,6 +419,21 @@ export default function KitBookingView({ projects, triggerToast }: KitBookingVie
           onSuccess={(po) => {
             setShowShortagePOModal(false);
             // Refresh audit after PO created
+            handleValidate();
+          }}
+          triggerToast={triggerToast}
+        />
+      )}
+
+      {isAdmin && editorStockCode !== null && (
+        <BomLineEditorModal
+          projectId={selectedProjectId}
+          // empty string is our "add fresh line" sentinel; a stock code
+          // string is edit-mode for that component's underlying rows.
+          stockCode={editorStockCode === '' ? null : editorStockCode}
+          onClose={() => setEditorStockCode(null)}
+          onSaved={() => {
+            setEditorStockCode(null);
             handleValidate();
           }}
           triggerToast={triggerToast}
