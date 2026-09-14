@@ -33,6 +33,14 @@ interface BomRow {
   comment: string;
   footprint: string;
   libref: string;
+  // Canonical values from the inventory table. Legacy source tables
+  // (db_bom etc.) don't carry description/comment/footprint at all, so
+  // the audit view already falls back to inventory for those columns —
+  // we surface the same fallback here so the editor is honest about
+  // what will show downstream instead of rendering an empty field.
+  inventoryDescription?: string;
+  inventoryComment?: string;
+  inventoryFootprint?: string;
   _isNew?: boolean;
   _isDeleted?: boolean;
   _isDirty?: boolean;
@@ -278,28 +286,43 @@ export default function BomLineEditorModal({ projectId, stockCode, onClose, onSa
                           placeholder="e.g. C1, C2, C17"
                         />
                       </Field>
-                      <Field label="Description" span={12} disabledHint={isLegacy ? 'Not stored on legacy tables' : undefined}>
+                      <Field
+                        label="Description"
+                        span={12}
+                        disabledHint={isLegacy ? 'from inventory (legacy source rows don\'t store their own)' : undefined}
+                      >
                         <input
-                          value={r.description}
+                          value={isLegacy ? (r.inventoryDescription || '') : r.description}
                           disabled={r._isDeleted || isLegacy}
                           onChange={(e) => patch(r.id, { description: e.target.value })}
-                          className="w-full px-2 py-1.5 rounded border border-outline-variant bg-surface-container-low text-on-surface text-xs focus:outline-none focus:border-primary disabled:opacity-50"
+                          placeholder={!isLegacy && r.inventoryDescription ? `Inventory: ${r.inventoryDescription}` : undefined}
+                          className="w-full px-2 py-1.5 rounded border border-outline-variant bg-surface-container-low text-on-surface text-xs focus:outline-none focus:border-primary disabled:opacity-70"
                         />
                       </Field>
-                      <Field label="Comment" span={6} disabledHint={isLegacy ? 'Not stored on legacy tables' : undefined}>
+                      <Field
+                        label="Comment"
+                        span={6}
+                        disabledHint={isLegacy ? 'from inventory' : undefined}
+                      >
                         <input
-                          value={r.comment}
+                          value={isLegacy ? (r.inventoryComment || '') : r.comment}
                           disabled={r._isDeleted || isLegacy}
                           onChange={(e) => patch(r.id, { comment: e.target.value })}
-                          className="w-full px-2 py-1.5 rounded border border-outline-variant bg-surface-container-low text-on-surface text-xs focus:outline-none focus:border-primary disabled:opacity-50"
+                          placeholder={!isLegacy && r.inventoryComment ? `Inventory: ${r.inventoryComment}` : undefined}
+                          className="w-full px-2 py-1.5 rounded border border-outline-variant bg-surface-container-low text-on-surface text-xs focus:outline-none focus:border-primary disabled:opacity-70"
                         />
                       </Field>
-                      <Field label="Footprint" span={3} disabledHint={isLegacy ? '—' : undefined}>
+                      <Field
+                        label="Footprint"
+                        span={3}
+                        disabledHint={isLegacy ? 'from inventory' : undefined}
+                      >
                         <input
-                          value={r.footprint}
+                          value={isLegacy ? (r.inventoryFootprint || '') : r.footprint}
                           disabled={r._isDeleted || isLegacy}
                           onChange={(e) => patch(r.id, { footprint: e.target.value })}
-                          className="w-full px-2 py-1.5 rounded border border-outline-variant bg-surface-container-low text-on-surface text-xs font-mono focus:outline-none focus:border-primary disabled:opacity-50"
+                          placeholder={!isLegacy && r.inventoryFootprint ? `Inventory: ${r.inventoryFootprint}` : undefined}
+                          className="w-full px-2 py-1.5 rounded border border-outline-variant bg-surface-container-low text-on-surface text-xs font-mono focus:outline-none focus:border-primary disabled:opacity-70"
                         />
                       </Field>
                       <Field label="LibRef" span={3} disabledHint={isLegacy ? '—' : undefined}>

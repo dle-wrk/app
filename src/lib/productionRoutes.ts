@@ -1073,26 +1073,60 @@ export function registerProductionRoutes(app: Express): void {
     try {
       const tables = await bomTablesForProject(projectId);
       const out: any[] = [];
+      // Collect distinct stock codes as we walk the tables so we can do
+      // one lookup into `inventory` for their canonical description /
+      // comment / footprint (legacy BOM tables don't store any of those,
+      // and the audit view falls back to inventory for the same reason —
+      // the editor has to show the same fallback or a legacy row lands
+      // in the modal with a blank description, which reads as "we lost
+      // your data" even though nothing was ever there).
+      const stockCodes = new Set<string>();
+      const rawRows: Array<{ table: string; ctid: string; r: any; stockCode: string }> = [];
       for (const t of tables) {
-        // ctid::text serialises as e.g. "(0,3)"; we round-trip that string
-        // back to the DELETE/UPDATE unchanged and postgres accepts it.
         const { rows } = await query(`SELECT ctid::text as ctid, * FROM "${t}"`);
         for (const r of rows as any[]) {
           const rowProject = parseInt(String(r.project_name ?? '')) || 1;
           if (rowProject !== projectId) continue;
-          out.push({
-            id: `${t}::${r.ctid}`,
-            _table: t,
-            _ctid: r.ctid,
-            stockCode: String(r.internal_stock_number || r.stock_code || ''),
-            quantity: parseInt(r.qty_per_unit || r.quantity || '1') || 1,
-            designator: String(r.ref_des || r.designator || ''),
-            description: String(r.description || ''),
-            comment: String(r.comment || ''),
-            footprint: String(r.footprint || ''),
-            libref: String(r.libref || ''),
+          const stockCode = String(r.internal_stock_number || r.stock_code || '');
+          if (stockCode) stockCodes.add(stockCode);
+          rawRows.push({ table: t, ctid: r.ctid, r, stockCode });
+        }
+      }
+      const inventoryByCode = new Map<string, { description: string; comment: string; footprint: string }>();
+      if (stockCodes.size > 0) {
+        const { rows: invRows } = await query<{ serial_number: string; description: string | null; comment: string | null; footprint: string | null }>(
+          `SELECT serial_number, description, comment, footprint FROM inventory WHERE serial_number = ANY($1::text[])`,
+          [Array.from(stockCodes)]
+        );
+        for (const inv of invRows) {
+          inventoryByCode.set(inv.serial_number, {
+            description: String(inv.description || ''),
+            comment: String(inv.comment || ''),
+            footprint: String(inv.footprint || ''),
           });
         }
+      }
+      for (const { table, ctid, r, stockCode } of rawRows) {
+        const inv = inventoryByCode.get(stockCode);
+        out.push({
+          id: `${table}::${ctid}`,
+          _table: table,
+          _ctid: ctid,
+          stockCode,
+          quantity: parseInt(r.qty_per_unit || r.quantity || '1') || 1,
+          designator: String(r.ref_des || r.designator || ''),
+          description: String(r.description || ''),
+          comment: String(r.comment || ''),
+          footprint: String(r.footprint || ''),
+          libref: String(r.libref || ''),
+          // Canonical values from the inventory table, so the client can
+          // display them when the row's own field is blank (legacy tables
+          // always are). Never used as an edit target — the row's own
+          // column is what gets written back.
+          inventoryDescription: inv?.description || '',
+          inventoryComment: inv?.comment || '',
+          inventoryFootprint: inv?.footprint || '',
+        });
       }
       res.json(out);
     } catch (err: any) {
