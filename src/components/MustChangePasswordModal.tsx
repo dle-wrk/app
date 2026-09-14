@@ -19,15 +19,25 @@ export default function MustChangePasswordModal({ currentPassword: prefilled, on
   const [currentPassword, setCurrentPassword] = useState(prefilled || '');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showCurrent, setShowCurrent] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Leading/trailing whitespace on either password is almost always an
+  // accident (autofill, copy-paste with trailing newline, holding Space).
+  // Silently storing that hash means the user retypes without the space
+  // on next login and is locked out — exactly the failure mode that put
+  // this modal here in the first place. We call it out as a rule below
+  // so the user sees it and can fix it before submitting.
+  const hasEdgeSpace = (v: string) => v !== v.trim();
 
   const rules = [
     { ok: newPassword.length >= 8, text: 'At least 8 characters' },
     { ok: newPassword.trim().toLowerCase() !== 'tracklab' && newPassword.length > 0, text: 'Not the default "tracklab"' },
     { ok: newPassword.length > 0 && newPassword === confirmPassword, text: 'Both fields match' },
     { ok: newPassword.length > 0 && newPassword !== currentPassword, text: 'Different from the current password' },
+    { ok: newPassword.length === 0 || !hasEdgeSpace(newPassword), text: 'No leading or trailing spaces' },
   ];
   const allOk = rules.every(r => r.ok);
 
@@ -63,15 +73,25 @@ export default function MustChangePasswordModal({ currentPassword: prefilled, on
         <form onSubmit={submit} className="px-lg py-md space-y-md">
           <div>
             <label className="block text-xs font-bold text-outline uppercase mb-1">Current password</label>
-            <input
-              type="password"
-              autoComplete="current-password"
-              className="w-full px-3 py-2 rounded border border-outline-variant bg-surface-container-low text-on-surface text-sm focus:outline-none focus:border-primary"
-              value={currentPassword}
-              onChange={(e) => setCurrentPassword(e.target.value)}
-              placeholder='"tracklab" if this is your first login'
-              required
-            />
+            <div className="relative">
+              <input
+                type={showCurrent ? 'text' : 'password'}
+                autoComplete="current-password"
+                className="w-full px-3 py-2 pr-10 rounded border border-outline-variant bg-surface-container-low text-on-surface text-sm focus:outline-none focus:border-primary"
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+                placeholder='"tracklab" if this is your first login'
+                required
+              />
+              <button
+                type="button"
+                onClick={() => setShowCurrent(s => !s)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-outline hover:text-on-surface p-1"
+                title={showCurrent ? 'Hide' : 'Show'}
+              >
+                {showCurrent ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+              </button>
+            </div>
           </div>
 
           <div>
