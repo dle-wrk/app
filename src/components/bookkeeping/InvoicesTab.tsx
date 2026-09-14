@@ -151,7 +151,12 @@ export const InvoicesTab: React.FC<ModuleDataProps> = (props) => {
             </thead>
             <tbody className="divide-y divide-outline-variant/30">
               {filtered.map(inv => (
-                <tr key={inv.id} className="hover:bg-surface-variant/20 transition-all">
+                <tr
+                  key={inv.id}
+                  onDoubleClick={() => openView(inv)}
+                  className="hover:bg-surface-variant/20 transition-all cursor-pointer"
+                  title="Double-click to open — edit/delete drafts, void sent invoices"
+                >
                   <td className="px-lg py-sm font-mono text-primary font-bold cursor-pointer" onClick={() => openView(inv)}>
                     {inv.invoiceNumber}
                     {inv.isWarrantyClaim && <span className="ml-1.5 inline-block px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wide bg-tertiary/15 text-tertiary align-middle">Warranty</span>}
