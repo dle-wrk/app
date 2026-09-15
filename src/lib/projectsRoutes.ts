@@ -391,8 +391,23 @@ export function registerProjectsRoutes(app: Express): void {
       const { rows: tables } = await query<{ tablename: string }>(
         `SELECT c.relname as tablename FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relname LIKE 'db_bom%'`
       );
+      // BOM Manager and P&P Kit Booking must show the same rows per
+      // project — this endpoint was walking every db_bom* table including
+      // legacy per-model duplicates (db_bom_tcu06 etc.) that the kit-
+      // booking audit deliberately ignores, so BOM Manager showed rows
+      // P&P never counts. Match the audit's table set exactly here: the
+      // three universal legacy tables auditKitStock reads (db_bom,
+      // db_bom_ncu04, db_bom_loradongle) plus every db_bom_project_<N>
+      // per-project table. Anything else stays in the database but is
+      // no longer surfaced through this feed.
+      const eligible = tables.filter(t =>
+        t.tablename === 'db_bom' ||
+        t.tablename === 'db_bom_ncu04' ||
+        t.tablename === 'db_bom_loradongle' ||
+        /^db_bom_project_\d+$/.test(t.tablename)
+      );
       let allItems: any[] = [];
-      for (const t of tables) {
+      for (const t of eligible) {
         const { rows } = await query(`SELECT * FROM "${t.tablename}"`);
         const mapped = rows.map((r: any) => {
           const stockCode = String(r.internal_stock_number || r.stock_code || r.StockCode || '');

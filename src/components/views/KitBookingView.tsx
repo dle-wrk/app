@@ -36,9 +36,14 @@ interface KitBookingViewProps {
   projects: Project[];
   triggerToast: (msg: string, type?: string) => void;
   currentUser?: { role?: string } | null;
+  // Called after the admin BOM editor saves. The parent uses this to
+  // refetch the app-wide bomItems cache so BOM Manager (and any other
+  // view reading from that state) shows the edit without waiting for
+  // the next full-page reload.
+  onBomChanged?: () => void;
 }
 
-export default function KitBookingView({ projects, triggerToast, currentUser }: KitBookingViewProps) {
+export default function KitBookingView({ projects, triggerToast, currentUser, onBomChanged }: KitBookingViewProps) {
   // Admin gate for the BOM editor. The endpoints themselves are
   // admin-gated too — this just hides the affordance for non-admins so
   // they don't get error toasts trying to open something they can't use.
@@ -435,6 +440,10 @@ export default function KitBookingView({ projects, triggerToast, currentUser }: 
           onSaved={() => {
             setEditorStockCode(null);
             handleValidate();
+            // Cascade the refresh to any other view that reads the same
+            // BOM data (BOM Manager is the current consumer) so the edit
+            // shows up everywhere without a page reload.
+            onBomChanged?.();
           }}
           triggerToast={triggerToast}
         />

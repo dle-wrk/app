@@ -14,3 +14,8 @@ scratch-*.mjs
 assets/
 *.db-shm
 *.db-walseed-docs.sql
+
+# BOM snapshots taken by scripts/backup-bom-tables.mjs — local rollback
+# artifacts, not source code. Keep out of git; hold onto them on disk
+# for as long as the corresponding change window is still live.
+backups/

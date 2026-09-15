@@ -361,6 +361,20 @@ export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [bomItems, setBomItems] = useState<BOMItem[]>([]);
   const [ppItems, setPpItems] = useState<PickPlaceItem[]>([]);
+  // Ad-hoc refetch for the BOM Manager view after an edit landed
+  // elsewhere (e.g. the P&P Kit Booking admin BOM editor). Bypasses the
+  // one-shot bulk /api/data loader — that endpoint is meant for boot
+  // hydration, not per-write invalidation.
+  const refreshBomItems = React.useCallback(async () => {
+    try {
+      const res = await fetch('/api/bom-items');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data)) setBomItems(data);
+    } catch {
+      /* leave the stale set in place; the next boot will refresh it */
+    }
+  }, []);
   const [jobCards, setJobCards] = useState<JobCard[]>([]);
 
   // Bookkeeping States
@@ -1885,6 +1899,7 @@ export default function App() {
                   projects={projects}
                   triggerToast={triggerToast}
                   currentUser={currentUser}
+                  onBomChanged={refreshBomItems}
                 />
               );
             }
