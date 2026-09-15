@@ -15,6 +15,9 @@ interface InventoryViewProps {
   setSelectedStatus: (status: string) => void;
   selectedStockStatus: string;
   setSelectedStockStatus: (status: any) => void;
+  selectedPackaging: string;
+  setSelectedPackaging: (mode: string) => void;
+  availablePackagingModes: string[];
   availablePrefixes: string[];
   sortBy: 'name' | 'stockLevel' | 'price';
   setSortBy: (sort: 'name' | 'stockLevel' | 'price') => void;
@@ -35,6 +38,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   setSelectedStatus,
   selectedStockStatus,
   setSelectedStockStatus,
+  selectedPackaging,
+  setSelectedPackaging,
+  availablePackagingModes,
   availablePrefixes,
   sortBy,
   setSortBy,
@@ -135,6 +141,29 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             <option value="OK">Healthy (≥ 19)</option>
             <option value="LOW">Low Level (&lt; 19)</option>
             <option value="CRITICAL">Out of Stock (0)</option>
+          </select>
+        </div>
+
+        {/* Packaging / Storage Mode Filter — reads how each SKU is
+            physically stored (reel, packet, tray, pallet, …). Options
+            are computed from what actually appears in inventory so the
+            list can't drift from reality. UNSPECIFIED is deliberately
+            present (rather than hidden) so admins can find rows with
+            no packaging value and fill them in. */}
+        <div className="flex items-center gap-1.5">
+          <span className="text-outline text-[11px] font-medium">Packaging:</span>
+          <select
+            aria-label="Filter by packaging"
+            value={selectedPackaging}
+            onChange={(e) => setSelectedPackaging(e.target.value)}
+            className="bg-surface-container-high border border-outline-variant rounded px-2 py-1 text-xs cursor-pointer focus:outline-none focus:border-primary text-on-surface font-mono"
+          >
+            <option value="ALL" className="font-sans">All Packaging</option>
+            {availablePackagingModes.map(mode => (
+              <option key={mode} value={mode}>
+                {mode === 'UNSPECIFIED' ? '— Not set —' : mode}
+              </option>
+            ))}
           </select>
         </div>
 

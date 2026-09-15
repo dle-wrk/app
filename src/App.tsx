@@ -217,6 +217,7 @@ export default function App() {
   const [selectedItemType, setSelectedItemType] = useState<string>('ALL');
   const [selectedStatus, setSelectedStatus] = useState<string>('ALL');
   const [selectedStockStatus, setSelectedStockStatus] = useState<'ALL' | 'OK' | 'LOW' | 'CRITICAL'>('ALL');
+  const [selectedPackaging, setSelectedPackaging] = useState<string>('ALL');
   const [sortBy, setSortBy] = useState<'name' | 'stockLevel' | 'price'>('name');
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
   const [isSidebarCollapsed, setIsSidebarCollapsedState] = useState<boolean>(() => {
@@ -237,6 +238,7 @@ export default function App() {
     setSelectedItemType('ALL');
     setSelectedStatus('ALL');
     setSelectedStockStatus('ALL');
+    setSelectedPackaging('ALL');
     setSortBy('name');
   };
 
@@ -1497,6 +1499,32 @@ export default function App() {
   };
 
 
+  // Normalize a free-text packaging string (e.g. "X1 REEL", "x1 Packet",
+  // "X 1 BOX", "X3 BOXES", "X1 PALLET/BOX") into a canonical filter mode.
+  // Strategy: strip the leading quantity prefix ("X<n>"), uppercase, then
+  // undo simple plurals so "BOXES" and "BOX" collapse. Compound values
+  // like "PALLET/BOX" survive as-is — they're their own meaningful mode.
+  // Anything empty/null returns '' so the caller can decide whether to
+  // treat it as an "unknown" bucket in the dropdown.
+  const normalizePackaging = React.useCallback((raw?: string | null): string => {
+    if (!raw) return '';
+    const stripped = String(raw).trim().replace(/^x\s*\d+\s+/i, '');
+    const upper = stripped.toUpperCase().trim();
+    if (!upper) return '';
+    // Depluralize by splitting on '/' so compound modes stay legible,
+    // undoing plurals on each token independently.
+    const singular = upper
+      .split('/')
+      .map(tok => {
+        const t = tok.trim();
+        if (/BOXES$/.test(t)) return t.replace(/BOXES$/, 'BOX');
+        if (/(REELS|PACKETS|TRAYS|TUBES|PALLETS|UNITS|BAGS|STICKS)$/.test(t)) return t.replace(/S$/, '');
+        return t;
+      })
+      .join('/');
+    return singular;
+  }, []);
+
   // --- ADDED DYNAMIC FILTER LOGIC ---
   const filteredItems = React.useMemo(() => {
     return items.filter(item => {
@@ -1515,9 +1543,34 @@ export default function App() {
       const itemPrefix = item.partNumber?.split('-')[0]?.toUpperCase() || '';
       const matchesType = selectedItemType === 'ALL' || itemPrefix === selectedItemType;
 
-      return matchesSearch && matchesStatus && matchesStock && matchesType;
+      // Packaging filter. UNSPECIFIED is a real bucket for items that
+      // have no packaging string yet — visible so admins can find and
+      // fill them in rather than have those rows hide behind ALL.
+      let matchesPackaging = true;
+      if (selectedPackaging !== 'ALL') {
+        const mode = normalizePackaging(item.packaging);
+        if (selectedPackaging === 'UNSPECIFIED') matchesPackaging = !mode;
+        else matchesPackaging = mode === selectedPackaging;
+      }
+
+      return matchesSearch && matchesStatus && matchesStock && matchesType && matchesPackaging;
     });
-  }, [items, searchQuery, selectedStatus, selectedStockStatus, selectedItemType]);
+  }, [items, searchQuery, selectedStatus, selectedStockStatus, selectedItemType, selectedPackaging, normalizePackaging]);
+
+  // Dedupe packaging modes present in the current inventory. UNSPECIFIED
+  // is appended when at least one item has a blank packaging column so
+  // it's a filterable bucket (rather than silently invisible).
+  const availablePackagingModes = React.useMemo(() => {
+    const set = new Set<string>();
+    let hasBlank = false;
+    items.forEach(i => {
+      const m = normalizePackaging(i.packaging);
+      if (m) set.add(m); else hasBlank = true;
+    });
+    const list = Array.from(set).sort();
+    if (hasBlank) list.push('UNSPECIFIED');
+    return list;
+  }, [items, normalizePackaging]);
 
   // Dynamically compile every unique 3-letter prefix code from the items array
   const availablePrefixes = React.useMemo(() => {
@@ -1848,6 +1901,9 @@ export default function App() {
                   setSelectedStatus={setSelectedStatus}
                   selectedStockStatus={selectedStockStatus}
                   setSelectedStockStatus={setSelectedStockStatus}
+                  selectedPackaging={selectedPackaging}
+                  setSelectedPackaging={setSelectedPackaging}
+                  availablePackagingModes={availablePackagingModes}
                   sortBy={sortBy}
                   setSortBy={setSortBy}
                   availablePrefixes={availablePrefixes}
