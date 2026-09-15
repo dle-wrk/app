@@ -17,7 +17,7 @@ interface Props {
   max?: number;
 }
 
-export default function BuildQtyPicker({ value, onChange, label = 'Build Quantity', min = 1, max = 1000 }: Props) {
+export default function BuildQtyPicker({ value, onChange, label = 'Build Quantity', min = 1, max = 2000 }: Props) {
   const isPreset = (PRESETS as readonly number[]).includes(value);
   // Explicit "custom" flag so an operator who deliberately picked a
   // preset can type into the input to fine-tune without the input
