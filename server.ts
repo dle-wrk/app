@@ -24,6 +24,7 @@ import { registerPricingRoutes } from './src/lib/pricingRoutes';
 import { registerExchangeRateRoutes, updateExchangeRate } from './src/lib/exchangeRate';
 import { registerItemsRoutes } from './src/lib/itemsRoutes';
 import { registerProductionRoutes, ensureProductionCostsSchema } from './src/lib/productionRoutes';
+import { registerKitsRoutes, ensureKitsSchema } from './src/lib/kitsRoutes';
 import { registerAutomationRoutes } from './src/lib/automationRoutes';
 import { registerProjectsRoutes } from './src/lib/projectsRoutes';
 import { registerClientsRoutes } from './src/lib/clientsRoutes';
@@ -150,6 +151,7 @@ registerItemsRoutes(app);
 // below (ensureProductionCostsSchema); registering the routes here does not
 // create tables.
 registerProductionRoutes(app);
+registerKitsRoutes(app);
 
 // Automation surface (Phase 4): rules, scheduled jobs, notifications,
 // auto-PO config, event log, alert subscriptions, and the trigger actions
@@ -1059,6 +1061,7 @@ async function runSchemaBootstrap() {
     await ensureBookkeepingSchema().catch((e) => console.error('Failed to bootstrap bookkeeping schema:', e));
 
     await ensureProductionCostsSchema().catch((e) => console.error('Failed to bootstrap production costs schema:', e));
+    await ensureKitsSchema().catch((e) => console.error('Failed to bootstrap kits schema:', e));
 
     // Phase 5: Quality & Compliance + Advanced Automation
     await ensurePhase5Tables().catch((e) => console.error('Failed to bootstrap Phase 5 schema:', e));

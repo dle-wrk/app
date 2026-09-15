@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Plus, Folder, X, Link as LinkIcon, Trash2, Edit, Search, Calendar, Users, FileText, CheckCircle2, AlertTriangle, Activity } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Plus, Folder, X, Link as LinkIcon, Trash2, Edit, Search, Calendar, Users, FileText, CheckCircle2, AlertTriangle, Activity, Package } from 'lucide-react';
 import { Item, Project, JobCard } from '../../types';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 
@@ -60,6 +60,29 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
   });
 
   const [selectedComponents, setSelectedComponents] = useState<Record<string, LinkedComponent>>({});
+
+  // Saved-kit index, keyed by projectId. Fetched once when the view
+  // mounts so each project card can show its kit count and the most
+  // recent kit name as a cross-link to P&P Kit Booking. Refetched when
+  // projects change (new project = possibly new kit references).
+  const [allKits, setAllKits] = useState<Array<{ id: number; name: string; projectId: number | null; buildQty: number; lockMode: boolean; updatedAt: string }>>([]);
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/kits')
+      .then(r => r.ok ? r.json() : [])
+      .then(data => { if (!cancelled && Array.isArray(data)) setAllKits(data); })
+      .catch(() => { /* leave empty; card just shows "no kits yet" */ });
+    return () => { cancelled = true; };
+  }, [projects.length]);
+  const kitsByProject = useMemo(() => {
+    const map: Record<number, typeof allKits> = {};
+    for (const k of allKits) {
+      if (k.projectId == null) continue;
+      if (!map[k.projectId]) map[k.projectId] = [];
+      map[k.projectId].push(k);
+    }
+    return map;
+  }, [allKits]);
 
   const handleCreateProject = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -349,6 +372,25 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
                   <span className="text-on-surface truncate">
                     {projectJobs.length} Job Cards ({completedJobs} Done)
                   </span>
+                </div>
+              )}
+
+              {/* Saved Kits — surface the kits that reference this
+                  project so BOM plans have a visible home here.
+                  Loaded is one aggregate fetch; shows the most-recent
+                  three names. */}
+              {kitsByProject[project.id]?.length > 0 && (
+                <div className="bg-primary/5 border border-primary/20 p-1.5 rounded text-[9px] font-mono">
+                  <div className="flex items-center gap-2">
+                    <Package className="w-3 h-3 text-primary" />
+                    <span className="text-on-surface truncate">
+                      {kitsByProject[project.id].length} Saved Kit{kitsByProject[project.id].length === 1 ? '' : 's'}
+                    </span>
+                  </div>
+                  <div className="mt-1 pl-4 text-outline truncate">
+                    {kitsByProject[project.id].slice(0, 3).map(k => k.name).join(' · ')}
+                    {kitsByProject[project.id].length > 3 && ` · +${kitsByProject[project.id].length - 3}`}
+                  </div>
                 </div>
               )}
 

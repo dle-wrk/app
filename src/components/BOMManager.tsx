@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useEscapeKey } from '../lib/useEscapeKey';
 import { Item, Transaction, Project, BOMItem } from '../types';
 import { mapDbRowsToItems } from '../lib/mapDbItem';
@@ -19,7 +19,8 @@ import {
   User,
   ShieldAlert,
   Boxes,
-  Briefcase
+  Briefcase,
+  Package
 } from 'lucide-react';
 
 interface BOMManagerProps {
@@ -54,6 +55,33 @@ export default function BOMManager({
   
   // Custom substitutions mapped as: { stockCode: substitutedAlternateStockCode }
   const [substitutions, setSubstitutions] = useState<Record<string, string>>({});
+
+  // Reverse lookup: stockCode → names of saved kits that reference it,
+  // so each row can advertise "in use by kits X, Y". One aggregate fetch
+  // of /api/kits (compact stock-code arrays per kit) beats per-row
+  // requests. Filtered to the currently-selected project so an audit
+  // for TCU06 doesn't get cross-project noise from another kit.
+  const [savedKits, setSavedKits] = useState<Array<{ id: number; name: string; projectId: number | null; buildQty: number; stockCodes: string[] }>>([]);
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/kits')
+      .then(r => r.ok ? r.json() : [])
+      .then(data => { if (!cancelled && Array.isArray(data)) setSavedKits(data); })
+      .catch(() => { /* no-op — the badge just doesn't render */ });
+    return () => { cancelled = true; };
+  }, []);
+  const kitsByStockCode = useMemo(() => {
+    const map: Record<string, Array<{ id: number; name: string }>> = {};
+    for (const kit of savedKits) {
+      if (kit.projectId != null && kit.projectId !== selectedProjectId) continue;
+      for (const sc of (kit.stockCodes || [])) {
+        if (!sc) continue;
+        if (!map[sc]) map[sc] = [];
+        map[sc].push({ id: kit.id, name: kit.name });
+      }
+    }
+    return map;
+  }, [savedKits, selectedProjectId]);
   
   // Active Project BOM lines
   const projectBOM = bomItems.filter(bom => bom.projectId === selectedProjectId);
@@ -415,6 +443,26 @@ export default function BOMManager({
                               Subbed: {line.stockCode} → {resolvedCode}
                             </span>
                           )}
+
+                          {/* Saved-kit badge: names the plans that
+                              reference this stockCode so the operator
+                              sees at a glance whether a change here
+                              affects live production plans. */}
+                          {(() => {
+                            const kits = kitsByStockCode[line.stockCode] || kitsByStockCode[resolvedCode] || [];
+                            if (kits.length === 0) return null;
+                            const label = kits.slice(0, 2).map(k => k.name).join(', ');
+                            const more = kits.length > 2 ? ` +${kits.length - 2}` : '';
+                            return (
+                              <span
+                                className="mt-1 inline-flex items-center gap-1 text-[8.5px] font-bold text-secondary font-mono uppercase bg-secondary/10 border border-secondary/20 px-1 py-0.5 rounded"
+                                title={`Used in ${kits.length} saved kit${kits.length === 1 ? '' : 's'}: ${kits.map(k => k.name).join(', ')}`}
+                              >
+                                <Package className="w-2.5 h-2.5" />
+                                In kit{kits.length === 1 ? '' : 's'}: {label}{more}
+                              </span>
+                            );
+                          })()}
                         </td>
 
                         {/* Qty Per PCB */}
