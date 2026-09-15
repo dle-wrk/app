@@ -83,6 +83,7 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
   const [allocatingStockCode, setAllocatingStockCode] = useState<string | null>(null);
   const [showSaveKit, setShowSaveKit] = useState<boolean>(false);
   const [showKitBrowser, setShowKitBrowser] = useState<boolean>(false);
+  const [showCsvExport, setShowCsvExport] = useState<boolean>(false);
   const [kitBusy, setKitBusy] = useState<boolean>(false);
   // Reservations from other kits — subtracted from qty_on_hand in the
   // display so the operator sees "available to this kit" rather than
@@ -92,6 +93,7 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
 
   useEscapeKey(() => setShowSaveKit(false), showSaveKit);
   useEscapeKey(() => setShowKitBrowser(false), showKitBrowser);
+  useEscapeKey(() => setShowCsvExport(false), showCsvExport);
 
   // Filter is a display-only lens over the audit — shortage math, the PO
   // modal, and the booking button all keep operating on the full result
@@ -295,26 +297,51 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
     });
   };
 
-  const exportShortagesCsv = () => {
-    const shortRows = auditResults.filter(r => !dnfOverride.has(r.component_id) && r.shortage_qty > 0);
-    if (shortRows.length === 0) {
-      triggerToast('No shortages to export.', 'INFO');
+  // CSV export flow: the button opens a small pre-download dialog so
+  // the operator can choose whether DNF-marked rows should appear in
+  // the file. Defaults to hiding them — the file's usual destination
+  // is procurement, and DNF lines by definition aren't procured — but
+  // audit-trail exports usually want everything, so it's one click to
+  // include them (rendered with "DNF" in the Shortage column so the
+  // reader can tell them apart).
+  const exportShortagesCsv = (includeDnf: boolean) => {
+    const inScope = auditResults.filter(r => {
+      if (dnfOverride.has(r.component_id)) return includeDnf;
+      return r.shortage_qty > 0;
+    });
+    if (inScope.length === 0) {
+      triggerToast(includeDnf ? 'No shortages or DNF rows to export.' : 'No shortages to export.', 'INFO');
       return;
     }
     const esc = (v: any) => {
       const s = String(v ?? '');
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
-    const header = ['Part', 'Description', 'Designator', 'Qty per PCB', 'Needed', 'On Hand', 'Reserved elsewhere', 'Shortage', 'Alternates used'];
-    const rows = shortRows.map(r => {
+    // Column order — Reserved elsewhere sits after Alternates used so
+    // the substitution note reads next to the part it modifies, and the
+    // stock accounting columns (On Hand / Shortage / Reserved) don't get
+    // interrupted by the alternate lookup.
+    const header = ['Part', 'Description', 'Designator', 'Qty per PCB', 'Needed', 'On Hand', 'Shortage', 'Alternates used', 'Reserved elsewhere'];
+    const rows = inScope.map(r => {
+      const isDnf = dnfOverride.has(r.component_id);
       const reserved = reservations[r.resolved_part_number] || 0;
       const qtyPerPcb = buildQty > 0 ? Math.round(r.qty_required / buildQty) : r.qty_required;
-      return [r.component_id, r.description, r.designator || '', qtyPerPcb, r.qty_required, r.qty_on_hand, reserved, r.shortage_qty, r.used_alternative ? r.resolved_part_number : ''];
+      return [
+        r.component_id,
+        r.description,
+        r.designator || '',
+        qtyPerPcb,
+        r.qty_required,
+        r.qty_on_hand,
+        isDnf ? 'DNF' : r.shortage_qty,
+        r.used_alternative ? r.resolved_part_number : '',
+        reserved,
+      ];
     });
     const csv = [header, ...rows].map(row => row.map(esc).join(',')).join('\n');
     const projectName = projects.find(p => p.id === selectedProjectId)?.projectName?.replace(/[^a-zA-Z0-9_-]/g, '_') || 'project';
     const stamp = new Date().toISOString().slice(0, 10);
-    const filename = `${projectName}_${stamp}_shortages.csv`;
+    const filename = `${projectName}_${stamp}_shortages${includeDnf ? '_with_dnf' : ''}.csv`;
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -324,7 +351,8 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    triggerToast(`Exported ${shortRows.length} shortage row(s) to ${filename}.`, 'SUCCESS');
+    triggerToast(`Exported ${inScope.length} row(s) to ${filename}.`, 'SUCCESS');
+    setShowCsvExport(false);
   };
 
   const handleExecute = async () => {
@@ -425,7 +453,7 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
               Load Kit
             </button>
             <button
-              onClick={exportShortagesCsv}
+              onClick={() => setShowCsvExport(true)}
               disabled={loading || auditResults.length === 0}
               title="Download shortages for this audit as CSV"
               className="h-9 px-3 rounded-lg flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider bg-surface-container-high border border-outline-variant text-on-surface hover:border-primary/60 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
@@ -802,6 +830,15 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
           onLoad={handleLoadKit}
           onDelete={handleDeleteKit}
           onClose={() => setShowKitBrowser(false)}
+        />
+      )}
+
+      {showCsvExport && (
+        <CsvExportDialog
+          shortageCount={auditResults.filter(r => !dnfOverride.has(r.component_id) && r.shortage_qty > 0).length}
+          dnfCount={auditResults.filter(r => dnfOverride.has(r.component_id)).length}
+          onCancel={() => setShowCsvExport(false)}
+          onExport={exportShortagesCsv}
         />
       )}
 
@@ -1204,6 +1241,78 @@ function KitAllocationDialog({ stockCode, needed, existing, autoResolved, reserv
               Apply
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// -----------------------------------------------------------------------
+// CSV export dialog — one gate before the download so the operator can
+// choose whether DNF-marked rows should be included. Defaults to hiding
+// them: purchase orders never buy DNF parts, so the common export is
+// procurement-shaped. Turning the checkbox on gives a full audit-trail
+// dump with "DNF" written into the Shortage column so the reader can
+// tell those rows apart. Checkbox disables (and count of DNF row info
+// hides) when the current audit has none.
+// -----------------------------------------------------------------------
+function CsvExportDialog({ shortageCount, dnfCount, onCancel, onExport }: {
+  shortageCount: number;
+  dnfCount: number;
+  onCancel: () => void;
+  onExport: (includeDnf: boolean) => void;
+}) {
+  const [includeDnf, setIncludeDnf] = useState<boolean>(false);
+  const total = shortageCount + (includeDnf ? dnfCount : 0);
+  return (
+    <div className="fixed inset-0 z-[200] bg-background/85 backdrop-blur-sm flex items-center justify-center p-md" onClick={onCancel}>
+      <div className="bg-surface-container border border-outline-variant rounded-xl shadow-2xl max-w-[460px] w-full" onClick={(e) => e.stopPropagation()}>
+        <div className="px-lg py-md border-b border-outline-variant flex items-center gap-sm">
+          <Download className="w-4 h-4 text-primary" />
+          <div>
+            <h4 className="font-bold text-sm text-on-surface">Export shortages CSV</h4>
+            <p className="text-[10px] text-outline mt-0.5">
+              {shortageCount} shortage row{shortageCount === 1 ? '' : 's'}{dnfCount > 0 ? ` · ${dnfCount} DNF row${dnfCount === 1 ? '' : 's'} available` : ''}.
+            </p>
+          </div>
+        </div>
+        <div className="px-lg py-md space-y-md">
+          <label className={`flex items-start gap-2 rounded-lg border px-3 py-2.5 ${dnfCount === 0 ? 'border-outline-variant/50 opacity-50 cursor-not-allowed' : 'border-outline-variant bg-surface-container-low hover:border-primary/60 cursor-pointer'}`}>
+            <input
+              type="checkbox"
+              checked={includeDnf}
+              onChange={(e) => setIncludeDnf(e.target.checked)}
+              disabled={dnfCount === 0}
+              className="mt-0.5 w-3.5 h-3.5 accent-primary"
+            />
+            <div className="flex-1">
+              <div className="text-xs font-bold text-on-surface">Include DNF parts</div>
+              <div className="text-[10px] text-outline">
+                DNF-marked rows appear with &quot;DNF&quot; in the Shortage column so procurement can filter them out. Off by default because purchase orders skip them anyway.
+              </div>
+            </div>
+          </label>
+          <div className="text-[10px] text-outline font-mono">
+            Will download {total} row{total === 1 ? '' : 's'}.
+          </div>
+        </div>
+        <div className="px-lg py-md border-t border-outline-variant flex justify-end gap-sm">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="px-md py-1.5 rounded-lg text-xs font-bold border border-outline-variant text-on-surface hover:bg-surface-variant/40"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => onExport(includeDnf)}
+            disabled={total === 0}
+            className="px-md py-1.5 rounded-lg text-xs font-bold bg-primary text-on-primary hover:brightness-110 active:scale-95 disabled:opacity-40 flex items-center gap-1.5"
+          >
+            <Download className="w-3.5 h-3.5" />
+            Download CSV
+          </button>
         </div>
       </div>
     </div>
