@@ -71,6 +71,11 @@ interface ProviderKeyConfig {
   description: string;
   configured: boolean;
   fields: ProviderKeyField[];
+  // 'authorization_code' when the provider supports the in-app 3-legged
+  // OAuth flow (opens a DigiKey login popup, captures the callback,
+  // stores the refresh token). Null / missing when the provider is a
+  // pure API-key setup and needs no redirect.
+  oauth?: 'authorization_code' | null;
 }
 
 function UsageMeter({ label, used, limit }: { label: string; used: number; limit: number }) {
@@ -183,6 +188,59 @@ export const PricingView: React.FC<PricingViewProps> = ({
       triggerToast(`${provider} credentials saved${data.configured ? '' : ' (still missing required fields)'}.`, 'SUCCESS');
       setKeyDrafts(prev => ({ ...prev, [provider]: {} }));
       await loadProviders();
+    } catch (err: any) {
+      triggerToast(err.message, 'ERROR');
+    } finally {
+      setKeyBusy(null);
+    }
+  };
+
+  // Kick off the 3-legged OAuth flow in a popup window. Backend returns
+  // the DigiKey consent URL with a one-shot state token; we open it,
+  // then listen for either a postMessage from the callback page or the
+  // popup closing (fallback when postMessage is blocked by browser
+  // policy). Either way we reload the provider status so the "authorized"
+  // badge and refresh-token field update on the spot.
+  const reauthorizeProvider = async (provider: string) => {
+    setKeyBusy(`reauth-${provider}`);
+    try {
+      const res = await fetch('/api/pricing/oauth/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to start authorization');
+
+      const popup = window.open(data.url, `pricing-oauth-${provider}`, 'width=560,height=760,noopener=no');
+      if (!popup) {
+        triggerToast('Popup blocked — allow popups for this site and retry.', 'ERROR');
+        return;
+      }
+
+      let settled = false;
+      const finish = async (ok: boolean, reason: string) => {
+        if (settled) return;
+        settled = true;
+        window.removeEventListener('message', onMessage);
+        clearInterval(pollClosed);
+        try { if (!popup.closed) popup.close(); } catch {}
+        await loadProviders();
+        if (ok) triggerToast(`${provider} re-authorized.`, 'SUCCESS');
+        else triggerToast(reason, 'ERROR');
+      };
+      const onMessage = (ev: MessageEvent) => {
+        const d = ev.data as any;
+        if (!d || d.type !== 'pricing-oauth' || d.provider !== provider) return;
+        finish(!!d.ok, d.ok ? '' : 'Authorization failed. Check the popup for details.');
+      };
+      window.addEventListener('message', onMessage);
+      // Fallback: some browsers strip postMessage from cross-origin popups.
+      // Watching the closed flag catches those cases — after the popup
+      // closes we just re-fetch and let the badge tell us if it worked.
+      const pollClosed = window.setInterval(() => {
+        if (popup.closed) finish(true, '');
+      }, 500);
     } catch (err: any) {
       triggerToast(err.message, 'ERROR');
     } finally {
@@ -638,6 +696,18 @@ export const PricingView: React.FC<PricingViewProps> = ({
                     <p className="text-[11px] text-on-surface-variant mt-1">{p.description}</p>
                   </div>
                   <div className="flex items-center gap-2">
+                    {p.oauth === 'authorization_code' && (
+                      <button
+                        onClick={() => reauthorizeProvider(p.provider)}
+                        disabled={!!keyBusy || !p.configured}
+                        title={p.configured
+                          ? 'Open the provider login in a popup to mint a fresh refresh token.'
+                          : 'Save Client ID and Client Secret first.'}
+                        className="px-md py-1.5 rounded-lg border border-primary/40 text-xs font-bold text-primary hover:bg-primary/10 disabled:opacity-40"
+                      >
+                        {keyBusy === `reauth-${p.provider}` ? 'Opening…' : 'Re-authorize'}
+                      </button>
+                    )}
                     <button
                       onClick={() => testProviderKeys(p.provider)}
                       disabled={!!keyBusy || !p.configured}

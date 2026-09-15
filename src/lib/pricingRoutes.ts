@@ -18,7 +18,7 @@
 
 import type { Express } from 'express';
 import { z } from 'zod';
-import { createHmac } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 import { query, queryOne } from './db';
 import {
   deriveCredKey,
@@ -85,6 +85,11 @@ interface PricingProviderConfig {
   provider: string;
   label: string;
   description: string;
+  // When set, the provider supports an in-app OAuth flow that mints a
+  // refresh token via a browser redirect. Only 'authorization_code' is
+  // wired up right now (DigiKey). Providers without this stay pure
+  // API-key entry.
+  oauth?: 'authorization_code';
   fields: PricingFieldConfig[];
 }
 
@@ -93,6 +98,7 @@ const PRICING_PROVIDERS: PricingProviderConfig[] = [
     provider: 'digikey',
     label: 'DigiKey',
     description: 'OAuth2 client_credentials (falls back to 3-legged refresh token).',
+    oauth: 'authorization_code',
     fields: [
       { name: 'client_id', label: 'Client ID', envVar: 'DIGIKEY_CLIENT_ID', type: 'text', required: true },
       { name: 'client_secret', label: 'Client Secret', envVar: 'DIGIKEY_CLIENT_SECRET', type: 'password', required: true },
@@ -1294,6 +1300,7 @@ export function registerPricingRoutes(app: Express): void {
         });
         return {
           provider: cfg.provider, label: cfg.label, description: cfg.description,
+          oauth: cfg.oauth || null,
           configured: await isProviderConfigured(cfg.provider), fields,
         };
       }));
@@ -1363,6 +1370,152 @@ export function registerPricingRoutes(app: Express): void {
       }
     } catch (err: any) {
       res.json({ provider, success: false, error: err.message });
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // In-app re-authorization (3-legged OAuth). Turns the CLI-only "run npm run
+  // digikey:authorize on your laptop" ceremony into a button-click. Flow:
+  //
+  //   1. Admin clicks "Re-authorize" in the API Keys tab.
+  //   2. POST /api/pricing/oauth/start returns a DigiKey consent URL that
+  //      carries a one-shot `state` we've stashed in memory. Client opens
+  //      that URL in a popup.
+  //   3. User logs into MyDigiKey and approves.
+  //   4. DigiKey redirects the popup to /api/pricing/oauth/callback with
+  //      `code` + `state`. We match `state`, exchange the code for a
+  //      refresh_token, encrypt-store it via setDigikeyRefreshToken, and
+  //      render a small self-closing HTML page.
+  //   5. The parent tab (listening for the popup to close) refetches
+  //      /api/pricing/keys and the "authorized" badge goes green.
+  //
+  // Redirect URI: constructed from the request so the same code works on
+  // Fly (https://tracklab-im.fly.dev) and localhost dev. Register the same
+  // URL in the DigiKey developer portal alongside the CLI one — /api/pricing/
+  // oauth/callback needs to be an allowed redirect for the app to succeed.
+  //
+  // Only 'digikey' is wired up right now; the switch below keeps the shape
+  // extensible for future OAuth providers without another endpoint.
+  const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
+  const oauthPendingStates = new Map<string, { provider: string; issuedAt: number }>();
+
+  function consumeOauthState(state: string): { provider: string } | null {
+    const entry = oauthPendingStates.get(state);
+    if (!entry) return null;
+    oauthPendingStates.delete(state);
+    if (Date.now() - entry.issuedAt > OAUTH_STATE_TTL_MS) return null;
+    return { provider: entry.provider };
+  }
+
+  // Periodically prune expired state entries so a burst of aborted flows
+  // can't grow the map unbounded. Cheap — this map should be near-empty
+  // during normal operation.
+  setInterval(() => {
+    const cutoff = Date.now() - OAUTH_STATE_TTL_MS;
+    for (const [k, v] of oauthPendingStates) if (v.issuedAt < cutoff) oauthPendingStates.delete(k);
+  }, 5 * 60 * 1000).unref();
+
+  function callbackUrlFor(req: any): string {
+    // Trust the reverse proxy for scheme/host — Fly sets x-forwarded-*
+    // headers and Express is configured to honour them (see server.ts
+    // trust proxy setup). Falls back to req.protocol/host for dev.
+    const proto = (req.headers['x-forwarded-proto'] || req.protocol || 'https').toString().split(',')[0].trim();
+    const host = (req.headers['x-forwarded-host'] || req.get('host') || '').toString().split(',')[0].trim();
+    return `${proto}://${host}/api/pricing/oauth/callback`;
+  }
+
+  app.post('/api/pricing/oauth/start', requireAdmin, async (req, res) => {
+    const { provider } = req.body as { provider: string };
+    if (provider !== 'digikey') {
+      return res.status(400).json({ error: `In-app authorization is not available for ${provider}.` });
+    }
+    const clientId = await getPricingCredential('digikey', 'client_id', 'DIGIKEY_CLIENT_ID');
+    const clientSecret = await getPricingCredential('digikey', 'client_secret', 'DIGIKEY_CLIENT_SECRET');
+    if (!clientId || !clientSecret) {
+      return res.status(400).json({ error: 'Save DigiKey Client ID and Client Secret first, then re-authorize.' });
+    }
+    const state = randomBytes(24).toString('base64url');
+    oauthPendingStates.set(state, { provider, issuedAt: Date.now() });
+    const redirectUri = callbackUrlFor(req);
+    const params = new URLSearchParams({
+      client_id: clientId,
+      response_type: 'code',
+      redirect_uri: redirectUri,
+      scope: 'openid profile email',
+      state,
+    });
+    res.json({
+      url: `https://api.digikey.com/v1/oauth2/authorize?${params.toString()}`,
+      // Included so the UI can show the exact URL that DigiKey will
+      // redirect back to — the admin must have this registered in the
+      // DigiKey developer portal or the callback lands on a 400.
+      redirectUri,
+    });
+  });
+
+  // Public route by design — DigiKey's user-agent lands here with no
+  // session cookie. CSRF is handled via the one-shot state token that only
+  // exists in the memory of the process that issued it. Ends by writing a
+  // small HTML page that closes the popup and notifies the opener.
+  app.get('/api/pricing/oauth/callback', async (req, res) => {
+    const code = String(req.query.code || '');
+    const state = String(req.query.state || '');
+    const error = String(req.query.error || '');
+    const errorDescription = String(req.query.error_description || '');
+    const respond = (title: string, message: string, ok: boolean) => {
+      res.set('Content-Type', 'text/html; charset=utf-8');
+      res.send(`<!doctype html><html><head><meta charset="utf-8"><title>${title}</title></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#1a1d2b;color:#fff;padding:40px;line-height:1.6">
+<h2 style="margin:0 0 8px;color:${ok ? '#22c55e' : '#ef4444'}">${title}</h2>
+<p style="opacity:.75;font-size:14px">${message}</p>
+<p style="opacity:.5;font-size:12px;margin-top:24px">You can close this window.</p>
+<script>
+  try { if (window.opener && !window.opener.closed) window.opener.postMessage({ type: 'pricing-oauth', ok: ${ok ? 'true' : 'false'}, provider: 'digikey' }, '*'); } catch (e) {}
+  setTimeout(function () { window.close(); }, 800);
+</script>
+</body></html>`);
+    };
+
+    if (error) return respond('Authorization declined', errorDescription || error, false);
+    if (!state || !code) return respond('Authorization failed', 'Missing code or state.', false);
+    const entry = consumeOauthState(state);
+    if (!entry) return respond('Authorization failed', 'State token was missing, reused, or expired. Start the flow again.', false);
+    const provider = entry.provider;
+    if (provider !== 'digikey') return respond('Authorization failed', `Unsupported provider: ${provider}.`, false);
+
+    try {
+      const clientId = await getPricingCredential('digikey', 'client_id', 'DIGIKEY_CLIENT_ID');
+      const clientSecret = await getPricingCredential('digikey', 'client_secret', 'DIGIKEY_CLIENT_SECRET');
+      if (!clientId || !clientSecret) throw new Error('DigiKey client credentials were cleared during the flow.');
+      const redirectUri = callbackUrlFor(req);
+      const tokRes = await fetch('https://api.digikey.com/v1/oauth2/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          client_id: clientId,
+          client_secret: clientSecret,
+          code,
+          grant_type: 'authorization_code',
+          redirect_uri: redirectUri,
+        }),
+      });
+      if (!tokRes.ok) {
+        const text = await tokRes.text().catch(() => '');
+        throw new Error(`DigiKey token exchange failed (${tokRes.status}): ${text.slice(0, 200)}`);
+      }
+      const data: any = await tokRes.json();
+      if (!data.refresh_token) throw new Error('DigiKey did not return a refresh_token — check that offline_access / long-lived tokens are enabled on the app.');
+      // Persist the new refresh token AND prime the in-process access
+      // token so the very next pricing lookup doesn't have to make a
+      // separate refresh round-trip.
+      await setDigikeyRefreshToken(data.refresh_token);
+      if (data.access_token && data.expires_in) {
+        digikeyAccessToken = { token: data.access_token, expiresAt: Date.now() + (data.expires_in as number) * 1000 };
+      }
+      respond('DigiKey authorized', 'The refresh token has been saved. This window will close automatically.', true);
+    } catch (err: any) {
+      console.error('[pricing:oauth:callback] failed:', err.message);
+      respond('Authorization failed', err.message || 'Unknown error during token exchange.', false);
     }
   });
 
