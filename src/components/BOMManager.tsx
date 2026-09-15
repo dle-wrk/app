@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useEscapeKey } from '../lib/useEscapeKey';
 import { Item, Transaction, Project, BOMItem } from '../types';
 import { mapDbRowsToItems } from '../lib/mapDbItem';
+import BuildQtyPicker from './BuildQtyPicker';
 import { 
   ClipboardCheck, 
   Layers, 
@@ -283,21 +284,11 @@ export default function BOMManager({
 
             {/* Quantity multiplier input */}
             <div className="bg-surface-container-high/60 border border-outline-variant p-md rounded-xl space-y-sm">
-              <label className="font-bold text-outline uppercase font-label-caps text-[10px] block">
-                PCB Assembly Target (Multiplier)
-              </label>
-              <div className="flex items-center gap-sm">
-<input
-                   type="number"
-                   min="1"
-                   max="1000"
-                   placeholder="Enter PCB quantity"
-                   className="flex-1 bg-surface border border-outline-variant rounded p-sm font-mono text-center text-sm font-bold text-on-surface focus:border-primary outline-none"
-                   value={pcbQty}
-                   onChange={(e) => setPcbQty(Math.max(1, parseInt(e.target.value) || 0))}
-                 />
-                <span className="font-mono text-xs text-outline shrink-0">PCBs to assemble</span>
-              </div>
+              <BuildQtyPicker
+                label="PCB Assembly Target (Multiplier)"
+                value={pcbQty}
+                onChange={setPcbQty}
+              />
               <p className="text-[10px] text-on-surface-variant leading-relaxed">
                 Scales individual quantities dynamically to assess floor preparation stocks.
               </p>

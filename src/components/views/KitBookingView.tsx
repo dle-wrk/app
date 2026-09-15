@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Project } from '../../types';
 import ShortageToPOModal from '../ShortageToPOModal';
 import BomLineEditorModal from '../BomLineEditorModal';
+import BuildQtyPicker from '../BuildQtyPicker';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import {
   Package,
@@ -157,16 +158,11 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
             </select>
           </div>
 
-          <div className="flex flex-col gap-1">
-            <label className="text-[10px] text-outline font-black uppercase tracking-wider">Build Quantity</label>
-            <input
-              type="number"
-              min="1"
-              className="bg-surface-container-high border border-outline-variant rounded px-sm py-1.5 text-xs font-bold text-on-surface outline-none focus:border-primary w-[80px] text-center"
-              value={buildQty}
-              onChange={(e) => setBuildQty(Math.max(1, Number(e.target.value)))}
-            />
-          </div>
+          <BuildQtyPicker
+            label="Build Quantity"
+            value={buildQty}
+            onChange={setBuildQty}
+          />
 
           {totalShortages > 0 && (
             <button
