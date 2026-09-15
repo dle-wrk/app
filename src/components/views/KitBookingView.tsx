@@ -73,6 +73,14 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
   // Saved-kit state. currentKitName is empty until you load or save.
   const [savedKits, setSavedKits] = useState<Array<{ id: number; name: string; projectId: number | null; projectName: string | null; buildQty: number; lockMode: boolean; updatedAt: string; bomLines: number; allocationLines: number; dnfCount: number }>>([]);
   const [currentKitName, setCurrentKitName] = useState<string>('');
+  const [currentKitId, setCurrentKitId] = useState<number | null>(null);
+  // Per-BOM-line allocation overrides. Empty means "use the audit's
+  // resolved code with the full needed qty". When the operator picks
+  // specific SKUs and quantities via the allocation dialog, each row
+  // ends up as { stockCode: [{allocatedCode, qty}, …] }. On kit save
+  // this flat-maps into the kit_allocations payload.
+  const [allocations, setAllocations] = useState<Record<string, Array<{ allocatedCode: string; qty: number }>>>({});
+  const [allocatingStockCode, setAllocatingStockCode] = useState<string | null>(null);
   const [showSaveKit, setShowSaveKit] = useState<boolean>(false);
   const [showKitBrowser, setShowKitBrowser] = useState<boolean>(false);
   const [kitBusy, setKitBusy] = useState<boolean>(false);
@@ -112,27 +120,36 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
 
   useEffect(() => {
     handleValidate();
-  }, [selectedProjectId, buildQty]);
+  }, [selectedProjectId, buildQty, currentKitId]);
 
   const handleValidate = async () => {
     if (!selectedProjectId || buildQty <= 0) return;
     setLoading(true);
     try {
-      const [auditRes, resRes] = await Promise.all([
-        fetch('/api/kit-booking/validate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ projectId: selectedProjectId, buildQty })
-        }),
-        fetch('/api/kits/reservations'),
-      ]);
+      const auditRes = await fetch('/api/kit-booking/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId: selectedProjectId,
+          buildQty,
+          // Loading a saved kit passes its own id so its reservations
+          // aren't counted against itself — otherwise a locked kit
+          // that reserves 50 of a 100-stock SKU would look like it
+          // only has 50 available on reload.
+          excludeKitId: currentKitId,
+        })
+      });
       const data = await auditRes.json();
       if (data.error) throw new Error(data.error);
       setAuditResults(data);
-      if (resRes.ok) {
-        const map = await resRes.json();
-        setReservations(map && typeof map === 'object' ? map : {});
+      // Rebuild the client-side reservation lookup from the audit
+      // payload — the server already subtracted, this map is just for
+      // the "−N reserved" hint.
+      const nextRes: Record<string, number> = {};
+      for (const r of data) {
+        if (r.reserved_qty > 0) nextRes[r.resolved_part_number] = r.reserved_qty;
       }
+      setReservations(nextRes);
     } catch (err: any) {
       triggerToast(`Validation failed: ${err.message}`, 'ERROR');
     } finally {
@@ -171,13 +188,23 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
         description: r.description || '',
         footprint: '',
       }));
-      const allocations = auditResults
-        .filter(r => !dnfOverride.has(r.component_id) && r.resolved_part_number)
-        .map(r => ({
-          stockCode: r.component_id,
-          allocatedCode: r.resolved_part_number,
-          qty: r.qty_required,
-        }));
+      // Prefer the operator's per-line allocation overrides; where a
+      // row has none, fall back to the audit's auto-resolved code with
+      // the full required qty (mirrors the pre-override behaviour).
+      const savedAllocations: Array<{ stockCode: string; allocatedCode: string; qty: number }> = [];
+      for (const r of auditResults) {
+        if (dnfOverride.has(r.component_id)) continue;
+        const override = allocations[r.component_id];
+        if (override && override.length > 0) {
+          for (const a of override) {
+            if (a.allocatedCode && a.qty > 0) {
+              savedAllocations.push({ stockCode: r.component_id, allocatedCode: a.allocatedCode, qty: a.qty });
+            }
+          }
+        } else if (r.resolved_part_number) {
+          savedAllocations.push({ stockCode: r.component_id, allocatedCode: r.resolved_part_number, qty: r.qty_required });
+        }
+      }
       const dnf = Array.from(dnfOverride);
       const res = await fetch('/api/kits', {
         method: 'POST',
@@ -189,7 +216,7 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
           lockMode,
           notes,
           bom,
-          allocations,
+          allocations: savedAllocations,
           dnf,
         }),
       });
@@ -197,6 +224,7 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
       if (!res.ok) throw new Error(body?.error || 'Save failed');
       triggerToast(`Kit "${name.trim()}" saved.`, 'SUCCESS');
       setCurrentKitName(name.trim());
+      if (body?.id) setCurrentKitId(body.id);
       setShowSaveKit(false);
       loadSavedKits();
       handleValidate();
@@ -216,10 +244,22 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
       if (kit.projectId) setSelectedProjectId(kit.projectId);
       if (kit.buildQty) setBuildQty(kit.buildQty);
       setDnfOverride(new Set(kit.dnf || []));
+      // Fold the saved kit_allocations back into the per-line map:
+      // { stockCode: [{allocatedCode, qty}, …] }. A row with just one
+      // allocation and allocatedCode === stockCode is effectively "no
+      // override" — we still record it so the operator can see what
+      // was saved.
+      const nextAllocs: Record<string, Array<{ allocatedCode: string; qty: number }>> = {};
+      for (const a of (kit.allocations || [])) {
+        if (!nextAllocs[a.stockCode]) nextAllocs[a.stockCode] = [];
+        nextAllocs[a.stockCode].push({ allocatedCode: a.allocatedCode, qty: a.qty });
+      }
+      setAllocations(nextAllocs);
       setCurrentKitName(kit.name || '');
+      setCurrentKitId(kit.id);
       setShowKitBrowser(false);
       triggerToast(`Loaded kit "${kit.name}".`, 'SUCCESS');
-      // handleValidate runs via the useEffect on buildQty/projectId change.
+      // handleValidate runs via the useEffect on buildQty/projectId/currentKitId change.
     } catch (err: any) {
       triggerToast(`Load failed: ${err.message}`, 'ERROR');
     } finally {
@@ -332,7 +372,7 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
               Loaded kit: {currentKitName}
               <button
                 type="button"
-                onClick={() => { setCurrentKitName(''); setDnfOverride(new Set()); }}
+                onClick={() => { setCurrentKitName(''); setCurrentKitId(null); setDnfOverride(new Set()); setAllocations({}); }}
                 className="ml-1 hover:text-on-surface"
                 title="Clear the loaded-kit context"
               >
@@ -565,17 +605,44 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
                     )}
                   </td>
                   <td className="px-lg py-3 text-center" data-label="Alternates">
-                    {res.used_alternative ? (
-                      <div className="flex flex-col items-center">
-                        <span className="inline-flex items-center gap-1 text-[9px] font-bold text-primary font-mono uppercase bg-primary/10 border border-primary/20 px-1 py-0.5 rounded">
-                          <ArrowRightLeft className="w-2.5 h-2.5" />
-                          Subbed
-                        </span>
-                        <span className="text-[8px] text-outline font-mono mt-1">{res.resolved_part_number}</span>
-                      </div>
-                    ) : (
-                      <span className="text-[10px] text-outline italic">None used</span>
-                    )}
+                    {(() => {
+                      const override = allocations[res.component_id];
+                      const hasOverride = override && override.length > 0;
+                      const totalOverride = hasOverride ? override.reduce((s, a) => s + a.qty, 0) : 0;
+                      return (
+                        <div className="flex flex-col items-center gap-1">
+                          {hasOverride ? (
+                            <>
+                              <span className="inline-flex items-center gap-1 text-[9px] font-bold text-tertiary font-mono uppercase bg-tertiary/10 border border-tertiary/20 px-1 py-0.5 rounded">
+                                <ArrowRightLeft className="w-2.5 h-2.5" />
+                                {override.length === 1 ? override[0].allocatedCode : `${override.length} SKUs`}
+                              </span>
+                              <span className={`text-[8px] font-mono ${totalOverride >= res.qty_required ? 'text-green-400' : 'text-red-400'}`}>
+                                {totalOverride}/{res.qty_required}
+                              </span>
+                            </>
+                          ) : res.used_alternative ? (
+                            <>
+                              <span className="inline-flex items-center gap-1 text-[9px] font-bold text-primary font-mono uppercase bg-primary/10 border border-primary/20 px-1 py-0.5 rounded">
+                                <ArrowRightLeft className="w-2.5 h-2.5" />
+                                Subbed
+                              </span>
+                              <span className="text-[8px] text-outline font-mono">{res.resolved_part_number}</span>
+                            </>
+                          ) : (
+                            <span className="text-[10px] text-outline italic">None used</span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); setAllocatingStockCode(res.component_id); }}
+                            className="text-[9px] font-mono uppercase tracking-wider text-outline hover:text-primary underline"
+                            title="Pick specific SKUs to fulfil this line"
+                          >
+                            Allocate
+                          </button>
+                        </div>
+                      );
+                    })()}
                   </td>
                   <td className="px-lg py-3" data-label="Sourcing">
                     {(() => {
@@ -728,6 +795,31 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
           onClose={() => setShowKitBrowser(false)}
         />
       )}
+
+      {allocatingStockCode && (() => {
+        const row = auditResults.find(r => r.component_id === allocatingStockCode);
+        if (!row) return null;
+        return (
+          <KitAllocationDialog
+            stockCode={allocatingStockCode}
+            needed={row.qty_required}
+            existing={allocations[allocatingStockCode] || []}
+            autoResolved={row.resolved_part_number}
+            reservations={reservations}
+            onClose={() => setAllocatingStockCode(null)}
+            onSave={(picks) => {
+              setAllocations(prev => {
+                const next = { ...prev };
+                if (picks.length === 0) delete next[allocatingStockCode];
+                else next[allocatingStockCode] = picks;
+                return next;
+              });
+              setAllocatingStockCode(null);
+            }}
+            triggerToast={triggerToast}
+          />
+        );
+      })()}
     </div>
   );
 }
@@ -899,6 +991,210 @@ function KitBrowserDialog({ kits, busy, onLoad, onDelete, onClose }: {
               ))}
             </div>
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// -----------------------------------------------------------------------
+// Multi-tier allocation dialog. Fetches candidate SKUs from
+// /api/kits/match/:stockCode (T1 exact → T4 substring) and lets the
+// operator pick one or more, with a per-pick qty. Running total in the
+// footer is compared against `needed` so the operator can see whether
+// the plan covers the requirement. Reserved-elsewhere qty is shown
+// per candidate so a "500 in stock, 400 reserved" row is honest about
+// what's actually free.
+// -----------------------------------------------------------------------
+interface MatchCandidate {
+  serialNumber: string;
+  name: string;
+  description: string;
+  footprint: string;
+  stock: number;
+  status: string;
+  matchTier: number;
+  matchNote: string;
+}
+function KitAllocationDialog({ stockCode, needed, existing, autoResolved, reservations, onClose, onSave, triggerToast }: {
+  stockCode: string;
+  needed: number;
+  existing: Array<{ allocatedCode: string; qty: number }>;
+  autoResolved: string;
+  reservations: Record<string, number>;
+  onClose: () => void;
+  onSave: (picks: Array<{ allocatedCode: string; qty: number }>) => void;
+  triggerToast: (msg: string, type?: string) => void;
+}) {
+  const [candidates, setCandidates] = useState<MatchCandidate[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  // Picks are keyed by SKU serial. qty=0 means "not selected".
+  const [picks, setPicks] = useState<Record<string, number>>(() => {
+    const seed: Record<string, number> = {};
+    for (const e of existing) seed[e.allocatedCode] = e.qty;
+    return seed;
+  });
+  useEscapeKey(onClose, true);
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetch(`/api/kits/match/${encodeURIComponent(stockCode)}`)
+      .then(r => r.ok ? r.json() : [])
+      .then(data => {
+        if (cancelled) return;
+        setCandidates(Array.isArray(data) ? data : []);
+        // Auto-preselect the primary (T1) with the full needed qty when
+        // the operator opens a fresh row with no existing overrides —
+        // saves a click for the common case.
+        if (existing.length === 0 && Array.isArray(data)) {
+          const primary = data.find((c: MatchCandidate) => c.matchTier === 1);
+          if (primary) setPicks({ [primary.serialNumber]: Math.min(needed, Math.max(0, primary.stock - (reservations[primary.serialNumber] || 0))) });
+        }
+      })
+      .catch(() => triggerToast('Match lookup failed.', 'ERROR'))
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [stockCode]);
+
+  const totalPicked = Object.values(picks).reduce((s, q) => s + (q || 0), 0);
+  const shortfall = needed - totalPicked;
+
+  const setQty = (serial: string, qty: number) => {
+    setPicks(prev => {
+      const next = { ...prev };
+      if (qty <= 0) delete next[serial]; else next[serial] = qty;
+      return next;
+    });
+  };
+
+  const save = () => {
+    const out = Object.entries(picks)
+      .filter(([, q]) => q > 0)
+      .map(([allocatedCode, qty]) => ({ allocatedCode, qty }));
+    onSave(out);
+  };
+
+  const clearAll = () => setPicks({});
+
+  return (
+    <div className="fixed inset-0 z-[210] bg-background/85 backdrop-blur-sm flex items-center justify-center p-md" onClick={onClose}>
+      <div className="bg-surface-container border border-outline-variant rounded-xl shadow-2xl max-w-[960px] w-full max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="px-lg py-md border-b border-outline-variant flex items-center gap-sm">
+          <ArrowRightLeft className="w-4 h-4 text-primary" />
+          <div className="flex-1">
+            <h4 className="font-bold text-sm text-on-surface">Allocate for {stockCode}</h4>
+            <p className="text-[10px] text-outline mt-0.5">
+              Pick which SKU(s) fulfil this line. T1 is the exact primary; T2/T3 are like-for-like; T4 is a fuzzy match — verify before use. Reserved qty from other locked kits is shown so what you allocate is honest.
+            </p>
+          </div>
+          <button type="button" onClick={onClose} className="p-1 rounded hover:bg-surface-variant/40 text-outline hover:text-on-surface">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+          {loading ? (
+            <div className="flex items-center justify-center py-12 text-xs text-outline">
+              <Loader2 className="w-4 h-4 animate-spin mr-2" /> Finding candidates…
+            </div>
+          ) : candidates.length === 0 ? (
+            <div className="py-12 text-center text-xs text-outline italic">
+              No candidates found for {stockCode}. Only the auto-resolved SKU ({autoResolved}) will be used on save.
+            </div>
+          ) : (
+            <table className="w-full text-left text-xs">
+              <thead className="sticky top-0 bg-surface-container-high/95">
+                <tr className="text-[10px] uppercase font-mono text-outline border-b border-outline-variant">
+                  <th className="px-md py-2 w-[60px]">Tier</th>
+                  <th className="px-md py-2">SKU</th>
+                  <th className="px-md py-2">Name / Footprint</th>
+                  <th className="px-md py-2 text-right">Stock</th>
+                  <th className="px-md py-2 text-right">Reserved</th>
+                  <th className="px-md py-2 text-right">Available</th>
+                  <th className="px-md py-2 text-right w-[110px]">Allocate</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-outline-variant/30">
+                {candidates.map(c => {
+                  const reserved = reservations[c.serialNumber] || 0;
+                  const available = Math.max(0, c.stock - reserved);
+                  const picked = picks[c.serialNumber] || 0;
+                  const tierClass =
+                    c.matchTier === 1 ? 'bg-primary/10 text-primary border-primary/20'
+                    : c.matchTier === 2 ? 'bg-green-500/10 text-green-400 border-green-500/20'
+                    : c.matchTier === 3 ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20'
+                    : 'bg-outline-variant/20 text-outline border-outline-variant/40';
+                  return (
+                    <tr key={c.serialNumber} className={`hover:bg-surface-variant/20 ${picked > 0 ? 'bg-primary/5' : ''}`}>
+                      <td className="px-md py-2">
+                        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold font-mono uppercase border ${tierClass}`}>
+                          T{c.matchTier}
+                        </span>
+                      </td>
+                      <td className="px-md py-2 font-mono font-bold text-on-surface">{c.serialNumber}</td>
+                      <td className="px-md py-2 max-w-[280px]">
+                        <div className="truncate text-on-surface">{c.name || c.description}</div>
+                        <div className="text-[10px] text-outline font-mono">{c.footprint || '—'} · {c.matchNote}</div>
+                      </td>
+                      <td className="px-md py-2 text-right font-mono text-on-surface">{c.stock}</td>
+                      <td className="px-md py-2 text-right font-mono text-outline">{reserved > 0 ? `−${reserved}` : '—'}</td>
+                      <td className={`px-md py-2 text-right font-mono font-bold ${available === 0 ? 'text-red-400' : 'text-on-surface'}`}>{available}</td>
+                      <td className="px-md py-2 text-right">
+                        <input
+                          type="number"
+                          min={0}
+                          max={Math.max(available, picked)}
+                          value={picked}
+                          onChange={(e) => setQty(c.serialNumber, Math.max(0, parseInt(e.target.value) || 0))}
+                          className="w-[90px] px-2 py-1 rounded border border-outline-variant bg-surface-container-low text-on-surface text-xs font-mono text-right focus:outline-none focus:border-primary"
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        <div className="px-lg py-md border-t border-outline-variant flex items-center justify-between gap-sm bg-surface-container-high/30">
+          <div className="text-xs">
+            <span className="text-outline">Needed: </span>
+            <span className="font-mono font-bold text-on-surface">{needed}</span>
+            <span className="text-outline mx-2">·</span>
+            <span className="text-outline">Picked: </span>
+            <span className={`font-mono font-bold ${totalPicked >= needed ? 'text-green-400' : 'text-red-400'}`}>{totalPicked}</span>
+            {shortfall > 0 && (
+              <>
+                <span className="text-outline mx-2">·</span>
+                <span className="text-red-400 font-mono font-bold">Short {shortfall}</span>
+              </>
+            )}
+          </div>
+          <div className="flex gap-sm">
+            <button
+              type="button"
+              onClick={clearAll}
+              className="px-md py-1.5 rounded-lg text-xs font-bold border border-outline-variant text-on-surface hover:bg-surface-variant/40"
+            >
+              Clear all
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-md py-1.5 rounded-lg text-xs font-bold border border-outline-variant text-on-surface hover:bg-surface-variant/40"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={save}
+              className="px-md py-1.5 rounded-lg text-xs font-bold bg-primary text-on-primary hover:brightness-110 active:scale-95 flex items-center gap-1.5"
+            >
+              <Save className="w-3.5 h-3.5" />
+              Apply
+            </button>
+          </div>
         </div>
       </div>
     </div>

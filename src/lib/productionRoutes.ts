@@ -120,7 +120,24 @@ export async function ensureProductionCostsSchema() {
 // to alternative parts if a primary is short). Only surfaces navigable
 // supplier URLs — the weblink_N columns hold plenty of placeholder junk
 // ("N/A", " ", partial paths) that used to render as broken sourcing buttons.
-async function auditKitStock(projectId: number, buildQty: number) {
+async function auditKitStock(projectId: number, buildQty: number, opts?: { excludeKitId?: number | null }) {
+  const excludeKitId = opts?.excludeKitId ?? null;
+  // Load reservations up front and treat them as unavailable stock.
+  // Passing excludeKitId lets an operator editing an already-saved kit
+  // see its own reservations back (subtracting them would double-count
+  // — the qty is already committed to this same kit).
+  const reservationsRes = excludeKitId
+    ? await query<{ allocated_code: string; reserved_qty: string }>(
+        `SELECT allocated_code, SUM(qty)::int AS reserved_qty FROM kit_reservations WHERE kit_id <> $1 GROUP BY allocated_code`,
+        [excludeKitId]
+      )
+    : await query<{ allocated_code: string; reserved_qty: string }>(
+        `SELECT allocated_code, SUM(qty)::int AS reserved_qty FROM kit_reservations GROUP BY allocated_code`
+      );
+  const reservedByCode = new Map<string, number>();
+  for (const r of reservationsRes.rows) reservedByCode.set(r.allocated_code, parseInt(r.reserved_qty as any) || 0);
+  const availableFor = (code: string, rawStock: number) => Math.max(0, rawStock - (reservedByCode.get(code) || 0));
+
   const { rows: tables } = await query<{ tablename: string }>(`SELECT c.relname as tablename FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relname LIKE 'db_bom%'`);
 
   // Optimize: Only query legacy tables or the project's specific table
@@ -161,7 +178,8 @@ async function auditKitStock(projectId: number, buildQty: number) {
   for (const [stockCode, bomInfo] of aggregatedBOM.entries()) {
     const qtyRequired = bomInfo.quantity * buildQty;
     const item = await queryOne(`SELECT * FROM inventory WHERE serial_number = $1`, [stockCode]);
-    let qtyOnHand = item ? (parseInt(item.stock || '0') || 0) : 0;
+    const rawStock = item ? (parseInt(item.stock || '0') || 0) : 0;
+    let qtyOnHand = availableFor(stockCode, rawStock);
     let resolvedPartNumber = stockCode;
     let usedAlternative = false;
 
@@ -169,9 +187,10 @@ async function auditKitStock(projectId: number, buildQty: number) {
       const alternatives = await query(`SELECT alternative_part_number FROM alternative_components WHERE primary_part_number = $1`, [stockCode]);
       for (const alt of alternatives.rows as any[]) {
         const altItem = await queryOne(`SELECT * FROM inventory WHERE serial_number = $1`, [alt.alternative_part_number]);
-        const altStock = altItem ? (parseInt(altItem.stock || '0') || 0) : 0;
-        if (altStock >= qtyRequired) {
-          qtyOnHand = altStock;
+        const altRaw = altItem ? (parseInt(altItem.stock || '0') || 0) : 0;
+        const altAvail = availableFor(alt.alternative_part_number, altRaw);
+        if (altAvail >= qtyRequired) {
+          qtyOnHand = altAvail;
           resolvedPartNumber = alt.alternative_part_number;
           usedAlternative = true;
           break;
@@ -180,6 +199,7 @@ async function auditKitStock(projectId: number, buildQty: number) {
     }
 
     const shortageQty = Math.max(0, qtyRequired - qtyOnHand);
+    const reservedQty = reservedByCode.get(resolvedPartNumber) || 0;
     const rawLinks = item ? [item.weblink_1, item.weblink_2, item.weblink_3, item.weblink_4, item.weblink_5] : [];
     const supplierLinks = rawLinks
       .map((v: any) => typeof v === 'string' ? v.trim() : '')
@@ -192,6 +212,10 @@ async function auditKitStock(projectId: number, buildQty: number) {
       used_alternative: usedAlternative,
       qty_required: qtyRequired,
       qty_on_hand: qtyOnHand,
+      // The reservation slice already subtracted from qty_on_hand — this
+      // field is surfaced so the client can render "−N reserved" as an
+      // explanatory hint without doing its own math.
+      reserved_qty: reservedQty,
       shortage_qty: shortageQty,
       description: item?.description || bomInfo.description,
       comment: item?.comment || bomInfo.comment,
@@ -948,13 +972,18 @@ export function registerProductionRoutes(app: Express): void {
   // execute wraps the deduction in a single transaction: if any component
   // is short, we roll back rather than leaving inventory partly consumed.
   app.post('/api/kit-booking/validate', async (req, res) => {
-    const { projectId, buildQty } = req.body;
+    const { projectId, buildQty, excludeKitId } = req.body;
     if (!projectId || !buildQty) {
       return res.status(400).json({ error: 'projectId and buildQty are required' });
     }
 
     try {
-      const auditResults = await auditKitStock(Number(projectId), Number(buildQty));
+      // excludeKitId lets the operator edit an already-saved kit
+      // without its own reservations counting against it — otherwise
+      // reloading a locked kit would show every part as double-reserved.
+      const auditResults = await auditKitStock(Number(projectId), Number(buildQty), {
+        excludeKitId: excludeKitId != null ? Number(excludeKitId) : null,
+      });
       res.json(auditResults);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
