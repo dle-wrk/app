@@ -266,7 +266,18 @@ app.get('/api/bootstrap', async (_req, res) => {
     const { rows: productionKits } = await query('SELECT * FROM production_kits ORDER BY lastUpdated DESC');
 
     // 6. BOM Items (db_bom)
-    const { rows: bomTables } = await query<{ tablename: string }>(`SELECT c.relname as tablename FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relname LIKE 'db_bom%'`);
+    // Restrict to the same eligible tables as auditKitStock and
+    // /api/bom-items so BOM Manager on cold boot doesn't pick up rows
+    // from legacy per-model duplicates (db_bom_tcu06 etc.) that P&P Kit
+    // Booking never counts. Without this filter DNF-001 shows twice for
+    // project 1 — once from db_bom, once from db_bom_tcu06.
+    const { rows: allBomTables } = await query<{ tablename: string }>(`SELECT c.relname as tablename FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relname LIKE 'db_bom%'`);
+    const bomTables = allBomTables.filter(t =>
+      t.tablename === 'db_bom' ||
+      t.tablename === 'db_bom_ncu04' ||
+      t.tablename === 'db_bom_loradongle' ||
+      /^db_bom_project_\d+$/.test(t.tablename)
+    );
     let bomItems: any[] = [];
     for (const t of bomTables) {
       const { rows: bomRows } = await query(`SELECT * FROM "${t.tablename}"`);
