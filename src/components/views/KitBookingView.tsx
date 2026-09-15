@@ -466,9 +466,18 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
           <span className="font-mono text-xs uppercase tracking-tight font-black text-on-surface-variant flex items-center gap-1.5">
             <Layers className="w-4 h-4 text-primary" />
             Live Inventory Audit
-            {search.trim() && (
+            {/* Component count — the total number of distinct BOM
+                rows the audit is tracking for this project. Rendered
+                even when the search box is empty so the operator has
+                a single at-a-glance number for "how big is this
+                board's parts list". When a filter is on we swap to a
+                showing/of readout so the number they see always
+                matches the visible rows. */}
+            {auditResults.length > 0 && (
               <span className="ml-2 text-[10px] font-mono text-outline normal-case tracking-normal">
-                showing {filteredResults.length} of {auditResults.length}
+                {search.trim()
+                  ? `showing ${filteredResults.length} of ${auditResults.length} components`
+                  : `components: ${auditResults.length}`}
               </span>
             )}
           </span>
