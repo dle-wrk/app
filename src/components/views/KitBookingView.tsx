@@ -24,7 +24,81 @@ import {
   Ban,
   Lock,
   Trash2,
+  Upload,
+  FileText,
 } from 'lucide-react';
+
+interface ParsedKitImport {
+  suggestedName: string;
+  projectId: number | null;
+  buildQty: number;
+  notes: string;
+  bom: Array<{ stockCode: string; qtyPerPcb: number; designator: string; description: string; footprint: string }>;
+  allocations: Array<{ stockCode: string; allocatedCode: string; qty: number }>;
+  dnf: string[];
+}
+
+// Tolerant CSV parser for BOM imports. Handles quoted fields, escaped
+// quotes ("" inside "…"), CRLF line endings, and header aliases. Column
+// aliases mirror the reference kitting tool's expectations:
+//   part      ← stock_code, stockcode, part_number, partno, part, component
+//   qty       ← qty, quantity, qty_per_pcb, qtyperpcb
+//   designator← designator, ref_des, refdes
+//   description ← description, desc
+//   footprint ← footprint, package
+function parseCsvBom(text: string): ParsedKitImport['bom'] {
+  const rows: string[][] = [];
+  let cur: string[] = [];
+  let cell = '';
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"' && text[i + 1] === '"') { cell += '"'; i++; }
+      else if (ch === '"') { inQuotes = false; }
+      else { cell += ch; }
+    } else {
+      if (ch === '"') inQuotes = true;
+      else if (ch === ',') { cur.push(cell); cell = ''; }
+      else if (ch === '\n') { cur.push(cell); rows.push(cur); cur = []; cell = ''; }
+      else if (ch === '\r') { /* ignore, handled with the following \n */ }
+      else cell += ch;
+    }
+  }
+  if (cell.length || cur.length) { cur.push(cell); rows.push(cur); }
+  if (rows.length < 2) return [];
+  const norm = (s: string) => s.toLowerCase().replace(/[\s_-]+/g, '');
+  const header = rows[0].map(norm);
+  const findCol = (aliases: string[]) => {
+    for (const a of aliases) {
+      const idx = header.indexOf(norm(a));
+      if (idx >= 0) return idx;
+    }
+    return -1;
+  };
+  const iPart = findCol(['stock_code', 'stockcode', 'part_number', 'partno', 'part', 'component']);
+  const iQty = findCol(['qty', 'quantity', 'qty_per_pcb', 'qtyperpcb']);
+  const iDes = findCol(['designator', 'ref_des', 'refdes']);
+  const iDesc = findCol(['description', 'desc']);
+  const iFp = findCol(['footprint', 'package']);
+  if (iPart < 0 || iQty < 0) return [];
+  const out: ParsedKitImport['bom'] = [];
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r];
+    if (!row || row.every(c => !c.trim())) continue;
+    const stockCode = String(row[iPart] || '').trim();
+    const qty = parseInt(String(row[iQty] || '').trim() || '0', 10);
+    if (!stockCode || !qty || qty <= 0) continue;
+    out.push({
+      stockCode,
+      qtyPerPcb: qty,
+      designator: iDes >= 0 ? String(row[iDes] || '').trim() : '',
+      description: iDesc >= 0 ? String(row[iDesc] || '').trim() : '',
+      footprint: iFp >= 0 ? String(row[iFp] || '').trim() : '',
+    });
+  }
+  return out;
+}
 
 interface AuditResult {
   component_id: string;
@@ -286,6 +360,111 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
       triggerToast(`Delete failed: ${err.message}`, 'ERROR');
     } finally {
       setKitBusy(false);
+    }
+  };
+
+  // Import a kit from disk. Accepts .json (full kit shape) or .csv
+  // (bom-only, needs project + name + buildQty from the operator). The
+  // parser is tolerant: header casing / alias mismatches don't fail
+  // silently, they surface as an error toast so the operator can fix
+  // the file rather than getting an empty kit. Successful parses land
+  // on the "review before import" step in the browser dialog.
+  const handleImportKitFile = async (file: File): Promise<ParsedKitImport | null> => {
+    const name = file.name.replace(/\.(json|csv|txt)$/i, '');
+    const text = await file.text();
+    const lower = file.name.toLowerCase();
+    try {
+      if (lower.endsWith('.json')) {
+        const j = JSON.parse(text);
+        // Accept either our own export shape (has bom[]) or a raw
+        // array of {stockCode, qty, ...} — the latter is what a user
+        // hand-writing a JSON dump would produce.
+        const bomRaw: any[] = Array.isArray(j.bom) ? j.bom : Array.isArray(j) ? j : [];
+        if (bomRaw.length === 0) throw new Error('No BOM lines in JSON');
+        return {
+          suggestedName: (j.name || name).toString().trim() || name,
+          projectId: typeof j.projectId === 'number' ? j.projectId : null,
+          buildQty: Number(j.buildQty) || 1,
+          notes: (j.notes || '').toString(),
+          bom: bomRaw.map(r => ({
+            stockCode: String(r.stockCode || r.stock_code || r.part || r.partNumber || r.part_number || '').trim(),
+            qtyPerPcb: Math.max(1, parseInt(r.qtyPerPcb || r.qty_per_pcb || r.qty || r.quantity || '1') || 1),
+            designator: String(r.designator || r.ref_des || '').trim(),
+            description: String(r.description || '').trim(),
+            footprint: String(r.footprint || '').trim(),
+          })).filter(l => l.stockCode),
+          allocations: Array.isArray(j.allocations) ? j.allocations : [],
+          dnf: Array.isArray(j.dnf) ? j.dnf : [],
+        };
+      }
+      if (lower.endsWith('.csv') || lower.endsWith('.txt')) {
+        const bom = parseCsvBom(text);
+        if (bom.length === 0) throw new Error('No BOM lines found in CSV. Need at least a stock-code column and a qty column.');
+        return {
+          suggestedName: name,
+          projectId: null,
+          buildQty: 1,
+          notes: '',
+          bom,
+          allocations: [],
+          dnf: [],
+        };
+      }
+      throw new Error(`Unsupported file type: ${file.name.split('.').pop() || 'unknown'}. Accepts .json or .csv.`);
+    } catch (err: any) {
+      triggerToast(`Import failed: ${err.message}`, 'ERROR');
+      return null;
+    }
+  };
+
+  // Persist an imported/reviewed kit and load it back into the audit.
+  // Runs the standard save endpoint so validation + reservations behave
+  // exactly like an in-app Save Kit did, then loads by id.
+  const handleCommitImportedKit = async (payload: {
+    name: string; projectId: number; buildQty: number; notes: string;
+    bom: Array<{ stockCode: string; qtyPerPcb: number; designator: string; description: string; footprint: string }>;
+    allocations: Array<{ stockCode: string; allocatedCode: string; qty: number }>;
+    dnf: string[];
+  }) => {
+    setKitBusy(true);
+    try {
+      const res = await fetch('/api/kits', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, lockMode: false }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body?.error || 'Import save failed');
+      triggerToast(`Imported "${payload.name}".`, 'SUCCESS');
+      loadSavedKits();
+      // Fall through to load — sets project, buildQty, dnf, allocations.
+      await handleLoadKit(body.id);
+    } catch (err: any) {
+      triggerToast(`Import failed: ${err.message}`, 'ERROR');
+    } finally {
+      setKitBusy(false);
+    }
+  };
+
+  // Serialise a kit into a JSON file the user can drop into another
+  // browser / share with a colleague / stash for backup. Round-trips
+  // through the same importer above.
+  const handleExportKitToFile = async (kitId: number, kitName: string) => {
+    try {
+      const res = await fetch(`/api/kits/${kitId}`);
+      if (!res.ok) throw new Error(`Fetch failed (${res.status})`);
+      const kit = await res.json();
+      const blob = new Blob([JSON.stringify(kit, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${kitName.replace(/[^a-zA-Z0-9_-]/g, '_') || 'kit'}.kit.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      triggerToast(`Export failed: ${err.message}`, 'ERROR');
     }
   };
 
@@ -827,8 +1006,13 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
         <KitBrowserDialog
           kits={savedKits}
           busy={kitBusy}
+          projects={projects}
+          defaultProjectId={selectedProjectId}
           onLoad={handleLoadKit}
           onDelete={handleDeleteKit}
+          onExport={handleExportKitToFile}
+          onParseFile={handleImportKitFile}
+          onCommitImport={handleCommitImportedKit}
           onClose={() => setShowKitBrowser(false)}
         />
       )}
@@ -957,87 +1141,280 @@ function SaveKitDialog({ initialName, busy, onCancel, onSave }: {
 }
 
 // -----------------------------------------------------------------------
-// Kit Browser — plain list, sorted by most recent. Load hydrates the
-// kit into the audit; Delete asks for confirm via native window.confirm.
+// Kit Browser — server-saved kits plus a drag-and-drop / file-picker
+// import zone. JSON round-trips a previous export; CSV brings in a raw
+// BOM (needs project + name + buildQty confirmed on the review step).
 // -----------------------------------------------------------------------
-function KitBrowserDialog({ kits, busy, onLoad, onDelete, onClose }: {
+function KitBrowserDialog({ kits, busy, projects, defaultProjectId, onLoad, onDelete, onExport, onParseFile, onCommitImport, onClose }: {
   kits: Array<{ id: number; name: string; projectId: number | null; projectName: string | null; buildQty: number; lockMode: boolean; updatedAt: string; bomLines: number; allocationLines: number; dnfCount: number }>;
   busy: boolean;
+  projects: Project[];
+  defaultProjectId: number;
   onLoad: (kitId: number) => void;
   onDelete: (kitId: number, name: string) => void;
+  onExport: (kitId: number, kitName: string) => void;
+  onParseFile: (file: File) => Promise<ParsedKitImport | null>;
+  onCommitImport: (payload: {
+    name: string; projectId: number; buildQty: number; notes: string;
+    bom: ParsedKitImport['bom']; allocations: ParsedKitImport['allocations']; dnf: string[];
+  }) => Promise<void>;
   onClose: () => void;
 }) {
   const [q, setQ] = useState('');
+  const [dragOver, setDragOver] = useState(false);
+  // Pending import moves the dialog into "review before saving" mode.
+  // Null means we're back to the plain browser list.
+  const [pending, setPending] = useState<ParsedKitImport | null>(null);
+  const [pendingName, setPendingName] = useState('');
+  const [pendingProjectId, setPendingProjectId] = useState<number>(defaultProjectId);
+  const [pendingBuildQty, setPendingBuildQty] = useState<number>(1);
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const filtered = kits.filter(k => !q.trim() || `${k.name} ${k.projectName || ''}`.toLowerCase().includes(q.toLowerCase()));
+
+  const acceptFile = async (file: File | null | undefined) => {
+    if (!file) return;
+    const parsed = await onParseFile(file);
+    if (!parsed) return;
+    setPending(parsed);
+    setPendingName(parsed.suggestedName);
+    setPendingProjectId(parsed.projectId ?? defaultProjectId);
+    setPendingBuildQty(parsed.buildQty || 1);
+  };
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const f = e.dataTransfer.files?.[0];
+    void acceptFile(f);
+  };
+  const confirmImport = async () => {
+    if (!pending || !pendingName.trim() || !pendingProjectId) return;
+    await onCommitImport({
+      name: pendingName.trim(),
+      projectId: pendingProjectId,
+      buildQty: pendingBuildQty,
+      notes: pending.notes,
+      bom: pending.bom,
+      allocations: pending.allocations,
+      dnf: pending.dnf,
+    });
+  };
+
   return (
     <div className="fixed inset-0 z-[200] bg-background/85 backdrop-blur-sm flex items-center justify-center p-md" onClick={onClose}>
-      <div className="bg-surface-container border border-outline-variant rounded-xl shadow-2xl max-w-[720px] w-full max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-surface-container border border-outline-variant rounded-xl shadow-2xl max-w-[720px] w-full max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="px-lg py-md border-b border-outline-variant flex items-center gap-sm">
           <FolderOpen className="w-4 h-4 text-primary" />
           <div className="flex-1">
-            <h4 className="font-bold text-sm text-on-surface">Load Kit</h4>
-            <p className="text-[10px] text-outline mt-0.5">Saved kits — pick one to load its BOM snapshot, DNF marks and buildQty into the audit.</p>
+            <h4 className="font-bold text-sm text-on-surface">{pending ? 'Import kit — review' : 'Load Kit'}</h4>
+            <p className="text-[10px] text-outline mt-0.5">
+              {pending
+                ? `Parsed ${pending.bom.length} BOM line${pending.bom.length === 1 ? '' : 's'} from disk. Confirm the details below — save posts to the same /api/kits endpoint as an in-app Save Kit, then loads it into the audit.`
+                : 'Pick a saved kit to load, or drop a .json / .csv file to import a new one.'}
+            </p>
           </div>
           <button type="button" onClick={onClose} className="p-1 rounded hover:bg-surface-variant/40 text-outline hover:text-on-surface">
             <X className="w-4 h-4" />
           </button>
         </div>
-        <div className="px-lg py-sm border-b border-outline-variant">
-          <div className="relative">
-            <Search className="w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-outline pointer-events-none" />
-            <input
-              type="search"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Filter by kit name or project…"
-              className="w-full bg-surface-container-high border border-outline-variant rounded pl-7 pr-2 py-1.5 text-xs text-on-surface outline-none focus:border-primary"
-            />
-          </div>
-        </div>
-        <div className="flex-1 overflow-y-auto">
-          {filtered.length === 0 ? (
-            <div className="p-lg text-center text-xs text-outline italic">
-              {kits.length === 0 ? 'No kits saved yet. Save your first from the header.' : `No kits match "${q}".`}
+
+        {!pending && (
+          <>
+            {/* Drop zone / file picker. Renders above the filter so the
+                cursor lands here first on a fresh open. */}
+            <div
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={onDrop}
+              className={`mx-lg mt-md rounded-lg border-2 border-dashed p-md text-center transition-colors ${
+                dragOver ? 'border-primary bg-primary/10' : 'border-outline-variant/60 bg-surface-container-high/30 hover:border-primary/60'
+              }`}
+            >
+              <Upload className="w-5 h-5 mx-auto text-outline mb-1" />
+              <div className="text-xs text-on-surface font-bold">Drop a .json or .csv kit file here</div>
+              <div className="text-[10px] text-outline mt-0.5">
+                — or —{' '}
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="text-primary underline font-bold"
+                >
+                  choose a file
+                </button>
+              </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".json,.csv,.txt,application/json,text/csv,text/plain"
+                className="hidden"
+                onChange={(e) => { void acceptFile(e.target.files?.[0]); e.target.value = ''; }}
+              />
+              <div className="text-[10px] text-outline/70 mt-2 font-mono">
+                JSON — round-trips the app's own kit export. CSV — needs at least a stock-code + qty column (aliases accepted).
+              </div>
             </div>
-          ) : (
-            <div className="divide-y divide-outline-variant/30">
-              {filtered.map(k => (
-                <div key={k.id} className="px-lg py-sm flex items-start gap-sm hover:bg-surface-variant/20">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-xs font-bold text-primary truncate">{k.name}</span>
-                      {k.lockMode && (
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20 uppercase font-mono">
-                          <Lock className="w-2.5 h-2.5" /> Locked
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-[10px] text-outline font-mono mt-0.5">
-                      {k.projectName || '(project deleted)'} · build {k.buildQty} · {k.bomLines} lines · {k.dnfCount} DNF · updated {new Date(k.updatedAt).toLocaleString()}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => onLoad(k.id)}
-                    disabled={busy}
-                    className="px-3 py-1 rounded text-[10px] font-bold uppercase tracking-wider bg-primary text-on-primary hover:brightness-110 active:scale-95 disabled:opacity-40"
-                  >
-                    Load
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onDelete(k.id, k.name)}
-                    disabled={busy}
-                    className="p-1.5 rounded text-outline hover:text-error hover:bg-error/10 disabled:opacity-40"
-                    title="Delete kit (admin only)"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+
+            <div className="px-lg pt-sm pb-sm">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-outline pointer-events-none" />
+                <input
+                  type="search"
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder="Filter saved kits by name or project…"
+                  className="w-full bg-surface-container-high border border-outline-variant rounded pl-7 pr-2 py-1.5 text-xs text-on-surface outline-none focus:border-primary"
+                />
+              </div>
+            </div>
+          </>
+        )}
+        {pending ? (
+          <>
+            <div className="flex-1 overflow-y-auto px-lg py-md space-y-md">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-sm">
+                <div className="md:col-span-2">
+                  <label className="block text-[10px] font-bold text-outline uppercase tracking-wider mb-1">Kit Name *</label>
+                  <input
+                    value={pendingName}
+                    onChange={(e) => setPendingName(e.target.value)}
+                    className="w-full px-3 py-2 rounded border border-outline-variant bg-surface-container-low text-on-surface text-sm font-mono focus:outline-none focus:border-primary"
+                  />
                 </div>
-              ))}
+                <div>
+                  <label className="block text-[10px] font-bold text-outline uppercase tracking-wider mb-1">Build Qty</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={pendingBuildQty}
+                    onChange={(e) => setPendingBuildQty(Math.max(1, parseInt(e.target.value) || 1))}
+                    className="w-full px-3 py-2 rounded border border-outline-variant bg-surface-container-low text-on-surface text-sm font-mono focus:outline-none focus:border-primary text-right"
+                  />
+                </div>
+                <div className="md:col-span-3">
+                  <label className="block text-[10px] font-bold text-outline uppercase tracking-wider mb-1">Project *</label>
+                  <select
+                    value={pendingProjectId}
+                    onChange={(e) => setPendingProjectId(Number(e.target.value))}
+                    className="w-full px-3 py-2 rounded border border-outline-variant bg-surface-container-low text-on-surface text-sm focus:outline-none focus:border-primary"
+                  >
+                    {projects.map(p => (
+                      <option key={p.id} value={p.id}>{p.projectName}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <div className="text-[10px] font-bold text-outline uppercase tracking-wider mb-1">
+                  BOM preview — {pending.bom.length} line{pending.bom.length === 1 ? '' : 's'}
+                  {pending.allocations.length > 0 && ` · ${pending.allocations.length} allocation${pending.allocations.length === 1 ? '' : 's'}`}
+                  {pending.dnf.length > 0 && ` · ${pending.dnf.length} DNF`}
+                </div>
+                <div className="rounded-lg border border-outline-variant/40 bg-surface-container-low overflow-hidden">
+                  <table className="w-full text-left text-[11px]">
+                    <thead className="bg-surface-container-high/40 text-[9px] uppercase font-mono text-outline">
+                      <tr>
+                        <th className="px-2 py-1">Stock Code</th>
+                        <th className="px-2 py-1 text-right">Qty/PCB</th>
+                        <th className="px-2 py-1">Designator</th>
+                        <th className="px-2 py-1">Description</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-outline-variant/20">
+                      {pending.bom.slice(0, 8).map((l, i) => (
+                        <tr key={i}>
+                          <td className="px-2 py-1 font-mono font-bold text-primary">{l.stockCode}</td>
+                          <td className="px-2 py-1 text-right font-mono">{l.qtyPerPcb}</td>
+                          <td className="px-2 py-1 font-mono text-outline">{l.designator || '—'}</td>
+                          <td className="px-2 py-1 text-outline truncate max-w-[240px]">{l.description || '—'}</td>
+                        </tr>
+                      ))}
+                      {pending.bom.length > 8 && (
+                        <tr>
+                          <td colSpan={4} className="px-2 py-1 text-center text-outline italic text-[10px]">
+                            …and {pending.bom.length - 8} more
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
-          )}
-        </div>
+            <div className="px-lg py-md border-t border-outline-variant flex justify-end gap-sm">
+              <button
+                type="button"
+                onClick={() => setPending(null)}
+                disabled={busy}
+                className="px-md py-1.5 rounded-lg text-xs font-bold border border-outline-variant text-on-surface hover:bg-surface-variant/40 disabled:opacity-40"
+              >
+                Back
+              </button>
+              <button
+                type="button"
+                onClick={confirmImport}
+                disabled={busy || !pendingName.trim() || !pendingProjectId || pending.bom.length === 0}
+                className="px-md py-1.5 rounded-lg text-xs font-bold bg-primary text-on-primary hover:brightness-110 active:scale-95 disabled:opacity-40 flex items-center gap-1.5"
+              >
+                {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                {busy ? 'Importing…' : 'Save & Load'}
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="flex-1 overflow-y-auto border-t border-outline-variant/50">
+            {filtered.length === 0 ? (
+              <div className="p-lg text-center text-xs text-outline italic">
+                {kits.length === 0 ? 'No kits saved yet. Save your first from the header, or drop a file above.' : `No kits match "${q}".`}
+              </div>
+            ) : (
+              <div className="divide-y divide-outline-variant/30">
+                {filtered.map(k => (
+                  <div key={k.id} className="px-lg py-sm flex items-start gap-sm hover:bg-surface-variant/20">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-xs font-bold text-primary truncate">{k.name}</span>
+                        {k.lockMode && (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20 uppercase font-mono">
+                            <Lock className="w-2.5 h-2.5" /> Locked
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[10px] text-outline font-mono mt-0.5">
+                        {k.projectName || '(project deleted)'} · build {k.buildQty} · {k.bomLines} lines · {k.dnfCount} DNF · updated {new Date(k.updatedAt).toLocaleString()}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => onLoad(k.id)}
+                      disabled={busy}
+                      className="px-3 py-1 rounded text-[10px] font-bold uppercase tracking-wider bg-primary text-on-primary hover:brightness-110 active:scale-95 disabled:opacity-40"
+                    >
+                      Load
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onExport(k.id, k.name)}
+                      disabled={busy}
+                      className="p-1.5 rounded text-outline hover:text-primary hover:bg-primary/10 disabled:opacity-40"
+                      title="Export kit to .json file for backup / round-trip"
+                    >
+                      <FileText className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onDelete(k.id, k.name)}
+                      disabled={busy}
+                      className="p-1.5 rounded text-outline hover:text-error hover:bg-error/10 disabled:opacity-40"
+                      title="Delete kit (admin only)"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
