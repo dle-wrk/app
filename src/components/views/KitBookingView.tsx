@@ -1179,50 +1179,45 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
                         // italic placeholder.
                         const mfn = (res.manufacturer_part_number || '').trim();
                         if (mfn) {
-                          const search = new URL(`https://www.google.com/search?q=${encodeURIComponent(mfn + ' datasheet')}`);
+                          const searchHref = `https://www.google.com/search?q=${encodeURIComponent(mfn + ' datasheet')}`;
                           return (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const w = window.open(search.href, '_blank', 'noopener,noreferrer');
-                                if (!w) { triggerToast(`Popup blocked — opening search in this tab`); window.location.href = search.href; }
-                              }}
+                            <a
+                              href={searchHref}
+                              target="_blank"
+                              rel="noopener noreferrer"
                               title={`No supplier links stored — search "${mfn}"`}
                               className="inline-flex items-center gap-1 p-1 rounded bg-surface-container-highest border border-outline-variant hover:border-primary transition-colors text-outline hover:text-primary"
                             >
                               <ExternalLink className="w-3 h-3" />
                               <span className="text-[10px] font-mono max-w-[100px] truncate">{mfn}</span>
-                            </button>
+                            </a>
                           );
                         }
                         return <span className="text-[10px] text-outline italic">No links</span>;
                       }
-                      const open = (u: URL) => {
-                        // window.open with explicit args survives some
-                        // popup blockers that reject bare <a target="_blank">.
-                        // Fallback: current-tab navigation, so the user always
-                        // ends up on the vendor page instead of about:blank#blocked.
-                        const w = window.open(u.href, '_blank', 'noopener,noreferrer');
-                        if (!w) {
-                          triggerToast(`Popup blocked — opening ${u.hostname} in this tab`);
-                          window.location.href = u.href;
-                        }
-                      };
+                      // Anchor with target=_blank + rel="noopener
+                      // noreferrer" is what the browser interprets
+                      // natively. window.open with noopener returns
+                      // null even on success, so the earlier
+                      // "if (!w) same-tab fallback" landed on top of a
+                      // successfully-opened new tab and the row
+                      // ended up in both places at once.
                       return (
                         <div className="flex flex-wrap gap-1.5">
                           {parsed.map((u, idx) => {
                             const host = u.hostname.replace(/^www\./, '');
                             return (
-                              <button
+                              <a
                                 key={idx}
-                                type="button"
-                                onClick={() => open(u)}
+                                href={u.href}
+                                target="_blank"
+                                rel="noopener noreferrer"
                                 title={u.href}
                                 className="inline-flex items-center gap-1 p-1 rounded bg-surface-container-highest border border-outline-variant hover:border-primary transition-colors text-outline hover:text-primary"
                               >
                                 <ExternalLink className="w-3 h-3" />
                                 <span className="text-[10px] font-mono max-w-[80px] truncate">{host}</span>
-                              </button>
+                              </a>
                             );
                           })}
                         </div>
