@@ -1212,14 +1212,31 @@ function KitAllocationDialog({ stockCode, needed, existing, autoResolved, reserv
                     : c.matchTier === 2 ? 'bg-green-500/10 text-green-400 border-green-500/20'
                     : c.matchTier === 3 ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20'
                     : 'bg-outline-variant/20 text-outline border-outline-variant/40';
+                  const isSelected = picked > 0;
                   return (
-                    <tr key={c.serialNumber} className={`hover:bg-surface-variant/20 ${picked > 0 ? 'bg-primary/5' : ''}`}>
+                    <tr
+                      key={c.serialNumber}
+                      className={`transition-all ${
+                        isSelected
+                          ? 'bg-primary/15 border-l-4 border-l-primary shadow-[inset_2px_0_0_var(--md-sys-color-primary)]'
+                          : 'border-l-4 border-l-transparent hover:bg-surface-variant/20'
+                      }`}
+                    >
                       <td className="px-md py-2">
                         <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold font-mono uppercase border ${tierClass}`}>
                           T{c.matchTier}
                         </span>
                       </td>
-                      <td className="px-md py-2 font-mono font-bold text-on-surface">{c.serialNumber}</td>
+                      <td className="px-md py-2 font-mono font-bold">
+                        <div className="flex items-center gap-1.5">
+                          {isSelected ? (
+                            <CheckCircle2 className="w-3.5 h-3.5 text-primary shrink-0" />
+                          ) : (
+                            <span className="w-3.5 h-3.5 rounded-full border border-outline-variant/60 shrink-0" />
+                          )}
+                          <span className={isSelected ? 'text-primary' : 'text-on-surface'}>{c.serialNumber}</span>
+                        </div>
+                      </td>
                       <td className="px-md py-2 max-w-[280px]">
                         <div className="truncate text-on-surface">{c.name || c.description}</div>
                         <div className="text-[10px] text-outline font-mono">{c.footprint || '—'} · {c.matchNote}</div>
@@ -1235,7 +1252,11 @@ function KitAllocationDialog({ stockCode, needed, existing, autoResolved, reserv
                             max={Math.max(available, picked)}
                             value={picked}
                             onChange={(e) => setQty(c.serialNumber, Math.max(0, parseInt(e.target.value) || 0))}
-                            className="w-[90px] px-2 py-1 rounded border border-outline-variant bg-surface-container-low text-on-surface text-xs font-mono text-right focus:outline-none focus:border-primary"
+                            className={`w-[90px] px-2 py-1 rounded border text-xs font-mono text-right focus:outline-none focus:border-primary transition-colors ${
+                              isSelected
+                                ? 'border-primary bg-primary/10 text-primary font-bold'
+                                : 'border-outline-variant bg-surface-container-low text-on-surface'
+                            }`}
                           />
                           <button
                             type="button"
@@ -1257,19 +1278,36 @@ function KitAllocationDialog({ stockCode, needed, existing, autoResolved, reserv
         </div>
 
         <div className="px-lg py-md border-t border-outline-variant flex items-center justify-between gap-sm bg-surface-container-high/30">
-          <div className="text-xs">
-            <span className="text-outline">Needed: </span>
-            <span className="font-mono font-bold text-on-surface">{needed}</span>
-            <span className="text-outline mx-2">·</span>
-            <span className="text-outline">Picked: </span>
-            <span className={`font-mono font-bold ${totalPicked >= needed ? 'text-green-400' : 'text-red-400'}`}>{totalPicked}</span>
-            {shortfall > 0 && (
-              <>
-                <span className="text-outline mx-2">·</span>
-                <span className="text-red-400 font-mono font-bold">Short {shortfall}</span>
-              </>
-            )}
-          </div>
+          {(() => {
+            const selectedCount = Object.values(picks).filter(q => q > 0).length;
+            return (
+              <div className="text-xs flex items-center gap-2 flex-wrap">
+                <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-primary/10 border border-primary/20 text-primary font-mono font-bold">
+                  <CheckCircle2 className="w-3 h-3" />
+                  {selectedCount} selected
+                </span>
+                <span className="text-outline">Needed: </span>
+                <span className="font-mono font-bold text-on-surface">{needed}</span>
+                <span className="text-outline">·</span>
+                <span className="text-outline">Picked: </span>
+                <span className={`font-mono font-bold ${totalPicked >= needed ? 'text-green-400' : 'text-red-400'}`}>{totalPicked}</span>
+                {shortfall > 0 && (
+                  <>
+                    <span className="text-outline">·</span>
+                    <span className="text-red-400 font-mono font-bold">Short {shortfall}</span>
+                  </>
+                )}
+                {shortfall <= 0 && selectedCount > 0 && (
+                  <>
+                    <span className="text-outline">·</span>
+                    <span className="text-green-400 font-mono font-bold inline-flex items-center gap-1">
+                      <CheckCircle2 className="w-3 h-3" /> Covered
+                    </span>
+                  </>
+                )}
+              </div>
+            );
+          })()}
           <div className="flex gap-sm">
             <button
               type="button"
