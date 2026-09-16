@@ -38,15 +38,46 @@ interface ParsedKitImport {
   dnf: string[];
 }
 
-// Tolerant CSV parser for BOM imports. Handles quoted fields, escaped
-// quotes ("" inside "…"), CRLF line endings, and header aliases. Column
-// aliases mirror the reference kitting tool's expectations:
-//   part      ← stock_code, stockcode, part_number, partno, part, component
-//   qty       ← qty, quantity, qty_per_pcb, qtyperpcb
-//   designator← designator, ref_des, refdes
-//   description ← description, desc
-//   footprint ← footprint, package
+// Custom parse error so the review step can surface which columns the
+// parser saw when it couldn't identify a stock-code or qty column. That
+// makes fixing the CSV a 5-second job instead of guessing.
+class CsvBomError extends Error {
+  detectedColumns: string[];
+  constructor(msg: string, detectedColumns: string[] = []) {
+    super(msg);
+    this.detectedColumns = detectedColumns;
+  }
+}
+
+// Tolerant CSV parser for BOM imports. Handles:
+//   - BOM (﻿) prefix on files exported from Excel
+//   - auto-detected delimiter (comma / semicolon / tab)
+//   - quoted fields, escaped quotes ("" inside "…"), CRLF line endings
+//   - broad header aliases: stock_code / part_number / MPN / internal
+//     stock number / reference / SKU; qty / quantity / count; ref_des /
+//     designator; description; footprint / package / case.
 function parseCsvBom(text: string): ParsedKitImport['bom'] {
+  // Strip UTF-8 BOM if present. Excel likes to inject one and it makes
+  // the very first column header look like "﻿Part" — an invisible
+  // mismatch that a stock header check would never explain.
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+
+  // Sniff the delimiter from the first non-blank line. Excel-in-EU
+  // exports use ';', tab-delimited BOMs from CAD tools are common,
+  // comma is the plain-text default.
+  const firstLine = text.split(/\r?\n/).find(l => l.trim()) || '';
+  const counts = {
+    ',': (firstLine.match(/,/g) || []).length,
+    ';': (firstLine.match(/;/g) || []).length,
+    '\t': (firstLine.match(/\t/g) || []).length,
+  };
+  const delimiter = ((): string => {
+    let best: string = ',';
+    let n = -1;
+    for (const [d, c] of Object.entries(counts)) if (c > n) { best = d; n = c; }
+    return best;
+  })();
+
   const rows: string[][] = [];
   let cur: string[] = [];
   let cell = '';
@@ -59,16 +90,18 @@ function parseCsvBom(text: string): ParsedKitImport['bom'] {
       else { cell += ch; }
     } else {
       if (ch === '"') inQuotes = true;
-      else if (ch === ',') { cur.push(cell); cell = ''; }
+      else if (ch === delimiter) { cur.push(cell); cell = ''; }
       else if (ch === '\n') { cur.push(cell); rows.push(cur); cur = []; cell = ''; }
-      else if (ch === '\r') { /* ignore, handled with the following \n */ }
+      else if (ch === '\r') { /* handled with the following \n */ }
       else cell += ch;
     }
   }
   if (cell.length || cur.length) { cur.push(cell); rows.push(cur); }
-  if (rows.length < 2) return [];
-  const norm = (s: string) => s.toLowerCase().replace(/[\s_-]+/g, '');
-  const header = rows[0].map(norm);
+  if (rows.length < 2) throw new CsvBomError('The file has no data rows.');
+
+  const norm = (s: string) => s.toLowerCase().replace(/[\s_/\-()]+/g, '').replace(/[^\w]/g, '');
+  const rawHeader = rows[0].map(c => c.trim());
+  const header = rawHeader.map(norm);
   const findCol = (aliases: string[]) => {
     for (const a of aliases) {
       const idx = header.indexOf(norm(a));
@@ -76,18 +109,36 @@ function parseCsvBom(text: string): ParsedKitImport['bom'] {
     }
     return -1;
   };
-  const iPart = findCol(['stock_code', 'stockcode', 'part_number', 'partno', 'part', 'component']);
-  const iQty = findCol(['qty', 'quantity', 'qty_per_pcb', 'qtyperpcb']);
-  const iDes = findCol(['designator', 'ref_des', 'refdes']);
-  const iDesc = findCol(['description', 'desc']);
-  const iFp = findCol(['footprint', 'package']);
-  if (iPart < 0 || iQty < 0) return [];
+  const iPart = findCol([
+    'stock_code', 'stockcode', 'internal_stock_number', 'internalstocknumber',
+    'part_number', 'partnumber', 'partno', 'part', 'component',
+    'mpn', 'manufacturer_part_number', 'sku', 'reference',
+  ]);
+  const iQty = findCol([
+    'qty', 'quantity', 'qty_per_pcb', 'qtyperpcb', 'count', 'placements', 'boardqty',
+  ]);
+  const iDes = findCol(['designator', 'ref_des', 'refdes', 'designators', 'reference_designator']);
+  const iDesc = findCol(['description', 'desc', 'comment']);
+  const iFp = findCol(['footprint', 'package', 'case']);
+  if (iPart < 0 || iQty < 0) {
+    // Surface the columns we DID see so the operator can rename one
+    // rather than guess. Also include the aliases we tried to help
+    // them normalise their file.
+    const missing = [
+      iPart < 0 ? 'stock code (one of: stock_code, part_number, part, component, MPN, SKU, reference, internal_stock_number)' : null,
+      iQty  < 0 ? 'qty (one of: qty, quantity, qty_per_pcb, count, placements)' : null,
+    ].filter(Boolean).join(' and ');
+    throw new CsvBomError(`Could not find ${missing}.`, rawHeader);
+  }
+
   const out: ParsedKitImport['bom'] = [];
   for (let r = 1; r < rows.length; r++) {
     const row = rows[r];
     if (!row || row.every(c => !c.trim())) continue;
     const stockCode = String(row[iPart] || '').trim();
-    const qty = parseInt(String(row[iQty] || '').trim() || '0', 10);
+    // Qty may show up as "1.0" or "1,0" (EU decimal comma) — coerce.
+    const rawQty = String(row[iQty] || '').trim().replace(',', '.');
+    const qty = parseInt(rawQty || '0', 10);
     if (!stockCode || !qty || qty <= 0) continue;
     out.push({
       stockCode,
@@ -97,6 +148,7 @@ function parseCsvBom(text: string): ParsedKitImport['bom'] {
       footprint: iFp >= 0 ? String(row[iFp] || '').trim() : '',
     });
   }
+  if (out.length === 0) throw new CsvBomError(`Found the columns but every row failed validation (need a non-empty stock code and a qty > 0).`, rawHeader);
   return out;
 }
 
@@ -399,7 +451,6 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
       }
       if (lower.endsWith('.csv') || lower.endsWith('.txt')) {
         const bom = parseCsvBom(text);
-        if (bom.length === 0) throw new Error('No BOM lines found in CSV. Need at least a stock-code column and a qty column.');
         return {
           suggestedName: name,
           projectId: null,
@@ -412,7 +463,14 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
       }
       throw new Error(`Unsupported file type: ${file.name.split('.').pop() || 'unknown'}. Accepts .json or .csv.`);
     } catch (err: any) {
-      triggerToast(`Import failed: ${err.message}`, 'ERROR');
+      // CsvBomError carries the header row it saw so the operator can
+      // rename a column instead of guessing which name we wanted. Toast
+      // shows both the failure and the detected columns.
+      const detected = Array.isArray((err as any).detectedColumns) ? (err as any).detectedColumns : [];
+      const columnsHint = detected.length > 0
+        ? ` Detected columns: ${detected.slice(0, 8).join(', ')}${detected.length > 8 ? ` (+${detected.length - 8} more)` : ''}.`
+        : '';
+      triggerToast(`Import failed: ${err.message}${columnsHint}`, 'ERROR');
       return null;
     }
   };
