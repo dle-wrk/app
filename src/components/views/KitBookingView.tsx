@@ -1088,13 +1088,23 @@ function KitAllocationDialog({ stockCode, needed, existing, autoResolved, reserv
       .then(r => r.ok ? r.json() : [])
       .then(data => {
         if (cancelled) return;
-        setCandidates(Array.isArray(data) ? data : []);
-        // Auto-preselect the primary (T1) with the full needed qty when
-        // the operator opens a fresh row with no existing overrides —
-        // saves a click for the common case.
-        if (existing.length === 0 && Array.isArray(data)) {
-          const primary = data.find((c: MatchCandidate) => c.matchTier === 1);
-          if (primary) setPicks({ [primary.serialNumber]: Math.min(needed, Math.max(0, primary.stock - (reservations[primary.serialNumber] || 0))) });
+        const list: MatchCandidate[] = Array.isArray(data) ? data : [];
+        setCandidates(list);
+        // Auto-preselect on first open with no existing overrides:
+        // greedy-fill T1 → T4 so a short T1 automatically spills to
+        // T2, T3, then T4. Saves the operator opening the dialog just
+        // to click Auto-fill for the common case, and demonstrates that
+        // multiple SKUs can be combined out of the box.
+        if (existing.length === 0 && list.length > 0) {
+          const seed: Record<string, number> = {};
+          let remaining = needed;
+          for (const c of list) {
+            if (remaining <= 0) break;
+            const avail = Math.max(0, c.stock - (reservations[c.serialNumber] || 0));
+            const take = Math.min(avail, remaining);
+            if (take > 0) { seed[c.serialNumber] = take; remaining -= take; }
+          }
+          setPicks(seed);
         }
       })
       .catch(() => triggerToast('Match lookup failed.', 'ERROR'))
@@ -1111,6 +1121,38 @@ function KitAllocationDialog({ stockCode, needed, existing, autoResolved, reserv
       if (qty <= 0) delete next[serial]; else next[serial] = qty;
       return next;
     });
+  };
+
+  // Per-row: top up this SKU by whatever's still short, capped by its
+  // available stock. Leaves other picks alone — the operator can combine
+  // multiple candidates by clicking Fill on each until the footer reads
+  // Picked >= Needed.
+  const availableFor = (c: MatchCandidate) => Math.max(0, c.stock - (reservations[c.serialNumber] || 0));
+  const fillRowToShortfall = (c: MatchCandidate) => {
+    const current = picks[c.serialNumber] || 0;
+    const otherPicks = totalPicked - current;
+    const stillNeeded = Math.max(0, needed - otherPicks);
+    const target = Math.min(stillNeeded, availableFor(c));
+    setQty(c.serialNumber, target);
+  };
+
+  // Footer: greedy fill by tier order. Clears whatever's there and walks
+  // T1 → T4, taking min(available, remaining shortfall) from each. Stops
+  // when the requirement is covered. The starting-fresh choice matches
+  // "distribute this line across alternates for me" — if the operator
+  // wanted to preserve a manual pick, they can Fill per-row instead.
+  const autoFillByTier = () => {
+    const next: Record<string, number> = {};
+    let remaining = needed;
+    for (const c of candidates) {
+      if (remaining <= 0) break;
+      const take = Math.min(availableFor(c), remaining);
+      if (take > 0) {
+        next[c.serialNumber] = take;
+        remaining -= take;
+      }
+    }
+    setPicks(next);
   };
 
   const save = () => {
@@ -1130,7 +1172,7 @@ function KitAllocationDialog({ stockCode, needed, existing, autoResolved, reserv
           <div className="flex-1">
             <h4 className="font-bold text-sm text-on-surface">Allocate for {stockCode}</h4>
             <p className="text-[10px] text-outline mt-0.5">
-              Pick which SKU(s) fulfil this line. T1 is the exact primary; T2/T3 are like-for-like; T4 is a fuzzy match — verify before use. Reserved qty from other locked kits is shown so what you allocate is honest.
+              Pick one or more SKUs to fulfil this line — the picked qtys add up against Needed. Use Fill per row to top up from that candidate, or Auto-fill by tier to greedy-fill T1 → T4. T1 is the exact primary; T2/T3 are like-for-like; T4 is a fuzzy match — verify before use. Reserved qty from other locked kits is shown so what you allocate is honest.
             </p>
           </div>
           <button type="button" onClick={onClose} className="p-1 rounded hover:bg-surface-variant/40 text-outline hover:text-on-surface">
@@ -1157,7 +1199,7 @@ function KitAllocationDialog({ stockCode, needed, existing, autoResolved, reserv
                   <th className="px-md py-2 text-right">Stock</th>
                   <th className="px-md py-2 text-right">Reserved</th>
                   <th className="px-md py-2 text-right">Available</th>
-                  <th className="px-md py-2 text-right w-[110px]">Allocate</th>
+                  <th className="px-md py-2 text-right w-[170px]">Allocate</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-outline-variant/30">
@@ -1185,15 +1227,26 @@ function KitAllocationDialog({ stockCode, needed, existing, autoResolved, reserv
                       <td className="px-md py-2 text-right font-mono text-on-surface">{c.stock}</td>
                       <td className="px-md py-2 text-right font-mono text-outline">{reserved > 0 ? `−${reserved}` : '—'}</td>
                       <td className={`px-md py-2 text-right font-mono font-bold ${available === 0 ? 'text-red-400' : 'text-on-surface'}`}>{available}</td>
-                      <td className="px-md py-2 text-right">
-                        <input
-                          type="number"
-                          min={0}
-                          max={Math.max(available, picked)}
-                          value={picked}
-                          onChange={(e) => setQty(c.serialNumber, Math.max(0, parseInt(e.target.value) || 0))}
-                          className="w-[90px] px-2 py-1 rounded border border-outline-variant bg-surface-container-low text-on-surface text-xs font-mono text-right focus:outline-none focus:border-primary"
-                        />
+                      <td className="px-md py-2">
+                        <div className="flex items-center justify-end gap-1">
+                          <input
+                            type="number"
+                            min={0}
+                            max={Math.max(available, picked)}
+                            value={picked}
+                            onChange={(e) => setQty(c.serialNumber, Math.max(0, parseInt(e.target.value) || 0))}
+                            className="w-[90px] px-2 py-1 rounded border border-outline-variant bg-surface-container-low text-on-surface text-xs font-mono text-right focus:outline-none focus:border-primary"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => fillRowToShortfall(c)}
+                            disabled={available === 0}
+                            title={available === 0 ? 'No stock available' : 'Top up this row to cover as much of the remaining shortfall as its available stock allows'}
+                            className="px-1.5 py-1 rounded text-[10px] font-bold uppercase border border-outline-variant text-outline hover:text-primary hover:border-primary/60 disabled:opacity-30 disabled:cursor-not-allowed"
+                          >
+                            Fill
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -1218,6 +1271,15 @@ function KitAllocationDialog({ stockCode, needed, existing, autoResolved, reserv
             )}
           </div>
           <div className="flex gap-sm">
+            <button
+              type="button"
+              onClick={autoFillByTier}
+              disabled={candidates.length === 0}
+              title="Clear picks and greedy-fill from T1 → T4 (uses each candidate's available stock in tier order until the requirement is covered)"
+              className="px-md py-1.5 rounded-lg text-xs font-bold border border-primary/40 text-primary hover:bg-primary/10 active:scale-95 disabled:opacity-40"
+            >
+              Auto-fill by tier
+            </button>
             <button
               type="button"
               onClick={clearAll}
