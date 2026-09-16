@@ -188,9 +188,15 @@ interface KitBookingViewProps {
   // view reading from that state) shows the edit without waiting for
   // the next full-page reload.
   onBomChanged?: () => void;
+  // Fired after any write that touches the projects table's
+  // updated_at column (BOM sync, admin BOM save, anything server-side
+  // that bumps the timestamp). Parent uses it to re-hydrate the
+  // projects state so the "Last edited" chip in ProjectsView + the
+  // header chip here reflect the new activity without a page reload.
+  onProjectsChanged?: () => void;
 }
 
-export default function KitBookingView({ projects, triggerToast, currentUser, onBomChanged }: KitBookingViewProps) {
+export default function KitBookingView({ projects, triggerToast, currentUser, onBomChanged, onProjectsChanged }: KitBookingViewProps) {
   // Admin gate for the BOM editor. The endpoints themselves are
   // admin-gated too — this just hides the affordance for non-admins so
   // they don't get error toasts trying to open something they can't use.
@@ -370,6 +376,10 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
       setShowSaveKit(false);
       loadSavedKits();
       handleValidate();
+      // A kit save bumps the project's last_activity_at (server folds
+      // MAX(kit.updated_at) into it), so the Project Manager cards
+      // deserve a refresh too.
+      onProjectsChanged?.();
     } catch (err: any) {
       triggerToast(`Save failed: ${err.message}`, 'ERROR');
     } finally {
@@ -490,6 +500,7 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
     bom: Array<{ stockCode: string; qtyPerPcb: number; designator: string; description: string; footprint: string }>;
     allocations: Array<{ stockCode: string; allocatedCode: string; qty: number }>;
     dnf: string[];
+    syncToProjectBom: boolean;
   }) => {
     setKitBusy(true);
     try {
@@ -500,9 +511,25 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body?.error || 'Import save failed');
-      triggerToast(`Imported "${payload.name}".`, 'SUCCESS');
+      const bomMsg = body?.bomSynced ? ` · project BOM updated (${payload.bom.length} lines)` : '';
+      triggerToast(`Imported "${payload.name}"${bomMsg}.`, 'SUCCESS');
       loadSavedKits();
-      // Fall through to load — sets project, buildQty, dnf, allocations.
+      // Cascade both refreshes when the BOM was synced: BOM Manager
+      // (bomItems state in App.tsx) picks up the new rows, and the
+      // Project Manager cards + the header chip here pick up the new
+      // projects.updated_at.
+      if (body?.bomSynced) {
+        onBomChanged?.();
+        onProjectsChanged?.();
+      } else {
+        // Even a kit-only save bumps kits.updated_at, which our
+        // last_activity_at fold on the server picks up — the projects
+        // feed reads GREATEST(project.updated_at, MAX(kit.updated_at))
+        // so a fresh kit save changes the "Last edited" answer too.
+        onProjectsChanged?.();
+      }
+      // Fall through to load — sets project, buildQty, dnf, allocations,
+      // and re-runs the audit against the freshly-synced BOM.
       await handleLoadKit(body.id);
     } catch (err: any) {
       triggerToast(`Import failed: ${err.message}`, 'ERROR');
@@ -1070,8 +1097,11 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
             handleValidate();
             // Cascade the refresh to any other view that reads the same
             // BOM data (BOM Manager is the current consumer) so the edit
-            // shows up everywhere without a page reload.
+            // shows up everywhere without a page reload. Admin BOM save
+            // also bumps projects.updated_at server-side, so the
+            // "Last edited" chip in Project Manager needs a refresh too.
             onBomChanged?.();
+            onProjectsChanged?.();
           }}
           triggerToast={triggerToast}
         />
@@ -1241,6 +1271,7 @@ function KitBrowserDialog({ kits, busy, projects, defaultProjectId, onLoad, onDe
   onCommitImport: (payload: {
     name: string; projectId: number; buildQty: number; notes: string;
     bom: ParsedKitImport['bom']; allocations: ParsedKitImport['allocations']; dnf: string[];
+    syncToProjectBom: boolean;
   }) => Promise<void>;
   onClose: () => void;
 }) {
@@ -1256,6 +1287,10 @@ function KitBrowserDialog({ kits, busy, projects, defaultProjectId, onLoad, onDe
   const [pendingName, setPendingName] = useState('');
   const [pendingProjectId, setPendingProjectId] = useState<number>(defaultProjectId);
   const [pendingBuildQty, setPendingBuildQty] = useState<number>(1);
+  // Default the "sync to project BOM" flag ON for imports — that's the
+  // whole point of dropping a file. Operators who explicitly want to
+  // save the kit without touching the project BOM can uncheck it.
+  const [pendingSyncBom, setPendingSyncBom] = useState<boolean>(true);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const filtered = kits.filter(k => !q.trim() || `${k.name} ${k.projectName || ''}`.toLowerCase().includes(q.toLowerCase()));
 
@@ -1314,6 +1349,7 @@ function KitBrowserDialog({ kits, busy, projects, defaultProjectId, onLoad, onDe
       bom: pending.bom,
       allocations: pending.allocations,
       dnf: pending.dnf,
+      syncToProjectBom: pendingSyncBom,
     });
   };
 
@@ -1567,6 +1603,29 @@ function KitBrowserDialog({ kits, busy, projects, defaultProjectId, onLoad, onDe
                   </table>
                 </div>
               </div>
+
+              {/* Sync-to-project-BOM: the whole point of dropping a
+                  file for most operators, so on by default. The label
+                  spells out exactly what it does — the project's
+                  current BOM rows get REPLACED across every eligible
+                  table with the kit's rows, and the "Last edited" chip
+                  in Project Manager updates on the next fetch. */}
+              <label className={`flex items-start gap-2 rounded-lg border p-md cursor-pointer transition-colors ${
+                pendingSyncBom ? 'border-primary/50 bg-primary/5' : 'border-outline-variant bg-surface-container-low'
+              }`}>
+                <input
+                  type="checkbox"
+                  checked={pendingSyncBom}
+                  onChange={(e) => setPendingSyncBom(e.target.checked)}
+                  className="mt-0.5 w-3.5 h-3.5 accent-primary"
+                />
+                <div className="flex-1">
+                  <div className="text-xs font-bold text-on-surface">Also update the project's BOM to match</div>
+                  <div className="text-[10px] text-outline mt-0.5">
+                    Replaces every row for this project across the audit tables (db_bom + per-project) with the kit's BOM lines. BOM Manager and P&P Kit Booking will show these lines the next time they load, and the project's "Last edited" timestamp updates.
+                  </div>
+                </div>
+              </label>
             </div>
             <div className="px-lg py-md border-t border-outline-variant flex justify-end gap-sm">
               <button
@@ -1584,7 +1643,7 @@ function KitBrowserDialog({ kits, busy, projects, defaultProjectId, onLoad, onDe
                 className="px-md py-1.5 rounded-lg text-xs font-bold bg-primary text-on-primary hover:brightness-110 active:scale-95 disabled:opacity-40 flex items-center gap-1.5"
               >
                 {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                {busy ? 'Importing…' : 'Save & Load'}
+                {busy ? 'Importing…' : (pendingSyncBom ? 'Save · Sync · Load' : 'Save & Load')}
               </button>
             </div>
           </>

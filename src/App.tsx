@@ -375,6 +375,21 @@ export default function App() {
       /* leave the stale set in place; the next boot will refresh it */
     }
   }, []);
+  // Companion refetch for projects — used when a save touched the
+  // projects.updated_at column (BOM sync, admin BOM edit, kit save).
+  // Keeps the "Last edited" chip in Project Manager and the P&P Kit
+  // Booking header in sync with the write without waiting for a
+  // full-page reload.
+  const refreshProjects = React.useCallback(async () => {
+    try {
+      const res = await fetch('/api/projects');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data)) setProjects(data.map((p: any) => ({ ...p, id: Number(p.id) })));
+    } catch {
+      /* stale is fine; next boot picks it up */
+    }
+  }, []);
   const [jobCards, setJobCards] = useState<JobCard[]>([]);
 
   // Bookkeeping States
@@ -1900,6 +1915,7 @@ export default function App() {
                   triggerToast={triggerToast}
                   currentUser={currentUser}
                   onBomChanged={refreshBomItems}
+                  onProjectsChanged={refreshProjects}
                 />
               );
             }

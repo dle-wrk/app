@@ -156,6 +156,14 @@ const KitSaveBody = z.object({
     qty: z.number().int().min(1).max(10_000_000),
   })).default([]),
   dnf: z.array(z.string().max(200)).default([]),
+  // When true, the save also rewrites the project's db_bom rows to
+  // match the kit's BOM exactly — clears every row for this project
+  // across the eligible tables (db_bom, db_bom_ncu04, db_bom_loradongle,
+  // db_bom_project_<N>) and reinserts into the canonical per-project
+  // table. Off by default so an in-app Save Kit never silently clobbers
+  // the project BOM; the import flow flips it on because that's the
+  // whole point of dropping a CSV.
+  syncToProjectBom: z.boolean().optional().default(false),
 });
 
 // ----- Routes -------------------------------------------------------------
@@ -320,9 +328,59 @@ export function registerKitsRoutes(app: Express): void {
         );
       }
       await rewriteReservationsInTx(client, kitId, body.lockMode, body.allocations);
+
+      // Optional: rewrite the project's BOM to match this kit's BOM
+      // exactly. Fires from the CSV/JSON import flow by default. Skipped
+      // otherwise so an in-app Save never silently clobbers hand-edited
+      // rows. Steps:
+      //   1. Ensure db_bom_project_<pid> exists as the canonical write
+      //      target (matches ensureCanonicalTable in productionRoutes).
+      //   2. Delete every row for this project across the eligible
+      //      audit tables so the audit + BOM Manager see only what
+      //      the kit carries.
+      //   3. Insert the kit's BOM lines into db_bom_project_<pid>.
+      //   4. Bump projects.updated_at so the Last-edited chip reflects
+      //      the change immediately.
+      let bomSynced = false;
+      if (body.syncToProjectBom && body.projectId) {
+        const pid = body.projectId;
+        const table = `db_bom_project_${pid}`;
+        await client.query(`CREATE TABLE IF NOT EXISTS "${table}" (
+          project_name text,
+          internal_stock_number text,
+          qty_per_unit integer,
+          ref_des text,
+          description text,
+          comment text,
+          footprint text,
+          libref text
+        )`);
+        const universals = ['db_bom', 'db_bom_ncu04', 'db_bom_loradongle', table];
+        for (const t of universals) {
+          // Skip if the table doesn't exist (some clean-boot databases
+          // won't have every legacy universal); the check keeps the
+          // transaction alive when a table is missing.
+          const exists = await client.query(
+            `SELECT to_regclass($1) AS r`, [`public.${t}`]
+          );
+          if (!exists.rows[0]?.r) continue;
+          await client.query(`DELETE FROM "${t}" WHERE project_name::text = $1`, [String(pid)]);
+        }
+        for (const b of body.bom) {
+          await client.query(
+            `INSERT INTO "${table}" (project_name, internal_stock_number, qty_per_unit, ref_des, description, comment, footprint, libref)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, '')`,
+            [String(pid), b.stockCode, b.qtyPerPcb, b.designator, b.description, '', b.footprint]
+          );
+        }
+        await client.query(`UPDATE projects SET updated_at = now() WHERE id::int = $1`, [pid]).catch(() => {});
+        bomSynced = true;
+      }
+
       await client.query('COMMIT');
+      if (bomSynced) console.log(`[kits:save] project=${body.projectId} bom synced from kit "${body.name}" (${body.bom.length} lines)`);
       const full = await loadFullKit(kitId);
-      res.json(full);
+      res.json({ ...full, bomSynced });
     } catch (err: any) {
       await client.query('ROLLBACK').catch(() => {});
       console.error('[kits:save] failed:', err.message);
