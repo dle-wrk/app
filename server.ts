@@ -245,7 +245,18 @@ app.get('/api/bootstrap', async (_req, res) => {
     const { rows: suppliers } = await query('SELECT * FROM suppliers ORDER BY id');
 
     // 3. Projects
-    const { rows: projectsRows } = await query('SELECT * FROM projects ORDER BY id');
+    // Same GREATEST() as GET /api/projects — folds kit saves into the
+    // "last touched" reading so the boot payload agrees with the live
+    // refetch on the projects view.
+    const { rows: projectsRows } = await query(`
+      SELECT p.*,
+             GREATEST(
+               p.updated_at,
+               (SELECT MAX(updated_at) FROM kits WHERE project_id = p.id::int)
+             ) AS last_activity_at
+        FROM projects p
+    ORDER BY p.id
+    `);
     const projects = projectsRows.map((r: any) => ({
       // Numeric id: BOM/PP rows carry numeric projectId and the frontend Project
       // type declares id: number — emitting strings here broke strict-equality
@@ -257,6 +268,8 @@ app.get('/api/bootstrap', async (_req, res) => {
       createdDate: r.created_date,
       startDate: r.start_date,
       endDate: r.end_date,
+      updatedAt: r.updated_at,
+      lastActivityAt: r.last_activity_at,
       assignedTeam: r.assigned_team,
       designSpecs: r.design_specs
     }));
@@ -1054,6 +1067,13 @@ async function runSchemaBootstrap() {
     await exec(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS end_date TEXT`).catch(() => {});
     await exec(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS assigned_team TEXT`).catch(() => {});
     await exec(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS design_specs TEXT`).catch(() => {});
+    // Track when a project row was last touched. Backfilled to now()
+    // for existing rows so every project has a meaningful baseline for
+    // the new "Last edited" chip. created_date is TEXT of varied
+    // formats — not worth a per-format parse; the delta from now() is
+    // "unknown, older than deploy" for those rows and that's honest.
+    await exec(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`).catch(() => {});
+    await exec(`UPDATE projects SET updated_at = now() WHERE updated_at IS NULL`).catch(() => {});
     await exec(`ALTER TABLE job_cards ADD COLUMN IF NOT EXISTS assigned_team TEXT`).catch(() => {});
 
     // Bookkeeping / ERP schema — runs after clients & client_orders exist, since invoices

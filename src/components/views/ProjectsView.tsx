@@ -3,6 +3,24 @@ import { Plus, Folder, X, Link as LinkIcon, Trash2, Edit, Search, Calendar, User
 import { Item, Project, JobCard } from '../../types';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 
+// Compact human-friendly "N units ago" for the Last-edited chip.
+// Falls back to a locale date string once we're past a week — beyond
+// that, the exact date is more useful than "23 days ago".
+export function formatRelativeTime(iso?: string | null): string {
+  if (!iso) return 'never';
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return 'unknown';
+  const s = Math.max(0, Math.round((Date.now() - t) / 1000));
+  if (s < 45) return 'just now';
+  if (s < 90) return '1 min ago';
+  if (s < 3600) return `${Math.round(s / 60)} mins ago`;
+  if (s < 5400) return '1 hr ago';
+  if (s < 86400) return `${Math.round(s / 3600)} hrs ago`;
+  if (s < 129600) return 'yesterday';
+  if (s < 604800) return `${Math.round(s / 86400)} days ago`;
+  return new Date(t).toLocaleDateString();
+}
+
 interface ProjectsViewProps {
   projects: Project[];
   items: Item[];
@@ -415,8 +433,13 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
               </div>
             </div>
 
-            <div className="text-[9px] text-outline mb-3 font-mono">
-              Created: {project.createdDate}
+            <div className="text-[9px] text-outline mb-3 font-mono flex flex-col gap-0.5">
+              <span>Created: {project.createdDate}</span>
+              {(project.lastActivityAt || project.updatedAt) && (
+                <span title={new Date(project.lastActivityAt || project.updatedAt || '').toLocaleString()}>
+                  Last edited: {formatRelativeTime(project.lastActivityAt || project.updatedAt)}
+                </span>
+              )}
             </div>
 
             <div className="flex gap-sm mt-auto">

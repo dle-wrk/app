@@ -31,7 +31,19 @@ export function registerProjectsRoutes(app: Express): void {
   // ---------------------------------------------------------------------------
   app.get('/api/projects', async (_req, res) => {
     try {
-      const { rows } = await query('SELECT * FROM projects ORDER BY id');
+      // last_activity_at folds a kit save into the "when was this
+      // project last touched" answer — an operator who resaves a kit
+      // for TCU06 has meaningfully edited the project's plan even if
+      // the projects row itself wasn't updated.
+      const { rows } = await query(`
+        SELECT p.*,
+               GREATEST(
+                 p.updated_at,
+                 (SELECT MAX(updated_at) FROM kits WHERE project_id = p.id::int)
+               ) AS last_activity_at
+          FROM projects p
+      ORDER BY p.id
+      `);
       const mapped = rows.map((r: any) => ({
         id: parseInt(r.id) || 0,
         projectName: r.project_name,
@@ -42,6 +54,8 @@ export function registerProjectsRoutes(app: Express): void {
         endDate: r.end_date,
         assignedTeam: r.assigned_team,
         designSpecs: r.design_specs,
+        updatedAt: r.updated_at,
+        lastActivityAt: r.last_activity_at,
       }));
       res.json(mapped);
     } catch (err: any) {
@@ -63,7 +77,7 @@ export function registerProjectsRoutes(app: Express): void {
 
       if (existing) {
         await query(
-          `UPDATE projects SET description = $1, status = $2, start_date = $3, end_date = $4, assigned_team = $5, design_specs = $6 WHERE project_name = $7`,
+          `UPDATE projects SET description = $1, status = $2, start_date = $3, end_date = $4, assigned_team = $5, design_specs = $6, updated_at = now() WHERE project_name = $7`,
           [description || '', status || 'Active', startDate || null, endDate || null, assignedTeam || '', designSpecs || '', projectName]
         );
         row = existing;
@@ -109,7 +123,7 @@ export function registerProjectsRoutes(app: Express): void {
   app.put('/api/projects/:id', async (req, res) => {
     const id = parseInt(req.params.id);
     const { projectName, description, status, startDate, endDate, assignedTeam, designSpecs } = req.body;
-    const sqlText = `UPDATE projects SET project_name = $1, description = $2, status = $3, start_date = $4, end_date = $5, assigned_team = $6, design_specs = $7 WHERE id = $8`;
+    const sqlText = `UPDATE projects SET project_name = $1, description = $2, status = $3, start_date = $4, end_date = $5, assigned_team = $6, design_specs = $7, updated_at = now() WHERE id = $8`;
     try {
       const { rowCount } = await query(sqlText, [projectName, description, status, startDate, endDate, assignedTeam, designSpecs, id]);
       if (rowCount === 0) return res.status(404).json({ error: 'project not found' });

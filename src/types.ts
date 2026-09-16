@@ -76,6 +76,12 @@ export interface Project {
   endDate?: string;
   assignedTeam?: string;
   designSpecs?: string;
+  // Timestamp on the projects row itself; bumped on PUT + on admin
+  // BOM saves. ISO-8601, backfilled to boot time for pre-migration rows.
+  updatedAt?: string;
+  // GREATEST(updatedAt, most-recent kit save for this project). Powers
+  // the "Last edited" chip in ProjectsView and P&P Kit Booking.
+  lastActivityAt?: string;
 }
 
 export interface BOMItem {

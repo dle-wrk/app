@@ -1266,6 +1266,11 @@ export function registerProductionRoutes(app: Express): void {
         }
       }
 
+      // Bump the project's updated_at so the "Last edited" chip in
+      // ProjectsView + P&P Kit Booking reflects BOM edits, not just
+      // direct edits to the projects row itself. Best-effort — a
+      // silent failure here doesn't roll back the BOM change.
+      await client.query(`UPDATE projects SET updated_at = now() WHERE id::int = $1`, [projectId]).catch(() => {});
       await client.query('COMMIT');
       console.log(`[bom:save] project=${projectId} updates=${updates.length} deletes=${deletes.length} inserts=${inserts.length} by=${(req as any).user?.email || 'unknown'}`);
       res.json({ ok: true, applied: { updates: updates.length, deletes: deletes.length, inserts: inserts.length } });

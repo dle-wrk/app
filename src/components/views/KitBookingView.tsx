@@ -3,6 +3,7 @@ import { Project } from '../../types';
 import ShortageToPOModal from '../ShortageToPOModal';
 import BomLineEditorModal from '../BomLineEditorModal';
 import BuildQtyPicker from '../BuildQtyPicker';
+import { formatRelativeTime } from './ProjectsView';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import {
   Package,
@@ -26,6 +27,7 @@ import {
   Trash2,
   Upload,
   FileText,
+  History,
 } from 'lucide-react';
 
 interface ParsedKitImport {
@@ -636,6 +638,25 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
           <p className="text-on-surface-variant text-xs max-w-[576px]">
             Audit inventory against BOM for production runs. Automatically resolves alternatives and identifies shortages.
           </p>
+          {(() => {
+            // Last-edited chip for the active project. Source is
+            // GREATEST(projects.updated_at, MAX(kits.updated_at for
+            // this project)), so a fresh kit save shows as recent
+            // even if the projects row itself was not touched. Admin
+            // BOM edits also bump the project row on save.
+            const proj = projects.find(p => p.id === selectedProjectId);
+            const last = proj?.lastActivityAt || proj?.updatedAt;
+            if (!last) return null;
+            return (
+              <div
+                className="inline-flex items-center gap-1.5 mt-1.5 px-2 py-0.5 rounded bg-surface-container-high border border-outline-variant text-[10px] font-mono uppercase tracking-wider text-outline"
+                title={new Date(last).toLocaleString()}
+              >
+                <History className="w-3 h-3" />
+                Last edited: {formatRelativeTime(last)}
+              </div>
+            );
+          })()}
           {currentKitName && (
             <div className="inline-flex items-center gap-1.5 mt-1.5 px-2 py-0.5 rounded bg-primary/10 border border-primary/20 text-[10px] font-mono uppercase tracking-wider text-primary">
               <FolderOpen className="w-3 h-3" />
