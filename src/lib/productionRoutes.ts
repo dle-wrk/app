@@ -206,6 +206,14 @@ async function auditKitStock(projectId: number, buildQty: number, opts?: { exclu
       .map((v: string) => v && !/^https?:\/\//i.test(v) && /^[\w-]+(\.[\w-]+)+/.test(v) ? `https://${v}` : v)
       .filter((v: string) => /^https?:\/\/\S+\.\S+/.test(v));
 
+    // Manufacturer part number fallback for the Sourcing column: pick
+    // the first non-empty man_pn_* column. Sourcing renders a Google
+    // search link on that string when no supplier weblinks are present,
+    // so a row is never a completely dead "No links".
+    const mfnCandidates = item ? [item.man_pn_1, item.man_pn_2, item.man_pn_3, item.man_pn_4, item.man_pn_5] : [];
+    const mfn = mfnCandidates.map(v => typeof v === 'string' ? v.trim() : '')
+      .find(v => v && !/^n\/?a$/i.test(v)) || '';
+
     auditResults.push({
       component_id: stockCode,
       resolved_part_number: resolvedPartNumber,
@@ -220,7 +228,8 @@ async function auditKitStock(projectId: number, buildQty: number, opts?: { exclu
       description: item?.description || bomInfo.description,
       comment: item?.comment || bomInfo.comment,
       designator: bomInfo.designator,
-      supplier_links: supplierLinks
+      supplier_links: supplierLinks,
+      manufacturer_part_number: mfn,
     });
   }
 
@@ -1273,6 +1282,21 @@ export function registerProductionRoutes(app: Express): void {
       await client.query(`UPDATE projects SET updated_at = now() WHERE id::int = $1`, [projectId]).catch(() => {});
       await client.query('COMMIT');
       console.log(`[bom:save] project=${projectId} updates=${updates.length} deletes=${deletes.length} inserts=${inserts.length} by=${(req as any).user?.email || 'unknown'}`);
+      // Activity ledger: BOM edits are audit-worthy. Fire-and-forget
+      // so a log failure never fails the outer BOM write.
+      try {
+        const email = (req as any).user?.email;
+        if (email) {
+          const xf = String(req.headers?.['x-forwarded-for'] || '');
+          const ip = xf.split(',')[0].trim() || (req.socket?.remoteAddress || '').split(':').pop() || '';
+          const ua = String(req.headers?.['user-agent'] || '');
+          await query(
+            `INSERT INTO user_activity_logs (user_email, action, entity_type, entity_id, details, ip_address, user_agent, status)
+             VALUES ($1,'BOM_EDIT','Project',$2,$3,$4,$5,'SUCCESS')`,
+            [email, String(projectId), JSON.stringify({ projectId, updates: updates.length, deletes: deletes.length, inserts: inserts.length }), ip, ua]
+          );
+        }
+      } catch { /* audit gap is preferable to a hard 500 on the BOM write */ }
       res.json({ ok: true, applied: { updates: updates.length, deletes: deletes.length, inserts: inserts.length } });
     } catch (err: any) {
       await client.query('ROLLBACK').catch(() => {});

@@ -19,6 +19,28 @@ import { z } from 'zod';
 import { pool, query, queryOne, exec } from './db';
 import { requireAdmin } from './authRoutes';
 
+// Cheap fire-and-forget writer into user_activity_logs — used by the
+// kit endpoints so every SAVE_KIT / IMPORT_KIT / SYNC_BOM /
+// DELETE_KIT / CREATE_PROJECT_FROM_KIT event lands in the same log the
+// UI already renders under Activity Logs. A failure here never fails
+// the outer request; audit gaps are less bad than losing the write.
+async function logKitEvent(req: any, action: string, opts: { entityId?: string | number | null; details?: any; status?: 'SUCCESS' | 'ERROR' } = {}) {
+  try {
+    const email = req?.user?.email;
+    if (!email) return;
+    const xf = String(req.headers?.['x-forwarded-for'] || '');
+    const ip = xf.split(',')[0].trim() || (req.socket?.remoteAddress || '').split(':').pop() || '';
+    const ua = String(req.headers?.['user-agent'] || '');
+    await query(
+      `INSERT INTO user_activity_logs (user_email, action, entity_type, entity_id, details, ip_address, user_agent, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [email, action, 'Kit', opts.entityId != null ? String(opts.entityId) : null, JSON.stringify(opts.details || {}), ip, ua, opts.status || 'SUCCESS']
+    );
+  } catch (err: any) {
+    console.warn(`[activity-log] failed for ${action}:`, err.message);
+  }
+}
+
 export async function ensureKitsSchema(): Promise<void> {
   // Wrapped in try/catch per statement so a partial schema (e.g. old
   // deployment already had one of these tables) doesn't abort the rest.
@@ -66,10 +88,23 @@ export async function ensureKitsSchema(): Promise<void> {
     qty INTEGER NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   )`).catch(() => {});
+  // Lightweight presence table for the "Sam is editing this kit"
+  // banner. One row per (kit, user) is heartbeat-updated by the
+  // client every ~10s while the kit is loaded; GET filters to rows
+  // seen within the last minute. Deliberately not FK-cascaded — a
+  // stale row is fine, the age filter drops it anyway.
+  await exec(`CREATE TABLE IF NOT EXISTS kit_presence (
+    kit_id INTEGER NOT NULL,
+    user_email TEXT NOT NULL,
+    user_name TEXT,
+    last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (kit_id, user_email)
+  )`).catch(() => {});
   await exec(`CREATE INDEX IF NOT EXISTS idx_kit_bom_kit ON kit_bom(kit_id)`).catch(() => {});
   await exec(`CREATE INDEX IF NOT EXISTS idx_kit_allocations_kit ON kit_allocations(kit_id)`).catch(() => {});
   await exec(`CREATE INDEX IF NOT EXISTS idx_kit_allocations_code ON kit_allocations(stock_code)`).catch(() => {});
   await exec(`CREATE INDEX IF NOT EXISTS idx_kit_reservations_code ON kit_reservations(allocated_code)`).catch(() => {});
+  await exec(`CREATE INDEX IF NOT EXISTS idx_kit_presence_seen ON kit_presence(last_seen)`).catch(() => {});
 }
 
 // ----- Helpers --------------------------------------------------------------
@@ -164,6 +199,11 @@ const KitSaveBody = z.object({
   // the project BOM; the import flow flips it on because that's the
   // whole point of dropping a CSV.
   syncToProjectBom: z.boolean().optional().default(false),
+  // Auto-create a project row named after the kit if none matches
+  // the name (case-insensitive). Combined with syncToProjectBom this
+  // gives the "Save Kit → have a real project row show up in Project
+  // Manager and BOM Manager pointing at these BOM lines" workflow.
+  createProjectIfMissing: z.boolean().optional().default(false),
 });
 
 // ----- Routes -------------------------------------------------------------
@@ -289,13 +329,47 @@ export function registerKitsRoutes(app: Express): void {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+
+      // Optional: auto-provision a project row named after the kit if
+      // the operator asked for it AND no project already carries this
+      // name (case-insensitive). The new project becomes the kit's
+      // projectId for the rest of the save so kit → project → BOM all
+      // chain to the same row.
+      let effectiveProjectId: number | null = body.projectId ?? null;
+      let createdProject: { id: number; name: string } | null = null;
+      if (body.createProjectIfMissing) {
+        const stamp = new Date().toISOString().slice(0, 10);
+        const desiredName = `${body.name} (${stamp})`;
+        const nameMatch = await client.query(
+          `SELECT id, project_name FROM projects WHERE LOWER(project_name) = LOWER($1) LIMIT 1`,
+          [desiredName]
+        );
+        if (nameMatch.rows.length > 0) {
+          effectiveProjectId = parseInt(nameMatch.rows[0].id) || null;
+        } else {
+          // MAX(id)+1 mirrors the pattern in projectsRoutes for
+          // consistency with the existing projects endpoint.
+          const nextRow = await client.query(
+            `SELECT COALESCE(MAX(id::integer), 0) + 1 AS next_id FROM projects`
+          );
+          const nextId = parseInt(nextRow.rows[0].next_id) || 1;
+          await client.query(
+            `INSERT INTO projects (id, project_name, description, status, created_date, updated_at)
+             VALUES ($1, $2, $3, 'Active', $4, now())`,
+            [String(nextId), desiredName, `Auto-created from kit "${body.name}"`, stamp]
+          );
+          effectiveProjectId = nextId;
+          createdProject = { id: nextId, name: desiredName };
+        }
+      }
+
       const existing = await client.query(`SELECT id FROM kits WHERE name = $1`, [body.name]);
       let kitId: number;
       if (existing.rows.length > 0) {
         kitId = existing.rows[0].id;
         await client.query(
           `UPDATE kits SET project_id=$1, build_qty=$2, lock_mode=$3, notes=$4, updated_at=CURRENT_TIMESTAMP WHERE id=$5`,
-          [body.projectId ?? null, body.buildQty, body.lockMode, body.notes, kitId]
+          [effectiveProjectId, body.buildQty, body.lockMode, body.notes, kitId]
         );
         await client.query(`DELETE FROM kit_bom WHERE kit_id=$1`, [kitId]);
         await client.query(`DELETE FROM kit_allocations WHERE kit_id=$1`, [kitId]);
@@ -304,7 +378,7 @@ export function registerKitsRoutes(app: Express): void {
         const ins = await client.query(
           `INSERT INTO kits (name, project_id, build_qty, lock_mode, notes, created_by)
            VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
-          [body.name, body.projectId ?? null, body.buildQty, body.lockMode, body.notes, user]
+          [body.name, effectiveProjectId, body.buildQty, body.lockMode, body.notes, user]
         );
         kitId = ins.rows[0].id;
       }
@@ -343,8 +417,8 @@ export function registerKitsRoutes(app: Express): void {
       //      the change immediately.
       let bomSynced = false;
       let backup: any = null;
-      if (body.syncToProjectBom && body.projectId) {
-        const pid = body.projectId;
+      if (body.syncToProjectBom && effectiveProjectId) {
+        const pid = effectiveProjectId;
         const table = `db_bom_project_${pid}`;
         await client.query(`CREATE TABLE IF NOT EXISTS "${table}" (
           project_name text,
@@ -414,9 +488,38 @@ export function registerKitsRoutes(app: Express): void {
       }
 
       await client.query('COMMIT');
-      if (bomSynced) console.log(`[kits:save] project=${body.projectId} bom synced from kit "${body.name}" (${body.bom.length} lines, ${backup?.rowCount || 0} rows backed up)`);
+      if (bomSynced) console.log(`[kits:save] project=${effectiveProjectId} bom synced from kit "${body.name}" (${body.bom.length} lines, ${backup?.rowCount || 0} rows backed up)`);
+      // Activity ledger: one row per meaningful outcome. Multiple in a
+      // single save is fine — they read as a coherent "user X did all
+      // of this at HH:MM:SS" grouping in the Activity Logs view.
+      if (createdProject) {
+        void logKitEvent(req, 'CREATE_PROJECT_FROM_KIT', {
+          entityId: createdProject.id,
+          details: { projectName: createdProject.name, kitName: body.name, bomLines: body.bom.length },
+        });
+      }
+      if (bomSynced) {
+        void logKitEvent(req, 'SYNC_BOM', {
+          entityId: effectiveProjectId,
+          details: { projectId: effectiveProjectId, kitName: body.name, bomLines: body.bom.length, backedUpRows: backup?.rowCount || 0 },
+        });
+      }
+      void logKitEvent(req, existing.rows.length > 0 ? 'UPDATE_KIT' : 'SAVE_KIT', {
+        entityId: kitId,
+        details: {
+          kitName: body.name,
+          projectId: effectiveProjectId,
+          buildQty: body.buildQty,
+          bomLines: body.bom.length,
+          allocations: body.allocations.length,
+          dnf: body.dnf.length,
+          lockMode: body.lockMode,
+          syncedToProjectBom: bomSynced,
+          createdProject: !!createdProject,
+        },
+      });
       const full = await loadFullKit(kitId);
-      res.json({ ...full, bomSynced, backup });
+      res.json({ ...full, bomSynced, backup, createdProject });
     } catch (err: any) {
       await client.query('ROLLBACK').catch(() => {});
       console.error('[kits:save] failed:', err.message);
@@ -433,8 +536,12 @@ export function registerKitsRoutes(app: Express): void {
     const id = parseInt(req.params.id);
     if (!id) return res.status(400).json({ error: 'invalid id' });
     try {
+      // Grab the name before the delete so the activity log carries
+      // human-readable context even after the row is gone.
+      const meta = await queryOne<{ name: string }>(`SELECT name FROM kits WHERE id = $1`, [id]);
       const r = await query(`DELETE FROM kits WHERE id = $1`, [id]);
       if (r.rowCount === 0) return res.status(404).json({ error: 'kit not found' });
+      void logKitEvent(req, 'DELETE_KIT', { entityId: id, details: { kitName: meta?.name || `#${id}` } });
       res.json({ ok: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -528,6 +635,84 @@ export function registerKitsRoutes(app: Express): void {
       const out: Record<string, number> = {};
       for (const r of rows as any[]) out[r.allocated_code] = r.reserved_qty;
       res.json(out);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // --- Presence ------------------------------------------------------------
+  // Cheap collaboration: the client that has a kit loaded heartbeats
+  // POST /api/kits/:id/presence every ~10 seconds. GET returns rows
+  // seen within the last 60 seconds — that's the "editors right now"
+  // list plus the kit's updated_at so clients can detect a save that
+  // landed while they were viewing and prompt for a refresh.
+  const PRESENCE_STALE_S = 60;
+
+  app.post('/api/kits/:id/presence', async (req: any, res) => {
+    const kitId = parseInt(req.params.id);
+    if (!kitId) return res.status(400).json({ error: 'invalid kit id' });
+    const email = req.user?.email;
+    if (!email) return res.status(401).json({ error: 'sign in required' });
+    // Cheap "first name" derivation from the email local-part when the
+    // users row doesn't have one — banner reads "Alex is editing" not
+    // "alex.smith@... is editing".
+    let displayName = '';
+    try {
+      const row = await queryOne<{ first_name: string; last_name: string }>(
+        `SELECT first_name, last_name FROM users WHERE email = $1`, [email]
+      );
+      displayName = (row?.first_name || '').trim() || String(email).split('@')[0].split('.')[0];
+    } catch { displayName = String(email).split('@')[0].split('.')[0]; }
+    try {
+      await query(
+        `INSERT INTO kit_presence (kit_id, user_email, user_name, last_seen)
+         VALUES ($1, $2, $3, now())
+         ON CONFLICT (kit_id, user_email) DO UPDATE SET last_seen = now(), user_name = EXCLUDED.user_name`,
+        [kitId, email, displayName]
+      );
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Explicit "I'm no longer editing" ping. Not required for correctness
+  // — the 60s TTL fills in — but makes the banner clear instantly when
+  // an operator closes the kit.
+  app.delete('/api/kits/:id/presence', async (req: any, res) => {
+    const kitId = parseInt(req.params.id);
+    if (!kitId) return res.status(400).json({ error: 'invalid kit id' });
+    const email = req.user?.email;
+    if (!email) return res.status(401).json({ error: 'sign in required' });
+    try {
+      await query(`DELETE FROM kit_presence WHERE kit_id = $1 AND user_email = $2`, [kitId, email]);
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/kits/:id/presence', async (req: any, res) => {
+    const kitId = parseInt(req.params.id);
+    if (!kitId) return res.status(400).json({ error: 'invalid kit id' });
+    try {
+      const { rows: editors } = await query(
+        `SELECT user_email, user_name, last_seen FROM kit_presence
+          WHERE kit_id = $1 AND last_seen > now() - ($2::text || ' seconds')::interval
+       ORDER BY last_seen DESC`,
+        [kitId, String(PRESENCE_STALE_S)]
+      );
+      const kit = await queryOne<{ updated_at: string }>(
+        `SELECT updated_at FROM kits WHERE id = $1`, [kitId]
+      );
+      res.json({
+        updatedAt: kit?.updated_at || null,
+        editors: (editors as any[]).map(r => ({
+          email: r.user_email,
+          name: r.user_name || String(r.user_email).split('@')[0],
+          lastSeen: r.last_seen,
+        })),
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

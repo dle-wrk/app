@@ -172,17 +172,22 @@ interface AuditResult {
   used_alternative: boolean;
   qty_required: number;
   qty_on_hand: number;
+  reserved_qty?: number;
   shortage_qty: number;
   description: string;
   comment: string;
   designator?: string;
   supplier_links: string[];
+  // Manufacturer part number, populated from the first non-empty
+  // man_pn_* on the inventory row. Used by the Sourcing column as a
+  // fallback link (Google search) when no supplier weblinks exist.
+  manufacturer_part_number?: string;
 }
 
 interface KitBookingViewProps {
   projects: Project[];
   triggerToast: (msg: string, type?: string) => void;
-  currentUser?: { role?: string } | null;
+  currentUser?: { role?: string; email?: string; firstName?: string } | null;
   // Called after the admin BOM editor saves. The parent uses this to
   // refetch the app-wide bomItems cache so BOM Manager (and any other
   // view reading from that state) shows the edit without waiting for
@@ -220,6 +225,16 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
   const [savedKits, setSavedKits] = useState<Array<{ id: number; name: string; projectId: number | null; projectName: string | null; buildQty: number; lockMode: boolean; updatedAt: string; bomLines: number; allocationLines: number; dnfCount: number }>>([]);
   const [currentKitName, setCurrentKitName] = useState<string>('');
   const [currentKitId, setCurrentKitId] = useState<number | null>(null);
+  // Presence: other editors seen on the currently-loaded kit within
+  // the last minute. Populated by the 10-second poll below and used
+  // to render the blinking "X is editing" banner.
+  const [otherEditors, setOtherEditors] = useState<Array<{ email: string; name: string }>>([]);
+  // Kit updated_at tracked across polls. When the server's copy moves
+  // AND we didn't just save, another user landed a save on the same
+  // kit — show the "Kit updated by X — refresh" banner.
+  const [remoteUpdatedAt, setRemoteUpdatedAt] = useState<string | null>(null);
+  const [kitDirtyRemote, setKitDirtyRemote] = useState<boolean>(false);
+  const currentUserEmail = String(currentUser?.email || '').toLowerCase();
   // Per-BOM-line allocation overrides. Empty means "use the audit's
   // resolved code with the full needed qty". When the operator picks
   // specific SKUs and quantities via the allocation dialog, each row
@@ -298,6 +313,17 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
         if (r.reserved_qty > 0) nextRes[r.resolved_part_number] = r.reserved_qty;
       }
       setReservations(nextRes);
+      // Auto-DNF any stock code matching the DNF convention
+      // (bare "DNF" or "DNF-*" prefix). Operator can toggle any of
+      // these back on with the row's DNF pill. Keeps existing manual
+      // overrides untouched — merges rather than replacing.
+      setDnfOverride(prev => {
+        const next = new Set(prev);
+        for (const r of data as AuditResult[]) {
+          if (/^DNF(-|$)/i.test(String(r.component_id || ''))) next.add(r.component_id);
+        }
+        return next;
+      });
     } catch (err: any) {
       triggerToast(`Validation failed: ${err.message}`, 'ERROR');
     } finally {
@@ -323,6 +349,56 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
   }, []);
 
   useEffect(() => { loadSavedKits(); }, [loadSavedKits]);
+
+  // Presence heartbeat + poll for the currently-loaded kit.
+  // - Every 10s we heartbeat (POST) to say we're editing.
+  // - Every 10s we read the roster (GET) and stash the kit's
+  //   updated_at. If it moves and we didn't just save, another editor
+  //   landed a save on the same kit and we surface a refresh banner.
+  // - On kit change / unmount we delete our own presence row so the
+  //   banner disappears from other viewers immediately.
+  useEffect(() => {
+    if (!currentKitId || !currentUserEmail) {
+      setOtherEditors([]);
+      setRemoteUpdatedAt(null);
+      setKitDirtyRemote(false);
+      return;
+    }
+    let cancelled = false;
+    const kitId = currentKitId;
+
+    const beat = async () => {
+      try { await fetch(`/api/kits/${kitId}/presence`, { method: 'POST' }); } catch { /* noop */ }
+    };
+    const roster = async () => {
+      try {
+        const r = await fetch(`/api/kits/${kitId}/presence`);
+        if (!r.ok) return;
+        const data = await r.json();
+        if (cancelled) return;
+        const others = (data.editors || []).filter((e: any) => String(e.email || '').toLowerCase() !== currentUserEmail);
+        setOtherEditors(others);
+        if (data.updatedAt) {
+          setRemoteUpdatedAt(prev => {
+            if (prev && data.updatedAt !== prev) setKitDirtyRemote(true);
+            return data.updatedAt;
+          });
+        }
+      } catch { /* keep last-known state */ }
+    };
+
+    // Fire immediately, then every 10s.
+    void beat(); void roster();
+    const beatT = window.setInterval(beat, 10_000);
+    const rosterT = window.setInterval(roster, 10_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(beatT);
+      window.clearInterval(rosterT);
+      // Best-effort leave — the row also expires on its own after 60s.
+      void fetch(`/api/kits/${kitId}/presence`, { method: 'DELETE' }).catch(() => {});
+    };
+  }, [currentKitId, currentUserEmail]);
 
   const handleSaveKit = async (name: string, lockMode: boolean, notes: string) => {
     if (!name.trim()) { triggerToast('Kit needs a name.', 'ERROR'); return; }
@@ -366,16 +442,29 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
           bom,
           allocations: savedAllocations,
           dnf,
+          // Every in-app Save Kit auto-creates a project + syncs the
+          // BOM to it. Kit name → project name; BOM Manager and P&P
+          // Kit Booking pick up the rows on their next audit; other
+          // users see the new project + kit as soon as they refresh.
+          createProjectIfMissing: true,
+          syncToProjectBom: true,
         }),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body?.error || 'Save failed');
-      triggerToast(`Kit "${name.trim()}" saved.`, 'SUCCESS');
+      const projMsg = body?.createdProject ? ` · created project "${body.createdProject.name}"` : '';
+      triggerToast(`Kit "${name.trim()}" saved${projMsg}.`, 'SUCCESS');
       setCurrentKitName(name.trim());
       if (body?.id) setCurrentKitId(body.id);
+      if (body?.createdProject?.id) setSelectedProjectId(body.createdProject.id);
+      // Our own save moves updated_at — remember it so the next
+      // presence poll doesn't flag us as "someone else saved".
+      if (body?.updatedAt) setRemoteUpdatedAt(body.updatedAt);
+      setKitDirtyRemote(false);
       setShowSaveKit(false);
       loadSavedKits();
       handleValidate();
+      onBomChanged?.();
       // A kit save bumps the project's last_activity_at (server folds
       // MAX(kit.updated_at) into it), so the Project Manager cards
       // deserve a refresh too.
@@ -409,6 +498,8 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
       setAllocations(nextAllocs);
       setCurrentKitName(kit.name || '');
       setCurrentKitId(kit.id);
+      setRemoteUpdatedAt(kit.updatedAt || null);
+      setKitDirtyRemote(false);
       setShowKitBrowser(false);
       triggerToast(`Loaded kit "${kit.name}".`, 'SUCCESS');
       // handleValidate runs via the useEffect on buildQty/projectId/currentKitId change.
@@ -673,10 +764,18 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
 
   // DNF-overridden lines drop out of the shortage tally so the Process
   // Booking button is not blocked by parts the operator explicitly said
-  // "do not fit for this kit". The BOM Manager's auto-void detection
-  // (DNF-* stock codes) already runs server-side; this handles the
-  // operator's explicit-per-kit choices layered on top.
-  const totalShortages = auditResults.filter(r => !dnfOverride.has(r.component_id) && r.shortage_qty > 0).length;
+  // "do not fit for this kit". Allocation overrides also change the
+  // effective shortage: a multi-SKU pick that covers the requirement
+  // reads as satisfied even when the primary SKU alone was short.
+  const totalShortages = auditResults.filter(r => {
+    if (dnfOverride.has(r.component_id)) return false;
+    const override = allocations[r.component_id] || [];
+    if (override.length > 0) {
+      const picked = override.reduce((s, a) => s + (a.qty || 0), 0);
+      return picked < r.qty_required;
+    }
+    return r.shortage_qty > 0;
+  }).length;
 
   return (
     <div className="p-container-margin space-y-lg max-w-[1600px] mx-auto w-full select-none">
@@ -720,6 +819,39 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
                 title="Clear the loaded-kit context"
               >
                 <X className="w-3 h-3" />
+              </button>
+            </div>
+          )}
+          {/* Presence banner — one blinking chip per other editor on
+              this kit. Roster refreshes on a 10-second poll; each
+              entry disappears when the server's TTL (60s) drops it. */}
+          {currentKitId && otherEditors.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-1.5">
+              {otherEditors.map(e => (
+                <div
+                  key={e.email}
+                  className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/40 text-[10px] font-mono uppercase tracking-wider text-amber-400 animate-pulse"
+                  title={`${e.name} (${e.email}) is editing this kit`}
+                >
+                  <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+                  {e.name} is editing
+                </div>
+              ))}
+            </div>
+          )}
+          {/* Remote-save notification — the server's updated_at moved
+              since we loaded / last saved. Someone else landed a
+              save; refresh to pick it up. */}
+          {currentKitId && kitDirtyRemote && (
+            <div className="inline-flex items-center gap-2 mt-1.5 px-3 py-1.5 rounded bg-blue-500/15 border border-blue-500/40 text-[10px] font-mono uppercase tracking-wider text-blue-300">
+              <History className="w-3 h-3" />
+              Kit saved by another user — refresh to load the latest
+              <button
+                type="button"
+                onClick={() => currentKitId && handleLoadKit(currentKitId)}
+                className="ml-1 px-2 py-0.5 rounded bg-blue-500/20 hover:bg-blue-500/30 text-blue-100 font-bold"
+              >
+                Refresh
               </button>
             </div>
           )}
@@ -905,16 +1037,39 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
                     {res.qty_required}
                   </td>
                   <td className="px-lg py-3 text-right font-mono" data-label="On hand">
-                    <span className={res.qty_on_hand < res.qty_required ? 'text-red-400 font-bold' : 'text-on-surface'}>
-                      {res.qty_on_hand}
-                    </span>
                     {(() => {
-                      const reserved = reservations[res.resolved_part_number] || 0;
-                      return reserved > 0 ? (
-                        <div className="text-[9px] text-outline font-mono mt-0.5" title="Reserved by another locked kit — subtract from available">
-                          −{reserved} reserved
-                        </div>
-                      ) : null;
+                      // When the operator has explicitly allocated one
+                      // or more SKUs to this line, the "on hand" number
+                      // that matters is the sum of what's been picked
+                      // across those SKUs — the audit's single-SKU
+                      // qty_on_hand no longer represents the plan. Show
+                      // the pick total, and expose the raw audit number
+                      // as a hint below.
+                      const override = allocations[res.component_id] || [];
+                      const pickedTotal = override.reduce((s, a) => s + (a.qty || 0), 0);
+                      const showAggregate = override.length > 0 && pickedTotal > 0;
+                      const displayHand = showAggregate ? pickedTotal : res.qty_on_hand;
+                      const isShort = displayHand < res.qty_required;
+                      return (
+                        <>
+                          <span className={isShort ? 'text-red-400 font-bold' : 'text-on-surface'}>
+                            {displayHand}
+                          </span>
+                          {showAggregate && (
+                            <div className="text-[9px] text-primary font-mono mt-0.5" title="Sum of qty allocated across the picked SKUs">
+                              from {override.length} SKU{override.length === 1 ? '' : 's'}
+                            </div>
+                          )}
+                          {(() => {
+                            const reserved = reservations[res.resolved_part_number] || 0;
+                            return reserved > 0 ? (
+                              <div className="text-[9px] text-outline font-mono mt-0.5" title="Reserved by another locked kit — subtract from available">
+                                −{reserved} reserved
+                              </div>
+                            ) : null;
+                          })()}
+                        </>
+                      );
                     })()}
                   </td>
                   <td className="px-lg py-3 text-center" data-label="Status">
@@ -933,10 +1088,19 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
                           </button>
                         );
                       }
-                      return res.shortage_qty > 0 ? (
+                      // Multi-SKU allocation overrides the server's
+                      // single-SKU shortage: if the operator's picks
+                      // cover the requirement, the line is Ready even
+                      // if the primary SKU alone was short.
+                      const override = allocations[res.component_id] || [];
+                      const pickedTotal = override.reduce((s, a) => s + (a.qty || 0), 0);
+                      const effectiveShortage = override.length > 0
+                        ? Math.max(0, res.qty_required - pickedTotal)
+                        : res.shortage_qty;
+                      return effectiveShortage > 0 ? (
                         <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-red-500/10 text-red-400 border border-red-500/15 font-mono uppercase">
                           <AlertTriangle className="w-3 h-3" />
-                          Short: {res.shortage_qty}
+                          Short: {effectiveShortage}
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-green-500/10 text-green-400 border border-green-500/15 font-mono uppercase">
@@ -1008,6 +1172,29 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
                         .filter((u): u is URL => !!u && (u.protocol === 'http:' || u.protocol === 'https:'))
                         .slice(0, 3);
                       if (parsed.length === 0) {
+                        // Fallback to the manufacturer part number: an
+                        // MPN → a clickable Google search of that MPN
+                        // is more useful than a dead "No links" cell.
+                        // If neither is available, fall through to the
+                        // italic placeholder.
+                        const mfn = (res.manufacturer_part_number || '').trim();
+                        if (mfn) {
+                          const search = new URL(`https://www.google.com/search?q=${encodeURIComponent(mfn + ' datasheet')}`);
+                          return (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const w = window.open(search.href, '_blank', 'noopener,noreferrer');
+                                if (!w) { triggerToast(`Popup blocked — opening search in this tab`); window.location.href = search.href; }
+                              }}
+                              title={`No supplier links stored — search "${mfn}"`}
+                              className="inline-flex items-center gap-1 p-1 rounded bg-surface-container-highest border border-outline-variant hover:border-primary transition-colors text-outline hover:text-primary"
+                            >
+                              <ExternalLink className="w-3 h-3" />
+                              <span className="text-[10px] font-mono max-w-[100px] truncate">{mfn}</span>
+                            </button>
+                          );
+                        }
                         return <span className="text-[10px] text-outline italic">No links</span>;
                       }
                       const open = (u: URL) => {
@@ -1812,13 +1999,18 @@ function KitAllocationDialog({ stockCode, needed, existing, autoResolved, reserv
     });
   };
 
-  // Per-row: top up this SKU by whatever's still short, capped by its
-  // available stock. Leaves other picks alone — the operator can combine
-  // multiple candidates by clicking Fill on each until the footer reads
-  // Picked >= Needed.
+  // Per-row Fill / Unfill toggle.
+  // - When the row has zero picked, top it up to
+  //   min(available, remaining shortfall). Leaves other picks alone.
+  // - When the row already carries a pick, click again to deselect it
+  //   (setQty(0)) — replaces the earlier "must Clear all" flow.
   const availableFor = (c: MatchCandidate) => Math.max(0, c.stock - (reservations[c.serialNumber] || 0));
   const fillRowToShortfall = (c: MatchCandidate) => {
     const current = picks[c.serialNumber] || 0;
+    if (current > 0) {
+      setQty(c.serialNumber, 0);
+      return;
+    }
     const otherPicks = totalPicked - current;
     const stillNeeded = Math.max(0, needed - otherPicks);
     const target = Math.min(stillNeeded, availableFor(c));
