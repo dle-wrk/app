@@ -38,45 +38,57 @@ interface ParsedKitImport {
   dnf: string[];
 }
 
-// Custom parse error so the review step can surface which columns the
-// parser saw when it couldn't identify a stock-code or qty column. That
-// makes fixing the CSV a 5-second job instead of guessing.
-class CsvBomError extends Error {
-  detectedColumns: string[];
-  constructor(msg: string, detectedColumns: string[] = []) {
-    super(msg);
-    this.detectedColumns = detectedColumns;
-  }
+// A raw CSV import that still needs the operator to confirm which
+// column carries which field. The dialog surfaces this shape so the
+// mapping UI can render the actual headers verbatim.
+interface ParsedCsvFile {
+  suggestedName: string;
+  headers: string[];
+  rows: string[][];
+  // Auto-guessed mapping — index into headers, or null if no alias hit.
+  // The operator can override every field in the dialog.
+  autoMap: CsvColumnMapping;
 }
 
-// Tolerant CSV parser for BOM imports. Handles:
-//   - BOM (﻿) prefix on files exported from Excel
-//   - auto-detected delimiter (comma / semicolon / tab)
-//   - quoted fields, escaped quotes ("" inside "…"), CRLF line endings
-//   - broad header aliases: stock_code / part_number / MPN / internal
-//     stock number / reference / SKU; qty / quantity / count; ref_des /
-//     designator; description; footprint / package / case.
-function parseCsvBom(text: string): ParsedKitImport['bom'] {
-  // Strip UTF-8 BOM if present. Excel likes to inject one and it makes
-  // the very first column header look like "﻿Part" — an invisible
-  // mismatch that a stock header check would never explain.
-  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+interface CsvColumnMapping {
+  part: number | null;
+  qty: number | null;
+  designator: number | null;
+  description: number | null;
+  footprint: number | null;
+}
 
-  // Sniff the delimiter from the first non-blank line. Excel-in-EU
-  // exports use ';', tab-delimited BOMs from CAD tools are common,
-  // comma is the plain-text default.
+type ParsedImport =
+  | { kind: 'json'; kit: ParsedKitImport }
+  | { kind: 'csv'; csv: ParsedCsvFile };
+
+// Two-step CSV import.
+//
+//   parseCsvStructural(text)     — pure delimiter/quotes parser, no
+//                                  semantics. Returns headers + rows.
+//   guessColumnMapping(headers)  — tries to auto-pair the header row
+//                                  against alias sets so the mapping
+//                                  UI opens pre-populated for typical
+//                                  BOM exports.
+//   applyCsvMapping(rows, map)   — turns raw rows + a confirmed mapping
+//                                  into ParsedKitImport['bom'] once the
+//                                  operator hits Continue.
+
+function parseCsvStructural(text: string): { headers: string[]; rows: string[][] } {
+  // Excel likes to inject a UTF-8 BOM. Strip it so the first header
+  // doesn't silently start with an invisible ﻿ character.
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+  // Sniff delimiter from the first non-blank line: comma / semicolon /
+  // tab. EU Excel writes ';'; CAD tools often emit tab.
   const firstLine = text.split(/\r?\n/).find(l => l.trim()) || '';
-  const counts = {
+  const counts: Record<string, number> = {
     ',': (firstLine.match(/,/g) || []).length,
     ';': (firstLine.match(/;/g) || []).length,
     '\t': (firstLine.match(/\t/g) || []).length,
   };
-  const delimiter = ((): string => {
-    let best: string = ',';
-    let n = -1;
-    for (const [d, c] of Object.entries(counts)) if (c > n) { best = d; n = c; }
-    return best;
-  })();
+  let delimiter: string = ',';
+  let best = -1;
+  for (const [d, c] of Object.entries(counts)) if (c > best) { best = c; delimiter = d; }
 
   const rows: string[][] = [];
   let cur: string[] = [];
@@ -97,58 +109,58 @@ function parseCsvBom(text: string): ParsedKitImport['bom'] {
     }
   }
   if (cell.length || cur.length) { cur.push(cell); rows.push(cur); }
-  if (rows.length < 2) throw new CsvBomError('The file has no data rows.');
+  if (rows.length === 0) throw new Error('The file is empty.');
+  const headers = rows[0].map(c => c.trim());
+  const dataRows = rows.slice(1).filter(r => r && !r.every(c => !c.trim()));
+  return { headers, rows: dataRows };
+}
 
+const CSV_PART_ALIASES = [
+  'stock_code', 'stockcode', 'internal_stock_number', 'internalstocknumber',
+  'part_number', 'partnumber', 'partno', 'part', 'component',
+  'mpn', 'manufacturer_part_number', 'sku', 'reference',
+];
+const CSV_QTY_ALIASES = ['qty', 'quantity', 'qty_per_pcb', 'qtyperpcb', 'count', 'placements', 'boardqty'];
+const CSV_DES_ALIASES = ['designator', 'ref_des', 'refdes', 'designators', 'reference_designator'];
+const CSV_DESC_ALIASES = ['description', 'desc', 'comment'];
+const CSV_FP_ALIASES = ['footprint', 'package', 'case'];
+
+function guessColumnMapping(headers: string[]): CsvColumnMapping {
   const norm = (s: string) => s.toLowerCase().replace(/[\s_/\-()]+/g, '').replace(/[^\w]/g, '');
-  const rawHeader = rows[0].map(c => c.trim());
-  const header = rawHeader.map(norm);
-  const findCol = (aliases: string[]) => {
+  const H = headers.map(norm);
+  const find = (aliases: string[]) => {
     for (const a of aliases) {
-      const idx = header.indexOf(norm(a));
+      const idx = H.indexOf(norm(a));
       if (idx >= 0) return idx;
     }
-    return -1;
+    return null;
   };
-  const iPart = findCol([
-    'stock_code', 'stockcode', 'internal_stock_number', 'internalstocknumber',
-    'part_number', 'partnumber', 'partno', 'part', 'component',
-    'mpn', 'manufacturer_part_number', 'sku', 'reference',
-  ]);
-  const iQty = findCol([
-    'qty', 'quantity', 'qty_per_pcb', 'qtyperpcb', 'count', 'placements', 'boardqty',
-  ]);
-  const iDes = findCol(['designator', 'ref_des', 'refdes', 'designators', 'reference_designator']);
-  const iDesc = findCol(['description', 'desc', 'comment']);
-  const iFp = findCol(['footprint', 'package', 'case']);
-  if (iPart < 0 || iQty < 0) {
-    // Surface the columns we DID see so the operator can rename one
-    // rather than guess. Also include the aliases we tried to help
-    // them normalise their file.
-    const missing = [
-      iPart < 0 ? 'stock code (one of: stock_code, part_number, part, component, MPN, SKU, reference, internal_stock_number)' : null,
-      iQty  < 0 ? 'qty (one of: qty, quantity, qty_per_pcb, count, placements)' : null,
-    ].filter(Boolean).join(' and ');
-    throw new CsvBomError(`Could not find ${missing}.`, rawHeader);
-  }
+  return {
+    part: find(CSV_PART_ALIASES),
+    qty: find(CSV_QTY_ALIASES),
+    designator: find(CSV_DES_ALIASES),
+    description: find(CSV_DESC_ALIASES),
+    footprint: find(CSV_FP_ALIASES),
+  };
+}
 
+function applyCsvMapping(rows: string[][], map: CsvColumnMapping): ParsedKitImport['bom'] {
   const out: ParsedKitImport['bom'] = [];
-  for (let r = 1; r < rows.length; r++) {
-    const row = rows[r];
-    if (!row || row.every(c => !c.trim())) continue;
-    const stockCode = String(row[iPart] || '').trim();
-    // Qty may show up as "1.0" or "1,0" (EU decimal comma) — coerce.
-    const rawQty = String(row[iQty] || '').trim().replace(',', '.');
+  if (map.part == null || map.qty == null) return out;
+  for (const row of rows) {
+    const stockCode = String(row[map.part] || '').trim();
+    // "1.0" or "1,0" (EU decimal comma) both coerce.
+    const rawQty = String(row[map.qty] || '').trim().replace(',', '.');
     const qty = parseInt(rawQty || '0', 10);
     if (!stockCode || !qty || qty <= 0) continue;
     out.push({
       stockCode,
       qtyPerPcb: qty,
-      designator: iDes >= 0 ? String(row[iDes] || '').trim() : '',
-      description: iDesc >= 0 ? String(row[iDesc] || '').trim() : '',
-      footprint: iFp >= 0 ? String(row[iFp] || '').trim() : '',
+      designator: map.designator != null ? String(row[map.designator] || '').trim() : '',
+      description: map.description != null ? String(row[map.description] || '').trim() : '',
+      footprint: map.footprint != null ? String(row[map.footprint] || '').trim() : '',
     });
   }
-  if (out.length === 0) throw new CsvBomError(`Found the columns but every row failed validation (need a non-empty stock code and a qty > 0).`, rawHeader);
   return out;
 }
 
@@ -421,7 +433,7 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
   // silently, they surface as an error toast so the operator can fix
   // the file rather than getting an empty kit. Successful parses land
   // on the "review before import" step in the browser dialog.
-  const handleImportKitFile = async (file: File): Promise<ParsedKitImport | null> => {
+  const handleImportKitFile = async (file: File): Promise<ParsedImport | null> => {
     const name = file.name.replace(/\.(json|csv|txt)$/i, '');
     const text = await file.text();
     const lower = file.name.toLowerCase();
@@ -433,7 +445,7 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
         // hand-writing a JSON dump would produce.
         const bomRaw: any[] = Array.isArray(j.bom) ? j.bom : Array.isArray(j) ? j : [];
         if (bomRaw.length === 0) throw new Error('No BOM lines in JSON');
-        return {
+        const kit: ParsedKitImport = {
           suggestedName: (j.name || name).toString().trim() || name,
           projectId: typeof j.projectId === 'number' ? j.projectId : null,
           buildQty: Number(j.buildQty) || 1,
@@ -448,29 +460,22 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
           allocations: Array.isArray(j.allocations) ? j.allocations : [],
           dnf: Array.isArray(j.dnf) ? j.dnf : [],
         };
+        return { kind: 'json', kit };
       }
       if (lower.endsWith('.csv') || lower.endsWith('.txt')) {
-        const bom = parseCsvBom(text);
-        return {
-          suggestedName: name,
-          projectId: null,
-          buildQty: 1,
-          notes: '',
-          bom,
-          allocations: [],
-          dnf: [],
-        };
+        // CSV imports go through a mapping step so the operator sees
+        // the actual headers and picks which one is stock-code /
+        // qty / etc. Auto-guessed mapping pre-populates the dropdowns
+        // for typical BOM exports; anything unusual gets fixed by
+        // hand rather than failing outright.
+        const { headers, rows } = parseCsvStructural(text);
+        if (headers.length === 0) throw new Error('No header row found.');
+        if (rows.length === 0) throw new Error('The file has no data rows.');
+        return { kind: 'csv', csv: { suggestedName: name, headers, rows, autoMap: guessColumnMapping(headers) } };
       }
       throw new Error(`Unsupported file type: ${file.name.split('.').pop() || 'unknown'}. Accepts .json or .csv.`);
     } catch (err: any) {
-      // CsvBomError carries the header row it saw so the operator can
-      // rename a column instead of guessing which name we wanted. Toast
-      // shows both the failure and the detected columns.
-      const detected = Array.isArray((err as any).detectedColumns) ? (err as any).detectedColumns : [];
-      const columnsHint = detected.length > 0
-        ? ` Detected columns: ${detected.slice(0, 8).join(', ')}${detected.length > 8 ? ` (+${detected.length - 8} more)` : ''}.`
-        : '';
-      triggerToast(`Import failed: ${err.message}${columnsHint}`, 'ERROR');
+      triggerToast(`Import failed: ${err.message}`, 'ERROR');
       return null;
     }
   };
@@ -1211,7 +1216,7 @@ function KitBrowserDialog({ kits, busy, projects, defaultProjectId, onLoad, onDe
   onLoad: (kitId: number) => void;
   onDelete: (kitId: number, name: string) => void;
   onExport: (kitId: number, kitName: string) => void;
-  onParseFile: (file: File) => Promise<ParsedKitImport | null>;
+  onParseFile: (file: File) => Promise<ParsedImport | null>;
   onCommitImport: (payload: {
     name: string; projectId: number; buildQty: number; notes: string;
     bom: ParsedKitImport['bom']; allocations: ParsedKitImport['allocations']; dnf: string[];
@@ -1220,8 +1225,12 @@ function KitBrowserDialog({ kits, busy, projects, defaultProjectId, onLoad, onDe
 }) {
   const [q, setQ] = useState('');
   const [dragOver, setDragOver] = useState(false);
-  // Pending import moves the dialog into "review before saving" mode.
-  // Null means we're back to the plain browser list.
+  // Three panels share the dialog body:
+  //   null         → plain saved-kit browser
+  //   csvMap step  → column-mapping UI for a CSV that just landed
+  //   kit review   → final confirm step (project / name / buildQty)
+  const [csvStep, setCsvStep] = useState<ParsedCsvFile | null>(null);
+  const [mapping, setMapping] = useState<CsvColumnMapping>({ part: null, qty: null, designator: null, description: null, footprint: null });
   const [pending, setPending] = useState<ParsedKitImport | null>(null);
   const [pendingName, setPendingName] = useState('');
   const [pendingProjectId, setPendingProjectId] = useState<number>(defaultProjectId);
@@ -1229,14 +1238,44 @@ function KitBrowserDialog({ kits, busy, projects, defaultProjectId, onLoad, onDe
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const filtered = kits.filter(k => !q.trim() || `${k.name} ${k.projectName || ''}`.toLowerCase().includes(q.toLowerCase()));
 
+  const mappedPreview = React.useMemo(() => csvStep ? applyCsvMapping(csvStep.rows, mapping) : [], [csvStep, mapping]);
+  const mappingIsValid = mapping.part != null && mapping.qty != null && mappedPreview.length > 0;
+
   const acceptFile = async (file: File | null | undefined) => {
     if (!file) return;
     const parsed = await onParseFile(file);
     if (!parsed) return;
-    setPending(parsed);
-    setPendingName(parsed.suggestedName);
-    setPendingProjectId(parsed.projectId ?? defaultProjectId);
-    setPendingBuildQty(parsed.buildQty || 1);
+    if (parsed.kind === 'json') {
+      setPending(parsed.kit);
+      setPendingName(parsed.kit.suggestedName);
+      setPendingProjectId(parsed.kit.projectId ?? defaultProjectId);
+      setPendingBuildQty(parsed.kit.buildQty || 1);
+    } else {
+      setCsvStep(parsed.csv);
+      setMapping(parsed.csv.autoMap);
+    }
+  };
+
+  // Called from the mapping step's Continue button — turns the mapping
+  // into a full ParsedKitImport and moves the dialog to the standard
+  // review panel.
+  const continueFromCsv = () => {
+    if (!csvStep) return;
+    const bom = applyCsvMapping(csvStep.rows, mapping);
+    if (bom.length === 0) return;
+    setPending({
+      suggestedName: csvStep.suggestedName,
+      projectId: null,
+      buildQty: 1,
+      notes: '',
+      bom,
+      allocations: [],
+      dnf: [],
+    });
+    setPendingName(csvStep.suggestedName);
+    setPendingProjectId(defaultProjectId);
+    setPendingBuildQty(1);
+    setCsvStep(null);
   };
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -1263,11 +1302,15 @@ function KitBrowserDialog({ kits, busy, projects, defaultProjectId, onLoad, onDe
         <div className="px-lg py-md border-b border-outline-variant flex items-center gap-sm">
           <FolderOpen className="w-4 h-4 text-primary" />
           <div className="flex-1">
-            <h4 className="font-bold text-sm text-on-surface">{pending ? 'Import kit — review' : 'Load Kit'}</h4>
+            <h4 className="font-bold text-sm text-on-surface">
+              {csvStep ? 'CSV — map columns' : pending ? 'Import kit — review' : 'Load Kit'}
+            </h4>
             <p className="text-[10px] text-outline mt-0.5">
-              {pending
-                ? `Parsed ${pending.bom.length} BOM line${pending.bom.length === 1 ? '' : 's'} from disk. Confirm the details below — save posts to the same /api/kits endpoint as an in-app Save Kit, then loads it into the audit.`
-                : 'Pick a saved kit to load, or drop a .json / .csv file to import a new one.'}
+              {csvStep
+                ? `The CSV has ${csvStep.headers.length} column${csvStep.headers.length === 1 ? '' : 's'} and ${csvStep.rows.length} data row${csvStep.rows.length === 1 ? '' : 's'}. Match each field below to one of the columns; auto-guessed pairings are pre-filled.`
+                : pending
+                  ? `Parsed ${pending.bom.length} BOM line${pending.bom.length === 1 ? '' : 's'} from disk. Confirm the details below — save posts to the same /api/kits endpoint as an in-app Save Kit, then loads it into the audit.`
+                  : 'Pick a saved kit to load, or drop a .json / .csv file to import a new one.'}
             </p>
           </div>
           <button type="button" onClick={onClose} className="p-1 rounded hover:bg-surface-variant/40 text-outline hover:text-on-surface">
@@ -1275,7 +1318,113 @@ function KitBrowserDialog({ kits, busy, projects, defaultProjectId, onLoad, onDe
           </button>
         </div>
 
-        {!pending && (
+        {csvStep && (
+          <>
+            <div className="flex-1 overflow-y-auto px-lg py-md space-y-md">
+              {/* Column mapping — each required/optional field gets a
+                  select of the CSV's real headers. "Not mapped" clears
+                  the pairing; part + qty must both be set to Continue. */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-sm">
+                {(['part', 'qty', 'designator', 'description', 'footprint'] as const).map(field => {
+                  const required = field === 'part' || field === 'qty';
+                  const label = ({ part: 'Stock code', qty: 'Qty per PCB', designator: 'Designator', description: 'Description', footprint: 'Footprint' } as Record<typeof field, string>)[field];
+                  return (
+                    <div key={field}>
+                      <label className="block text-[10px] font-bold text-outline uppercase tracking-wider mb-1">
+                        {label}{required && <span className="text-error"> *</span>}
+                      </label>
+                      <select
+                        value={mapping[field] ?? ''}
+                        onChange={(e) => setMapping(prev => ({ ...prev, [field]: e.target.value === '' ? null : Number(e.target.value) }))}
+                        className={`w-full px-3 py-2 rounded border text-xs font-mono focus:outline-none focus:border-primary ${
+                          mapping[field] != null
+                            ? 'border-primary bg-primary/5 text-on-surface'
+                            : required
+                              ? 'border-error/40 bg-error/5 text-on-surface'
+                              : 'border-outline-variant bg-surface-container-low text-on-surface'
+                        }`}
+                      >
+                        <option value="">— Not mapped —</option>
+                        {csvStep.headers.map((h, i) => (
+                          <option key={i} value={i}>{h || `(column ${i + 1})`}</option>
+                        ))}
+                      </select>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between text-[10px] font-bold text-outline uppercase tracking-wider mb-1">
+                  <span>
+                    Live preview — {mappedPreview.length} valid row{mappedPreview.length === 1 ? '' : 's'} out of {csvStep.rows.length}
+                  </span>
+                  {!mappingIsValid && (
+                    <span className="text-error normal-case font-normal tracking-normal italic">
+                      Pick a Stock Code and Qty column to continue
+                    </span>
+                  )}
+                </div>
+                <div className="rounded-lg border border-outline-variant/40 bg-surface-container-low overflow-auto max-h-[280px]">
+                  <table className="w-full text-left text-[11px]">
+                    <thead className="bg-surface-container-high/60 text-[9px] uppercase font-mono text-outline sticky top-0">
+                      <tr>
+                        {csvStep.headers.map((h, i) => {
+                          const mappedTo = (Object.entries(mapping) as [keyof CsvColumnMapping, number | null][]).find(([, idx]) => idx === i)?.[0];
+                          return (
+                            <th key={i} className={`px-2 py-1 whitespace-nowrap ${mappedTo ? 'bg-primary/10 text-primary' : ''}`}>
+                              <div>{h || `(col ${i + 1})`}</div>
+                              {mappedTo && <div className="text-[8px] normal-case font-bold">→ {mappedTo}</div>}
+                            </th>
+                          );
+                        })}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-outline-variant/20">
+                      {csvStep.rows.slice(0, 6).map((r, ri) => (
+                        <tr key={ri}>
+                          {csvStep.headers.map((_, ci) => (
+                            <td key={ci} className={`px-2 py-1 font-mono truncate max-w-[180px] ${
+                              (Object.values(mapping) as (number | null)[]).includes(ci) ? 'text-on-surface' : 'text-outline'
+                            }`}>
+                              {r[ci] || <span className="italic text-outline/50">—</span>}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                      {csvStep.rows.length > 6 && (
+                        <tr>
+                          <td colSpan={csvStep.headers.length} className="px-2 py-1 text-center text-outline italic text-[10px]">
+                            …and {csvStep.rows.length - 6} more
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+            <div className="px-lg py-md border-t border-outline-variant flex justify-end gap-sm">
+              <button
+                type="button"
+                onClick={() => setCsvStep(null)}
+                className="px-md py-1.5 rounded-lg text-xs font-bold border border-outline-variant text-on-surface hover:bg-surface-variant/40"
+              >
+                Back
+              </button>
+              <button
+                type="button"
+                onClick={continueFromCsv}
+                disabled={!mappingIsValid}
+                className="px-md py-1.5 rounded-lg text-xs font-bold bg-primary text-on-primary hover:brightness-110 active:scale-95 disabled:opacity-40 flex items-center gap-1.5"
+              >
+                Continue → Review
+              </button>
+            </div>
+          </>
+        )}
+
+        {!pending && !csvStep && (
           <>
             {/* Drop zone / file picker. Renders above the filter so the
                 cursor lands here first on a fresh open. */}
