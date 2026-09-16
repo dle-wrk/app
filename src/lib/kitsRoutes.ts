@@ -366,11 +366,35 @@ export function registerKitsRoutes(app: Express): void {
           if (!exists.rows[0]?.r) continue;
           await client.query(`DELETE FROM "${t}" WHERE project_name::text = $1`, [String(pid)]);
         }
+        // The per-project table has PRIMARY KEY (internal_stock_number),
+        // so one physical row per stock code. Upstream CSVs commonly
+        // list the same code on multiple rows (one per designator, or
+        // duplicated by tool). Aggregate here — sum quantities, concat
+        // designators (deduped), first non-empty description/footprint
+        // — so INSERT never violates the pkey.
+        const aggregated = new Map<string, { qty: number; designators: Set<string>; description: string; footprint: string }>();
         for (const b of body.bom) {
+          const code = b.stockCode.trim();
+          if (!code) continue;
+          if (!aggregated.has(code)) {
+            aggregated.set(code, { qty: 0, designators: new Set(), description: b.description || '', footprint: b.footprint || '' });
+          }
+          const agg = aggregated.get(code)!;
+          agg.qty += b.qtyPerPcb;
+          if (b.designator) {
+            // Designators may already be a comma-list — split, dedupe.
+            for (const d of b.designator.split(',').map(s => s.trim()).filter(Boolean)) {
+              agg.designators.add(d);
+            }
+          }
+          if (!agg.description && b.description) agg.description = b.description;
+          if (!agg.footprint && b.footprint) agg.footprint = b.footprint;
+        }
+        for (const [code, agg] of aggregated) {
           await client.query(
             `INSERT INTO "${table}" (project_name, internal_stock_number, qty_per_unit, ref_des, description, comment, footprint, libref)
              VALUES ($1, $2, $3, $4, $5, $6, $7, '')`,
-            [String(pid), b.stockCode, b.qtyPerPcb, b.designator, b.description, '', b.footprint]
+            [String(pid), code, agg.qty, Array.from(agg.designators).join(', '), agg.description, '', agg.footprint]
           );
         }
         await client.query(`UPDATE projects SET updated_at = now() WHERE id::int = $1`, [pid]).catch(() => {});
