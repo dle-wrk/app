@@ -1083,6 +1083,20 @@ async function runSchemaBootstrap() {
     await ensureProductionCostsSchema().catch((e) => console.error('Failed to bootstrap production costs schema:', e));
     await ensureKitsSchema().catch((e) => console.error('Failed to bootstrap kits schema:', e));
 
+    // Legacy fix: every db_bom_project_<N> table was created with
+    // PRIMARY KEY (internal_stock_number), which forbids multiple rows
+    // per stock code — but real BOMs legitimately carry per-designator
+    // rows for the same part. The read path aggregates at query time,
+    // so this pkey was never load-bearing. Drop it so kit-sync can
+    // preserve every input row without aggregation.
+    await query<{ tablename: string }>(
+      `SELECT c.relname AS tablename FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname='public' AND c.relkind='r' AND c.relname ~ '^db_bom_project_[0-9]+$'`
+    ).then(async ({ rows }) => {
+      for (const r of rows) {
+        await exec(`ALTER TABLE "${r.tablename}" DROP CONSTRAINT IF EXISTS "${r.tablename}_pkey"`).catch(() => {});
+      }
+    }).catch(() => {});
+
     // Phase 5: Quality & Compliance + Advanced Automation
     await ensurePhase5Tables().catch((e) => console.error('Failed to bootstrap Phase 5 schema:', e));
 

@@ -514,6 +514,31 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
       const bomMsg = body?.bomSynced ? ` · project BOM updated (${payload.bom.length} lines)` : '';
       triggerToast(`Imported "${payload.name}"${bomMsg}.`, 'SUCCESS');
       loadSavedKits();
+
+      // Auto-download the pre-sync backup so the operator always has a
+      // recoverable copy of the project's previous BOM on disk. Named
+      // OLD_<slugified project name>_<yyyy-mm-dd>.json per the spec.
+      if (body?.bomSynced && body?.backup) {
+        try {
+          const b = body.backup;
+          const slug = String(b.projectName || `project_${b.projectId}`).replace(/[^a-zA-Z0-9_-]/g, '_');
+          const stamp = new Date(b.backupCreatedAt || Date.now()).toISOString().slice(0, 10);
+          const filename = `OLD_${slug}_${stamp}.json`;
+          const blob = new Blob([JSON.stringify(b, null, 2)], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+          triggerToast(`Backup saved: ${filename} (${b.rowCount} rows)`, 'INFO');
+        } catch (dlErr: any) {
+          triggerToast(`BOM synced but backup download failed: ${dlErr.message}`, 'ERROR');
+        }
+      }
+
       // Cascade both refreshes when the BOM was synced: BOM Manager
       // (bomItems state in App.tsx) picks up the new rows, and the
       // Project Manager cards + the header chip here pick up the new
@@ -1622,7 +1647,7 @@ function KitBrowserDialog({ kits, busy, projects, defaultProjectId, onLoad, onDe
                 <div className="flex-1">
                   <div className="text-xs font-bold text-on-surface">Also update the project's BOM to match</div>
                   <div className="text-[10px] text-outline mt-0.5">
-                    Replaces every row for this project across the audit tables (db_bom + per-project) with the kit's BOM lines. BOM Manager and P&P Kit Booking will show these lines the next time they load, and the project's "Last edited" timestamp updates.
+                    Replaces every row for this project across the audit tables with the kit's BOM lines. Before the replace, the project's current BOM is downloaded to your PC as <span className="font-mono">OLD_{'{'}project_name{'}'}_{'{'}date{'}'}.json</span> — keep it in case you need to restore. BOM Manager and P&P Kit Booking pick up the new lines on their next load; the project's "Last edited" timestamp updates.
                   </div>
                 </div>
               </label>

@@ -342,6 +342,7 @@ export function registerKitsRoutes(app: Express): void {
       //   4. Bump projects.updated_at so the Last-edited chip reflects
       //      the change immediately.
       let bomSynced = false;
+      let backup: any = null;
       if (body.syncToProjectBom && body.projectId) {
         const pid = body.projectId;
         const table = `db_bom_project_${pid}`;
@@ -355,46 +356,57 @@ export function registerKitsRoutes(app: Express): void {
           footprint text,
           libref text
         )`);
+        // Drop the (internal_stock_number) primary key if a legacy
+        // schema left one on this table. A real BOM can legitimately
+        // carry multiple rows for the same stock code (different
+        // designators, different comments), and the read path already
+        // aggregates at query time — the pkey was a mistake.
+        await client.query(`ALTER TABLE "${table}" DROP CONSTRAINT IF EXISTS "${table}_pkey"`).catch(() => {});
+
         const universals = ['db_bom', 'db_bom_ncu04', 'db_bom_loradongle', table];
+
+        // 1. Snapshot every existing row for this project across the
+        //    audit tables BEFORE deleting, tagging each with its
+        //    source table so a later restore can round-trip.
+        const backupRows: any[] = [];
         for (const t of universals) {
-          // Skip if the table doesn't exist (some clean-boot databases
-          // won't have every legacy universal); the check keeps the
-          // transaction alive when a table is missing.
-          const exists = await client.query(
-            `SELECT to_regclass($1) AS r`, [`public.${t}`]
+          const exists = await client.query(`SELECT to_regclass($1) AS r`, [`public.${t}`]);
+          if (!exists.rows[0]?.r) continue;
+          const { rows } = await client.query(
+            `SELECT * FROM "${t}" WHERE project_name::text = $1`,
+            [String(pid)]
           );
+          for (const r of rows) backupRows.push({ _table: t, ...r });
+        }
+        const projMeta = await client.query(`SELECT project_name, created_date FROM projects WHERE id::int = $1`, [pid]);
+        const projectName = projMeta.rows[0]?.project_name || `project_${pid}`;
+        backup = {
+          projectId: pid,
+          projectName,
+          projectCreatedDate: projMeta.rows[0]?.created_date || null,
+          backupCreatedAt: new Date().toISOString(),
+          replacedByKit: body.name,
+          rowCount: backupRows.length,
+          rows: backupRows,
+        };
+
+        // 2. Delete every row for this project across the eligible
+        //    tables so the audit + BOM Manager see only what the kit
+        //    carries.
+        for (const t of universals) {
+          const exists = await client.query(`SELECT to_regclass($1) AS r`, [`public.${t}`]);
           if (!exists.rows[0]?.r) continue;
           await client.query(`DELETE FROM "${t}" WHERE project_name::text = $1`, [String(pid)]);
         }
-        // The per-project table has PRIMARY KEY (internal_stock_number),
-        // so one physical row per stock code. Upstream CSVs commonly
-        // list the same code on multiple rows (one per designator, or
-        // duplicated by tool). Aggregate here — sum quantities, concat
-        // designators (deduped), first non-empty description/footprint
-        // — so INSERT never violates the pkey.
-        const aggregated = new Map<string, { qty: number; designators: Set<string>; description: string; footprint: string }>();
+
+        // 3. Insert the kit's BOM lines verbatim — one row per input,
+        //    no aggregation. The pkey drop above lets multiple rows
+        //    share a stock code (per-designator entries).
         for (const b of body.bom) {
-          const code = b.stockCode.trim();
-          if (!code) continue;
-          if (!aggregated.has(code)) {
-            aggregated.set(code, { qty: 0, designators: new Set(), description: b.description || '', footprint: b.footprint || '' });
-          }
-          const agg = aggregated.get(code)!;
-          agg.qty += b.qtyPerPcb;
-          if (b.designator) {
-            // Designators may already be a comma-list — split, dedupe.
-            for (const d of b.designator.split(',').map(s => s.trim()).filter(Boolean)) {
-              agg.designators.add(d);
-            }
-          }
-          if (!agg.description && b.description) agg.description = b.description;
-          if (!agg.footprint && b.footprint) agg.footprint = b.footprint;
-        }
-        for (const [code, agg] of aggregated) {
           await client.query(
             `INSERT INTO "${table}" (project_name, internal_stock_number, qty_per_unit, ref_des, description, comment, footprint, libref)
              VALUES ($1, $2, $3, $4, $5, $6, $7, '')`,
-            [String(pid), code, agg.qty, Array.from(agg.designators).join(', '), agg.description, '', agg.footprint]
+            [String(pid), b.stockCode, b.qtyPerPcb, b.designator, b.description, '', b.footprint]
           );
         }
         await client.query(`UPDATE projects SET updated_at = now() WHERE id::int = $1`, [pid]).catch(() => {});
@@ -402,9 +414,9 @@ export function registerKitsRoutes(app: Express): void {
       }
 
       await client.query('COMMIT');
-      if (bomSynced) console.log(`[kits:save] project=${body.projectId} bom synced from kit "${body.name}" (${body.bom.length} lines)`);
+      if (bomSynced) console.log(`[kits:save] project=${body.projectId} bom synced from kit "${body.name}" (${body.bom.length} lines, ${backup?.rowCount || 0} rows backed up)`);
       const full = await loadFullKit(kitId);
-      res.json({ ...full, bomSynced });
+      res.json({ ...full, bomSynced, backup });
     } catch (err: any) {
       await client.query('ROLLBACK').catch(() => {});
       console.error('[kits:save] failed:', err.message);
