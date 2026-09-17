@@ -1130,23 +1130,34 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
           </div>
         </div>
 
-        <div className="overflow-x-auto">
+        {/* Bounded height so the header can stick within its own scroll
+            context. The wrapper handles both axes: horizontal for the
+            wide preset-columns layout, vertical so long BOMs get an
+            inner scrollbar and the thead stays pinned at the top of
+            the audit table (not the page). */}
+        <div className="overflow-auto max-h-[calc(100vh-280px)]">
           <table className="stacked-mobile w-full text-left border-collapse min-w-[1400px]">
             <thead>
               {/* Grouped header: five preset-qty columns sit under a
                   common "Shortages at" header with a button that opens
                   the batch CSV export for those quantities. Row-level
-                  cells below carry the actual shortage values. */}
-              <tr className="bg-surface-container-high text-[10px] uppercase font-mono text-outline border-b border-outline-variant">
-                <th className="px-lg py-2" rowSpan={2}>Component ID</th>
-                <th className="px-lg py-2" rowSpan={2}>Description / Comment</th>
-                <th className="px-lg py-2 text-right" rowSpan={2}>Required</th>
-                <th className="px-lg py-2 text-right" rowSpan={2}>On Hand</th>
-                <th className="px-lg py-2 text-center" rowSpan={2}>Status</th>
-                <th className="px-lg py-2 text-center" rowSpan={2}>Alternatives</th>
+                  cells below carry the actual shortage values.
+                  Sticky positioning is applied per-<th> (not on the
+                  <thead> element) because border-collapse tables in
+                  Chrome don't pin whole thead reliably; per-th
+                  works everywhere. Row 1 sticks at top-0, row 2
+                  offsets by row 1's height (~34px at py-2 text-[10px]).
+                  Solid background prevents rows scrolling behind. */}
+              <tr className="text-[10px] uppercase font-mono text-outline border-b border-outline-variant">
+                <th className="px-lg py-2 sticky top-0 z-20 bg-surface-container-high" rowSpan={2}>Component ID</th>
+                <th className="px-lg py-2 sticky top-0 z-20 bg-surface-container-high" rowSpan={2}>Description / Comment</th>
+                <th className="px-lg py-2 text-right sticky top-0 z-20 bg-surface-container-high" rowSpan={2}>Required</th>
+                <th className="px-lg py-2 text-right sticky top-0 z-20 bg-surface-container-high" rowSpan={2}>On Hand</th>
+                <th className="px-lg py-2 text-center sticky top-0 z-20 bg-surface-container-high" rowSpan={2}>Status</th>
+                <th className="px-lg py-2 text-center sticky top-0 z-20 bg-surface-container-high" rowSpan={2}>Alternatives</th>
                 <th
                   colSpan={PRESET_QTYS.length}
-                  className="px-lg py-2 text-center border-l border-r border-outline-variant/40 bg-primary/5"
+                  className="px-lg py-2 text-center border-l border-r border-outline-variant/40 sticky top-0 z-20 bg-primary/5 backdrop-blur-sm"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[10px] text-primary font-black tracking-wider">Shortages at build qty</span>
@@ -1162,13 +1173,13 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
                     </button>
                   </div>
                 </th>
-                <th className="px-lg py-2" rowSpan={2}>Sourcing</th>
+                <th className="px-lg py-2 sticky top-0 z-20 bg-surface-container-high" rowSpan={2}>Sourcing</th>
               </tr>
-              <tr className="bg-surface-container-high text-[10px] uppercase font-mono text-outline border-b border-outline-variant">
+              <tr className="text-[10px] uppercase font-mono text-outline border-b border-outline-variant">
                 {PRESET_QTYS.map((q, i) => (
                   <th
                     key={q}
-                    className={`px-2 py-1 text-right font-mono ${i === 0 ? 'border-l border-outline-variant/40' : ''} ${i === PRESET_QTYS.length - 1 ? 'border-r border-outline-variant/40' : ''}`}
+                    className={`px-2 py-1 text-right font-mono sticky top-[34px] z-10 bg-surface-container-high ${i === 0 ? 'border-l border-outline-variant/40' : ''} ${i === PRESET_QTYS.length - 1 ? 'border-r border-outline-variant/40' : ''}`}
                   >
                     {q}
                   </th>
