@@ -603,6 +603,12 @@ export async function ensureSchema() {
     await exec(`ALTER TABLE inventory ADD COLUMN IF NOT EXISTS status TEXT CHECK (status IN ('ACTIVE', 'INACTIVE', 'BOOKED OUT', 'DISCONTINUED'))`).catch(() => {});
     await exec(`UPDATE inventory SET status = 'ACTIVE' WHERE status IS NULL`).catch(() => {});
     await exec(`ALTER TABLE inventory ADD COLUMN IF NOT EXISTS deleted BOOLEAN DEFAULT FALSE`).catch(() => {});
+    // Free-text colour marker (LEDs and any SKU where colour matters).
+    // Must live here too: this early-return branch is what runs against
+    // a live production DB with existing data — the CREATE-TABLE-then-
+    // ALTER path in ensureInventoryTable is only reached on a fresh
+    // provision, so an ALTER added there alone silently skips prod.
+    await exec(`ALTER TABLE inventory ADD COLUMN IF NOT EXISTS color TEXT`).catch(() => {});
     // Belt-and-braces: make sure sibling tables exist too, in case of a partially-provisioned
     // database. CREATE TABLE IF NOT EXISTS is a no-op (and never touches data) when they're
     // already there, so this is safe to run on every boot against a live database.
