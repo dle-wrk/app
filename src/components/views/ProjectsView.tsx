@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, Folder, X, Link as LinkIcon, Trash2, Edit, Search, Calendar, Users, FileText, CheckCircle2, AlertTriangle, Activity, Package } from 'lucide-react';
+import { Plus, Folder, X, Link as LinkIcon, Trash2, Edit, Search, Calendar, Users, FileText, CheckCircle2, AlertTriangle, Activity, Package, ShoppingCart } from 'lucide-react';
+import ProcurementShortageCheckerView from './ProcurementShortageCheckerView';
 import { Item, Project, JobCard } from '../../types';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 
@@ -27,7 +28,7 @@ interface ProjectsViewProps {
   projectReadiness: Record<number, any>;
   projectPlacementStats?: Record<number, number>;
   jobCards?: JobCard[];
-  triggerToast: (msg: string) => void;
+  triggerToast: (msg: string, type?: string) => void;
   onProjectCreated: (project: Project) => void;
   onProjectDeleted: (projectId: number) => void;
   onProjectUpdated: (project: Project) => void;
@@ -57,6 +58,11 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [deletingProject, setDeletingProject] = useState<Project | null>(null);
+  // Sub-tab within the Projects view. 'projects' shows the project
+  // grid; 'procurement' hands off to the CSV shortage merger. Kept as
+  // internal state (rather than a new top-level view) so the sidebar
+  // and router stay unchanged.
+  const [subView, setSubView] = useState<'projects' | 'procurement'>('projects');
 
   // Escape-to-close each of this view's four inline modals. Guarded on
   // the `enabled` flag so listeners only bind while the corresponding
@@ -288,8 +294,50 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
     setShowLinkModal(true);
   };
 
+  // Sub-tab strip — sits above the header so the current section is
+  // obvious. Two options for now: the project grid and the procurement
+  // shortage merger.
+  const subTabs: Array<{ id: 'projects' | 'procurement'; label: string; icon: any }> = [
+    { id: 'projects', label: 'Projects', icon: Folder },
+    { id: 'procurement', label: 'Procurement Shortage Checker', icon: ShoppingCart },
+  ];
+
+  const subTabStrip = (
+    <div className="flex gap-1 border-b border-outline-variant mb-md -mx-container-margin px-container-margin">
+      {subTabs.map(t => {
+        const Icon = t.icon;
+        const active = subView === t.id;
+        return (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setSubView(t.id)}
+            className={`px-md py-2 text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 border-b-2 -mb-px transition-all ${
+              active
+                ? 'border-primary text-primary'
+                : 'border-transparent text-outline hover:text-on-surface hover:border-outline-variant'
+            }`}
+          >
+            <Icon className="w-3.5 h-3.5" />
+            {t.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+
+  if (subView === 'procurement') {
+    return (
+      <div className="p-container-margin max-w-[1600px] mx-auto w-full">
+        {subTabStrip}
+        <ProcurementShortageCheckerView triggerToast={triggerToast} />
+      </div>
+    );
+  }
+
   return (
     <div className="p-container-margin space-y-lg max-w-7xl mx-auto w-full">
+      {subTabStrip}
       <div className="flex justify-between items-end mb-lg">
         <div>
           <h3 className="font-headline-sm text-lg text-on-surface">Project Manager</h3>

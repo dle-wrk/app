@@ -25,6 +25,7 @@ import { registerExchangeRateRoutes, updateExchangeRate } from './src/lib/exchan
 import { registerItemsRoutes } from './src/lib/itemsRoutes';
 import { registerProductionRoutes, ensureProductionCostsSchema } from './src/lib/productionRoutes';
 import { registerKitsRoutes, ensureKitsSchema } from './src/lib/kitsRoutes';
+import { registerProcurementRoutes, ensureProcurementSchema } from './src/lib/procurementRoutes';
 import { registerAutomationRoutes } from './src/lib/automationRoutes';
 import { registerProjectsRoutes } from './src/lib/projectsRoutes';
 import { registerClientsRoutes } from './src/lib/clientsRoutes';
@@ -152,6 +153,7 @@ registerItemsRoutes(app);
 // create tables.
 registerProductionRoutes(app);
 registerKitsRoutes(app);
+registerProcurementRoutes(app);
 
 // Automation surface (Phase 4): rules, scheduled jobs, notifications,
 // auto-PO config, event log, alert subscriptions, and the trigger actions
@@ -1082,6 +1084,7 @@ async function runSchemaBootstrap() {
 
     await ensureProductionCostsSchema().catch((e) => console.error('Failed to bootstrap production costs schema:', e));
     await ensureKitsSchema().catch((e) => console.error('Failed to bootstrap kits schema:', e));
+    await ensureProcurementSchema().catch((e) => console.error('Failed to bootstrap procurement schema:', e));
 
     // Legacy fix: every db_bom_project_<N> table was created with
     // PRIMARY KEY (internal_stock_number), which forbids multiple rows
