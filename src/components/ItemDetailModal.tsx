@@ -688,6 +688,28 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete }: Ite
                         title="Component packaging (e.g. Cut Tape, Reel, Box)"
                       />
                     </div>
+                    {/* Colour marker — mainly for LEDs, but any SKU
+                        that carries a colour value renders it in the
+                        audit and BOM Manager views. Free-text so RGB
+                        / Bi-colour / dual-die etc. can be typed in
+                        as-is; empty saves as null. */}
+                    <div className="flex flex-col gap-1">
+                      <label className="font-bold text-outline">
+                        Colour
+                        {String(edited.partNumber || '').toUpperCase().startsWith('LED') && (
+                          <span className="ml-2 text-[10px] text-primary font-mono normal-case tracking-normal">LED — recommended</span>
+                        )}
+                      </label>
+                      <input
+                        className="bg-surface-container-high border border-outline-variant rounded p-2 text-on-surface outline-none focus:border-primary font-mono"
+                        type="text"
+                        name="color"
+                        value={edited.color || ''}
+                        onChange={handleChange}
+                        placeholder="e.g. Red, Green, Blue, RGB, Yellow-Green"
+                        title="Free-text colour marker — shown on P&P Kit Booking + BOM Manager"
+                      />
+                    </div>
                     <div className="flex flex-col gap-1">
                       <label className="font-bold text-outline">Internal Comment</label>
                       <input

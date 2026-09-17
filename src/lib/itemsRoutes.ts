@@ -52,6 +52,11 @@ const ItemSchema = z.object({
   weblink_3: z.string().optional(),
   weblink_4: z.string().optional(),
   weblink_5: z.string().optional(),
+  // Free-text colour marker for parts where a colour matters (LEDs
+  // most obviously — Red / Green / RGB — but usable on any SKU where
+  // it helps identify what's on the shelf). Optional so nothing else
+  // has to know about it.
+  color: z.string().max(50).optional(),
 });
 
 const ALLOWED_ITEM_FIELDS = Object.keys(ItemSchema.shape).filter(k => k !== 'serial_number');

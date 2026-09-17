@@ -30,6 +30,45 @@ import {
   History,
 } from 'lucide-react';
 
+// Maps a free-text colour string ("Red", "Yellow-Green", "RGB",
+// "Warm White", …) to a CSS background that's roughly the right hue.
+// Unrecognised strings get a plain grey so the swatch is at least
+// visible. Kept out of a Tailwind class map so operators can invent
+// their own colours without a code change.
+export function colorToCssBackground(raw?: string): string {
+  const s = String(raw || '').trim().toLowerCase();
+  if (!s) return '#666';
+  if (s === 'rgb' || s === 'rgb led') return 'linear-gradient(90deg,#e11d48 0%, #16a34a 50%, #2563eb 100%)';
+  if (/(bi[-\s]?colour|bi[-\s]?color|dual)/.test(s)) return 'linear-gradient(90deg,#e11d48,#16a34a)';
+  if (/warm.*white/.test(s)) return '#fef3c7';
+  if (/cool.*white|white/.test(s)) return '#f5f5f5';
+  // Compound colours like "yellow-green" or "amber orange" — pick the
+  // first named token that CSS knows about.
+  const tokens = s.split(/[\s\-\/]+/).filter(Boolean);
+  const named: Record<string, string> = {
+    red: '#dc2626', orange: '#ea580c', amber: '#f59e0b', yellow: '#eab308',
+    'yellow-green': '#a3e635', green: '#16a34a', teal: '#0d9488', cyan: '#06b6d4',
+    blue: '#2563eb', royal: '#1d4ed8', navy: '#1e3a8a', purple: '#9333ea',
+    violet: '#7c3aed', magenta: '#c026d3', pink: '#ec4899', ir: '#7f1d1d',
+    uv: '#5b21b6', white: '#f5f5f5', black: '#111', grey: '#6b7280', gray: '#6b7280',
+  };
+  for (const t of tokens) if (named[t]) return named[t];
+  return '#6b7280';
+}
+
+// Container styling for the colour chip — light border + faint fill
+// tinted to the chosen colour so the pill reads as belonging to it
+// without overpowering the row.
+export function colorChipStyle(raw?: string): React.CSSProperties {
+  const s = String(raw || '').trim().toLowerCase();
+  if (!s) return { background: '#374151', color: '#e5e7eb', borderColor: '#4b5563' };
+  const dot = colorToCssBackground(s);
+  // Solid colour dot uses colour directly; gradient (RGB / dual) falls
+  // back to a neutral chip.
+  if (dot.startsWith('linear')) return { background: 'rgba(255,255,255,0.05)', color: '#e5e7eb', borderColor: 'rgba(255,255,255,0.2)' };
+  return { background: `${dot}22`, color: '#e5e7eb', borderColor: `${dot}88` };
+}
+
 interface ParsedKitImport {
   suggestedName: string;
   projectId: number | null;
@@ -182,6 +221,10 @@ interface AuditResult {
   // man_pn_* on the inventory row. Used by the Sourcing column as a
   // fallback link (Google search) when no supplier weblinks exist.
   manufacturer_part_number?: string;
+  // Free-text colour marker from inventory.color. Rendered as a chip
+  // in the Component ID column when populated — mainly LEDs but any
+  // SKU with a colour value shows the badge.
+  color?: string;
 }
 
 interface KitBookingViewProps {
@@ -1022,7 +1065,20 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
                   title={isAdmin ? 'Double-click to edit this BOM line' : undefined}
                 >
                   <td className="px-lg py-3" data-label="Part">
-                    <div className="font-mono font-bold text-primary">{res.component_id}</div>
+                    <div className="font-mono font-bold text-primary flex items-center gap-2">
+                      {res.component_id}
+                      {res.color && (
+                        // Plain colour dot — the swatch itself is the
+                        // label. Hover reveals the free-text colour
+                        // string for anyone who needs the exact hue.
+                        <span
+                          className="inline-block w-3.5 h-3.5 rounded-full border border-white/25 shadow-sm shrink-0"
+                          style={{ background: colorToCssBackground(res.color) }}
+                          title={`Colour: ${res.color}`}
+                          aria-label={`Colour: ${res.color}`}
+                        />
+                      )}
+                    </div>
                     {res.designator && (
                       <div className="text-[9px] text-outline font-mono truncate max-w-[150px]" title={res.designator}>
                         {res.designator}

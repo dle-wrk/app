@@ -70,6 +70,7 @@ export function mapDbRowToItem(record: any): Item {
     manPns: manPns.length ? manPns : undefined,
     supPns: supPns.length ? supPns : undefined,
     weblinks: weblinks.length ? weblinks : undefined,
+    color: record['color'] || '',
   };
 }
 

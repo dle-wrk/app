@@ -175,6 +175,10 @@ async function ensureInventoryTable() {
   )`);
   await exec(`ALTER TABLE inventory ADD COLUMN IF NOT EXISTS supplier TEXT DEFAULT 'N/A'`).catch(() => {});
   await exec(`ALTER TABLE inventory ADD COLUMN IF NOT EXISTS deleted BOOLEAN DEFAULT FALSE`).catch(() => {});
+  // Free-text colour marker — mainly for LEDs, but nothing about the
+  // column is category-specific. Nullable; UI only renders it when
+  // populated so we don't gain a bunch of empty cells.
+  await exec(`ALTER TABLE inventory ADD COLUMN IF NOT EXISTS color TEXT`).catch(() => {});
 }
 
 async function ensureSuppliersTable() {

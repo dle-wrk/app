@@ -1028,6 +1028,7 @@ export default function App() {
       datasheet: item.datasheet,
       project: item.project,
       packaging: item.packaging,
+      color: item.color || '',
       stock: item.stockLevel,
       low_stock_lvl: item.lowStockLvl,
       current_cost_dollar: item.price,

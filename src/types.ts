@@ -31,6 +31,10 @@ export interface Item {
   manPns?: string[]; // man_pn_1 to man_pn_5
   supPns?: string[]; // sup_pn_1 to sup_pn_5
   weblinks?: string[]; // weblink_1 to weblink_5
+  // Free-text colour. Mainly used for LEDs (Red / Green / RGB / …)
+  // but populated on any SKU where colour matters for identification.
+  // Empty string when not set so consumers can conditionally render.
+  color?: string;
 }
 
 export interface Transaction {

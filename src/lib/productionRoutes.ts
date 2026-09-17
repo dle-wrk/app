@@ -230,6 +230,10 @@ async function auditKitStock(projectId: number, buildQty: number, opts?: { exclu
       designator: bomInfo.designator,
       supplier_links: supplierLinks,
       manufacturer_part_number: mfn,
+      // Free-text colour marker (mainly LEDs). Only populated when
+      // the inventory row carries a value; empty string otherwise so
+      // clients can conditionally render.
+      color: String(item?.color || '').trim(),
     });
   }
 

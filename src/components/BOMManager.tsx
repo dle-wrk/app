@@ -3,6 +3,7 @@ import { useEscapeKey } from '../lib/useEscapeKey';
 import { Item, Transaction, Project, BOMItem } from '../types';
 import { mapDbRowsToItems } from '../lib/mapDbItem';
 import BuildQtyPicker from './BuildQtyPicker';
+import { colorToCssBackground } from './views/KitBookingView';
 import { 
   ClipboardCheck, 
   Layers, 
@@ -425,12 +426,20 @@ export default function BOMManager({
                         
                         {/* SKU Reference with hover tooltips */}
                         <td className="px-lg py-3" data-label="Part">
-                          <div 
+                          <div
                             onClick={() => onItemClick?.(resolvedCode)}
-                            className="font-bold font-mono text-[13px] text-primary hover:underline cursor-pointer flex items-center gap-1 select-none w-fit"
+                            className="font-bold font-mono text-[13px] text-primary hover:underline cursor-pointer flex items-center gap-2 select-none w-fit"
                             title="Click to view/edit component details"
                           >
                             {resolvedCode}
+                            {inventoryItem?.color && (
+                              <span
+                                className="inline-block w-3.5 h-3.5 rounded-full border border-white/25 shadow-sm shrink-0"
+                                style={{ background: colorToCssBackground(inventoryItem.color) }}
+                                title={`Colour: ${inventoryItem.color}`}
+                                aria-label={`Colour: ${inventoryItem.color}`}
+                              />
+                            )}
                           </div>
                           <span className="text-[10px] text-outline block max-w-[220px] truncate leading-normal">
                             {inventoryItem ? inventoryItem.description : line.comment}
