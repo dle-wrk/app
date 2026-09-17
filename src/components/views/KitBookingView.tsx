@@ -1,4 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
+
+// Preset build quantities used by the "shortages at preset qtys"
+// grid on the audit table. Same list the BuildQtyPicker offers, so
+// what the operator sees in the preview matches what they'd get if
+// they picked one of these presets as the active build quantity.
+const PRESET_QTYS = [50, 100, 250, 500, 1000] as const;
 import { Project } from '../../types';
 import ShortageToPOModal from '../ShortageToPOModal';
 import BomLineEditorModal from '../BomLineEditorModal';
@@ -288,6 +294,7 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
   const [showSaveKit, setShowSaveKit] = useState<boolean>(false);
   const [showKitBrowser, setShowKitBrowser] = useState<boolean>(false);
   const [showCsvExport, setShowCsvExport] = useState<boolean>(false);
+  const [showPresetCsvs, setShowPresetCsvs] = useState<boolean>(false);
   const [kitBusy, setKitBusy] = useState<boolean>(false);
   // Reservations from other kits — subtracted from qty_on_hand in the
   // display so the operator sees "available to this kit" rather than
@@ -298,6 +305,7 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
   useEscapeKey(() => setShowSaveKit(false), showSaveKit);
   useEscapeKey(() => setShowKitBrowser(false), showKitBrowser);
   useEscapeKey(() => setShowCsvExport(false), showCsvExport);
+  useEscapeKey(() => setShowPresetCsvs(false), showPresetCsvs);
 
   // Filter is a display-only lens over the audit — shortage math, the PO
   // modal, and the booking button all keep operating on the full result
@@ -785,6 +793,85 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
     setShowCsvExport(false);
   };
 
+  // Shortage for one audit row at an arbitrary build size. The audit
+  // ran once against the current buildQty; we back-out qtyPerPcb from
+  // it so the preset columns can preview shortages at 50/100/250/…
+  // without re-hitting the backend for each preset.
+  const shortageAt = React.useCallback((row: AuditResult, atQty: number): number => {
+    if (buildQty <= 0 || atQty <= 0) return 0;
+    const qtyPerPcb = row.qty_required / buildQty;
+    const needed = Math.round(qtyPerPcb * atQty);
+    const short = needed - row.qty_on_hand;
+    return short > 0 ? short : 0;
+  }, [buildQty]);
+
+  // Batch export: one CSV per selected preset. Files download in
+  // sequence with a small delay so the browser doesn't throttle or
+  // squash them into a single prompt. Each CSV is shaped like the
+  // single-qty export, just recomputed for its own build size.
+  const exportPresetCsvs = async (quantities: number[], includeDnf: boolean) => {
+    if (quantities.length === 0) return;
+    const projectName = projects.find(p => p.id === selectedProjectId)?.projectName?.replace(/[^a-zA-Z0-9_-]/g, '_') || 'project';
+    const stamp = new Date().toISOString().slice(0, 10);
+    const esc = (v: any) => {
+      const s = String(v ?? '');
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    let totalRows = 0;
+    for (let i = 0; i < quantities.length; i++) {
+      const atQty = quantities[i];
+      const inScope = auditResults.filter(r => {
+        if (dnfOverride.has(r.component_id)) return includeDnf;
+        return shortageAt(r, atQty) > 0;
+      });
+      if (inScope.length === 0) continue;
+      const header = ['Part', 'Description', 'Designator', 'Qty per PCB', 'Needed', 'On Hand', 'Shortage', 'Alternates used', 'Reserved elsewhere'];
+      const rows = inScope.map(r => {
+        const isDnf = dnfOverride.has(r.component_id);
+        const reserved = reservations[r.resolved_part_number] || 0;
+        const qtyPerPcb = buildQty > 0 ? Math.max(1, Math.round(r.qty_required / buildQty)) : r.qty_required;
+        const needed = qtyPerPcb * atQty;
+        const shortage = isDnf ? 0 : Math.max(0, needed - r.qty_on_hand);
+        return [
+          r.component_id,
+          r.description,
+          r.designator || '',
+          qtyPerPcb,
+          needed,
+          r.qty_on_hand,
+          isDnf ? 'DNF' : shortage,
+          r.used_alternative ? r.resolved_part_number : '',
+          reserved,
+        ];
+      });
+      const csv = [header, ...rows].map(row => row.map(esc).join(',')).join('\n');
+      const filename = `${projectName}_${stamp}_QTY-${atQty}_shortages${includeDnf ? '_with_dnf' : ''}.csv`;
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      totalRows += rows.length;
+      // Small stagger between downloads — Chrome will silently drop
+      // rapid-fire download calls otherwise; 250ms is enough for
+      // every browser I tested and short enough that the operator
+      // barely notices the sequence.
+      if (i < quantities.length - 1) {
+        await new Promise(r => setTimeout(r, 300));
+      }
+    }
+    if (totalRows === 0) {
+      triggerToast('No shortages at any selected preset — nothing exported.', 'INFO');
+    } else {
+      triggerToast(`Exported ${quantities.length} CSV file(s), ${totalRows} row(s) total.`, 'SUCCESS');
+    }
+    setShowPresetCsvs(false);
+  };
+
   const handleExecute = async () => {
     setShowConfirmBooking(false);
     setExecuting(true);
@@ -1044,16 +1131,48 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
         </div>
 
         <div className="overflow-x-auto">
-          <table className="stacked-mobile w-full text-left border-collapse min-w-[1000px]">
+          <table className="stacked-mobile w-full text-left border-collapse min-w-[1400px]">
             <thead>
+              {/* Grouped header: five preset-qty columns sit under a
+                  common "Shortages at" header with a button that opens
+                  the batch CSV export for those quantities. Row-level
+                  cells below carry the actual shortage values. */}
               <tr className="bg-surface-container-high text-[10px] uppercase font-mono text-outline border-b border-outline-variant">
-                <th className="px-lg py-2">Component ID</th>
-                <th className="px-lg py-2">Description / Comment</th>
-                <th className="px-lg py-2 text-right">Required</th>
-                <th className="px-lg py-2 text-right">On Hand</th>
-                <th className="px-lg py-2 text-center">Status</th>
-                <th className="px-lg py-2 text-center">Alternatives</th>
-                <th className="px-lg py-2">Sourcing</th>
+                <th className="px-lg py-2" rowSpan={2}>Component ID</th>
+                <th className="px-lg py-2" rowSpan={2}>Description / Comment</th>
+                <th className="px-lg py-2 text-right" rowSpan={2}>Required</th>
+                <th className="px-lg py-2 text-right" rowSpan={2}>On Hand</th>
+                <th className="px-lg py-2 text-center" rowSpan={2}>Status</th>
+                <th className="px-lg py-2 text-center" rowSpan={2}>Alternatives</th>
+                <th
+                  colSpan={PRESET_QTYS.length}
+                  className="px-lg py-2 text-center border-l border-r border-outline-variant/40 bg-primary/5"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] text-primary font-black tracking-wider">Shortages at build qty</span>
+                    <button
+                      type="button"
+                      onClick={() => setShowPresetCsvs(true)}
+                      disabled={auditResults.length === 0}
+                      className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded bg-primary/15 border border-primary/40 text-primary hover:bg-primary/25 disabled:opacity-40 disabled:cursor-not-allowed normal-case"
+                      title="Download a shortages CSV for each preset build quantity"
+                    >
+                      <Download className="w-3 h-3" />
+                      Save preset CSVs
+                    </button>
+                  </div>
+                </th>
+                <th className="px-lg py-2" rowSpan={2}>Sourcing</th>
+              </tr>
+              <tr className="bg-surface-container-high text-[10px] uppercase font-mono text-outline border-b border-outline-variant">
+                {PRESET_QTYS.map((q, i) => (
+                  <th
+                    key={q}
+                    className={`px-2 py-1 text-right font-mono ${i === 0 ? 'border-l border-outline-variant/40' : ''} ${i === PRESET_QTYS.length - 1 ? 'border-r border-outline-variant/40' : ''}`}
+                  >
+                    {q}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-outline-variant/30 text-xs">
@@ -1216,6 +1335,31 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
                       );
                     })()}
                   </td>
+                  {/* Preset-qty shortage grid — one small cell per
+                      preset, showing how many more units would be
+                      short at that build size. DNF rows and rows with
+                      no shortage show a subtle placeholder so the eye
+                      lands on the red numbers. */}
+                  {PRESET_QTYS.map((atQty, i) => {
+                    const isDnf = dnfOverride.has(res.component_id);
+                    const short = isDnf ? 0 : shortageAt(res, atQty);
+                    return (
+                      <td
+                        key={atQty}
+                        data-label={`@${atQty}`}
+                        className={`px-2 py-3 text-right font-mono text-[11px] ${i === 0 ? 'border-l border-outline-variant/40' : ''} ${i === PRESET_QTYS.length - 1 ? 'border-r border-outline-variant/40' : ''}`}
+                        title={isDnf ? 'DNF for this kit' : short > 0 ? `Short ${short.toLocaleString()} at build qty ${atQty}` : `Fully covered at build qty ${atQty}`}
+                      >
+                        {isDnf ? (
+                          <span className="text-outline/50">DNF</span>
+                        ) : short > 0 ? (
+                          <span className="text-red-400 font-bold">{short.toLocaleString()}</span>
+                        ) : (
+                          <span className="text-outline/40">·</span>
+                        )}
+                      </td>
+                    );
+                  })}
                   <td className="px-lg py-3" data-label="Sourcing">
                     {(() => {
                       // Parse into URL objects up front — anything that fails
@@ -1284,14 +1428,14 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
               ))}
               {auditResults.length === 0 && !loading && (
                 <tr>
-                  <td colSpan={7} className="px-lg py-12 text-center text-outline italic font-mono">
+                  <td colSpan={7 + PRESET_QTYS.length} className="px-lg py-12 text-center text-outline italic font-mono">
                     No BOM data found for the selected project.
                   </td>
                 </tr>
               )}
               {auditResults.length > 0 && filteredResults.length === 0 && !loading && (
                 <tr>
-                  <td colSpan={7} className="px-lg py-12 text-center text-outline italic font-mono">
+                  <td colSpan={7 + PRESET_QTYS.length} className="px-lg py-12 text-center text-outline italic font-mono">
                     No components match "{search}".
                   </td>
                 </tr>
@@ -1400,6 +1544,21 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
           dnfCount={auditResults.filter(r => dnfOverride.has(r.component_id)).length}
           onCancel={() => setShowCsvExport(false)}
           onExport={exportShortagesCsv}
+        />
+      )}
+
+      {showPresetCsvs && (
+        <PresetCsvDialog
+          presets={PRESET_QTYS as unknown as number[]}
+          shortagesAtPreset={Object.fromEntries(
+            (PRESET_QTYS as unknown as number[]).map(q => [
+              q,
+              auditResults.filter(r => !dnfOverride.has(r.component_id) && shortageAt(r, q) > 0).length,
+            ])
+          )}
+          dnfCount={auditResults.filter(r => dnfOverride.has(r.component_id)).length}
+          onCancel={() => setShowPresetCsvs(false)}
+          onExport={exportPresetCsvs}
         />
       )}
 
@@ -2344,6 +2503,109 @@ function CsvExportDialog({ shortageCount, dnfCount, onCancel, onExport }: {
           >
             <Download className="w-3.5 h-3.5" />
             Download CSV
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// -----------------------------------------------------------------------
+// Batch preset-quantity CSV export dialog. Lets the operator tick which
+// preset build sizes to export, plus the include-DNF flag, and then
+// downloads one CSV per selected preset (sequentially, with a small
+// stagger, so browsers don't collapse the downloads). Shortage counts
+// per preset are shown next to each checkbox so it's clear before
+// downloading whether that build size even has anything to procure.
+// -----------------------------------------------------------------------
+function PresetCsvDialog({ presets, shortagesAtPreset, dnfCount, onCancel, onExport }: {
+  presets: number[];
+  shortagesAtPreset: Record<number, number>;
+  dnfCount: number;
+  onCancel: () => void;
+  onExport: (quantities: number[], includeDnf: boolean) => void;
+}) {
+  const [selected, setSelected] = useState<Set<number>>(() => new Set(presets));
+  const [includeDnf, setIncludeDnf] = useState<boolean>(false);
+  const [busy, setBusy] = useState<boolean>(false);
+  const toggle = (q: number) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(q)) next.delete(q); else next.add(q);
+      return next;
+    });
+  };
+  const orderedSelected = presets.filter(p => selected.has(p));
+  return (
+    <div className="fixed inset-0 z-[200] bg-background/85 backdrop-blur-sm flex items-center justify-center p-md" onClick={busy ? undefined : onCancel}>
+      <div className="bg-surface-container border border-outline-variant rounded-xl shadow-2xl max-w-[520px] w-full" onClick={(e) => e.stopPropagation()}>
+        <div className="px-lg py-md border-b border-outline-variant flex items-center gap-sm">
+          <Download className="w-4 h-4 text-primary" />
+          <div>
+            <h4 className="font-bold text-sm text-on-surface">Save preset CSVs</h4>
+            <p className="text-[10px] text-outline mt-0.5">
+              Downloads one shortages CSV per selected build quantity. Files land one after another (short stagger) so your browser keeps all of them.
+            </p>
+          </div>
+        </div>
+        <div className="px-lg py-md space-y-md">
+          <div className="space-y-1.5">
+            {presets.map(q => {
+              const short = shortagesAtPreset[q] || 0;
+              return (
+                <label key={q} className="flex items-center justify-between gap-2 rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2 cursor-pointer hover:border-primary/60">
+                  <span className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(q)}
+                      onChange={() => toggle(q)}
+                      className="w-3.5 h-3.5 accent-primary"
+                    />
+                    <span className="text-xs font-mono font-bold text-on-surface">Build qty {q}</span>
+                  </span>
+                  <span className={`text-[10px] font-mono ${short > 0 ? 'text-red-400' : 'text-outline'}`}>
+                    {short > 0 ? `${short} shortage row${short === 1 ? '' : 's'}` : 'no shortages'}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+          <label className={`flex items-start gap-2 rounded-lg border px-3 py-2.5 ${dnfCount === 0 ? 'border-outline-variant/50 opacity-50 cursor-not-allowed' : 'border-outline-variant bg-surface-container-low hover:border-primary/60 cursor-pointer'}`}>
+            <input
+              type="checkbox"
+              checked={includeDnf}
+              onChange={(e) => setIncludeDnf(e.target.checked)}
+              disabled={dnfCount === 0}
+              className="mt-0.5 w-3.5 h-3.5 accent-primary"
+            />
+            <div className="flex-1">
+              <div className="text-xs font-bold text-on-surface">Include DNF parts</div>
+              <div className="text-[10px] text-outline">
+                DNF-marked rows appear in every generated file with "DNF" in the Shortage column. Off by default because procurement skips them.
+              </div>
+            </div>
+          </label>
+          <div className="text-[10px] text-outline font-mono">
+            Will download {orderedSelected.length} file{orderedSelected.length === 1 ? '' : 's'}.
+          </div>
+        </div>
+        <div className="px-lg py-md border-t border-outline-variant flex justify-end gap-sm">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={busy}
+            className="px-md py-1.5 rounded-lg text-xs font-bold border border-outline-variant text-on-surface hover:bg-surface-variant/40 disabled:opacity-40"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={async () => { setBusy(true); await onExport(orderedSelected, includeDnf); setBusy(false); }}
+            disabled={busy || orderedSelected.length === 0}
+            className="px-md py-1.5 rounded-lg text-xs font-bold bg-primary text-on-primary hover:brightness-110 active:scale-95 disabled:opacity-40 flex items-center gap-1.5"
+          >
+            {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+            {busy ? 'Downloading…' : `Download ${orderedSelected.length} file${orderedSelected.length === 1 ? '' : 's'}`}
           </button>
         </div>
       </div>
