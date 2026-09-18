@@ -291,6 +291,64 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
   // this flat-maps into the kit_allocations payload.
   const [allocations, setAllocations] = useState<Record<string, Array<{ allocatedCode: string; qty: number }>>>({});
   const [allocatingStockCode, setAllocatingStockCode] = useState<string | null>(null);
+
+  // Per-project persistence for allocations + DNF. Switching projects
+  // saves the current allocation / DNF picks under the previous
+  // project id and restores whatever was cached under the new one, so
+  // an operator can flip between TCU06 and NCU04 without redoing their
+  // Fill / Auto-fill work. Backed by localStorage so the same state
+  // survives a page reload.
+  const PER_PROJECT_CACHE_KEY = 'kitBooking:perProjectState:v1';
+  type PerProjectEntry = { allocations: Record<string, Array<{ allocatedCode: string; qty: number }>>; dnf: string[] };
+  const readPerProjectCache = React.useCallback((): Record<number, PerProjectEntry> => {
+    try { return JSON.parse(localStorage.getItem(PER_PROJECT_CACHE_KEY) || '{}'); } catch { return {}; }
+  }, []);
+  const writePerProjectCache = React.useCallback((c: Record<number, PerProjectEntry>) => {
+    try { localStorage.setItem(PER_PROJECT_CACHE_KEY, JSON.stringify(c)); } catch { /* quota / private mode */ }
+  }, []);
+
+  // Effect A skips effect B's save on the next tick because the
+  // setAllocations that just fired inside A won't have hit the DOM yet
+  // — without the guard, effect B would save the old project's
+  // allocations under the new project id.
+  const suppressPerProjectSaveOnceRef = React.useRef<boolean>(false);
+  const prevProjectIdRef = React.useRef<number | null>(null);
+
+  // Effect A — on first mount and on selectedProjectId change: save
+  // the OLD project's state under the OLD id, then hydrate local
+  // state from the cache entry for the NEW id.
+  useEffect(() => {
+    const oldPid = prevProjectIdRef.current;
+    const newPid = selectedProjectId;
+    if (!newPid) return;
+    if (oldPid !== null && oldPid !== newPid) {
+      const cache = readPerProjectCache();
+      cache[oldPid] = { allocations, dnf: Array.from(dnfOverride) };
+      writePerProjectCache(cache);
+    }
+    const cache = readPerProjectCache();
+    const entry = cache[newPid];
+    suppressPerProjectSaveOnceRef.current = true;
+    setAllocations(entry?.allocations || {});
+    setDnfOverride(new Set(entry?.dnf || []));
+    prevProjectIdRef.current = newPid;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedProjectId]);
+
+  // Effect B — whenever allocations or dnfOverride actually change,
+  // persist under the current project id. Guarded by the suppress-
+  // once flag so it doesn't clobber the cache immediately after a
+  // project switch.
+  useEffect(() => {
+    if (suppressPerProjectSaveOnceRef.current) {
+      suppressPerProjectSaveOnceRef.current = false;
+      return;
+    }
+    if (prevProjectIdRef.current === null) return;
+    const cache = readPerProjectCache();
+    cache[selectedProjectId] = { allocations, dnf: Array.from(dnfOverride) };
+    writePerProjectCache(cache);
+  }, [allocations, dnfOverride, selectedProjectId, readPerProjectCache, writePerProjectCache]);
   const [showSaveKit, setShowSaveKit] = useState<boolean>(false);
   const [showKitBrowser, setShowKitBrowser] = useState<boolean>(false);
   const [showCsvExport, setShowCsvExport] = useState<boolean>(false);
