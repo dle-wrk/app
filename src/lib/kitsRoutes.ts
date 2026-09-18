@@ -623,6 +623,88 @@ export function registerKitsRoutes(app: Express): void {
     }
   });
 
+  // POST /api/kits/match/batch — match many stock codes in one call.
+  // The single-code endpoint does a full inventory scan per request,
+  // which for a 126-line BOM adds up to 126 full scans and a slow
+  // "auto-allocate all" experience. The batch version reads inventory
+  // ONCE, indexes it, and evaluates each anchor against that index —
+  // O(N × M) instead of O(N × M²) round-trips. Response is a map
+  // keyed by input stock code.
+  app.post('/api/kits/match/batch', async (req, res) => {
+    const codes: string[] = Array.isArray(req.body?.stockCodes) ? req.body.stockCodes : [];
+    if (codes.length === 0) return res.json({});
+    // Cap the batch so a runaway request can't scan the DB and hold
+    // memory forever. 500 covers the biggest BOMs in the current
+    // dataset with headroom; the client walks by-project so this is
+    // never hit in normal use.
+    const capped = codes.slice(0, 500);
+    try {
+      const { rows: allRows } = await query<any>(
+        `SELECT serial_number, name, description, footprint, stock, status FROM inventory`
+      );
+      // Load every approved-alt pair for the requested anchors in a
+      // single query, then index by primary code so the per-anchor
+      // loop is a plain map lookup.
+      const { rows: altRows } = await query<{ primary_part_number: string; alternative_part_number: string }>(
+        `SELECT primary_part_number, alternative_part_number FROM alternative_components WHERE primary_part_number = ANY($1::text[])`,
+        [capped]
+      );
+      const manualAltsByAnchor: Record<string, Set<string>> = {};
+      for (const row of altRows) {
+        if (!manualAltsByAnchor[row.primary_part_number]) manualAltsByAnchor[row.primary_part_number] = new Set();
+        manualAltsByAnchor[row.primary_part_number].add(row.alternative_part_number);
+      }
+      const inventoryByCode: Record<string, any> = {};
+      for (const r of allRows) if (r.serial_number) inventoryByCode[r.serial_number] = r;
+
+      const out: Record<string, any[]> = {};
+      for (const code of capped) {
+        const anchor = inventoryByCode[code];
+        if (!anchor) { out[code] = []; continue; }
+        const anchorName = String(anchor.name || '').trim();
+        const anchorFp = String(anchor.footprint || '').trim();
+        const manualAlts = manualAltsByAnchor[code] || new Set<string>();
+        const results: any[] = [];
+        const seen = new Set<string>();
+        for (const r of allRows) {
+          const sn = r.serial_number;
+          if (!sn || seen.has(sn)) continue;
+          const name = String(r.name || '').trim();
+          const fp = String(r.footprint || '').trim();
+          let tier = 0;
+          let note = '';
+          if (sn === code) { tier = 1; note = 'Exact match (primary SKU)'; }
+          else if (manualAlts.has(sn)) { tier = 2; note = 'Approved alternative (from alternates table)'; }
+          else if (name && anchorName && name === anchorName && fp && anchorFp && fp === anchorFp) { tier = 2; note = 'Equivalent — same Name + Footprint'; }
+          else if (name && anchorName && name === anchorName) { tier = 3; note = 'Same Name, footprint differs — verify'; }
+          else if (name && anchorName && (name.includes(anchorName) || anchorName.includes(name))) {
+            const fpOk = !fp || !anchorFp || fp === anchorFp;
+            if (fpOk) { tier = 4; note = 'Similar Name — verify carefully'; }
+          }
+          if (tier > 0) {
+            seen.add(sn);
+            results.push({
+              serialNumber: sn,
+              name,
+              description: r.description || '',
+              footprint: fp,
+              stock: parseInt(r.stock || '0') || 0,
+              status: r.status || 'ACTIVE',
+              matchTier: tier,
+              matchNote: note,
+            });
+          }
+        }
+        results.sort((a, b) => a.matchTier - b.matchTier || String(a.serialNumber).localeCompare(String(b.serialNumber)));
+        out[code] = results;
+      }
+      res.json(out);
+    } catch (err: any) {
+      console.error('[kits:match:batch] failed:', err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // GET /api/kits/reservations — snapshot of currently-locked qty per
   // SKU aggregated across every kit that carries a reservation. Called
   // by the kit-booking audit so it can subtract "reserved elsewhere"

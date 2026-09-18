@@ -354,6 +354,12 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
   const [showCsvExport, setShowCsvExport] = useState<boolean>(false);
   const [showPresetCsvs, setShowPresetCsvs] = useState<boolean>(false);
   const [kitBusy, setKitBusy] = useState<boolean>(false);
+  // Bulk-auto-allocation runs the same T1 + T2 greedy fill the per-row
+  // dialog uses, but for every non-DNF line in one pass. Progress
+  // state drives the button label so the operator sees it walking
+  // rather than a silent hang on a big BOM.
+  const [autoAllocateBusy, setAutoAllocateBusy] = useState<boolean>(false);
+  const [autoAllocateProgress, setAutoAllocateProgress] = useState<{ done: number; total: number } | null>(null);
   // Reservations from other kits — subtracted from qty_on_hand in the
   // display so the operator sees "available to this kit" rather than
   // "on the shelf". The book-out flow still runs against the raw stock,
@@ -785,6 +791,79 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
     }
   };
 
+  // Bulk auto-allocation. Walks every non-DNF audit row, hits the
+  // batch match endpoint once, then greedy-fills each row with T1 +
+  // T2 candidates (same rule the per-row Auto-fill by tier button
+  // uses — footprint swaps stay manual). Rows the operator already
+  // allocated by hand are skipped so a partial job isn't clobbered.
+  const autoAllocateAll = async () => {
+    if (autoAllocateBusy || auditResults.length === 0) return;
+    const candidates = auditResults.filter(r => !dnfOverride.has(r.component_id));
+    if (candidates.length === 0) {
+      triggerToast('Nothing to allocate — every line is DNF.', 'INFO');
+      return;
+    }
+    // Skip lines that already carry a non-empty operator allocation
+    // so a bulk-allocate never overwrites hand-tuned picks.
+    const targets = candidates.filter(r => !((allocations[r.component_id] || []).some(a => a.qty > 0)));
+    if (targets.length === 0) {
+      triggerToast('Every line already has an allocation — clear one first if you want auto-fill to redo it.', 'INFO');
+      return;
+    }
+    setAutoAllocateBusy(true);
+    setAutoAllocateProgress({ done: 0, total: targets.length });
+    try {
+      const res = await fetch('/api/kits/match/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stockCodes: targets.map(r => r.component_id) }),
+      });
+      if (!res.ok) throw new Error(`Match batch failed (${res.status})`);
+      const matches: Record<string, MatchCandidate[]> = await res.json();
+
+      let filled = 0;
+      let short = 0;
+      const nextAllocations: Record<string, Array<{ allocatedCode: string; qty: number }>> = { ...allocations };
+      for (let i = 0; i < targets.length; i++) {
+        const row = targets[i];
+        const list = matches[row.component_id] || [];
+        // Greedy fill T1 + T2 until needed is covered. Reservations
+        // held by OTHER kits (not our own) reduce what we can take —
+        // client-side reservations map already excludes self.
+        let remaining = row.qty_required;
+        const picks: Array<{ allocatedCode: string; qty: number }> = [];
+        for (const c of list) {
+          if (remaining <= 0) break;
+          if (c.matchTier > 2) continue;
+          const reserved = reservations[c.serialNumber] || 0;
+          const avail = Math.max(0, c.stock - reserved);
+          const take = Math.min(avail, remaining);
+          if (take > 0) {
+            picks.push({ allocatedCode: c.serialNumber, qty: take });
+            remaining -= take;
+          }
+        }
+        if (picks.length > 0) {
+          nextAllocations[row.component_id] = picks;
+          if (remaining > 0) short++;
+          filled++;
+        }
+        setAutoAllocateProgress({ done: i + 1, total: targets.length });
+      }
+      setAllocations(nextAllocations);
+      const skipped = targets.length - filled;
+      const parts = [`${filled} line${filled === 1 ? '' : 's'} auto-allocated`];
+      if (short > 0) parts.push(`${short} still short after fill`);
+      if (skipped > 0) parts.push(`${skipped} had no T1/T2 candidates`);
+      triggerToast(parts.join(' · '), short > 0 ? 'INFO' : 'SUCCESS');
+    } catch (err: any) {
+      triggerToast(`Auto-allocate failed: ${err.message}`, 'ERROR');
+    } finally {
+      setAutoAllocateBusy(false);
+      setAutoAllocateProgress(null);
+    }
+  };
+
   const toggleDnfOverride = (stockCode: string) => {
     setDnfOverride(prev => {
       const next = new Set(prev);
@@ -1070,6 +1149,24 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
               back into this view, or export what's short as CSV so
               the same file can go to procurement or the shop floor. */}
           <div className="flex items-center gap-1 mt-auto">
+            <button
+              onClick={autoAllocateAll}
+              disabled={loading || autoAllocateBusy || auditResults.length === 0}
+              title="Walk every non-DNF line and greedy-fill T1 + T2 candidates. Skips lines you already allocated by hand."
+              className="h-9 px-3 rounded-lg flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider border border-primary/40 text-primary bg-primary/10 hover:bg-primary/20 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {autoAllocateBusy ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  {autoAllocateProgress ? `${autoAllocateProgress.done}/${autoAllocateProgress.total}` : 'Working…'}
+                </>
+              ) : (
+                <>
+                  <ArrowRightLeft className="w-3.5 h-3.5" />
+                  Auto-allocate
+                </>
+              )}
+            </button>
             <button
               onClick={() => setShowSaveKit(true)}
               disabled={loading || auditResults.length === 0}
