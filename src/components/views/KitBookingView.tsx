@@ -2246,15 +2246,17 @@ function KitAllocationDialog({ stockCode, needed, existing, autoResolved, reserv
         const list: MatchCandidate[] = Array.isArray(data) ? data : [];
         setCandidates(list);
         // Auto-preselect on first open with no existing overrides:
-        // greedy-fill T1 → T4 so a short T1 automatically spills to
-        // T2, T3, then T4. Saves the operator opening the dialog just
-        // to click Auto-fill for the common case, and demonstrates that
-        // multiple SKUs can be combined out of the box.
+        // greedy-fill T1 → T2 only. Same-name-different-footprint
+        // (T3) and fuzzy (T4) stay visible in the list so the operator
+        // can verify and manually Fill them, but they never get picked
+        // by auto-fill — mixing footprints is a call the operator has
+        // to make, not the machine.
         if (existing.length === 0 && list.length > 0) {
           const seed: Record<string, number> = {};
           let remaining = needed;
           for (const c of list) {
             if (remaining <= 0) break;
+            if (c.matchTier > 2) continue; // T3 / T4 are manual-only
             const avail = Math.max(0, c.stock - (reservations[c.serialNumber] || 0));
             const take = Math.min(avail, remaining);
             if (take > 0) { seed[c.serialNumber] = take; remaining -= take; }
@@ -2296,16 +2298,19 @@ function KitAllocationDialog({ stockCode, needed, existing, autoResolved, reserv
     setQty(c.serialNumber, target);
   };
 
-  // Footer: greedy fill by tier order. Clears whatever's there and walks
-  // T1 → T4, taking min(available, remaining shortfall) from each. Stops
-  // when the requirement is covered. The starting-fresh choice matches
-  // "distribute this line across alternates for me" — if the operator
-  // wanted to preserve a manual pick, they can Fill per-row instead.
+  // Footer: greedy fill by tier order. Clears whatever's there and
+  // walks T1 → T2 (same footprint only), taking min(available,
+  // remaining shortfall) from each. Stops when the requirement is
+  // covered. T3 / T4 are excluded — swapping footprints is an
+  // operator-verified call, not something auto-fill should silently
+  // do. Fill per row still works for those tiers if the operator
+  // decides they're compatible.
   const autoFillByTier = () => {
     const next: Record<string, number> = {};
     let remaining = needed;
     for (const c of candidates) {
       if (remaining <= 0) break;
+      if (c.matchTier > 2) continue; // T3 / T4 stay manual-only
       const take = Math.min(availableFor(c), remaining);
       if (take > 0) {
         next[c.serialNumber] = take;
@@ -2332,7 +2337,7 @@ function KitAllocationDialog({ stockCode, needed, existing, autoResolved, reserv
           <div className="flex-1">
             <h4 className="font-bold text-sm text-on-surface">Allocate for {stockCode}</h4>
             <p className="text-[10px] text-outline mt-0.5">
-              Pick one or more SKUs to fulfil this line — the picked qtys add up against Needed. Use Fill per row to top up from that candidate, or Auto-fill by tier to greedy-fill T1 → T4. T1 is the exact primary; T2/T3 are like-for-like; T4 is a fuzzy match — verify before use. Reserved qty from other locked kits is shown so what you allocate is honest.
+              Pick one or more SKUs to fulfil this line — the picked qtys add up against Needed. Auto-fill only uses T1 (exact primary) and T2 (same Name + Footprint) so footprint swaps stay manual. T3 (same Name, footprint differs) and T4 (fuzzy) are shown here for reference — Fill them yourself only after you've verified they're a valid substitute. Reserved qty from other locked kits is shown so what you allocate is honest.
             </p>
           </div>
           <button type="button" onClick={onClose} className="p-1 rounded hover:bg-surface-variant/40 text-outline hover:text-on-surface">
@@ -2373,13 +2378,17 @@ function KitAllocationDialog({ stockCode, needed, existing, autoResolved, reserv
                     : c.matchTier === 3 ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20'
                     : 'bg-outline-variant/20 text-outline border-outline-variant/40';
                   const isSelected = picked > 0;
+                  const isManualOnly = c.matchTier > 2;
                   return (
                     <tr
                       key={c.serialNumber}
+                      title={isManualOnly ? 'Manual-only — Auto-fill will not touch this row. Verify footprint / substitutability before filling.' : undefined}
                       className={`transition-all ${
                         isSelected
                           ? 'bg-primary/15 border-l-4 border-l-primary shadow-[inset_2px_0_0_var(--md-sys-color-primary)]'
-                          : 'border-l-4 border-l-transparent hover:bg-surface-variant/20'
+                          : isManualOnly
+                            ? 'border-l-4 border-l-transparent opacity-70 hover:opacity-100 hover:bg-surface-variant/20'
+                            : 'border-l-4 border-l-transparent hover:bg-surface-variant/20'
                       }`}
                     >
                       <td className="px-md py-2">
