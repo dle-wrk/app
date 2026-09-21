@@ -298,7 +298,22 @@ const ReceiptScanModal: React.FC<{
   onContinueToBill?: (payload: PrefillFromScan) => void;
   triggerToast: (m: string, t?: 'SUCCESS' | 'ERROR' | 'INFO') => void;
 }> = ({ bill, mode = 'attach', onClose, onSaved, onContinueToBill, triggerToast }) => {
-  const [preview, setPreview] = useState<string | null>(bill?.receiptImage || null);
+  // Existing receipt_image column stores either a raw data: URL (single
+  // page — the pre-multi-page shape) or a JSON array of them. Parse
+  // both so old bills open cleanly.
+  const initialPreviews = React.useMemo<string[]>(() => {
+    const raw = bill?.receiptImage;
+    if (!raw) return [];
+    if (raw.startsWith('[')) {
+      try {
+        const arr = JSON.parse(raw);
+        return Array.isArray(arr) ? arr.filter((v: any) => typeof v === 'string' && v.startsWith('data:image/')) : [];
+      } catch { return []; }
+    }
+    return [raw];
+  }, [bill?.receiptImage]);
+  const [previews, setPreviews] = useState<string[]>(initialPreviews);
+  const preview = previews[previews.length - 1] || null; // most recent page for the visible camera-cancel view
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
@@ -355,13 +370,16 @@ const ReceiptScanModal: React.FC<{
     }
   }, [cameraOn]);
 
-  // Kick off OCR after any new capture. Runs in the background — the user
-  // can save the raw image immediately without waiting for OCR to finish.
-  const startOcr = async (image: string) => {
+  // Kick off OCR against every attached page in one call. The server-
+  // side OpenAI Vision endpoint accepts up to 8 images per request
+  // and returns a single unified OcrResult (supplier/date/total merged
+  // across pages, lineItems concatenated in reading order).
+  const startOcr = async (pages: string[]) => {
+    if (pages.length === 0) return;
     setOcr(null);
     setOcrRunning(true);
     try {
-      const result = await runOcr(image);
+      const result = await runOcr(pages);
       setOcr(result);
     } catch (err: any) {
       // OCR is a nice-to-have — don't block the save flow on its failure.
@@ -390,9 +408,10 @@ const ReceiptScanModal: React.FC<{
     const raw = canvas.toDataURL('image/jpeg', 0.92);
     stopCamera();
     const compressed = await compressImage(raw);
-    setPreview(compressed);
+    const nextPages = [...previews, compressed];
+    setPreviews(nextPages);
     setDirty(true);
-    startOcr(compressed);
+    startOcr(nextPages);
   };
 
   const readFile = (file: File) => new Promise<string>((resolve, reject) => {
@@ -432,20 +451,39 @@ const ReceiptScanModal: React.FC<{
     try {
       const raw = await readFile(file);
       const compressed = await compressImage(raw);
-      setPreview(compressed);
+      const nextPages = [...previews, compressed];
+      setPreviews(nextPages);
       setDirty(true);
-      startOcr(compressed);
+      startOcr(nextPages);
     } catch (err: any) {
       triggerToast(err?.message || 'Failed to read image', 'ERROR');
     }
   };
 
+  // Multi-page management helpers.
+  const removePage = (idx: number) => {
+    const nextPages = previews.filter((_, i) => i !== idx);
+    setPreviews(nextPages);
+    setDirty(true);
+    if (nextPages.length > 0) startOcr(nextPages);
+    else setOcr(null);
+  };
+  const startFresh = () => {
+    setPreviews([]);
+    setDirty(true);
+    setOcr(null);
+  };
+
   const save = async () => {
-    if (!preview || !bill) return;
+    if (previews.length === 0 || !bill) return;
     setSaving(true);
     try {
-      await apiPost(`/api/bills/${bill.id}/receipt`, { image: preview });
-      triggerToast('Receipt saved.');
+      // Legacy single-image callers still work: server accepts either
+      // `image` or `images[]`. We always send `images[]` now — the DB
+      // column stores a JSON array on multi-page and a bare data URL
+      // on single-page for backwards read compat.
+      await apiPost(`/api/bills/${bill.id}/receipt`, { images: previews });
+      triggerToast(`Receipt saved (${previews.length} page${previews.length === 1 ? '' : 's'}).`);
       await onSaved();
     } catch (err: any) {
       triggerToast(err?.message || 'Failed to save receipt', 'ERROR');
@@ -459,12 +497,16 @@ const ReceiptScanModal: React.FC<{
   // when the user clicks, we ship what we have (image only) — worst case the
   // editor just opens blank like the old "New Bill" button.
   const continueToBill = () => {
-    if (!onContinueToBill || !preview) return;
+    if (!onContinueToBill || previews.length === 0) return;
+    // Multi-page: JSON-encode so the bill editor round-trips every
+    // page; single-page keeps the legacy bare-data-URL shape so any
+    // downstream consumer that expects one image still gets one.
+    const receiptImage = previews.length === 1 ? previews[0] : JSON.stringify(previews);
     onContinueToBill({
       supplierName: ocr?.supplier ?? null,
       date: ocr?.date ?? null,
       total: ocr?.total ?? null,
-      receiptImage: preview,
+      receiptImage,
       lineItems: (ocr?.lineItems || []).map(li => ({
         description: li.description,
         quantity: li.quantity,
@@ -509,9 +551,43 @@ const ReceiptScanModal: React.FC<{
               className="w-full max-h-[60vh] object-contain bg-black"
             />
           </div>
-        ) : preview ? (
-          <div className="rounded-lg border border-outline-variant bg-black/20 flex items-center justify-center p-2">
-            <img src={preview} alt="Scanned receipt" className="max-h-[60vh] object-contain rounded" />
+        ) : previews.length > 0 ? (
+          <div className="space-y-2">
+            {/* Primary preview — largest / most recent page. */}
+            <div className="rounded-lg border border-outline-variant bg-black/20 flex items-center justify-center p-2">
+              <img src={previews[previews.length - 1]} alt={`Page ${previews.length}`} className="max-h-[50vh] object-contain rounded" />
+            </div>
+            {/* Page strip — thumbnails of every page with a per-page
+                remove button. Only visible when we have more than one
+                page so the single-page case stays uncluttered. */}
+            {previews.length > 1 && (
+              <div className="flex items-center gap-1.5 overflow-x-auto px-1 pb-1">
+                {previews.map((p, i) => (
+                  <div
+                    key={i}
+                    className={`relative shrink-0 rounded border ${i === previews.length - 1 ? 'border-primary' : 'border-outline-variant/60'}`}
+                    title={`Page ${i + 1}`}
+                  >
+                    <img src={p} alt={`Page ${i + 1}`} className="w-16 h-16 object-cover rounded" />
+                    <button
+                      type="button"
+                      onClick={() => removePage(i)}
+                      className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-error text-on-error text-[9px] flex items-center justify-center leading-none hover:brightness-110"
+                      title={`Remove page ${i + 1}`}
+                    >
+                      ×
+                    </button>
+                    <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[9px] font-mono text-center rounded-b">
+                      {i + 1}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="text-[10px] text-outline">
+              {previews.length} page{previews.length === 1 ? '' : 's'} attached.
+              {previews.length < 8 && ' Add another below for multi-page bills.'}
+            </div>
           </div>
         ) : (
           <div className="rounded-lg border border-dashed border-outline-variant/60 p-8 text-center text-xs text-on-surface-variant">
@@ -598,12 +674,17 @@ const ReceiptScanModal: React.FC<{
               </>
             ) : (
               <>
-                <PrimaryButton icon={<Camera className="w-3.5 h-3.5" />} onClick={startCamera} disabled={cameraStarting}>
-                  {cameraStarting ? 'Opening…' : preview ? 'Retake' : 'Take photo'}
+                <PrimaryButton icon={<Camera className="w-3.5 h-3.5" />} onClick={startCamera} disabled={cameraStarting || previews.length >= 8}>
+                  {cameraStarting ? 'Opening…' : previews.length > 0 ? 'Take next page' : 'Take photo'}
                 </PrimaryButton>
-                <SecondaryButton icon={<ImageIcon className="w-3.5 h-3.5" />} onClick={() => fileInputRef.current?.click()}>
-                  Choose image
+                <SecondaryButton icon={<ImageIcon className="w-3.5 h-3.5" />} onClick={() => fileInputRef.current?.click()} disabled={previews.length >= 8}>
+                  {previews.length > 0 ? 'Add image' : 'Choose image'}
                 </SecondaryButton>
+                {previews.length > 0 && (
+                  <SecondaryButton onClick={startFresh} title="Discard every page and start over">
+                    Start over
+                  </SecondaryButton>
+                )}
               </>
             )}
           </div>
@@ -614,11 +695,11 @@ const ReceiptScanModal: React.FC<{
               </DangerButton>
             )}
             {!cameraOn && mode === 'attach' && dirty && (
-              <PrimaryButton onClick={save} disabled={saving || !preview}>
-                {saving ? 'Saving…' : 'Save receipt'}
+              <PrimaryButton onClick={save} disabled={saving || previews.length === 0}>
+                {saving ? 'Saving…' : `Save ${previews.length > 1 ? `${previews.length} pages` : 'receipt'}`}
               </PrimaryButton>
             )}
-            {!cameraOn && mode === 'new-bill' && preview && (
+            {!cameraOn && mode === 'new-bill' && previews.length > 0 && (
               <PrimaryButton onClick={continueToBill} disabled={saving}>
                 {ocrRunning ? 'Continue anyway →' : 'Continue to bill →'}
               </PrimaryButton>
