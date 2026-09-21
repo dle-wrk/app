@@ -31,6 +31,12 @@ export const ActivityLogsView: React.FC<ActivityLogsViewProps> = ({ currentUserE
   const [selectedUser, setSelectedUser] = useState<string>('ALL');
   const [uniqueActions, setUniqueActions] = useState<string[]>([]);
   const [uniqueUsers, setUniqueUsers] = useState<string[]>([]);
+  // Date range filter. Empty string = no bound. Inputs are <input
+  // type="date"> so the value comes back as YYYY-MM-DD; we treat
+  // fromDate as inclusive start-of-day (>=) and toDate as inclusive
+  // end-of-day (<) by adding one day to the toDate before compare.
+  const [fromDate, setFromDate] = useState<string>('');
+  const [toDate, setToDate] = useState<string>('');
   const [expandedLogId, setExpandedLogId] = useState<number | null>(null);
   const [restoringId, setRestoringId] = useState<string | null>(null);
 
@@ -55,6 +61,14 @@ export const ActivityLogsView: React.FC<ActivityLogsViewProps> = ({ currentUserE
     fetchLogs();
   }, []);
 
+  // Precompute the range bounds once per filter change so the row
+  // filter below stays a plain comparison instead of parsing strings
+  // per log.
+  const fromMs = fromDate ? new Date(fromDate + 'T00:00:00').getTime() : null;
+  // toDate is inclusive → cover the whole day by pushing to the next
+  // midnight. Guards NaN for an unparseable value.
+  const toMs = toDate ? new Date(toDate + 'T00:00:00').getTime() + 86_400_000 : null;
+
   const filteredLogs = logs.filter(log => {
     const matchesSearch = searchQuery === '' ||
       log.user_email.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -65,8 +79,57 @@ export const ActivityLogsView: React.FC<ActivityLogsViewProps> = ({ currentUserE
     const matchesStatus = selectedStatus === 'ALL' || log.status === selectedStatus;
     const matchesUser = selectedUser === 'ALL' || log.user_email === selectedUser;
 
-    return matchesSearch && matchesAction && matchesStatus && matchesUser;
+    let matchesDate = true;
+    if (fromMs != null || toMs != null) {
+      const t = new Date(log.created_at).getTime();
+      if (!Number.isFinite(t)) matchesDate = false;
+      else {
+        if (fromMs != null && t < fromMs) matchesDate = false;
+        if (toMs != null && t >= toMs) matchesDate = false;
+      }
+    }
+
+    return matchesSearch && matchesAction && matchesStatus && matchesUser && matchesDate;
   });
+
+  // CSV export of the currently-filtered log set. Reuses the same
+  // shape shown in the table so what you see is what you get.
+  const exportCsv = () => {
+    const esc = (v: any) => {
+      const s = String(v ?? '');
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const header = ['Timestamp', 'User', 'Action', 'Entity Type', 'Entity ID', 'Status', 'IP Address', 'Details'];
+    const rows = filteredLogs.map(l => [
+      l.created_at, l.user_email, l.action, l.entity_type, l.entity_id, l.status, l.ip_address, l.details,
+    ]);
+    const csv = [header, ...rows].map(row => row.map(esc).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const stamp = new Date().toISOString().slice(0, 10);
+    a.download = `activity_logs_${stamp}${fromDate ? `_from_${fromDate}` : ''}${toDate ? `_to_${toDate}` : ''}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const clearDateRange = () => { setFromDate(''); setToDate(''); };
+  // Quick-set helpers: last 7 days, last 30 days, this month.
+  const setQuickRange = (days: number) => {
+    const to = new Date();
+    const from = new Date();
+    from.setDate(to.getDate() - days + 1);
+    setFromDate(from.toISOString().slice(0, 10));
+    setToDate(to.toISOString().slice(0, 10));
+  };
+  const setThisMonth = () => {
+    const now = new Date();
+    setFromDate(new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10));
+    setToDate(now.toISOString().slice(0, 10));
+  };
 
   const getActionColor = (action: string) => {
     if (action.startsWith('CREATE')) return 'text-green-400 bg-green-500/10';
@@ -253,10 +316,63 @@ export const ActivityLogsView: React.FC<ActivityLogsViewProps> = ({ currentUserE
           </select>
         </div>
 
-        {/* Results Counter */}
-        <div className="ml-auto text-outline font-mono text-[11px]">
-          Results: <span className="text-primary font-bold">{filteredLogs.length}</span>
+        {/* Date range — start / end inclusive. Quick-set chips
+            below cover the common windows without touching the
+            calendars, and "Clear" wipes both bounds. */}
+        <div className="flex items-center gap-1.5">
+          <span className="text-outline text-[11px] font-medium">From:</span>
+          <input
+            type="date"
+            value={fromDate}
+            onChange={(e) => setFromDate(e.target.value)}
+            className="bg-surface-container-high border border-outline-variant rounded px-2 py-1 text-xs cursor-pointer focus:outline-none focus:border-primary text-on-surface"
+          />
+          <span className="text-outline text-[11px] font-medium">To:</span>
+          <input
+            type="date"
+            value={toDate}
+            onChange={(e) => setToDate(e.target.value)}
+            className="bg-surface-container-high border border-outline-variant rounded px-2 py-1 text-xs cursor-pointer focus:outline-none focus:border-primary text-on-surface"
+          />
+          {(fromDate || toDate) && (
+            <button
+              type="button"
+              onClick={clearDateRange}
+              title="Clear the date range"
+              className="text-[10px] font-mono uppercase tracking-wider text-outline hover:text-primary underline decoration-dotted"
+            >
+              clear
+            </button>
+          )}
         </div>
+
+        {/* Results Counter + CSV export */}
+        <div className="ml-auto flex items-center gap-md">
+          <div className="text-outline font-mono text-[11px]">
+            Results: <span className="text-primary font-bold">{filteredLogs.length}</span>
+          </div>
+          <button
+            type="button"
+            onClick={exportCsv}
+            disabled={filteredLogs.length === 0}
+            title="Download the visible rows as CSV — respects every filter above"
+            className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider border border-outline-variant text-on-surface hover:border-primary/60 hover:text-primary disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Download className="w-3 h-3" />
+            CSV
+          </button>
+        </div>
+      </div>
+
+      {/* Quick-range chips — appear under the toolbar because they
+          only make sense once the calendars are visible. Each sets
+          both bounds in one click. */}
+      <div className="flex items-center gap-1.5 mb-md text-[10px] font-mono uppercase tracking-wider text-outline">
+        <span>Quick range:</span>
+        <button type="button" onClick={() => setQuickRange(1)} className="px-1.5 py-0.5 rounded border border-outline-variant hover:border-primary/60 hover:text-primary">Today</button>
+        <button type="button" onClick={() => setQuickRange(7)} className="px-1.5 py-0.5 rounded border border-outline-variant hover:border-primary/60 hover:text-primary">7 days</button>
+        <button type="button" onClick={() => setQuickRange(30)} className="px-1.5 py-0.5 rounded border border-outline-variant hover:border-primary/60 hover:text-primary">30 days</button>
+        <button type="button" onClick={setThisMonth} className="px-1.5 py-0.5 rounded border border-outline-variant hover:border-primary/60 hover:text-primary">This month</button>
       </div>
 
       {/* Logs Table */}

@@ -87,6 +87,30 @@ export default function BOMManager({
   // Active Project BOM lines
   const projectBOM = bomItems.filter(bom => bom.projectId === selectedProjectId);
   const activeProject = projects.find(p => p.id === selectedProjectId);
+  // Free-text search across every practically searchable field on a
+  // BOM line: stock code, substituted resolved code, description /
+  // comment / designator, and the paired inventory row's description
+  // + manufacturer PN so an operator searching by MPN can find the
+  // BOM line that uses it. Empty query = pass everything through
+  // (existing behaviour).
+  const [bomSearch, setBomSearch] = useState<string>('');
+  const filteredBOM = useMemo(() => {
+    const q = bomSearch.trim().toLowerCase();
+    if (!q) return projectBOM;
+    return projectBOM.filter(line => {
+      const inv = items.find(i => i.partNumber === line.stockCode);
+      const haystack = [
+        line.stockCode,
+        line.designator,
+        line.description,
+        line.comment,
+        inv?.description,
+        inv?.name,
+        ...(inv?.manPns || []),
+      ].filter(Boolean).join(' ').toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [projectBOM, bomSearch, items]);
 
   // Group alternates by matching exact specification values for safe interchangeability
   const getAlternatesFor = (stockCode: string) => {
@@ -183,6 +207,26 @@ export default function BOMManager({
 
   const totalShortagesCount = auditResults.filter(r => r.isShortage).length;
   const totalVoidedCount = auditResults.filter(r => r.isVoided).length;
+  // Table-only filtered view — keep the sidebar counts against the
+  // full audit so a stale search text can't hide the actual state.
+  const displayedAudit = useMemo(() => {
+    const q = bomSearch.trim().toLowerCase();
+    if (!q) return auditResults;
+    return auditResults.filter(r => {
+      const inv = r.inventoryItem;
+      const haystack = [
+        r.line.stockCode,
+        r.resolvedCode,
+        r.line.designator,
+        r.line.description,
+        r.line.comment,
+        inv?.description,
+        inv?.name,
+        ...(inv?.manPns || []),
+      ].filter(Boolean).join(' ').toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [auditResults, bomSearch]);
 
   const [showBookOutConfirm, setShowBookOutConfirm] = useState(false);
   useEscapeKey(() => setShowBookOutConfirm(false), showBookOutConfirm);
@@ -392,12 +436,32 @@ export default function BOMManager({
         {/* Right Side: Interactive audit lists with alternations mapping */}
         <div className="col-span-12 lg:col-span-8 flex flex-col space-y-md">
           <div className="bg-surface-container rounded-xl border border-outline-variant overflow-hidden shadow-xl">
-            <div className="px-lg py-sm border-b border-outline-variant bg-surface-container-high/30 flex justify-between items-center text-xs">
+            <div className="px-lg py-sm border-b border-outline-variant bg-surface-container-high/30 flex flex-wrap justify-between items-center gap-sm text-xs">
               <span className="font-mono text-xs uppercase tracking-tight font-black text-on-surface-variant flex items-center gap-1.5">
                 <Boxes className="w-4 h-4 text-primary" />
                 Project {selectedProjectId} - Direct Component Audit Rows
+                {bomSearch.trim() && (
+                  <span className="ml-2 text-[10px] font-mono text-outline normal-case tracking-normal">
+                    showing {displayedAudit.length} of {auditResults.length}
+                  </span>
+                )}
               </span>
-              <span className="font-mono text-[10px] text-outline">Multiplier: {pcbQty} PCBs</span>
+              <div className="flex items-center gap-sm">
+                {/* Free-text filter — matches stock code, substituted
+                    code, designator, comment, description, and the
+                    resolved inventory row's description + MPN so an
+                    operator searching by MPN finds the BOM line. */}
+                <div className="relative">
+                  <input
+                    type="search"
+                    value={bomSearch}
+                    onChange={(e) => setBomSearch(e.target.value)}
+                    placeholder="Search stock code, description, MPN…"
+                    className="bg-surface-container-high border border-outline-variant rounded pl-2 pr-2 py-1 text-xs text-on-surface outline-none focus:border-primary w-[260px] placeholder:text-outline/60 font-mono"
+                  />
+                </div>
+                <span className="font-mono text-[10px] text-outline">Multiplier: {pcbQty} PCBs</span>
+              </div>
             </div>
 
             <div className="overflow-x-auto">
@@ -413,7 +477,7 @@ export default function BOMManager({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-outline-variant/30 text-xs">
-                  {auditResults.map(({ line, isVoided, isSubstituted, resolvedCode, inventoryItem, requiredTotal, currentStock, remainingStock, isShortage, isPrimaryReplenished, shortageAmount }) => {
+                  {displayedAudit.map(({ line, isVoided, isSubstituted, resolvedCode, inventoryItem, requiredTotal, currentStock, remainingStock, isShortage, isPrimaryReplenished, shortageAmount }) => {
                     // Check if alternates are available for substitution
                     const altOptions = getAlternatesFor(line.stockCode);
 

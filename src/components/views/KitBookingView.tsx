@@ -1047,26 +1047,70 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
       // sees the gap rather than the row silently vanishing.
       for (let s = 0; s < suppliers.length; s++) {
         const supplier = suppliers[s];
-        const supHeader = ['SKU', `${supplierLabel[supplier]} PN`, 'Description', 'Qty per PCB', 'Needed', 'On Hand', 'Shortage', 'Manufacturer PN', 'Alternates used'];
-        const supRows = inScope.map(r => {
+
+        // Build shortage-only rows for THIS supplier — vendor paste
+        // tools reject unknown / missing PNs, and there's no value in
+        // handing procurement a row they can't order. Rows without a
+        // supplier PN are collected separately and appended as an
+        // "MISSING" section below so nothing silently vanishes.
+        const withPn: Array<{ r: AuditResult; pn: string; needed: number; shortage: number; qtyPerPcb: number }> = [];
+        const missingPn: Array<{ r: AuditResult; needed: number; shortage: number; qtyPerPcb: number }> = [];
+        for (const r of inScope) {
           const isDnf = dnfOverride.has(r.component_id);
           const qtyPerPcb = buildQty > 0 ? Math.max(1, Math.round(r.qty_required / buildQty)) : r.qty_required;
           const needed = qtyPerPcb * atQty;
           const shortage = isDnf ? 0 : Math.max(0, needed - r.qty_on_hand);
-          return [
-            r.component_id,
-            pickSupplierPn(r, supplier),
-            r.description,
-            qtyPerPcb,
-            needed,
-            r.qty_on_hand,
-            isDnf ? 'DNF' : shortage,
-            r.manufacturer_part_number || '',
-            r.used_alternative ? r.resolved_part_number : '',
-          ];
-        });
-        const supCsv = [supHeader, ...supRows].map(row => row.map(esc).join(',')).join('\n');
-        triggerDownload(supCsv, `${projectName}_${stamp}_QTY-${atQty}_${supplierLabel[supplier]}${includeDnf ? '_with_dnf' : ''}.csv`);
+          const pn = pickSupplierPn(r, supplier);
+          if (pn) withPn.push({ r, pn, needed, shortage, qtyPerPcb });
+          else missingPn.push({ r, needed, shortage, qtyPerPcb });
+        }
+
+        // Vendor-native formats — paste directly into each vendor's
+        // bulk-order tool. Ported from the reference Python script:
+        //   Mouser  → PN|qty, no header
+        //   DigiKey → Quantity,Part Number
+        //   LCSC    → Comment,Designator,Footprint,LCSC Part #,Quantity
+        // The "qty" the vendors want is the SHORTAGE (what we still
+        // need to buy), not the raw needed — otherwise we'd double-
+        // count stock already on the shelf. Rows with shortage <= 0
+        // are dropped from the vendor-facing part of the file.
+        const missingSection = missingPn.length > 0
+          ? ['', `# ${missingPn.length} row(s) without a ${supplierLabel[supplier]} PN — not orderable from this vendor:`,
+             ...missingPn.map(m => `# ${m.r.component_id}  needed=${m.needed}  onhand=${m.r.qty_on_hand}  shortage=${m.shortage}`)]
+          : [];
+
+        let supCsvText: string;
+        if (supplier === 'mouser') {
+          // Pipe-delimited, no header — matches the reference Python
+          // export_mouser_csv() format the Mouser tool accepts.
+          const lines = withPn
+            .filter(w => w.shortage > 0)
+            .map(w => `${w.pn}|${w.shortage}`);
+          supCsvText = [...lines, ...missingSection].join('\n');
+        } else if (supplier === 'digikey') {
+          const header = ['Quantity', 'Part Number'];
+          const rows = withPn
+            .filter(w => w.shortage > 0)
+            .map(w => [w.shortage, w.pn]);
+          supCsvText = [header, ...rows].map(row => row.map(esc).join(',')).join('\n') + (missingSection.length ? '\n' + missingSection.join('\n') : '');
+        } else {
+          // LCSC — the CSV shape their SMT / prototype tool accepts.
+          // Designator column is left blank (we merge lines by SKU
+          // upstream, so per-row designators aren't stable).
+          const header = ['Comment', 'Designator', 'Footprint', 'LCSC Part #', 'Quantity'];
+          const rows = withPn
+            .filter(w => w.shortage > 0)
+            .map(w => [
+              (w.r.description || '').replace(/,/g, ' '),
+              '',
+              '',
+              w.pn,
+              w.shortage,
+            ]);
+          supCsvText = [header, ...rows].map(row => row.map(esc).join(',')).join('\n') + (missingSection.length ? '\n' + missingSection.join('\n') : '');
+        }
+
+        triggerDownload(supCsvText, `${projectName}_${stamp}_QTY-${atQty}_${supplierLabel[supplier]}${includeDnf ? '_with_dnf' : ''}.csv`);
         totalFiles++;
         // Stagger between every download to keep Chrome from
         // dropping subsequent ones on tight loops.

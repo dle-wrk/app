@@ -266,6 +266,37 @@ export async function ensureBookkeepingSchema() {
   // retroactively.
   await exec(`ALTER TABLE invoice_items ADD COLUMN IF NOT EXISTS tax_inclusive BOOLEAN DEFAULT FALSE`).catch(() => {});
 
+  // --- Sales-order reservations --------------------------------------------
+  // Reserves stock against a sales order line so parallel SOs see the
+  // committed qty as unavailable. Released automatically when the source
+  // SO is:
+  //   - deleted / cancelled
+  //   - fulfilled through an invoice or delivery/collection note that
+  //     opts to book stock out (that book-out is what turns reserved
+  //     into actually-gone).
+  // Kept as its own table (not a column on client_order_items) so a
+  // line can carry a "backorder" component too — one row reserves what
+  // stock exists, another marks the shortfall for procurement.
+  await exec(`CREATE TABLE IF NOT EXISTS client_order_reservations (
+    id SERIAL PRIMARY KEY,
+    client_order_id INTEGER REFERENCES client_orders(id) ON DELETE CASCADE,
+    client_order_item_id INTEGER,
+    part_number TEXT NOT NULL,
+    reserved_qty NUMERIC(12,2) NOT NULL DEFAULT 0,
+    backorder_qty NUMERIC(12,2) NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`).catch(() => {});
+  await exec(`CREATE INDEX IF NOT EXISTS idx_client_order_res_part ON client_order_reservations(part_number)`).catch(() => {});
+  await exec(`CREATE INDEX IF NOT EXISTS idx_client_order_res_so ON client_order_reservations(client_order_id)`).catch(() => {});
+
+  // Invoice-line "book stock out on finalise" flag. Sales-order lines
+  // stayed as "no automatic movement" historically; the operator now
+  // chooses per invoice / per delivery note whether the finalise
+  // transaction also decrements inventory. Explicit on-invoice defaults
+  // FALSE so the SO → invoice happy-path still lines up with the old
+  // silent behaviour until the operator opts in.
+  await exec(`ALTER TABLE dispatch_note_items ADD COLUMN IF NOT EXISTS deduct_stock BOOLEAN DEFAULT FALSE`).catch(() => {});
+
   // --- Dispatch notes: delivery & collection of final project products ---------
   // Fulfillment documents (not accounting entries): they record which finished goods
   // physically left the premises (DELIVERY) or were handed over for pickup (COLLECTION),
