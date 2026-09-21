@@ -2,6 +2,7 @@ import React from 'react';
 import { X, Loader2 } from 'lucide-react';
 import { Account, TaxRate, Invoice, PaymentReceived, PurchaseOrder, Bill, PaymentMade, Expense, Client, Supplier, Item, ClientOrder } from '../../types';
 import { useEscapeKey } from '../../lib/useEscapeKey';
+import { fmtCurrency } from '../../lib/formatMoney';
 
 export interface ModuleDataProps {
   accounts: Account[];
@@ -46,12 +47,24 @@ export interface ModuleDataProps {
 // FORMATTING HELPERS
 // ============================================================================
 
+// Money formatter used across the app. Follows the South African
+// national standard (SANS 24 / ISO 31): space thousands separator,
+// dot decimal, no space between currency symbol and first digit.
+//
+//   R1 234.56
+//   R1 234 567.89
+//   -R89.00
+//
+// We do the grouping by hand rather than relying on the browser's
+// locale — different Chrome/Firefox versions on the same machine can
+// resolve `undefined` locale to different presets (some default to
+// `en-US`'s comma thousands even in a ZA account), which is exactly
+// the drift we're trying to eliminate.
 export function fmtMoney(amount: number | undefined | null, currency: string = 'ZAR'): string {
-  const n = Number(amount) || 0;
-  const symbol = currency === 'USD' ? '$' : currency === 'EUR' ? '€' : currency === 'GBP' ? '£' : 'R';
-  const formatted = Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return `${n < 0 ? '-' : ''}${symbol}${formatted}`;
+  return fmtCurrency(amount, currency);
 }
+// (Legacy inline implementation removed — SANS 24 grouping now lives in
+// src/lib/formatMoney.ts so every surface stays in lockstep.)
 
 export function fmtDate(dateStr: string | undefined | null): string {
   if (!dateStr) return '—';

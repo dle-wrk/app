@@ -4,6 +4,7 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { Item, ViewType } from '../../types';
+import { fmtNumber } from '../../lib/formatMoney';
 
 interface DashboardViewProps {
   items: Item[];
@@ -54,7 +55,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="flex flex-col gap-unit">
             <span className="text-on-surface-variant text-[11px] font-bold">Total items</span>
             <div className="flex items-baseline gap-sm">
-              <span className="text-xl font-black text-primary">{totalItemsCount.toLocaleString()}</span>
+              <span className="text-xl font-black text-primary">{fmtNumber(totalItemsCount)}</span>
               <span className="text-green-400 text-[10px] font-bold">+2.4%</span>
             </div>
             <div className="w-full bg-outline-variant h-1 mt-sm rounded-full overflow-hidden">
@@ -194,7 +195,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   </div>
                   <div className="mb-2">
                     <span className="text-2xl font-black" style={{ color: cardColor }}>
-                      {count.toLocaleString()}
+                      {fmtNumber(count)}
                     </span>
                     <span className="text-[10px] text-on-surface-variant block">units</span>
                   </div>

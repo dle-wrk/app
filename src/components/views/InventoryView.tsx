@@ -1,6 +1,7 @@
 import React from 'react';
 import { Upload, Plus, Search } from 'lucide-react';
 import { Item } from '../../types';
+import { fmtUSD, fmtZAR, fmtNumber } from '../../lib/formatMoney';
 
 const USD_TO_ZAR_RATE = 18.50;
 
@@ -198,17 +199,17 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               <div>
                 <span className="text-[9px] text-outline uppercase font-label-caps block">Stock</span>
                 <span className={`font-mono text-sm font-bold ${item.stockLevel < 19 ? 'text-tertiary' : 'text-on-surface'}`}>
-                  {(item.stockLevel ?? 0).toLocaleString()} units
+                  {fmtNumber(item.stockLevel ?? 0)} units
                 </span>
               </div>
               <div className="text-right">
                 <span className="text-[9px] text-outline uppercase font-label-caps block">Price</span>
                 <div className="flex flex-col gap-1">
                   <span className="font-mono text-sm font-bold text-green-400">
-                    ${(Number(item.price ?? 0)).toFixed(2)}
+                    {fmtUSD(Number(item.price ?? 0))}
                   </span>
                   <span className="font-mono text-xs font-bold text-green-400">
-                    R{((Number(item.price ?? 0)) * USD_TO_ZAR_RATE).toFixed(2)}
+                    {fmtZAR(Number(item.price ?? 0) * USD_TO_ZAR_RATE)}
                   </span>
                 </div>
               </div>

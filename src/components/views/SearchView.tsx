@@ -1,6 +1,7 @@
 import React from 'react';
 import { Search } from 'lucide-react';
 import { Item, Transaction, Supplier } from '../../types';
+import { fmtUSD, fmtNumber } from '../../lib/formatMoney';
 
 interface SearchViewProps {
   searchQuery: string;
@@ -87,8 +88,8 @@ export const SearchView: React.FC<SearchViewProps> = ({
                     </td>
                     <td className="px-lg py-sm font-semibold">{item.name} <span className="text-[10px] font-normal text-on-surface-variant block">{item.description}</span></td>
                     <td className="px-lg py-sm font-mono text-xs text-on-surface-variant">{item.category}</td>
-                    <td className="px-lg py-sm font-mono text-xs text-right text-on-surface font-black">{(item.stockLevel ?? 0).toLocaleString()}</td>
-                    <td className="px-lg py-sm font-mono text-xs text-right text-green-400">${(Number(item.price ?? 0)).toFixed(2)}</td>
+                    <td className="px-lg py-sm font-mono text-xs text-right text-on-surface font-black">{fmtNumber(item.stockLevel ?? 0)}</td>
+                    <td className="px-lg py-sm font-mono text-xs text-right text-green-400">{fmtUSD(Number(item.price ?? 0))}</td>
                     <td className="px-lg py-sm">
                       <span className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-bold border ${item.status === 'ACTIVE' ? 'bg-green-500/10 text-green-400 border-green-500/20' :
                         item.status === 'INACTIVE' ? 'bg-red-500/10 text-red-500 border-red-500/20' :

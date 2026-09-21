@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Item, ViewType } from '../../types';
 import { ChevronLeft, ChevronRight, Search, Settings, Database } from 'lucide-react';
 import BulkPricingWizard from '../BulkPricingWizard';
+import { fmtCurrency, fmtUSD, fmtNumber } from '../../lib/formatMoney';
 
 interface PricingViewProps {
   items: Item[];
@@ -115,10 +116,10 @@ function ProviderResultCard({ name, result }: { name: string; result?: ProviderR
     <div className="bg-surface-container-high/30 p-md rounded-lg border border-outline-variant">
       <span className="text-[10px] font-label-caps text-outline block mb-1">{name}</span>
       <div className="font-mono text-lg font-bold text-primary">
-        {result.unitPrice != null ? `${result.currency || 'USD'} ${Number(result.unitPrice).toFixed(4)}` : 'N/A'}
+        {result.unitPrice != null ? fmtCurrency(result.unitPrice, result.currency || 'USD', 4) : 'N/A'}
       </div>
       <div className="text-[11px] text-on-surface-variant mt-1">
-        {result.stock != null ? `${result.stock.toLocaleString()} in stock` : 'Stock unknown'}
+        {result.stock != null ? `${fmtNumber(result.stock)} in stock` : 'Stock unknown'}
       </div>
       {result.distributor && (
         <div className="text-[10px] text-secondary mt-1">via {result.distributor}</div>
@@ -616,7 +617,7 @@ export const PricingView: React.FC<PricingViewProps> = ({
                       </span>
                     </td>
                     <td className="px-lg py-sm font-mono text-right text-primary font-bold text-sm">
-                      ${(Number(i.price ?? 0)).toFixed(3)}
+                      {fmtUSD(Number(i.price ?? 0), 3)}
                     </td>
                     <td className="px-lg py-sm">
                       <span className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-bold border ${i.status === 'ACTIVE' ? 'bg-green-500/10 text-green-400 border-green-500/20' :

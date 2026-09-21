@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useEscapeKey } from '../lib/useEscapeKey';
 import { Item } from '../types';
+import { fmtUSD, fmtZAR, fmtNumber } from '../lib/formatMoney';
 import {
   X,
   Edit3,
@@ -367,7 +368,7 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete }: Ite
                   <div className="bg-surface-container-high/40 p-sm rounded-lg border border-outline-variant/50">
                     <span className="text-[10px] text-outline font-label-caps uppercase block mb-1">Stock Level</span>
                     <span className={`text-base font-black font-mono ${item.stockLevel < (item.lowStockLvl || 50) ? 'text-tertiary font-extrabold' : 'text-on-surface'}`}>
-                      {item.stockLevel.toLocaleString()} units
+                      {fmtNumber(item.stockLevel)} units
                     </span>
                     {item.stockLevel < (item.lowStockLvl || 50) && (
                       <span className="text-[9px] text-tertiary flex items-center gap-0.5 mt-0.5 font-bold">
@@ -380,10 +381,10 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete }: Ite
                     <span className="text-[10px] text-outline font-label-caps uppercase block mb-1">Standard Cost</span>
                     <div className="flex flex-col">
                       <span className="text-base font-black font-mono text-green-400 leading-none">
-                        ${item.price.toFixed(3)}
+                        {fmtUSD(item.price, 3)}
                       </span>
                       <span className="text-[10px] font-mono text-outline mt-1 block">
-                        R{(item.bulkPriceZar || item.price * 19).toFixed(3)} ZAR
+                        {fmtZAR(item.bulkPriceZar || item.price * 19, 3)} ZAR
                       </span>
                     </div>
                   </div>
@@ -392,10 +393,10 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete }: Ite
                     <span className="text-[10px] text-outline font-label-caps uppercase block mb-1">Total Holding Value</span>
                     <div className="flex flex-col">
                       <span className="text-base font-black font-mono text-primary leading-none">
-                        ${(item.price * item.stockLevel).toFixed(2)}
+                        {fmtUSD(item.price * item.stockLevel)}
                       </span>
                       <span className="text-[10px] font-mono text-outline mt-1 block">
-                        R{((item.bulkPriceZar || item.price * 19) * item.stockLevel).toFixed(2)} ZAR
+                        {fmtZAR((item.bulkPriceZar || item.price * 19) * item.stockLevel)} ZAR
                       </span>
                     </div>
                   </div>
@@ -511,11 +512,11 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete }: Ite
                         </div>
                         <div className="flex justify-between items-center pb-sm border-b border-outline-variant/20">
                           <span className="text-outline">Bulk Rate (USD):</span>
-                          <span className="font-mono font-semibold text-green-400">${(item.bulkPriceUsd || item.price).toFixed(3)}</span>
+                          <span className="font-mono font-semibold text-green-400">{fmtUSD(item.bulkPriceUsd || item.price, 3)}</span>
                         </div>
                         <div className="flex justify-between items-center">
                           <span className="text-outline">Bulk Rate (ZAR):</span>
-                          <span className="font-mono font-semibold text-green-400">R{(item.bulkPriceZar || item.price * 19).toFixed(2)}</span>
+                          <span className="font-mono font-semibold text-green-400">{fmtZAR(item.bulkPriceZar || item.price * 19)}</span>
                         </div>
                       </div>
 
@@ -533,7 +534,7 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete }: Ite
                     </div>
                     <div className="flex justify-between">
                       <span className="text-outline">Last Refill Quantity:</span>
-                      <span className="font-mono font-semibold">{item.lastOrderQty ? `${item.lastOrderQty.toLocaleString()} units` : 'Unknown'}</span>
+                      <span className="font-mono font-semibold">{item.lastOrderQty ? `${fmtNumber(item.lastOrderQty)} units` : 'Unknown'}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-outline">Last Ordered Date:</span>

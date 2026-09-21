@@ -212,8 +212,15 @@ export const StockTablesView: React.FC<StockTablesViewProps> = ({
     );
   }, [items, tableSearch]);
 
-  const formatCurrency = (val: number) =>
-    val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // SANS 24 grouping — non-breaking space every three digits from
+  // the right, dot decimal, no currency symbol so the call sites
+  // that already prefix R/$ keep working.
+  const formatCurrency = (val: number) => {
+    const abs = Math.abs(val).toFixed(2);
+    const [intPart, decPart] = abs.split('.');
+    const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+    return `${val < 0 ? '-' : ''}${grouped}.${decPart}`;
+  };
 
   return (
     <div className="p-container-margin space-y-5 max-w-7xl mx-auto w-full">

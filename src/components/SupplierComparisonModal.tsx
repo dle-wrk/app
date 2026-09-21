@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useEscapeKey } from '../lib/useEscapeKey';
 import { AlertTriangle, X, Loader2, TrendingDown, Package, Clock, RefreshCw } from 'lucide-react';
+import { fmtUSD } from '../lib/formatMoney';
 
 interface Shortage {
   component_id: string;
@@ -175,7 +176,7 @@ export default function SupplierComparisonModal({
                   <td className="px-md py-3 text-center">
                     {comp.digikey ? (
                       <div className="space-y-1">
-                        <div className="font-bold text-sm">${comp.digikey.price.toFixed(2)}</div>
+                        <div className="font-bold text-sm">{fmtUSD(comp.digikey.price)}</div>
                         {!comp.digikey.cached && <div className="text-[8px] bg-green-500/20 text-green-400 px-1 py-0.5 rounded uppercase font-bold">Live</div>}
                         {comp.digikey.cached && <div className="text-[8px] bg-surface-container text-outline px-1 py-0.5 rounded uppercase font-bold">Cached</div>}
                         <div className="text-[10px] text-on-surface-variant flex items-center justify-center gap-0.5">
@@ -192,7 +193,7 @@ export default function SupplierComparisonModal({
                   <td className="px-md py-3 text-center">
                     {comp.mouser ? (
                       <div className="space-y-1">
-                        <div className="font-bold text-sm">${comp.mouser.price.toFixed(2)}</div>
+                        <div className="font-bold text-sm">{fmtUSD(comp.mouser.price)}</div>
                         {!comp.mouser.cached && <div className="text-[8px] bg-green-500/20 text-green-400 px-1 py-0.5 rounded uppercase font-bold">Live</div>}
                         {comp.mouser.cached && <div className="text-[8px] bg-surface-container text-outline px-1 py-0.5 rounded uppercase font-bold">Cached</div>}
                         <div className="text-[10px] text-on-surface-variant flex items-center justify-center gap-0.5">
@@ -209,7 +210,7 @@ export default function SupplierComparisonModal({
                   <td className="px-md py-3 text-center">
                     {comp.lcsc ? (
                       <div className="space-y-1">
-                        <div className="font-bold text-sm">${comp.lcsc.price.toFixed(2)}</div>
+                        <div className="font-bold text-sm">{fmtUSD(comp.lcsc.price)}</div>
                         {!comp.lcsc.cached && <div className="text-[8px] bg-green-500/20 text-green-400 px-1 py-0.5 rounded uppercase font-bold">Live</div>}
                         {comp.lcsc.cached && <div className="text-[8px] bg-surface-container text-outline px-1 py-0.5 rounded uppercase font-bold">Cached</div>}
                         <div className="text-[10px] text-on-surface-variant flex items-center justify-center gap-0.5">
@@ -226,7 +227,7 @@ export default function SupplierComparisonModal({
                   <td className="px-md py-3 text-center">
                     {comp.bestSupplier && comp.bestPrice ? (
                       <div className="bg-green-500/10 border border-green-500/20 rounded px-2 py-1 inline-block">
-                        <div className="font-bold text-sm text-green-400">${comp.bestPrice.toFixed(2)}</div>
+                        <div className="font-bold text-sm text-green-400">{fmtUSD(comp.bestPrice)}</div>
                         <div className="text-[10px] text-green-400 font-bold uppercase">{comp.bestSupplier}</div>
                       </div>
                     ) : (

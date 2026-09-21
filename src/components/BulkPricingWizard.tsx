@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { confirmDialog } from '../lib/confirmDialog';
+import { fmtUSD, fmtNumber } from '../lib/formatMoney';
 import {
   Lock,
   Search,
@@ -429,11 +430,11 @@ export default function BulkPricingWizard({ items, onUpdatePrices, onShowNotific
                     <td className="px-lg py-sm text-right font-mono text-[11px] font-bold text-on-surface-variant">
                       <div className="inline-flex items-center gap-1 bg-surface-container-high/40 border border-outline-variant/30 px-2 py-0.5 rounded-lg select-none">
                         <Lock className="w-2.5 h-2.5 text-outline shrink-0" />
-                        <span>{item.stockLevel.toLocaleString()}</span>
+                        <span>{fmtNumber(item.stockLevel)}</span>
                       </div>
                     </td>
                     <td className="px-lg py-sm font-mono text-right text-outline">
-                      ${currentPrice.toFixed(3)}
+                      {fmtUSD(currentPrice, 3)}
                     </td>
                     <td className="px-lg py-sm text-center">
                       {priceDiffPercent === null ? (

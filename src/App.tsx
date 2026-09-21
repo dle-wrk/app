@@ -24,6 +24,7 @@ import { mapDbRowsToTransactions, formatTrxDateTime } from './lib/mapDbTransacti
 import PickPlaceManager from './components/PickPlaceManager';
 import AlternatesManager from './components/AlternatesManager';
 import BulkPricingWizard from './components/BulkPricingWizard';
+import { fmtUSD, fmtNumber } from './lib/formatMoney';
 import ItemDetailModal, { deriveMetric, deriveImperial } from './components/ItemDetailModal';
 import ProductionKitsManager from './components/ProductionKitsManager';
 import Login from './components/Login';
@@ -2665,8 +2666,8 @@ if (currentView === 'alternates') {
                             <tr key={item.partNumber}>
                               <td className="px-2 py-1 font-bold text-primary">{item.partNumber}</td>
                               <td className="px-2 py-1 truncate max-w-[150px]">{item.name}</td>
-                              <td className="px-2 py-1 text-right">{(item.stockLevel ?? 0).toLocaleString()}</td>
-                              <td className="px-2 py-1 text-right">${item.price.toFixed(4)}</td>
+                              <td className="px-2 py-1 text-right">{fmtNumber(item.stockLevel ?? 0)}</td>
+                              <td className="px-2 py-1 text-right">{fmtUSD(item.price, 4)}</td>
                             </tr>
                           ))}
                         </tbody>
