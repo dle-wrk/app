@@ -213,6 +213,18 @@ async function auditKitStock(projectId: number, buildQty: number, opts?: { exclu
     const mfnCandidates = item ? [item.man_pn_1, item.man_pn_2, item.man_pn_3, item.man_pn_4, item.man_pn_5] : [];
     const mfn = mfnCandidates.map(v => typeof v === 'string' ? v.trim() : '')
       .find(v => v && !/^n\/?a$/i.test(v)) || '';
+    // Full arrays of manufacturer + supplier part numbers, minus
+    // any "N/A"-style placeholders. Clients (e.g. the preset-CSV
+    // exporter) classify these by regex to fill supplier-specific
+    // columns — LCSC starts with C followed by digits, DigiKey ends
+    // in -ND, Mouser prefixes numeric like 504- / 683-. Sending the
+    // raw arrays keeps that logic on the client so it can evolve
+    // without a server deploy.
+    const cleanArray = (arr: any[]) =>
+      arr.map(v => typeof v === 'string' ? v.trim() : '')
+        .filter(v => v && !/^n\/?a$/i.test(v));
+    const manPns = cleanArray(item ? [item.man_pn_1, item.man_pn_2, item.man_pn_3, item.man_pn_4, item.man_pn_5] : []);
+    const supPns = cleanArray(item ? [item.sup_pn_1, item.sup_pn_2, item.sup_pn_3, item.sup_pn_4, item.sup_pn_5] : []);
 
     auditResults.push({
       component_id: stockCode,
@@ -230,6 +242,8 @@ async function auditKitStock(projectId: number, buildQty: number, opts?: { exclu
       designator: bomInfo.designator,
       supplier_links: supplierLinks,
       manufacturer_part_number: mfn,
+      manufacturer_part_numbers: manPns,
+      supplier_part_numbers: supPns,
       // Free-text colour marker (mainly LEDs). Only populated when
       // the inventory row carries a value; empty string otherwise so
       // clients can conditionally render.

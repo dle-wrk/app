@@ -227,10 +227,41 @@ interface AuditResult {
   // man_pn_* on the inventory row. Used by the Sourcing column as a
   // fallback link (Google search) when no supplier weblinks exist.
   manufacturer_part_number?: string;
+  // Full lists of manufacturer and supplier part numbers (raw
+  // strings from the man_pn_1..5 / sup_pn_1..5 inventory columns,
+  // minus "N/A" placeholders). The preset-CSV exporter classifies
+  // these by regex to fill supplier-specific columns.
+  manufacturer_part_numbers?: string[];
+  supplier_part_numbers?: string[];
   // Free-text colour marker from inventory.color. Rendered as a chip
   // in the Component ID column when populated — mainly LEDs but any
   // SKU with a colour value shows the badge.
   color?: string;
+}
+
+// Classify a candidate part-number string by supplier convention.
+// LCSC: starts with C followed by digits (C123456).
+// DigiKey: ends with -ND (case insensitive), often distributor
+//   part numbers like 283-…-ND.
+// Mouser: numeric prefix + hyphen + rest, e.g. 504-…, 683-….
+export function classifyPartNumberBySupplier(pn: string): 'lcsc' | 'digikey' | 'mouser' | null {
+  const s = String(pn || '').trim();
+  if (!s) return null;
+  if (/^C\d+$/i.test(s)) return 'lcsc';
+  if (/-ND$/i.test(s)) return 'digikey';
+  if (/^\d{2,4}-\S+/.test(s)) return 'mouser';
+  return null;
+}
+
+// Given a row's man_pn + sup_pn arrays, return the first PN that
+// classifies to the requested supplier, or empty string.
+export function pickSupplierPn(row: AuditResult, supplier: 'lcsc' | 'digikey' | 'mouser'): string {
+  const all = [
+    ...(row.supplier_part_numbers || []),
+    ...(row.manufacturer_part_numbers || []),
+  ];
+  for (const pn of all) if (classifyPartNumberBySupplier(pn) === supplier) return pn;
+  return '';
 }
 
 interface KitBookingViewProps {
@@ -946,7 +977,11 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
   // sequence with a small delay so the browser doesn't throttle or
   // squash them into a single prompt. Each CSV is shaped like the
   // single-qty export, just recomputed for its own build size.
-  const exportPresetCsvs = async (quantities: number[], includeDnf: boolean) => {
+  const exportPresetCsvs = async (
+    quantities: number[],
+    includeDnf: boolean,
+    suppliers: Array<'lcsc' | 'mouser' | 'digikey'> = [],
+  ) => {
     if (quantities.length === 0) return;
     const projectName = projects.find(p => p.id === selectedProjectId)?.projectName?.replace(/[^a-zA-Z0-9_-]/g, '_') || 'project';
     const stamp = new Date().toISOString().slice(0, 10);
@@ -954,36 +989,17 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
       const s = String(v ?? '');
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
+    const supplierLabel = { lcsc: 'LCSC', mouser: 'Mouser', digikey: 'DigiKey' } as const;
+
+    let totalFiles = 0;
     let totalRows = 0;
-    for (let i = 0; i < quantities.length; i++) {
-      const atQty = quantities[i];
-      const inScope = auditResults.filter(r => {
-        if (dnfOverride.has(r.component_id)) return includeDnf;
-        return shortageAt(r, atQty) > 0;
-      });
-      if (inScope.length === 0) continue;
-      const header = ['Part', 'Description', 'Designator', 'Qty per PCB', 'Needed', 'On Hand', 'Shortage', 'Alternates used', 'Reserved elsewhere'];
-      const rows = inScope.map(r => {
-        const isDnf = dnfOverride.has(r.component_id);
-        const reserved = reservations[r.resolved_part_number] || 0;
-        const qtyPerPcb = buildQty > 0 ? Math.max(1, Math.round(r.qty_required / buildQty)) : r.qty_required;
-        const needed = qtyPerPcb * atQty;
-        const shortage = isDnf ? 0 : Math.max(0, needed - r.qty_on_hand);
-        return [
-          r.component_id,
-          r.description,
-          r.designator || '',
-          qtyPerPcb,
-          needed,
-          r.qty_on_hand,
-          isDnf ? 'DNF' : shortage,
-          r.used_alternative ? r.resolved_part_number : '',
-          reserved,
-        ];
-      });
-      const csv = [header, ...rows].map(row => row.map(esc).join(',')).join('\n');
-      const filename = `${projectName}_${stamp}_QTY-${atQty}_shortages${includeDnf ? '_with_dnf' : ''}.csv`;
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+
+    // Downloads are staggered because Chrome silently drops rapid-fire
+    // download() calls. Adding suppliers multiplies the file count; the
+    // 300ms delay between each is enough to avoid the drop and short
+    // enough that the operator sees a coherent burst.
+    const triggerDownload = (csvText: string, filename: string) => {
+      const blob = new Blob([csvText], { type: 'text/csv;charset=utf-8' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -992,19 +1008,83 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+    };
+
+    for (let i = 0; i < quantities.length; i++) {
+      const atQty = quantities[i];
+      const inScope = auditResults.filter(r => {
+        if (dnfOverride.has(r.component_id)) return includeDnf;
+        return shortageAt(r, atQty) > 0;
+      });
+      if (inScope.length === 0) continue;
+
+      // Base file — same shape as before. Always generated as the
+      // full working list; supplier files are additive.
+      const header = ['Part', 'Description', 'Designator', 'Qty per PCB', 'Needed', 'On Hand', 'Shortage', 'Alternates used', 'Reserved elsewhere'];
+      const rows = inScope.map(r => {
+        const isDnf = dnfOverride.has(r.component_id);
+        const reserved = reservations[r.resolved_part_number] || 0;
+        const qtyPerPcb = buildQty > 0 ? Math.max(1, Math.round(r.qty_required / buildQty)) : r.qty_required;
+        const needed = qtyPerPcb * atQty;
+        const shortage = isDnf ? 0 : Math.max(0, needed - r.qty_on_hand);
+        return [
+          r.component_id, r.description, r.designator || '',
+          qtyPerPcb, needed, r.qty_on_hand,
+          isDnf ? 'DNF' : shortage,
+          r.used_alternative ? r.resolved_part_number : '',
+          reserved,
+        ];
+      });
+      const csv = [header, ...rows].map(row => row.map(esc).join(',')).join('\n');
+      triggerDownload(csv, `${projectName}_${stamp}_QTY-${atQty}_shortages${includeDnf ? '_with_dnf' : ''}.csv`);
       totalRows += rows.length;
-      // Small stagger between downloads — Chrome will silently drop
-      // rapid-fire download calls otherwise; 250ms is enough for
-      // every browser I tested and short enough that the operator
-      // barely notices the sequence.
-      if (i < quantities.length - 1) {
+      totalFiles++;
+      if (suppliers.length > 0) await new Promise(r => setTimeout(r, 300));
+
+      // Per-supplier files — one per (build qty × supplier). Rows
+      // where that supplier can't be resolved keep the primary code
+      // in the SKU column with an empty Supplier PN so procurement
+      // sees the gap rather than the row silently vanishing.
+      for (let s = 0; s < suppliers.length; s++) {
+        const supplier = suppliers[s];
+        const supHeader = ['SKU', `${supplierLabel[supplier]} PN`, 'Description', 'Qty per PCB', 'Needed', 'On Hand', 'Shortage', 'Manufacturer PN', 'Alternates used'];
+        const supRows = inScope.map(r => {
+          const isDnf = dnfOverride.has(r.component_id);
+          const qtyPerPcb = buildQty > 0 ? Math.max(1, Math.round(r.qty_required / buildQty)) : r.qty_required;
+          const needed = qtyPerPcb * atQty;
+          const shortage = isDnf ? 0 : Math.max(0, needed - r.qty_on_hand);
+          return [
+            r.component_id,
+            pickSupplierPn(r, supplier),
+            r.description,
+            qtyPerPcb,
+            needed,
+            r.qty_on_hand,
+            isDnf ? 'DNF' : shortage,
+            r.manufacturer_part_number || '',
+            r.used_alternative ? r.resolved_part_number : '',
+          ];
+        });
+        const supCsv = [supHeader, ...supRows].map(row => row.map(esc).join(',')).join('\n');
+        triggerDownload(supCsv, `${projectName}_${stamp}_QTY-${atQty}_${supplierLabel[supplier]}${includeDnf ? '_with_dnf' : ''}.csv`);
+        totalFiles++;
+        // Stagger between every download to keep Chrome from
+        // dropping subsequent ones on tight loops.
+        if (!(i === quantities.length - 1 && s === suppliers.length - 1)) {
+          await new Promise(r => setTimeout(r, 300));
+        }
+      }
+
+      if (suppliers.length === 0 && i < quantities.length - 1) {
         await new Promise(r => setTimeout(r, 300));
       }
     }
-    if (totalRows === 0) {
+
+    if (totalFiles === 0) {
       triggerToast('No shortages at any selected preset — nothing exported.', 'INFO');
     } else {
-      triggerToast(`Exported ${quantities.length} CSV file(s), ${totalRows} row(s) total.`, 'SUCCESS');
+      const supMsg = suppliers.length > 0 ? ` (incl. ${suppliers.map(s => supplierLabel[s]).join(', ')})` : '';
+      triggerToast(`Exported ${totalFiles} file(s)${supMsg}, ${totalRows} shortage row(s) total.`, 'SUCCESS');
     }
     setShowPresetCsvs(false);
   };
@@ -2693,15 +2773,23 @@ function CsvExportDialog({ shortageCount, dnfCount, onCancel, onExport }: {
 // per preset are shown next to each checkbox so it's clear before
 // downloading whether that build size even has anything to procure.
 // -----------------------------------------------------------------------
+type PresetSupplier = 'lcsc' | 'mouser' | 'digikey';
+const PRESET_SUPPLIERS: Array<{ id: PresetSupplier; label: string; match: string }> = [
+  { id: 'lcsc',    label: 'LCSC',    match: 'C-prefix codes (C123456)' },
+  { id: 'mouser',  label: 'Mouser',  match: 'numeric-prefix codes (504-…, 683-…)' },
+  { id: 'digikey', label: 'DigiKey', match: '-ND suffix codes (283-…-ND)' },
+];
+
 function PresetCsvDialog({ presets, shortagesAtPreset, dnfCount, onCancel, onExport }: {
   presets: number[];
   shortagesAtPreset: Record<number, number>;
   dnfCount: number;
   onCancel: () => void;
-  onExport: (quantities: number[], includeDnf: boolean) => void;
+  onExport: (quantities: number[], includeDnf: boolean, suppliers: PresetSupplier[]) => void;
 }) {
   const [selected, setSelected] = useState<Set<number>>(() => new Set(presets));
   const [includeDnf, setIncludeDnf] = useState<boolean>(false);
+  const [supplierSelection, setSupplierSelection] = useState<Set<PresetSupplier>>(() => new Set());
   const [busy, setBusy] = useState<boolean>(false);
   const toggle = (q: number) => {
     setSelected(prev => {
@@ -2710,20 +2798,31 @@ function PresetCsvDialog({ presets, shortagesAtPreset, dnfCount, onCancel, onExp
       return next;
     });
   };
+  const toggleSupplier = (id: PresetSupplier) => {
+    setSupplierSelection(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
   const orderedSelected = presets.filter(p => selected.has(p));
+  const orderedSuppliers = PRESET_SUPPLIERS.map(s => s.id).filter(id => supplierSelection.has(id));
+  // Base file per qty, plus one per (qty × supplier).
+  const filesToGo = orderedSelected.length * (1 + orderedSuppliers.length);
   return (
     <div className="fixed inset-0 z-[200] bg-background/85 backdrop-blur-sm flex items-center justify-center p-md" onClick={busy ? undefined : onCancel}>
-      <div className="bg-surface-container border border-outline-variant rounded-xl shadow-2xl max-w-[520px] w-full" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-surface-container border border-outline-variant rounded-xl shadow-2xl max-w-[560px] w-full max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="px-lg py-md border-b border-outline-variant flex items-center gap-sm">
           <Download className="w-4 h-4 text-primary" />
           <div>
             <h4 className="font-bold text-sm text-on-surface">Save preset CSVs</h4>
             <p className="text-[10px] text-outline mt-0.5">
-              Downloads one shortages CSV per selected build quantity. Files land one after another (short stagger) so your browser keeps all of them.
+              Downloads one shortages CSV per selected build quantity, plus an extra file per (qty × supplier) when suppliers are ticked. Files land one after another (short stagger) so your browser keeps all of them.
             </p>
           </div>
         </div>
-        <div className="px-lg py-md space-y-md">
+        <div className="flex-1 overflow-y-auto px-lg py-md space-y-md">
+          {/* Build qty checkboxes — unchanged */}
           <div className="space-y-1.5">
             {presets.map(q => {
               const short = shortagesAtPreset[q] || 0;
@@ -2745,6 +2844,34 @@ function PresetCsvDialog({ presets, shortagesAtPreset, dnfCount, onCancel, onExp
               );
             })}
           </div>
+
+          {/* Supplier checkboxes — each ticked supplier adds one file
+              per selected build qty, containing that supplier's PN
+              in a dedicated column. Regex hint under each label so
+              the operator understands where the PN comes from. */}
+          <div>
+            <div className="text-[10px] font-bold text-outline uppercase tracking-wider mb-1.5">Also generate per-supplier files</div>
+            <div className="space-y-1.5">
+              {PRESET_SUPPLIERS.map(s => (
+                <label key={s.id} className="flex items-center justify-between gap-2 rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2 cursor-pointer hover:border-primary/60">
+                  <span className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={supplierSelection.has(s.id)}
+                      onChange={() => toggleSupplier(s.id)}
+                      className="w-3.5 h-3.5 accent-primary"
+                    />
+                    <span className="text-xs font-mono font-bold text-on-surface">{s.label}</span>
+                  </span>
+                  <span className="text-[10px] font-mono text-outline">{s.match}</span>
+                </label>
+              ))}
+            </div>
+            <div className="text-[10px] text-outline mt-1.5">
+              Each supplier file carries the SKU, the supplier PN in its own column, the manufacturer PN fallback, and the same shortage math as the base file. Rows where a supplier PN isn't recorded still appear — the column is just blank so procurement can see the gap.
+            </div>
+          </div>
+
           <label className={`flex items-start gap-2 rounded-lg border px-3 py-2.5 ${dnfCount === 0 ? 'border-outline-variant/50 opacity-50 cursor-not-allowed' : 'border-outline-variant bg-surface-container-low hover:border-primary/60 cursor-pointer'}`}>
             <input
               type="checkbox"
@@ -2761,7 +2888,10 @@ function PresetCsvDialog({ presets, shortagesAtPreset, dnfCount, onCancel, onExp
             </div>
           </label>
           <div className="text-[10px] text-outline font-mono">
-            Will download {orderedSelected.length} file{orderedSelected.length === 1 ? '' : 's'}.
+            Will download {filesToGo} file{filesToGo === 1 ? '' : 's'}.
+            {orderedSuppliers.length > 0 && (
+              <> ({orderedSelected.length} base + {orderedSelected.length * orderedSuppliers.length} supplier)</>
+            )}
           </div>
         </div>
         <div className="px-lg py-md border-t border-outline-variant flex justify-end gap-sm">
@@ -2775,12 +2905,12 @@ function PresetCsvDialog({ presets, shortagesAtPreset, dnfCount, onCancel, onExp
           </button>
           <button
             type="button"
-            onClick={async () => { setBusy(true); await onExport(orderedSelected, includeDnf); setBusy(false); }}
+            onClick={async () => { setBusy(true); await onExport(orderedSelected, includeDnf, orderedSuppliers); setBusy(false); }}
             disabled={busy || orderedSelected.length === 0}
             className="px-md py-1.5 rounded-lg text-xs font-bold bg-primary text-on-primary hover:brightness-110 active:scale-95 disabled:opacity-40 flex items-center gap-1.5"
           >
             {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-            {busy ? 'Downloading…' : `Download ${orderedSelected.length} file${orderedSelected.length === 1 ? '' : 's'}`}
+            {busy ? 'Downloading…' : `Download ${filesToGo} file${filesToGo === 1 ? '' : 's'}`}
           </button>
         </div>
       </div>
