@@ -26,6 +26,7 @@ import {
   Search,
 } from 'lucide-react';
 import { useEscapeKey } from '../../lib/useEscapeKey';
+import { fmtNumber } from '../../lib/formatMoney';
 
 interface MergedRow {
   part: string;
@@ -464,7 +465,7 @@ export default function ProcurementShortageCheckerView({ triggerToast }: Props) 
           </span>
           {mergedRows.length > 0 && (
             <span className="text-[10px] font-mono text-outline">
-              {mergedRows.length} unique part{mergedRows.length === 1 ? '' : 's'} · total shortage {totalShortage.toLocaleString()}
+              {mergedRows.length} unique part{mergedRows.length === 1 ? '' : 's'} · total shortage {fmtNumber(totalShortage)}
             </span>
           )}
         </div>
@@ -493,15 +494,15 @@ export default function ProcurementShortageCheckerView({ triggerToast }: Props) 
                   <td className="px-md py-2 max-w-[220px]">
                     <div className="truncate text-outline text-[11px]" title={r.designator}>{r.designator || '—'}</div>
                   </td>
-                  <td className="px-md py-2 text-right font-mono">{r.qtyPerPcb.toLocaleString()}</td>
-                  <td className="px-md py-2 text-right font-mono">{r.needed.toLocaleString()}</td>
-                  <td className="px-md py-2 text-right font-mono">{r.onHand.toLocaleString()}</td>
+                  <td className="px-md py-2 text-right font-mono">{fmtNumber(r.qtyPerPcb)}</td>
+                  <td className="px-md py-2 text-right font-mono">{fmtNumber(r.needed)}</td>
+                  <td className="px-md py-2 text-right font-mono">{fmtNumber(r.onHand)}</td>
                   <td className="px-md py-2 text-right">
                     <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold font-mono bg-red-500/15 text-red-400 border border-red-500/25">
-                      {r.shortage.toLocaleString()}
+                      {fmtNumber(r.shortage)}
                     </span>
                   </td>
-                  <td className="px-md py-2 text-right font-mono text-outline">{r.reservedElsewhere > 0 ? r.reservedElsewhere.toLocaleString() : ''}</td>
+                  <td className="px-md py-2 text-right font-mono text-outline">{r.reservedElsewhere > 0 ? fmtNumber(r.reservedElsewhere) : ''}</td>
                   <td className="px-md py-2 text-[10px] text-outline font-mono max-w-[160px]">
                     <div className="truncate" title={r.sourceFiles.join(', ')}>
                       {r.sourceFiles.length}×
@@ -651,7 +652,7 @@ function LoadBrowserDialog({ projects, busy, onLoad, onDelete, onClose }: {
                   <div className="flex-1 min-w-0">
                     <div className="font-mono text-xs font-bold text-primary truncate">{p.name}</div>
                     <div className="text-[10px] text-outline font-mono mt-0.5">
-                      {p.rowCount} part{p.rowCount === 1 ? '' : 's'} · total shortage {p.totalShortage.toLocaleString()} · updated {new Date(p.updatedAt).toLocaleString()}
+                      {p.rowCount} part{p.rowCount === 1 ? '' : 's'} · total shortage {fmtNumber(p.totalShortage)} · updated {new Date(p.updatedAt).toLocaleString()}
                     </div>
                     {p.notes && <div className="text-[10px] text-on-surface-variant mt-1 truncate italic">{p.notes}</div>}
                   </div>

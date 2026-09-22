@@ -614,7 +614,7 @@ const ReceiptScanModal: React.FC<{
                 </div>
                 <div>
                   <div className="text-[10px] uppercase text-outline">Total</div>
-                  <div className="font-mono font-bold text-primary">{ocr.total !== null ? ocr.total.toFixed(2) : '—'}</div>
+                  <div className="font-mono font-bold text-primary">{ocr.total !== null ? fmtMoney(ocr.total) : '—'}</div>
                 </div>
               </div>
             )}
@@ -628,7 +628,7 @@ const ReceiptScanModal: React.FC<{
                     <div key={idx} className="flex items-baseline gap-2 text-[11px]">
                       <span className="font-mono text-outline w-8 text-right">{li.quantity}×</span>
                       <span className="font-medium truncate flex-1" title={li.description}>{li.description}</span>
-                      <span className="font-mono text-primary">{li.lineTotal.toFixed(2)}</span>
+                      <span className="font-mono text-primary">{fmtMoney(li.lineTotal)}</span>
                     </div>
                   ))}
                   {ocr.lineItems.length > 8 && (

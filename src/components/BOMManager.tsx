@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useEscapeKey } from '../lib/useEscapeKey';
 import { Item, Transaction, Project, BOMItem } from '../types';
 import { mapDbRowsToItems } from '../lib/mapDbItem';
+import { fmtNumber } from '../lib/formatMoney';
 import BuildQtyPicker from './BuildQtyPicker';
 import { colorToCssBackground } from './views/KitBookingView';
 import { 
@@ -545,13 +546,13 @@ export default function BOMManager({
 
                         {/* Calculated Target total required */}
                         <td className="px-lg py-3 text-right font-mono font-bold text-on-surface" data-label="Total needed">
-                          {requiredTotal.toLocaleString()}
+                          {fmtNumber(requiredTotal)}
                         </td>
 
                         {/* Current inventory level */}
                         <td className="px-lg py-3 text-right font-mono" data-label="On hand">
                           <span className={`font-semibold ${currentStock < 10 ? 'text-red-400 font-black' : 'text-on-surface-variant'}`}>
-                            {currentStock.toLocaleString()}
+                            {fmtNumber(currentStock)}
                           </span>
                           <span className="text-[9px] text-[#8c909f] block">
                             {inventoryItem?.status === 'DISCONTINUED' ? 'DISCONTINUED' : 'In Stock'}

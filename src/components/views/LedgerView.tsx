@@ -2,6 +2,7 @@ import React from 'react';
 import { Download, Lightbulb } from 'lucide-react';
 import { Transaction } from '../../types';
 import { formatTrxDateTime, isInboundType, isOutboundType } from '../../lib/mapDbTransaction';
+import { fmtNumber } from '../../lib/formatMoney';
 
 interface LedgerViewProps {
   transactions: Transaction[];
@@ -83,15 +84,15 @@ export const LedgerView: React.FC<LedgerViewProps> = ({
         <div className="bg-surface-container p-md rounded-xl border border-outline-variant">
           <span className="text-[9px] text-outline font-label-caps block mb-1">TRX TODAY</span>
           <div className="flex items-baseline gap-2">
-            <span className="text-xl font-black text-primary">{stats.trxToday.toLocaleString()}</span>
-            <span className="text-outline text-[11px] font-mono">of {transactions.length.toLocaleString()} total</span>
+            <span className="text-xl font-black text-primary">{fmtNumber(stats.trxToday)}</span>
+            <span className="text-outline text-[11px] font-mono">of {fmtNumber(transactions.length)} total</span>
           </div>
         </div>
         <div className="bg-surface-container p-md rounded-xl border border-outline-variant">
           <span className="text-[9px] text-outline font-label-caps block mb-1">NET STOCK CHANGE</span>
           <div className="flex items-baseline gap-2">
             <span className={`text-xl font-black ${stats.netChange >= 0 ? 'text-tertiary' : 'text-red-400'}`}>
-              {stats.netChange > 0 ? `+${stats.netChange.toLocaleString()}` : stats.netChange.toLocaleString()}
+              {stats.netChange > 0 ? `+${fmtNumber(stats.netChange)}` : fmtNumber(stats.netChange)}
             </span>
             <span className="text-outline text-[11px] font-mono">units</span>
           </div>
@@ -238,7 +239,7 @@ export const LedgerView: React.FC<LedgerViewProps> = ({
                 <>
                   <span className="font-mono font-bold text-primary">{stats.topConsumed.partNumber}</span>
                   {' '}({stats.topConsumed.name}) is the most consumed part in the ledger, with{' '}
-                  <span className="font-bold text-on-surface">{stats.topConsumed.qty.toLocaleString()} units</span>
+                  <span className="font-bold text-on-surface">{fmtNumber(stats.topConsumed.qty)} units</span>
                   {' '}booked out across {stats.outbound} outbound movement{stats.outbound === 1 ? '' : 's'}.
                 </>
               ) : (

@@ -24,6 +24,7 @@ import {
   Filter,
 } from 'lucide-react';
 import { ProductionKit, Project, Item, Transaction } from '../../types';
+import { fmtNumber } from '../../lib/formatMoney';
 
 interface StockTablesViewProps {
   setIsKitModalOpen: (open: boolean) => void;
@@ -304,7 +305,7 @@ export const StockTablesView: React.FC<StockTablesViewProps> = ({
               <span className="text-[9px] font-mono text-on-surface-variant/50 uppercase">SKUs</span>
             </div>
             <span className="text-lg font-black text-on-surface tracking-tight">
-              {analytics.totalSkus.toLocaleString()}
+              {fmtNumber(analytics.totalSkus)}
             </span>
             <span className="text-[10px] text-on-surface-variant/60">Active Stock Codes</span>
           </div>
@@ -351,10 +352,10 @@ export const StockTablesView: React.FC<StockTablesViewProps> = ({
             </span>
             <div className="flex items-center gap-2 text-[10px]">
               <span className="text-green-400 flex items-center gap-0.5">
-                <TrendingUp className="w-3 h-3" />+{analytics.inboundToday.toLocaleString()}
+                <TrendingUp className="w-3 h-3" />+{fmtNumber(analytics.inboundToday)}
               </span>
               <span className="text-red-400 flex items-center gap-0.5">
-                <TrendingDown className="w-3 h-3" />-{analytics.outboundToday.toLocaleString()}
+                <TrendingDown className="w-3 h-3" />-{fmtNumber(analytics.outboundToday)}
               </span>
             </div>
           </div>
@@ -389,7 +390,7 @@ export const StockTablesView: React.FC<StockTablesViewProps> = ({
                     <span className="font-mono text-[11px] font-bold text-on-surface">{table.name}</span>
                   </div>
                   <span className="text-[9px] font-mono font-black bg-primary/10 text-primary px-1.5 py-0.5 rounded-full">
-                    {table.rowSource().toLocaleString()} rows
+                    {fmtNumber(table.rowSource())} rows
                   </span>
                 </div>
                 <div className="space-y-0.5 mb-2.5">
@@ -479,7 +480,7 @@ export const StockTablesView: React.FC<StockTablesViewProps> = ({
           </span>
           <div className="flex justify-between items-center text-on-surface-variant/70 text-[11px] font-mono">
             <span>Production_Kits</span>
-            <span className="font-bold">{productionKits.length.toLocaleString()} Rows</span>
+            <span className="font-bold">{fmtNumber(productionKits.length)} Rows</span>
           </div>
           <h5 className={`font-bold text-sm ${selectedTableTab === 'Production_Kits' ? 'text-primary' : 'text-on-surface'}`}>
             Production_Kits
@@ -497,7 +498,7 @@ export const StockTablesView: React.FC<StockTablesViewProps> = ({
         >
           <div className="flex justify-between items-center text-on-surface-variant/70 text-[11px] font-mono">
             <span>Item_Pricing</span>
-            <span className="font-bold">{items.length.toLocaleString()} Rows</span>
+            <span className="font-bold">{fmtNumber(items.length)} Rows</span>
           </div>
           <h5 className="font-bold text-sm text-on-surface">Item_Pricing</h5>
           <p className="text-[11px] text-on-surface-variant/80">Standard vendor rates directory.</p>
@@ -598,7 +599,7 @@ export const StockTablesView: React.FC<StockTablesViewProps> = ({
                           </span>
                         </td>
                         <td className="px-4 py-3 text-right text-on-surface font-semibold">
-                          {(kit.qtyAvailable ?? 0).toLocaleString()}
+                          {fmtNumber(kit.qtyAvailable ?? 0)}
                         </td>
                         <td className="px-4 py-3 text-on-surface">{kit.assemblyLine}</td>
                         <td className="px-4 py-3 text-on-surface-variant/70 text-right">{kit.lastUpdated}</td>
@@ -665,7 +666,7 @@ export const StockTablesView: React.FC<StockTablesViewProps> = ({
                               : 'text-on-surface'
                           }
                         >
-                          {(item.stockLevel || 0).toLocaleString()}
+                          {fmtNumber(item.stockLevel || 0)}
                         </span>
                       </td>
                       <td className="px-4 py-3">
@@ -689,7 +690,7 @@ export const StockTablesView: React.FC<StockTablesViewProps> = ({
             </table>
             {filteredPricingItems.length > 100 && (
               <div className="px-4 py-2.5 border-t border-outline-variant/30 text-center text-[10px] font-mono text-on-surface-variant/50">
-                Showing 100 of {filteredPricingItems.length.toLocaleString()} rows — use search to filter
+                Showing 100 of {fmtNumber(filteredPricingItems.length)} rows — use search to filter
               </div>
             )}
           </div>

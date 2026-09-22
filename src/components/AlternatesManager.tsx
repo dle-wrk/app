@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Item } from '../types';
+import { fmtNumber } from '../lib/formatMoney';
 import {
   ArrowRightLeft,
   Search,
@@ -202,7 +203,7 @@ export default function AlternatesManager({
                                 ? 'text-tertiary'
                                 : 'text-success font-black'
                             }`}>
-                            {altItem.stockLevel.toLocaleString()} units
+                            {fmtNumber(altItem.stockLevel)} units
                           </span>
 
                           {/* First position top preference marker layout indicator code banner */}

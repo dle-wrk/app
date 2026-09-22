@@ -273,7 +273,7 @@ export default function BulkPricingWizard({ items, onUpdatePrices, onShowNotific
               disabled={isQuerying}
               className="bg-surface-container-high border border-outline-variant rounded px-2 py-1 text-xs text-on-surface outline-none focus:border-primary disabled:opacity-50"
             >
-              {QTY_OPTIONS.map(q => <option key={q} value={q}>{q.toLocaleString()}</option>)}
+              {QTY_OPTIONS.map(q => <option key={q} value={q}>{fmtNumber(q)}</option>)}
             </select>
           </label>
 
@@ -371,7 +371,7 @@ export default function BulkPricingWizard({ items, onUpdatePrices, onShowNotific
               <th className="px-lg py-sm text-right">Protected Qty</th>
               <th className="px-lg py-sm text-right">Base unit price</th>
               <th className="px-lg py-sm text-center">Change</th>
-              <th className="px-lg py-sm text-right">Live price @ {targetQty.toLocaleString()}</th>
+              <th className="px-lg py-sm text-right">Live price @ {fmtNumber(targetQty)}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-outline-variant/30 text-xs text-on-surface">
@@ -452,8 +452,8 @@ export default function BulkPricingWizard({ items, onUpdatePrices, onShowNotific
                       ) : f?.price != null ? (
                         <div className="flex items-center justify-end gap-1 text-primary font-bold">
                           <ArrowRight className="w-2.5 h-2.5 text-outline shrink-0 mr-1" />
-                          <span>{f.currency ? `${f.currency} ` : ''}{f.price.toFixed(3)}</span>
-                          {f.breakQty ? <span className="text-[9px] text-outline font-normal ml-1">@{Number(f.breakQty).toLocaleString()}</span> : null}
+                          <span>{f.currency ? `${f.currency} ` : ''}{fmtNumber(f.price, 3)}</span>
+                          {f.breakQty ? <span className="text-[9px] text-outline font-normal ml-1">@{fmtNumber(Number(f.breakQty))}</span> : null}
                         </div>
                       ) : f?.error ? (
                         <span className="inline-flex items-center gap-1 text-outline text-[10px] font-normal" title={f.error}><AlertCircle className="w-3 h-3 shrink-0" /> {f.error}</span>

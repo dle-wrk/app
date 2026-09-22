@@ -6,6 +6,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 // they picked one of these presets as the active build quantity.
 const PRESET_QTYS = [50, 100, 250, 500, 1000] as const;
 import { Project } from '../../types';
+import { fmtNumber } from '../../lib/formatMoney';
 import ShortageToPOModal from '../ShortageToPOModal';
 import BomLineEditorModal from '../BomLineEditorModal';
 import BuildQtyPicker from '../BuildQtyPicker';
@@ -1638,12 +1639,12 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
                         key={atQty}
                         data-label={`@${atQty}`}
                         className={`px-2 py-3 text-right font-mono text-[11px] ${i === 0 ? 'border-l border-outline-variant/40' : ''} ${i === PRESET_QTYS.length - 1 ? 'border-r border-outline-variant/40' : ''}`}
-                        title={isDnf ? 'DNF for this kit' : short > 0 ? `Short ${short.toLocaleString()} at build qty ${atQty}` : `Fully covered at build qty ${atQty}`}
+                        title={isDnf ? 'DNF for this kit' : short > 0 ? `Short ${fmtNumber(short)} at build qty ${atQty}` : `Fully covered at build qty ${atQty}`}
                       >
                         {isDnf ? (
                           <span className="text-outline/50">DNF</span>
                         ) : short > 0 ? (
-                          <span className="text-red-400 font-bold">{short.toLocaleString()}</span>
+                          <span className="text-red-400 font-bold">{fmtNumber(short)}</span>
                         ) : (
                           <span className="text-outline/40">·</span>
                         )}
