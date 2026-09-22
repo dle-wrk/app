@@ -589,7 +589,8 @@ export type ViewType =
   | 'auto_po_config'
   | 'quality_compliance'
   | 'advanced_automation'
-  | 'documentation';
+  | 'documentation'
+  | 'supplier_bom';
 
 export interface ProductionProduct {
   id: number;

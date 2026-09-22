@@ -103,6 +103,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'bom_manager', label: 'Bill of Materials', icon: Boxes },
     { id: 'pick_place', label: 'Pick & Place', icon: Database },
     { id: 'alternates', label: 'Component Alternates', icon: ArrowLeftRight },
+    { id: 'supplier_bom', label: 'Supplier BOM Generator', icon: Database },
   ] as const;
 
   const projectItems = [

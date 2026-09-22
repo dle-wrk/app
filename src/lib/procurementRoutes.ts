@@ -156,4 +156,81 @@ export function registerProcurementRoutes(app: Express): void {
       res.status(500).json({ error: err.message });
     }
   });
+
+  // Supplier BOM lookup — for each requested part, return the three
+  // supplier part numbers (LCSC / DigiKey / Mouser) and metadata used
+  // by the Supplier BOM Generator. Column assignment matches the
+  // legacy Python tool: sup_pn_1 = Mouser, sup_pn_2 = DigiKey,
+  // sup_pn_3 = LCSC. When the requested serial doesn't have a PN in a
+  // given column, we fall back to any reel with the same
+  // (name, footprint) — same rule as the Python `_find_pn_in_reels`
+  // helper — so an equivalent reel labelled with a different SKU can
+  // still supply the number.
+  const JUNK_VALUES = new Set(['', 'n/a', 'na', 'nan', 'none', '-', 'null', 'not available']);
+  const isJunk = (v: string | null | undefined) => JUNK_VALUES.has((v || '').trim().toLowerCase());
+  const clean = (v: string | null | undefined) => (v || '').trim();
+
+  app.post('/api/supplier-bom/lookup', async (req, res) => {
+    const raw = req.body?.parts;
+    if (!Array.isArray(raw) || raw.length === 0) return res.json([]);
+    const parts = raw.map((p: any) => String(p || '').trim()).filter(Boolean).slice(0, 5000);
+    if (parts.length === 0) return res.json([]);
+    try {
+      // First pass: direct hit by serial_number.
+      const { rows: direct } = await query<any>(
+        `SELECT serial_number, name, footprint, description,
+                sup_pn_1, sup_pn_2, sup_pn_3
+         FROM inventory
+         WHERE serial_number = ANY($1::text[])`,
+        [parts]
+      );
+      const byPart = new Map<string, any>();
+      for (const r of direct) byPart.set(r.serial_number, r);
+
+      // Second pass: for parts missing a supplier PN, try same
+      // (name, footprint) reels. Runs once per part so a very sparse
+      // request still finishes in tens of ms.
+      const out = [] as any[];
+      for (const p of parts) {
+        const row = byPart.get(p) || null;
+        const anchor = row ? { name: clean(row.name).toLowerCase(), footprint: clean(row.footprint).toLowerCase() } : null;
+
+        // Helper: for one supplier column, either take the direct hit
+        // or, when it's junk/empty, look for the same column on any
+        // equivalent reel.
+        const pickCol = async (col: 'sup_pn_1' | 'sup_pn_2' | 'sup_pn_3'): Promise<string> => {
+          const v = row ? clean(row[col]) : '';
+          if (!isJunk(v)) return v;
+          if (!anchor || (!anchor.name && !anchor.footprint)) return '';
+          const { rows: fb } = await query<any>(
+            `SELECT ${col} AS pn FROM inventory
+             WHERE lower(name) = $1 AND lower(footprint) = $2
+             LIMIT 20`,
+            [anchor.name, anchor.footprint]
+          );
+          for (const f of fb) {
+            const cand = clean(f.pn);
+            if (!isJunk(cand)) return cand;
+          }
+          return '';
+        };
+
+        const lcsc = await pickCol('sup_pn_3');
+        const digikey = await pickCol('sup_pn_2');
+        const mouser = await pickCol('sup_pn_1');
+
+        out.push({
+          part: p,
+          found: !!row,
+          name: row ? clean(row.name) : '',
+          description: row ? clean(row.description) : '',
+          footprint: row ? clean(row.footprint) : '',
+          supplierPns: { LCSC: lcsc, DigiKey: digikey, Mouser: mouser },
+        });
+      }
+      res.json(out);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
 }

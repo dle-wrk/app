@@ -40,6 +40,7 @@ export const ROUTES: CommandRoute[] = [
   { id: 'production_costs', label: 'Production Costs', path: 'Stock › Production Costs', keywords: 'cogs bom cost margin markup selling price', group: 'Pages', icon: 'Calculator', target: { view: 'production_costs' } },
   { id: 'kit_booking', label: 'P&P Kit Booking', path: 'Manufacturing', keywords: 'pick place kit reserve book', group: 'Pages', icon: 'Boxes', target: { view: 'kit_booking' } },
   { id: 'bom_manager', label: 'Bill of Materials', path: 'Manufacturing › BOM', keywords: 'bom bill of materials board pcb components', group: 'Pages', icon: 'Boxes', target: { view: 'bom_manager' } },
+  { id: 'supplier_bom', label: 'Supplier BOM Generator', path: 'Manufacturing › Supplier BOM', keywords: 'supplier bom lcsc digikey mouser export csv', group: 'Pages', icon: 'Database', target: { view: 'supplier_bom' } },
   { id: 'pick_place', label: 'Pick & Place', path: 'Manufacturing', keywords: 'p&p smt pnp coordinates placement', group: 'Pages', icon: 'Database', target: { view: 'pick_place' } },
   { id: 'alternates', label: 'Component Alternates', path: 'Manufacturing', keywords: 'substitutes alternates equivalents crosses', group: 'Pages', icon: 'ArrowLeftRight', target: { view: 'alternates' } },
   { id: 'projects', label: 'Project Manager', path: 'Projects', keywords: 'projects jobs builds', group: 'Pages', icon: 'ClipboardList', target: { view: 'projects' } },

@@ -19,6 +19,7 @@ import { useEscapeKey } from './lib/useEscapeKey';
 import { ConfirmDialogHost, confirmDialog } from './lib/confirmDialog';
 import { setToastHandler } from './lib/toast';
 import BOMManager from './components/BOMManager';
+import { SupplierBOMGeneratorView } from './components/views/SupplierBOMGeneratorView';
 import { mapDbRowsToItems } from './lib/mapDbItem';
 import { mapDbRowsToTransactions, formatTrxDateTime } from './lib/mapDbTransaction';
 import PickPlaceManager from './components/PickPlaceManager';
@@ -2256,6 +2257,10 @@ if (currentView === 'alternates') {
 
              if (currentView === 'documentation') {
                return <DocumentationView currentUserRole={currentUser?.role} triggerToast={triggerToast} />;
+             }
+
+             if (currentView === 'supplier_bom') {
+               return <SupplierBOMGeneratorView triggerToast={triggerToast} />;
              }
 
              return null;
