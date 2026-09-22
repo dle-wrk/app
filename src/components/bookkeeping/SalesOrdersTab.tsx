@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, Eye, Trash2, Upload, Download, Paperclip, CheckCircle2, XCircle, Printer, Truck, AlertTriangle } from 'lucide-react';
+import { Plus, Eye, Trash2, Upload, Download, Paperclip, CheckCircle2, XCircle, Printer, Truck, AlertTriangle, Zap } from 'lucide-react';
 import { ClientOrder } from '../../types';
 import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, apiGet, apiPost, apiDelete, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
 import { LineItemsEditor, EditableLine, newEditableLine, lineTotals } from './LineItemsEditor';
@@ -220,6 +220,7 @@ export const SalesOrdersTab: React.FC<ModuleDataProps & SalesOrdersTabExtras> = 
           onClose={() => setViewing(null)}
           onDelete={() => handleDelete(viewing.id)}
           onDocChanged={() => refetchOrder(viewing.id)}
+          accounts={props.accounts}
           onCreateDispatch={props.onCreateDispatch ? (noteType) => {
             setViewing(null);
             props.onCreateDispatch!(viewing.id, noteType);
@@ -371,8 +372,10 @@ const SalesOrderViewModal: React.FC<{
   onCreateDispatch?: (noteType: 'DELIVERY' | 'COLLECTION') => void;
   onDelete: () => void;
   onDocChanged: () => void;
-}> = ({ order, clientName, busy, setBusy, triggerToast, onClose, onDelete, onDocChanged, onCreateDispatch }) => {
+  accounts?: any[];
+}> = ({ order, clientName, busy, setBusy, triggerToast, onClose, onDelete, onDocChanged, onCreateDispatch, accounts }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [autoFulfilOpen, setAutoFulfilOpen] = useState(false);
 
   const handleUpload = async (file: File) => {
     if (file.size > DOC_MAX_BYTES) {
@@ -553,6 +556,9 @@ const SalesOrderViewModal: React.FC<{
         <div className="flex items-center gap-sm flex-wrap">
           <DangerButton icon={<Trash2 className="w-3.5 h-3.5" />} onClick={onDelete} disabled={busy}>Delete</DangerButton>
           <SecondaryButton icon={<Printer className="w-3.5 h-3.5" />} onClick={openPrint}>Print</SecondaryButton>
+          {order.status !== 'FULFILLED' && order.status !== 'CANCELLED' && (
+            <PrimaryButton icon={<Zap className="w-3.5 h-3.5" />} onClick={() => setAutoFulfilOpen(true)} disabled={busy}>Auto-Fulfil…</PrimaryButton>
+          )}
           {onCreateDispatch && (
             <>
               <SecondaryButton icon={<Truck className="w-3.5 h-3.5" />} onClick={() => onCreateDispatch('DELIVERY')}>Create Delivery Note</SecondaryButton>
@@ -565,6 +571,144 @@ const SalesOrderViewModal: React.FC<{
           <div className="flex justify-between text-on-surface-variant"><span>Tax</span><span className="font-mono">{fmtMoney(order.tax, order.currency)}</span></div>
           <div className="flex justify-between font-bold text-sm border-t border-outline-variant/40 pt-1"><span>Total</span><span className="font-mono text-primary">{fmtMoney(order.total, order.currency)}</span></div>
         </div>
+      </div>
+
+      {autoFulfilOpen && (
+        <AutoFulfilModal
+          order={order}
+          accounts={accounts || []}
+          triggerToast={triggerToast}
+          onClose={() => setAutoFulfilOpen(false)}
+          onDone={() => { setAutoFulfilOpen(false); onDocChanged(); onClose(); }}
+        />
+      )}
+    </Modal>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Auto-Fulfil macro — Sales Order → Invoice (SENT) → Delivery Note
+// (COMPLETED) → optional payment. Everything runs server-side in one
+// transaction: on failure nothing lands, on success the summary toast
+// names each doc that was created.
+// ---------------------------------------------------------------------------
+const AutoFulfilModal: React.FC<{
+  order: any;
+  accounts: any[];
+  triggerToast: (msg: string, type?: any) => void;
+  onClose: () => void;
+  onDone: () => void;
+}> = ({ order, accounts, triggerToast, onClose, onDone }) => {
+  const [createInvoice, setCreateInvoice] = useState(true);
+  const [sendInvoice, setSendInvoice] = useState(true);
+  const [createDelivery, setCreateDelivery] = useState(true);
+  const [completeDelivery, setCompleteDelivery] = useState(true);
+  const [recordPayment, setRecordPayment] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState('EFT');
+  const [depositAccountId, setDepositAccountId] = useState<string>('');
+  const [running, setRunning] = useState(false);
+
+  const bankAccounts = accounts.filter(a => a.type === 'ASSET' && (a.subtype === 'BANK' || /bank|cash|clearing/i.test(a.name || '')));
+
+  const run = async () => {
+    if (recordPayment && !depositAccountId) {
+      triggerToast('Pick a deposit account for the payment.', 'ERROR');
+      return;
+    }
+    setRunning(true);
+    try {
+      const res = await apiPost(`/api/client-orders/${order.id}/auto-fulfil`, {
+        createInvoice, sendInvoice, createDelivery, completeDelivery,
+        recordPayment,
+        paymentMethod: recordPayment ? paymentMethod : undefined,
+        depositAccountId: recordPayment ? Number(depositAccountId) : undefined,
+      });
+      const parts: string[] = [];
+      if (res.invoiceNumber) parts.push(`Invoice ${res.invoiceNumber}`);
+      if (res.dispatchNoteNumber) parts.push(`Dispatch ${res.dispatchNoteNumber}`);
+      if (res.paymentNumber) parts.push(`Payment ${res.paymentNumber}`);
+      triggerToast(`Auto-fulfil done — ${parts.join(' · ')}.`);
+      onDone();
+    } catch (err: any) {
+      triggerToast(err?.message || 'Auto-fulfil failed', 'ERROR');
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const StepRow: React.FC<{ label: string; hint: string; checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }> = ({ label, hint, checked, onChange, disabled }) => (
+    <label className={`flex items-start gap-3 p-3 rounded-lg border transition-colors ${checked ? 'border-primary/50 bg-primary/5' : 'border-outline-variant/50 bg-surface-container-low'} ${disabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer hover:bg-surface-container-high/40'}`}>
+      <input type="checkbox" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} className="mt-0.5 w-4 h-4 accent-primary" />
+      <div className="flex-1">
+        <div className="text-xs font-bold text-on-surface">{label}</div>
+        <div className="text-[10px] text-outline mt-0.5">{hint}</div>
+      </div>
+    </label>
+  );
+
+  return (
+    <Modal title={`Auto-Fulfil ${order.orderNumber}`} subtitle="One-click chain: SO → Invoice → Delivery → (optional) payment. Runs in a single transaction — nothing lands if anything fails." onClose={onClose} maxWidth="max-w-lg">
+      <div className="space-y-2">
+        <StepRow
+          label="Create invoice"
+          hint="Draft invoice with the SO lines. Deduct-stock is enabled on every line."
+          checked={createInvoice}
+          onChange={setCreateInvoice}
+        />
+        <StepRow
+          label="Send invoice (post journal + deduct stock)"
+          hint="Promotes the draft to SENT: posts the AR/sales/VAT journal, decrements stock for each priced line, and releases the matching SO reservation."
+          checked={sendInvoice}
+          onChange={setSendInvoice}
+          disabled={!createInvoice}
+        />
+        <StepRow
+          label="Create delivery note"
+          hint="Delivery note linked to this SO and the invoice above. If the invoice was sent, its lines skip a second book-out; otherwise the delivery-note lines carry the book-out flag."
+          checked={createDelivery}
+          onChange={setCreateDelivery}
+        />
+        <StepRow
+          label="Mark delivery complete"
+          hint="Flips the delivery note to COMPLETED and, if it holds the book-out flag, decrements stock and releases the reservation."
+          checked={completeDelivery}
+          onChange={setCompleteDelivery}
+          disabled={!createDelivery}
+        />
+        <StepRow
+          label="Record payment received"
+          hint="Records the invoice total as a payment against the invoice and posts the deposit journal."
+          checked={recordPayment}
+          onChange={setRecordPayment}
+          disabled={!createInvoice || !sendInvoice}
+        />
+        {recordPayment && (
+          <div className="grid grid-cols-2 gap-3 pl-8 pt-1">
+            <div>
+              <FieldLabel>Method</FieldLabel>
+              <select className={selectClass} value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}>
+                <option value="EFT">EFT</option>
+                <option value="CARD">Card</option>
+                <option value="CASH">Cash</option>
+                <option value="CHEQUE">Cheque</option>
+              </select>
+            </div>
+            <div>
+              <FieldLabel>Deposit to</FieldLabel>
+              <select className={selectClass} value={depositAccountId} onChange={(e) => setDepositAccountId(e.target.value)}>
+                <option value="">— Select an account —</option>
+                {bankAccounts.map((a: any) => <option key={a.id} value={a.id}>{a.code} {a.name}</option>)}
+              </select>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="flex items-center justify-end gap-2 pt-md mt-md border-t border-outline-variant/20">
+        <SecondaryButton onClick={onClose} disabled={running}>Cancel</SecondaryButton>
+        <PrimaryButton icon={<Zap className="w-3.5 h-3.5" />} onClick={run} disabled={running || (!createInvoice && !createDelivery)}>
+          {running ? 'Running…' : 'Run macro'}
+        </PrimaryButton>
       </div>
     </Modal>
   );

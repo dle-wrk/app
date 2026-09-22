@@ -400,6 +400,196 @@ export function registerBookkeepingRoutes(app: Express) {
   // safe to call at any time — the write-path recomputes from live stock
   // levels + other orders' reservations, so this is idempotent.
 
+  // ---------------------------------------------------------------------------
+  // Auto-fulfil macro: SO → Invoice (SENT) → Delivery Note (COMPLETED) in
+  // one round-trip. Everything runs in a single transaction so a failure
+  // half-way through leaves nothing behind — the SO retains its old
+  // status and no partial invoice/delivery is created.
+  //
+  // Payload options (all optional booleans, default true except payment):
+  //   createInvoice, sendInvoice, createDelivery, completeDelivery,
+  //   recordPayment (+ paymentAmount, paymentMethod, depositAccountId)
+  //
+  // Book-out behaviour: the invoice line carries deduct_stock=true so
+  // finalizeInvoiceInTx handles both the physical decrement and the
+  // reservation release. The delivery note's lines then default to
+  // deduct_stock=false so completing it doesn't double-decrement — it's
+  // a paper record of the shipment, not a second stock movement.
+  // ---------------------------------------------------------------------------
+  app.post('/api/client-orders/:id/auto-fulfil', async (req, res) => {
+    const id = parseInt(req.params.id);
+    const opts = req.body || {};
+    const createInvoice = opts.createInvoice !== false;
+    const sendInvoice = opts.sendInvoice !== false;
+    const createDelivery = opts.createDelivery !== false;
+    const completeDelivery = opts.completeDelivery !== false;
+    const recordPayment = !!opts.recordPayment;
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const so = await queryOne<any>(`SELECT * FROM client_orders WHERE id = $1`, [id]);
+      if (!so) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'sales order not found' }); }
+      if (so.status === 'CANCELLED' || so.status === 'FULFILLED') {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: `Cannot auto-fulfil a ${so.status} order.` });
+      }
+      const { rows: soItems } = await client.query(
+        `SELECT part_number, description, quantity, unit_price FROM client_order_items WHERE client_order_id = $1 ORDER BY id`,
+        [id]
+      );
+      if (soItems.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Sales order has no line items.' });
+      }
+
+      const summary: any = {};
+
+      // 1) Invoice ------------------------------------------------------------
+      let invoiceId: number | null = null;
+      let invoiceNumber: string | null = null;
+      let invoiceTotal = 0;
+      if (createInvoice) {
+        const computedLines = soItems.map((it: any) => ({
+          partNumber: it.part_number,
+          description: it.description || it.part_number || '',
+          quantity: Number(it.quantity) || 0,
+          unitPrice: Number(it.unit_price) || 0,
+          taxRateId: null,
+          taxInclusive: false,
+          deductStock: !!it.part_number,
+          ...computeLineTotals({
+            description: it.description || it.part_number || '',
+            quantity: Number(it.quantity) || 0,
+            unitPrice: Number(it.unit_price) || 0,
+            taxRatePercent: 0,
+            taxInclusive: false,
+          }),
+        }));
+        const { subtotal, taxTotal, total } = computeDocumentTotals(computedLines, 0);
+        invoiceTotal = total;
+        invoiceNumber = await nextDocNumber(client, 'INV', 'invoice_seq');
+        const invoiceDate = new Date().toISOString().slice(0, 10);
+        const invRes = await client.query(
+          `INSERT INTO invoices (invoice_number, client_id, client_order_id, invoice_date, due_date, status, currency, subtotal, tax_total, discount_total, total, balance_due, notes, terms, is_warranty_claim)
+           VALUES ($1,$2,$3,$4,$5,'DRAFT',$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id`,
+          [invoiceNumber, so.client_id, id, invoiceDate, null, so.currency || 'ZAR', subtotal, taxTotal, 0, total, total, `Auto-fulfilment of ${so.order_number}`, null, false]
+        );
+        invoiceId = invRes.rows[0].id;
+        const insertedItems: any[] = [];
+        for (const line of computedLines) {
+          const r = await client.query(
+            `INSERT INTO invoice_items (invoice_id, part_number, description, quantity, unit_price, tax_rate_id, tax_amount, line_total, deduct_stock, tax_inclusive)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+            [invoiceId, line.partNumber || null, line.description, line.quantity, line.unitPrice, null, line.taxAmount, line.lineTotal, !!line.deductStock, false]
+          );
+          insertedItems.push(r.rows[0]);
+        }
+        if (sendInvoice) {
+          await finalizeInvoiceInTx(client, invoiceId!, invoiceNumber, invoiceDate, total, subtotal, taxTotal, 0, insertedItems);
+        }
+        summary.invoiceId = invoiceId;
+        summary.invoiceNumber = invoiceNumber;
+      }
+
+      // 2) Delivery note ------------------------------------------------------
+      if (createDelivery) {
+        const noteNumber = await nextDocNumber(client, 'DN', 'dispatch_delivery_seq');
+        const noteDate = new Date().toISOString().slice(0, 10);
+        const noteRes = await client.query(
+          `INSERT INTO dispatch_notes (note_number, note_type, client_id, client_order_id, invoice_id, note_date, scheduled_date, status, contact_person, address, carrier, reference, notes)
+           VALUES ($1,'DELIVERY',$2,$3,$4,$5,NULL,'DRAFT',NULL,NULL,NULL,NULL,$6) RETURNING id`,
+          [noteNumber, so.client_id, id, invoiceId, noteDate, `Auto-fulfilment of ${so.order_number}`]
+        );
+        const noteId = noteRes.rows[0].id;
+        for (const it of soItems) {
+          // Book-out already happened via the invoice; the delivery-note
+          // line carries deduct_stock=false so completing it doesn't try
+          // to decrement a second time. If the operator skipped the
+          // invoice send step, the delivery-note's flag becomes the sole
+          // book-out trigger instead.
+          const shouldDeduct = !(sendInvoice && createInvoice) && !!it.part_number;
+          await client.query(
+            `INSERT INTO dispatch_note_items (dispatch_note_id, part_number, description, quantity, serial_numbers, deduct_stock)
+             VALUES ($1,$2,$3,$4,NULL,$5)`,
+            [noteId, it.part_number || null, it.description || it.part_number || '', Number(it.quantity) || 0, shouldDeduct]
+          );
+        }
+        // Issue then, if requested, complete. Completion runs the same
+        // book-out + reservation-release loop the dedicated endpoint uses.
+        await client.query(`UPDATE dispatch_notes SET status = 'ISSUED', updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [noteId]);
+        if (completeDelivery) {
+          await client.query(`UPDATE dispatch_notes SET status = 'COMPLETED', completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [noteId]);
+          const { rows: dnItemRows } = await client.query(`SELECT part_number, quantity, deduct_stock FROM dispatch_note_items WHERE dispatch_note_id = $1`, [noteId]);
+          for (const dn of dnItemRows) {
+            if (dn.deduct_stock && dn.part_number) {
+              const qty = Number(dn.quantity) || 0;
+              await adjustStock(client, dn.part_number, -qty, 'OUTBOUND', `Dispatch ${noteNumber}`);
+              await releaseReservation(client, id, dn.part_number, qty);
+            }
+          }
+        }
+        summary.dispatchNoteId = noteId;
+        summary.dispatchNoteNumber = noteNumber;
+      }
+
+      // 3) Payment ------------------------------------------------------------
+      if (recordPayment && invoiceId && sendInvoice) {
+        const amt = Number(opts.paymentAmount) || invoiceTotal;
+        const method = opts.paymentMethod || 'EFT';
+        const depositAccountId = opts.depositAccountId;
+        if (!depositAccountId) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ error: 'depositAccountId is required when recordPayment is true.' });
+        }
+        const paymentDate = new Date().toISOString().slice(0, 10);
+        const paymentNumber = await nextDocNumber(client, 'RCPT', 'payment_in_seq');
+        const payRes = await client.query(
+          `INSERT INTO payments_received (payment_number, client_id, payment_date, amount, unallocated_amount, method, deposit_account_id, reference, notes)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+          [paymentNumber, so.client_id, paymentDate, amt, 0, method, depositAccountId, `Auto-fulfilment of ${so.order_number}`, null]
+        );
+        const paymentId = payRes.rows[0].id;
+        await client.query(`INSERT INTO payment_receipt_allocations (payment_id, invoice_id, amount_applied) VALUES ($1,$2,$3)`, [paymentId, invoiceId, amt]);
+        await client.query(
+          `UPDATE invoices SET amount_paid = amount_paid + $1, balance_due = balance_due - $1, status = CASE WHEN balance_due - $1 <= 0.005 THEN 'PAID' ELSE 'PARTIAL' END, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+          [amt, invoiceId]
+        );
+        const arAccountId = await getAccountIdByCode(SYSTEM_ACCOUNT_CODES.AR);
+        const journalEntryId = await postJournalEntry(client, {
+          entryDate: paymentDate,
+          memo: `Payment received ${paymentNumber}`,
+          sourceType: 'PAYMENT_RECEIVED',
+          sourceId: paymentId,
+          lines: [
+            { accountId: depositAccountId, debit: amt, credit: 0, description: paymentNumber, entityType: 'CUSTOMER', entityId: so.client_id || undefined },
+            { accountId: arAccountId, debit: 0, credit: amt, description: paymentNumber, entityType: 'CUSTOMER', entityId: so.client_id || undefined },
+          ],
+        });
+        await client.query(`UPDATE payments_received SET journal_entry_id = $1 WHERE id = $2`, [journalEntryId, paymentId]);
+        summary.paymentId = paymentId;
+        summary.paymentNumber = paymentNumber;
+      }
+
+      // 4) SO status ----------------------------------------------------------
+      if (createDelivery && completeDelivery) {
+        await client.query(`UPDATE client_orders SET status = 'FULFILLED' WHERE id = $1`, [id]);
+        summary.orderStatus = 'FULFILLED';
+      } else if (createInvoice && so.status === 'DRAFT') {
+        await client.query(`UPDATE client_orders SET status = 'APPROVED' WHERE id = $1`, [id]);
+        summary.orderStatus = 'APPROVED';
+      }
+
+      await client.query('COMMIT');
+      res.status(201).json(summary);
+    } catch (err: any) {
+      await client.query('ROLLBACK').catch(() => {});
+      res.status(400).json({ error: err.message || String(err) });
+    } finally {
+      client.release();
+    }
+  });
+
   // Aggregate view used by the SO list to badge each row: totals per
   // client_order_id. Small even for a busy account so the SO list can
   // fetch it in one call rather than one round-trip per row.
