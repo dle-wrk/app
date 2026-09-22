@@ -22,9 +22,10 @@ interface EditableItem {
   description: string;
   quantity: number;
   serialNumbers?: string;
+  deductStock?: boolean;
 }
 
-const newItem = (): EditableItem => ({ key: `I${Date.now()}${Math.random().toString(36).slice(2, 6)}`, partNumber: '', description: '', quantity: 1, serialNumbers: '' });
+const newItem = (): EditableItem => ({ key: `I${Date.now()}${Math.random().toString(36).slice(2, 6)}`, partNumber: '', description: '', quantity: 1, serialNumbers: '', deductStock: false });
 
 interface DispatchTabExtras {
   prefillFromOrder?: { orderId: number; noteType: 'DELIVERY' | 'COLLECTION' } | null;
@@ -249,7 +250,7 @@ const DispatchEditorModal: React.FC<ModuleDataProps & { type: DispatchNoteType; 
   const [notes, setNotes] = useState(initial?.notes || '');
   const [lines, setLines] = useState<EditableItem[]>(
     initial?.items?.length
-      ? initial.items.map(it => ({ key: `L${it.id}`, partNumber: it.partNumber, description: it.description, quantity: it.quantity, serialNumbers: it.serialNumbers }))
+      ? initial.items.map(it => ({ key: `L${it.id}`, partNumber: it.partNumber, description: it.description, quantity: it.quantity, serialNumbers: it.serialNumbers, deductStock: it.deductStock }))
       : [newItem()]
   );
   const [saving, setSaving] = useState<'DRAFT' | 'ISSUED' | null>(null);
@@ -298,7 +299,7 @@ const DispatchEditorModal: React.FC<ModuleDataProps & { type: DispatchNoteType; 
         clientOrderId: clientOrderId ? Number(clientOrderId) : null,
         noteDate, scheduledDate: scheduledDate || null,
         contactPerson, address, carrier, reference, notes, status,
-        items: validLines.map(l => ({ partNumber: l.partNumber || undefined, description: l.description, quantity: l.quantity, serialNumbers: l.serialNumbers || undefined })),
+        items: validLines.map(l => ({ partNumber: l.partNumber || undefined, description: l.description, quantity: l.quantity, serialNumbers: l.serialNumbers || undefined, deductStock: !!l.deductStock })),
       };
       if (initial) await apiPut(`/api/dispatch-notes/${initial.id}`, payload);
       else await apiPost('/api/dispatch-notes', payload);
@@ -362,6 +363,7 @@ const DispatchEditorModal: React.FC<ModuleDataProps & { type: DispatchNoteType; 
               <th className="py-2 px-3">Description</th>
               <th className="py-2 px-3 w-20 text-right">Qty</th>
               <th className="py-2 px-3">Serial number(s)</th>
+              <th className="py-2 px-3 w-24 text-center" title="Deduct on complete">Book out</th>
               <th className="py-2 px-3 w-8"></th>
             </tr>
           </thead>
@@ -382,6 +384,21 @@ const DispatchEditorModal: React.FC<ModuleDataProps & { type: DispatchNoteType; 
                 <td className="py-1.5 px-2"><input className={`${inputClass} !py-1`} value={l.description} onChange={(e) => updateLine(l.key, { description: e.target.value })} placeholder="Item description" /></td>
                 <td className="py-1.5 px-2"><input type="number" min={0} step="1" className={`${inputClass} !py-1 text-right`} value={l.quantity} onChange={(e) => updateLine(l.key, { quantity: parseFloat(e.target.value) || 0 })} /></td>
                 <td className="py-1.5 px-2"><input className={`${inputClass} !py-1`} value={l.serialNumbers || ''} onChange={(e) => updateLine(l.key, { serialNumbers: e.target.value })} placeholder="Optional" /></td>
+                <td className="py-1.5 px-2 text-center">
+                  <label
+                    className={`inline-flex items-center gap-1 text-[10px] ${l.partNumber ? 'text-outline hover:text-on-surface cursor-pointer' : 'text-outline/40 cursor-not-allowed'}`}
+                    title={l.partNumber ? 'Decrement inventory when this note is marked complete' : 'Pick an inventory part first'}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={!!l.deductStock && !!l.partNumber}
+                      disabled={!l.partNumber}
+                      onChange={(e) => updateLine(l.key, { deductStock: e.target.checked })}
+                      className="w-3 h-3 accent-primary"
+                    />
+                    Book out
+                  </label>
+                </td>
                 <td className="py-1.5 px-2 text-center">
                   <button type="button" onClick={() => removeLine(l.key)} className="text-outline hover:text-error p-1" title="Remove"><X className="w-3.5 h-3.5" /></button>
                 </td>

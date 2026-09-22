@@ -20,7 +20,7 @@
 
 import type { Express } from 'express';
 import { pool, query, queryOne } from './db';
-import { nextDocNumber } from './bookkeeping-db';
+import { nextDocNumber, rewriteReservations } from './bookkeeping-db';
 
 // Client-order row → camelCase JSON. Only ONE definition of the shape lives
 // here — every endpoint that returns a client_order (list, create, update,
@@ -188,6 +188,15 @@ export function registerClientsRoutes(app: Express): void {
             [order.id, it.partNumber || null, it.description || '', it.quantity || 1, it.unitPrice || 0, it.lineTotal || 0]
           );
         }
+        // Auto-reserve stock for every line on save. Draft orders reserve
+        // too so a half-typed order still surfaces its shortfall — the
+        // memory here is cheap and the release path on delete/complete
+        // stays symmetric regardless of status.
+        await rewriteReservations(
+          client,
+          order.id,
+          items.map((it: any) => ({ partNumber: it.partNumber || null, quantity: Number(it.quantity) || 1 })),
+        );
       }
 
       await client.query('COMMIT');
@@ -408,6 +417,30 @@ export function registerClientsRoutes(app: Express): void {
     }
   });
 
+  // Refresh the reservation table for a single parent SO after any
+  // line-level mutation. Wrapped so the CRUD endpoints below stay tight.
+  async function refreshReservationsFor(clientOrderId: number | null | undefined) {
+    if (!clientOrderId) return;
+    const c = await pool.connect();
+    try {
+      await c.query('BEGIN');
+      const { rows } = await c.query(
+        `SELECT part_number, quantity FROM client_order_items WHERE client_order_id = $1`,
+        [clientOrderId]
+      );
+      await rewriteReservations(
+        c,
+        clientOrderId,
+        rows.map(r => ({ partNumber: r.part_number, quantity: Number(r.quantity) || 0 })),
+      );
+      await c.query('COMMIT');
+    } catch {
+      await c.query('ROLLBACK').catch(() => {});
+    } finally {
+      c.release();
+    }
+  }
+
   app.post('/api/client-order-items', async (req, res) => {
     const { clientOrderId, partNumber, description, quantity, unitPrice, lineTotal } = req.body;
     if (!description) return res.status(400).json({ error: 'description is required' });
@@ -418,6 +451,7 @@ export function registerClientsRoutes(app: Express): void {
          VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
         [clientOrderId || null, partNumber || null, description, quantity || 1, unitPrice || 0, lineTotal || 0]
       );
+      await refreshReservationsFor(row?.client_order_id);
       res.status(201).json({
         id: row?.id,
         clientOrderId: row?.client_order_id,
@@ -449,6 +483,7 @@ export function registerClientsRoutes(app: Express): void {
         [clientOrderId ?? null, partNumber ?? null, description ?? null, quantity ?? null, unitPrice ?? null, lineTotal ?? null, id]
       );
       if (!row) return res.status(404).json({ error: 'client order item not found' });
+      await refreshReservationsFor(row.client_order_id);
       res.json({
         id: row.id,
         clientOrderId: row.client_order_id,
@@ -467,8 +502,10 @@ export function registerClientsRoutes(app: Express): void {
   app.delete('/api/client-order-items/:id', async (req, res) => {
     const id = parseInt(req.params.id);
     try {
+      const existing = await queryOne<{ client_order_id: number }>(`SELECT client_order_id FROM client_order_items WHERE id = $1`, [id]);
       const { rowCount } = await query('DELETE FROM client_order_items WHERE id = $1', [id]);
       if (rowCount === 0) return res.status(404).json({ error: 'client order item not found' });
+      await refreshReservationsFor(existing?.client_order_id);
       res.json({ ok: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

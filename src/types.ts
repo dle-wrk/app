@@ -333,6 +333,7 @@ export interface DispatchNoteItem {
   description: string;
   quantity: number;
   serialNumbers?: string;
+  deductStock?: boolean;
 }
 
 export interface DispatchNote {

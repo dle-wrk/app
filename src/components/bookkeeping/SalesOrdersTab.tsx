@@ -1,5 +1,5 @@
-import React, { useMemo, useRef, useState } from 'react';
-import { Plus, Eye, Trash2, Upload, Download, Paperclip, CheckCircle2, XCircle, Printer, Truck } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Plus, Eye, Trash2, Upload, Download, Paperclip, CheckCircle2, XCircle, Printer, Truck, AlertTriangle } from 'lucide-react';
 import { ClientOrder } from '../../types';
 import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, apiGet, apiPost, apiDelete, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
 import { LineItemsEditor, EditableLine, newEditableLine, lineTotals } from './LineItemsEditor';
@@ -25,6 +25,26 @@ export const SalesOrdersTab: React.FC<ModuleDataProps & SalesOrdersTabExtras> = 
   const [busy, setBusy] = useState(false);
 
   const clientName = (id?: number) => clients.find(c => c.id === id)?.clientName || 'Unassigned';
+
+  // Reservation summary → { orderId: backorderQty }. Fetched once when
+  // the tab mounts and refreshed after any SO create/edit so the
+  // BACKORDER pill stays in step. A missing entry means the order is
+  // either fully reserved or has no priced lines yet — both render as
+  // "no badge" (the default state, not an alert).
+  const [reservationMap, setReservationMap] = useState<Record<number, number>>({});
+  const loadReservations = async () => {
+    try {
+      const rows = await apiGet('/api/client-order-reservations/summary');
+      const map: Record<number, number> = {};
+      for (const r of rows || []) {
+        if (r?.clientOrderId != null) map[r.clientOrderId] = Number(r.backorderQty) || 0;
+      }
+      setReservationMap(map);
+    } catch {
+      // best-effort; badge just won't show
+    }
+  };
+  useEffect(() => { loadReservations(); }, [clientOrders.length]);
 
   const filtered = useMemo(
     () => clientOrders.filter(o => statusFilter === 'ALL' || o.status === statusFilter),
@@ -138,7 +158,19 @@ export const SalesOrdersTab: React.FC<ModuleDataProps & SalesOrdersTabExtras> = 
                   <td className="px-lg py-sm text-on-surface-variant">{fmtDate(o.orderDate)}</td>
                   <td className="px-lg py-sm text-on-surface-variant">{fmtDate(o.requiredDate)}</td>
                   <td className="px-lg py-sm text-right font-mono">{fmtMoney(o.total, o.currency)}</td>
-                  <td className="px-lg py-sm"><StatusPill status={o.status} /></td>
+                  <td className="px-lg py-sm">
+                    <div className="flex items-center gap-1 flex-wrap">
+                      <StatusPill status={o.status} />
+                      {reservationMap[o.id] > 0 && (
+                        <span
+                          title={`${reservationMap[o.id]} units short — order will need procurement or back-fill.`}
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold border bg-error/10 text-error border-error/30 whitespace-nowrap"
+                        >
+                          <AlertTriangle className="w-2.5 h-2.5" /> BACKORDER
+                        </span>
+                      )}
+                    </div>
+                  </td>
                   <td className="px-lg py-sm text-center">
                     {o.verified ? (
                       <span title={`Verified${o.verifiedAt ? ` on ${fmtDate(o.verifiedAt)}` : ''}`} className="inline-flex items-center gap-1 text-green-400 text-[10px] font-bold">

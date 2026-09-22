@@ -857,6 +857,7 @@ export const mapDispatchNoteItem = (r: any) => ({
   description: r.description,
   quantity: parseFloat(r.quantity) || 0,
   serialNumbers: r.serial_numbers,
+  deductStock: !!r.deduct_stock,
 });
 
 // ============================================================================
@@ -898,6 +899,83 @@ export function computeLineTotals(line: RawLineInput) {
   }
   const lineTotal = Math.round((base + taxAmount) * 100) / 100;
   return { base, taxAmount, lineTotal };
+}
+
+// ---------------------------------------------------------------------------
+// Sales-order stock reservations
+// ---------------------------------------------------------------------------
+// Kept here (not in bookkeeping-routes) because clientsRoutes.ts also
+// writes reservations on SO create/edit, so both routers can import the
+// same helpers instead of duplicating the SQL.
+
+export async function releaseReservation(client: PoolClient, clientOrderId: number, partNumber: string, qty: number) {
+  if (!clientOrderId || !partNumber || qty <= 0) return;
+  const { rows } = await client.query(
+    `SELECT id, reserved_qty FROM client_order_reservations
+     WHERE client_order_id = $1 AND part_number = $2 AND reserved_qty > 0
+     ORDER BY id`,
+    [clientOrderId, partNumber]
+  );
+  let remaining = qty;
+  for (const r of rows) {
+    if (remaining <= 0) break;
+    const rowQty = Number(r.reserved_qty) || 0;
+    const take = Math.min(rowQty, remaining);
+    if (take >= rowQty) {
+      await client.query(`DELETE FROM client_order_reservations WHERE id = $1`, [r.id]);
+    } else {
+      await client.query(`UPDATE client_order_reservations SET reserved_qty = reserved_qty - $1 WHERE id = $2`, [take, r.id]);
+    }
+    remaining -= take;
+  }
+}
+
+export async function computeReservationRows(
+  client: PoolClient,
+  clientOrderId: number,
+  lines: Array<{ partNumber?: string | null; quantity: number }>,
+) {
+  const out: Array<{ partNumber: string; reservedQty: number; backorderQty: number }> = [];
+  const needed = new Map<string, number>();
+  for (const l of lines) {
+    const pn = (l.partNumber || '').trim();
+    if (!pn) continue;
+    needed.set(pn, (needed.get(pn) || 0) + Number(l.quantity || 0));
+  }
+  for (const [pn, qty] of needed) {
+    const stockRow = await client.query(`SELECT stock FROM inventory WHERE serial_number = $1`, [pn]);
+    const onHand = stockRow.rows.length ? Number(stockRow.rows[0].stock) || 0 : 0;
+    const otherRow = await client.query(
+      `SELECT COALESCE(SUM(reserved_qty), 0)::text AS reserved
+       FROM client_order_reservations
+       WHERE part_number = $1 AND client_order_id <> $2`,
+      [pn, clientOrderId]
+    );
+    const reservedElsewhere = Number(otherRow.rows[0]?.reserved) || 0;
+    const available = Math.max(0, onHand - reservedElsewhere);
+    const reserved = Math.max(0, Math.min(qty, available));
+    const backorder = Math.max(0, qty - reserved);
+    if (reserved > 0 || backorder > 0) {
+      out.push({ partNumber: pn, reservedQty: reserved, backorderQty: backorder });
+    }
+  }
+  return out;
+}
+
+export async function rewriteReservations(
+  client: PoolClient,
+  clientOrderId: number,
+  lines: Array<{ partNumber?: string | null; quantity: number }>,
+) {
+  await client.query(`DELETE FROM client_order_reservations WHERE client_order_id = $1`, [clientOrderId]);
+  const rows = await computeReservationRows(client, clientOrderId, lines);
+  for (const r of rows) {
+    await client.query(
+      `INSERT INTO client_order_reservations (client_order_id, part_number, reserved_qty, backorder_qty)
+       VALUES ($1, $2, $3, $4)`,
+      [clientOrderId, r.partNumber, r.reservedQty, r.backorderQty]
+    );
+  }
 }
 
 export function computeDocumentTotals(lines: Array<{ base: number; taxAmount: number }>, discountTotal = 0) {

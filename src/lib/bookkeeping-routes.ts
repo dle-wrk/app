@@ -26,6 +26,8 @@ import {
   mapDispatchNote,
   mapDispatchNoteItem,
   SYSTEM_ACCOUNT_CODES,
+  releaseReservation,
+  rewriteReservations,
 } from './bookkeeping-db';
 
 const LineItemSchema = z.object({
@@ -149,6 +151,7 @@ const DispatchNoteItemSchema = z.object({
   description: z.string().min(1),
   quantity: z.number().positive(),
   serialNumbers: z.string().optional(),
+  deductStock: z.boolean().optional(),
 });
 
 const DispatchNoteCreateSchema = z.object({
@@ -375,13 +378,100 @@ export function registerBookkeepingRoutes(app: Express) {
 
     await client.query(`UPDATE invoices SET status = 'SENT', journal_entry_id = $1, balance_due = total, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [journalEntryId, invoiceId]);
 
+    const invoiceRow = await queryOne<any>(`SELECT client_order_id FROM invoices WHERE id = $1`, [invoiceId]);
+    const linkedOrderId = invoiceRow?.client_order_id as number | null;
     for (const item of items) {
       if (item.deduct_stock && item.part_number) {
-        await adjustStock(client, item.part_number, -Number(item.quantity), 'OUTBOUND', `Invoice ${invoiceNumber}`);
+        const qty = Number(item.quantity) || 0;
+        await adjustStock(client, item.part_number, -qty, 'OUTBOUND', `Invoice ${invoiceNumber}`);
+        if (linkedOrderId) {
+          await releaseReservation(client, linkedOrderId, item.part_number, qty);
+        }
       }
     }
     return journalEntryId;
   }
+
+  // ---------------------------------------------------------------------------
+  // Sales-order reservations
+  // ---------------------------------------------------------------------------
+  // Exposed so the UI can badge each SO line as fully reserved vs
+  // backordered without re-computing on the client. Both endpoints are
+  // safe to call at any time — the write-path recomputes from live stock
+  // levels + other orders' reservations, so this is idempotent.
+
+  // Aggregate view used by the SO list to badge each row: totals per
+  // client_order_id. Small even for a busy account so the SO list can
+  // fetch it in one call rather than one round-trip per row.
+  app.get('/api/client-order-reservations/summary', async (_req, res) => {
+    try {
+      const { rows } = await query(
+        `SELECT client_order_id,
+                COALESCE(SUM(reserved_qty), 0)::text AS reserved,
+                COALESCE(SUM(backorder_qty), 0)::text AS backorder
+         FROM client_order_reservations
+         GROUP BY client_order_id`
+      );
+      res.json(rows.map(r => ({
+        clientOrderId: r.client_order_id,
+        reservedQty: Number(r.reserved) || 0,
+        backorderQty: Number(r.backorder) || 0,
+      })));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/client-orders/:id/reservations', async (req, res) => {
+    const id = parseInt(req.params.id);
+    try {
+      const { rows } = await query(
+        `SELECT part_number, reserved_qty, backorder_qty
+         FROM client_order_reservations
+         WHERE client_order_id = $1
+         ORDER BY id`,
+        [id]
+      );
+      res.json(rows.map(r => ({
+        partNumber: r.part_number,
+        reservedQty: Number(r.reserved_qty) || 0,
+        backorderQty: Number(r.backorder_qty) || 0,
+      })));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/client-orders/:id/reservations/refresh', async (req, res) => {
+    const id = parseInt(req.params.id);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const { rows: lineRows } = await client.query(
+        `SELECT part_number, quantity FROM client_order_items WHERE client_order_id = $1`,
+        [id]
+      );
+      const lines = lineRows.map(r => ({ partNumber: r.part_number, quantity: Number(r.quantity) || 0 }));
+      await rewriteReservations(client, id, lines);
+      await client.query('COMMIT');
+      const { rows } = await query(
+        `SELECT part_number, reserved_qty, backorder_qty
+         FROM client_order_reservations
+         WHERE client_order_id = $1 ORDER BY id`,
+        [id]
+      );
+      res.json(rows.map(r => ({
+        partNumber: r.part_number,
+        reservedQty: Number(r.reserved_qty) || 0,
+        backorderQty: Number(r.backorder_qty) || 0,
+      })));
+    } catch (err: any) {
+      await client.query('ROLLBACK').catch(() => {});
+      res.status(500).json({ error: err.message });
+    } finally {
+      client.release();
+    }
+  });
 
   app.post('/api/invoices', async (req, res) => {
     const parsed = InvoiceCreateSchema.safeParse(req.body);
@@ -1688,9 +1778,9 @@ If a field is unreadable, use null (or [] for lineItems). Never invent values.`;
     const inserted: any[] = [];
     for (const item of items) {
       const r = await client.query(
-        `INSERT INTO dispatch_note_items (dispatch_note_id, part_number, description, quantity, serial_numbers)
-         VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-        [noteId, item.partNumber || null, item.description, item.quantity, item.serialNumbers || null]
+        `INSERT INTO dispatch_note_items (dispatch_note_id, part_number, description, quantity, serial_numbers, deduct_stock)
+         VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+        [noteId, item.partNumber || null, item.description, item.quantity, item.serialNumbers || null, !!item.deductStock]
       );
       inserted.push(r.rows[0]);
     }
@@ -1771,19 +1861,42 @@ If a field is unreadable, use null (or [] for lineItems). Never invent values.`;
   for (const action of ['issue', 'complete', 'cancel'] as const) {
     app.post(`/api/dispatch-notes/:id/${action}`, async (req, res) => {
       const id = parseInt(req.params.id);
+      const client = await pool.connect();
       try {
-        const note = await queryOne<any>(`SELECT status FROM dispatch_notes WHERE id = $1`, [id]);
-        if (!note) return res.status(404).json({ error: 'dispatch note not found' });
+        await client.query('BEGIN');
+        const note = await queryOne<any>(`SELECT id, note_number, note_type, client_order_id, status FROM dispatch_notes WHERE id = $1`, [id]);
+        if (!note) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'dispatch note not found' }); }
         if (!DISPATCH_TRANSITIONS[action].includes(note.status)) {
+          await client.query('ROLLBACK');
           return res.status(400).json({ error: `Cannot ${action} a dispatch note that is ${note.status}.` });
         }
         const target = DISPATCH_TARGET[action];
         const completedClause = target === 'COMPLETED' ? ', completed_at = CURRENT_TIMESTAMP' : '';
-        await query(`UPDATE dispatch_notes SET status = $1${completedClause}, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [target, id]);
+        await client.query(`UPDATE dispatch_notes SET status = $1${completedClause}, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [target, id]);
+
+        // On COMPLETE: deduct stock for any line flagged deduct_stock, and
+        // release matching reservations against the linked sales order.
+        if (target === 'COMPLETED') {
+          const { rows: itemRows } = await client.query(`SELECT part_number, quantity, deduct_stock FROM dispatch_note_items WHERE dispatch_note_id = $1`, [id]);
+          for (const it of itemRows) {
+            if (it.deduct_stock && it.part_number) {
+              const qty = Number(it.quantity) || 0;
+              await adjustStock(client, it.part_number, -qty, 'OUTBOUND', `Dispatch ${note.note_number}`);
+              if (note.client_order_id) {
+                await releaseReservation(client, note.client_order_id, it.part_number, qty);
+              }
+            }
+          }
+        }
+
+        await client.query('COMMIT');
         const finalRow = await queryOne(`${DISPATCH_NOTE_JOIN} WHERE dn.id = $1`, [id]);
         res.json(mapDispatchNote(finalRow));
       } catch (err: any) {
+        await client.query('ROLLBACK').catch(() => {});
         res.status(500).json({ error: err.message });
+      } finally {
+        client.release();
       }
     });
   }
