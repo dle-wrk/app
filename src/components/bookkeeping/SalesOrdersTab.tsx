@@ -114,6 +114,35 @@ export const SalesOrdersTab: React.FC<ModuleDataProps & SalesOrdersTabExtras> = 
     }
   };
 
+  // Multi-select for the batch Auto-Fulfil macro. Only orders that are
+  // not already FULFILLED or CANCELLED can be picked — the server would
+  // reject them anyway, so we hide the checkbox rather than let the
+  // operator queue up guaranteed failures.
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [batchOpen, setBatchOpen] = useState(false);
+  const canSelect = (o: ClientOrder) => o.status !== 'FULFILLED' && o.status !== 'CANCELLED';
+  const eligibleInFilter = filtered.filter(canSelect);
+  const allEligibleSelected = eligibleInFilter.length > 0 && eligibleInFilter.every(o => selectedIds.has(o.id));
+  const toggleAll = () => {
+    setSelectedIds(prev => {
+      if (allEligibleSelected) {
+        const next = new Set(prev);
+        eligibleInFilter.forEach(o => next.delete(o.id));
+        return next;
+      }
+      const next = new Set(prev);
+      eligibleInFilter.forEach(o => next.add(o.id));
+      return next;
+    });
+  };
+  const toggleOne = (id: number) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
   return (
     <div className="space-y-4">
       <SectionCard
@@ -132,6 +161,11 @@ export const SalesOrdersTab: React.FC<ModuleDataProps & SalesOrdersTabExtras> = 
                 </button>
               ))}
             </div>
+            {selectedIds.size > 0 && (
+              <PrimaryButton icon={<Zap className="w-3.5 h-3.5" />} onClick={() => setBatchOpen(true)}>
+                Auto-Fulfil {selectedIds.size}…
+              </PrimaryButton>
+            )}
             <PrimaryButton icon={<Plus className="w-3.5 h-3.5" />} onClick={() => setShowEditor(true)}>New Sales Order</PrimaryButton>
           </div>
         }
@@ -140,6 +174,17 @@ export const SalesOrdersTab: React.FC<ModuleDataProps & SalesOrdersTabExtras> = 
           <table className="w-full text-left border-collapse text-xs">
             <thead>
               <tr className="bg-surface-container-high/50 text-[10px] uppercase font-bold text-outline border-b border-outline-variant">
+                <th className="px-2 py-sm text-center w-8">
+                  <input
+                    type="checkbox"
+                    checked={allEligibleSelected}
+                    onChange={toggleAll}
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-3.5 h-3.5 accent-primary cursor-pointer"
+                    title="Select every eligible order in this filter"
+                    disabled={eligibleInFilter.length === 0}
+                  />
+                </th>
                 <th className="px-lg py-sm">Order #</th>
                 <th className="px-lg py-sm">Client</th>
                 <th className="px-lg py-sm">Order Date</th>
@@ -152,7 +197,19 @@ export const SalesOrdersTab: React.FC<ModuleDataProps & SalesOrdersTabExtras> = 
             </thead>
             <tbody className="divide-y divide-outline-variant/30">
               {filtered.map(o => (
-                <tr key={o.id} className="hover:bg-surface-variant/20 transition-all cursor-pointer" onClick={() => openView(o)}>
+                <tr key={o.id} className={`hover:bg-surface-variant/20 transition-all cursor-pointer ${selectedIds.has(o.id) ? 'bg-primary/5' : ''}`} onClick={() => openView(o)}>
+                  <td className="px-2 py-sm text-center" onClick={(e) => e.stopPropagation()}>
+                    {canSelect(o) ? (
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(o.id)}
+                        onChange={() => toggleOne(o.id)}
+                        className="w-3.5 h-3.5 accent-primary cursor-pointer"
+                      />
+                    ) : (
+                      <span className="text-outline/40 text-[10px]">—</span>
+                    )}
+                  </td>
                   <td className="px-lg py-sm font-mono text-primary font-bold">{o.orderNumber}</td>
                   <td className="px-lg py-sm font-semibold">{clientName(o.clientId)}</td>
                   <td className="px-lg py-sm text-on-surface-variant">{fmtDate(o.orderDate)}</td>
@@ -190,7 +247,7 @@ export const SalesOrdersTab: React.FC<ModuleDataProps & SalesOrdersTabExtras> = 
                 </tr>
               ))}
               {filtered.length === 0 && (
-                <EmptyState message={statusFilter === 'ALL' ? 'No sales orders yet. Create one to attach a POP/PO for verification.' : `No orders with status ${statusFilter}.`} colSpan={8} />
+                <EmptyState message={statusFilter === 'ALL' ? 'No sales orders yet. Create one to attach a POP/PO for verification.' : `No orders with status ${statusFilter}.`} colSpan={9} />
               )}
             </tbody>
           </table>
@@ -225,6 +282,22 @@ export const SalesOrdersTab: React.FC<ModuleDataProps & SalesOrdersTabExtras> = 
             setViewing(null);
             props.onCreateDispatch!(viewing.id, noteType);
           } : undefined}
+        />
+      )}
+
+      {batchOpen && (
+        <BatchAutoFulfilModal
+          orderIds={Array.from(selectedIds)}
+          orders={clientOrders}
+          clientName={clientName}
+          accounts={props.accounts || []}
+          triggerToast={triggerToast}
+          onClose={() => setBatchOpen(false)}
+          onDone={async () => {
+            setBatchOpen(false);
+            setSelectedIds(new Set());
+            await refresh();
+          }}
         />
       )}
     </div>
@@ -710,6 +783,179 @@ const AutoFulfilModal: React.FC<{
           {running ? 'Running…' : 'Run macro'}
         </PrimaryButton>
       </div>
+    </Modal>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Batch Auto-Fulfil — same step-picker, applied over N sales orders. The
+// server puts each order in its OWN transaction so a bad row surfaces as
+// { ok: false, error } rather than dragging the rest down with it. On
+// completion we render a per-order result table so the operator can see
+// which ones landed and which need attention.
+// ---------------------------------------------------------------------------
+const BatchAutoFulfilModal: React.FC<{
+  orderIds: number[];
+  orders: ClientOrder[];
+  clientName: (id?: number) => string;
+  accounts: any[];
+  triggerToast: (msg: string, type?: any) => void;
+  onClose: () => void;
+  onDone: () => void;
+}> = ({ orderIds, orders, clientName, accounts, triggerToast, onClose, onDone }) => {
+  const [createInvoice, setCreateInvoice] = useState(true);
+  const [sendInvoice, setSendInvoice] = useState(true);
+  const [createDelivery, setCreateDelivery] = useState(true);
+  const [completeDelivery, setCompleteDelivery] = useState(true);
+  const [recordPayment, setRecordPayment] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState('EFT');
+  const [depositAccountId, setDepositAccountId] = useState<string>('');
+  const [running, setRunning] = useState(false);
+  const [results, setResults] = useState<any[] | null>(null);
+
+  const bankAccounts = accounts.filter(a => a.type === 'ASSET' && (a.subtype === 'BANK' || /bank|cash|clearing/i.test(a.name || '')));
+  const orderById = new Map<number, ClientOrder>(orders.map(o => [o.id, o]));
+
+  const run = async () => {
+    if (recordPayment && !depositAccountId) {
+      triggerToast('Pick a deposit account for the payment.', 'ERROR');
+      return;
+    }
+    setRunning(true);
+    try {
+      const res = await apiPost('/api/client-orders/auto-fulfil-batch', {
+        orderIds,
+        options: {
+          createInvoice, sendInvoice, createDelivery, completeDelivery,
+          recordPayment,
+          paymentMethod: recordPayment ? paymentMethod : undefined,
+          depositAccountId: recordPayment ? Number(depositAccountId) : undefined,
+        },
+      });
+      setResults(res.results || []);
+      triggerToast(`Batch done — ${res.succeeded}/${res.total} succeeded${res.failed ? `, ${res.failed} failed` : ''}.`, res.failed ? 'INFO' : 'SUCCESS');
+    } catch (err: any) {
+      triggerToast(err?.message || 'Batch auto-fulfil failed', 'ERROR');
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const StepRow: React.FC<{ label: string; hint: string; checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }> = ({ label, hint, checked, onChange, disabled }) => (
+    <label className={`flex items-start gap-3 p-2.5 rounded-lg border transition-colors ${checked ? 'border-primary/50 bg-primary/5' : 'border-outline-variant/50 bg-surface-container-low'} ${disabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer hover:bg-surface-container-high/40'}`}>
+      <input type="checkbox" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} className="mt-0.5 w-4 h-4 accent-primary" />
+      <div className="flex-1">
+        <div className="text-xs font-bold text-on-surface">{label}</div>
+        <div className="text-[10px] text-outline mt-0.5">{hint}</div>
+      </div>
+    </label>
+  );
+
+  return (
+    <Modal title={`Auto-Fulfil ${orderIds.length} sales orders`} subtitle="Each order runs in its own transaction — a failure on one row doesn't roll back the others." onClose={onClose} maxWidth="max-w-2xl">
+      {!results ? (
+        <>
+          <div className="rounded-lg border border-outline-variant/40 bg-surface-container-low p-sm mb-md max-h-40 overflow-y-auto">
+            <div className="text-[10px] uppercase tracking-wider text-outline mb-1 font-bold">Selected orders</div>
+            <div className="flex flex-wrap gap-1">
+              {orderIds.map(id => {
+                const o = orderById.get(id);
+                return (
+                  <span key={id} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-surface-container-high border border-outline-variant/40 text-[10px] font-mono">
+                    <span className="text-primary font-bold">{o?.orderNumber || `#${id}`}</span>
+                    <span className="text-outline">·</span>
+                    <span className="text-on-surface-variant truncate max-w-[120px]">{clientName(o?.clientId)}</span>
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <StepRow label="Create invoice" hint="Draft invoice with the SO lines, deduct-stock on every priced line." checked={createInvoice} onChange={setCreateInvoice} />
+            <StepRow label="Send invoice" hint="Post AR/sales/VAT journal, decrement stock, release the reservation." checked={sendInvoice} onChange={setSendInvoice} disabled={!createInvoice} />
+            <StepRow label="Create delivery note" hint="Delivery note linked to this SO and the invoice." checked={createDelivery} onChange={setCreateDelivery} />
+            <StepRow label="Mark delivery complete" hint="Flip to COMPLETED and (if it holds the flag) decrement stock + release reservation." checked={completeDelivery} onChange={setCompleteDelivery} disabled={!createDelivery} />
+            <StepRow label="Record payment received" hint="Record the invoice total against the invoice and post the deposit journal." checked={recordPayment} onChange={setRecordPayment} disabled={!createInvoice || !sendInvoice} />
+            {recordPayment && (
+              <div className="grid grid-cols-2 gap-3 pl-8 pt-1">
+                <div>
+                  <FieldLabel>Method</FieldLabel>
+                  <select className={selectClass} value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}>
+                    <option value="EFT">EFT</option>
+                    <option value="CARD">Card</option>
+                    <option value="CASH">Cash</option>
+                    <option value="CHEQUE">Cheque</option>
+                  </select>
+                </div>
+                <div>
+                  <FieldLabel>Deposit to</FieldLabel>
+                  <select className={selectClass} value={depositAccountId} onChange={(e) => setDepositAccountId(e.target.value)}>
+                    <option value="">— Select an account —</option>
+                    {bankAccounts.map((a: any) => <option key={a.id} value={a.id}>{a.code} {a.name}</option>)}
+                  </select>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center justify-end gap-2 pt-md mt-md border-t border-outline-variant/20">
+            <SecondaryButton onClick={onClose} disabled={running}>Cancel</SecondaryButton>
+            <PrimaryButton icon={<Zap className="w-3.5 h-3.5" />} onClick={run} disabled={running || (!createInvoice && !createDelivery)}>
+              {running ? `Running ${orderIds.length}…` : `Run on ${orderIds.length} orders`}
+            </PrimaryButton>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="overflow-x-auto rounded-lg border border-outline-variant/40 max-h-96 overflow-y-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-surface-container-high/50 text-outline text-[10px] uppercase font-bold sticky top-0">
+                <tr>
+                  <th className="py-2 px-3">Order</th>
+                  <th className="py-2 px-3">Result</th>
+                  <th className="py-2 px-3">Docs created</th>
+                </tr>
+              </thead>
+              <tbody>
+                {results.map((r, idx) => {
+                  const o = orderById.get(r.orderId);
+                  return (
+                    <tr key={idx} className="border-t border-outline-variant/20">
+                      <td className="py-2 px-3">
+                        <div className="font-mono text-primary font-bold">{o?.orderNumber || `#${r.orderId}`}</div>
+                        <div className="text-[10px] text-outline">{clientName(o?.clientId)}</div>
+                      </td>
+                      <td className="py-2 px-3">
+                        {r.ok ? (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-green-500/10 text-green-400 border border-green-500/20 text-[10px] font-bold">✓ SUCCESS</span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-error/10 text-error border border-error/20 text-[10px] font-bold" title={r.error}>✕ FAILED</span>
+                        )}
+                      </td>
+                      <td className="py-2 px-3">
+                        {r.ok ? (
+                          <div className="flex flex-wrap gap-1 font-mono text-[10px]">
+                            {r.invoiceNumber && <span className="px-1.5 py-0.5 rounded bg-primary/10 text-primary">{r.invoiceNumber}</span>}
+                            {r.dispatchNoteNumber && <span className="px-1.5 py-0.5 rounded bg-secondary/10 text-secondary">{r.dispatchNoteNumber}</span>}
+                            {r.paymentNumber && <span className="px-1.5 py-0.5 rounded bg-tertiary/10 text-tertiary">{r.paymentNumber}</span>}
+                          </div>
+                        ) : (
+                          <span className="text-[10px] text-error/80 italic">{r.error}</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="flex items-center justify-end gap-2 pt-md mt-md border-t border-outline-variant/20">
+            <PrimaryButton onClick={onDone}>Done</PrimaryButton>
+          </div>
+        </>
+      )}
     </Modal>
   );
 };
