@@ -184,9 +184,18 @@ export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChang
                       <div className="flex items-center gap-2">
                         <input
                           type="text"
-                          value={openDropdown === line.key ? searchQuery : line.partNumber || ''}
+                          // Bound directly to the line's partNumber so a free-
+                          // typed SKU is committed as the operator types —
+                          // the dropdown of matching inventory rows is a
+                          // helper, not the only path to a value. Suppliers
+                          // sometimes want a SKU that's not in inventory yet
+                          // (a first-time order, a supplier-side code), and
+                          // the picker must not force a match.
+                          value={line.partNumber || ''}
                           onChange={(e) => {
-                            setSearchQuery(e.target.value);
+                            const v = e.target.value;
+                            update(line.key, { partNumber: v });
+                            setSearchQuery(v);
                             setOpenDropdown(line.key);
                           }}
                           onFocus={() => {
@@ -195,7 +204,7 @@ export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChang
                           }}
                           onBlur={() => setTimeout(() => setOpenDropdown(null), 200)}
                           className={`${inputClass} py-2.5 px-3 text-sm font-mono flex-1`}
-                          placeholder="Type to search..."
+                          placeholder="Type any SKU — or search inventory…"
                           autoComplete="off"
                         />
                         <ChevronDown className="w-4 h-4 text-on-surface-variant pointer-events-none" />
