@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Plus, Eye, FileText, Trash2 } from 'lucide-react';
 import { PurchaseOrder, Item } from '../../types';
 import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, apiPost, apiPut, apiGet, apiDelete, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
@@ -149,11 +149,62 @@ const POEditorModal: React.FC<ModuleDataProps & { onClose: () => void; onSaved: 
 
   // Supplier POs are for raw components/consumables; customer POs are for
   // finished products. `itemType` is the canonical field — Component /
-  // Consumable / Product / Sub-Assembly / Tool.
+  // Consumable / Product / Sub-Assembly / Tool. Any production-tagged
+  // inventory rows show up under Customer alongside the production
+  // products catalogue.
   const isProductionItem = (i: Item) => i.itemType === 'Product' || i.itemType === 'Sub-Assembly';
-  const filteredItems = poType === 'SUPPLIER'
+
+  // Production products live in their own catalogue (production_products)
+  // and are not present in `items`. For a Customer PO we fetch the
+  // catalogue and shape each row into the same Item contract the picker
+  // consumes so an operator can type a model number ("TL-ABC-01") or a
+  // description and land on the finished good. Fetched lazily the first
+  // time the Customer toggle flips.
+  const [productionProducts, setProductionProducts] = useState<Item[]>([]);
+  const [prodFetched, setProdFetched] = useState(false);
+  useEffect(() => {
+    if (poType !== 'CLIENT' || prodFetched) return;
+    (async () => {
+      try {
+        const rows: any[] = await apiGet('/api/production-products');
+        const shaped: Item[] = (rows || []).map((r: any) => ({
+          partNumber: r.model_number || r.modelNumber,
+          name: r.description || r.model_number || r.modelNumber || '',
+          description: r.description || '',
+          itemType: 'Product',
+          stockLevel: 0,
+          price: Number(r.selling_price ?? r.sellingPrice) || 0,
+          category: r.category || undefined,
+        } as unknown as Item));
+        setProductionProducts(shaped);
+      } catch {
+        // best-effort; picker just won't include catalogue rows
+      } finally {
+        setProdFetched(true);
+      }
+    })();
+  }, [poType, prodFetched]);
+
+  const filteredItems: Item[] = poType === 'SUPPLIER'
     ? items.filter(i => !isProductionItem(i))
-    : items.filter(i => isProductionItem(i));
+    : (() => {
+        // Prefer catalogue entry when both a production_products row and
+        // an inventory row share a model number, so the price / metadata
+        // come from the source of truth for finished goods.
+        const seen = new Set<string>();
+        const merged: Item[] = [];
+        for (const p of productionProducts) {
+          if (!p.partNumber) continue;
+          seen.add(p.partNumber);
+          merged.push(p);
+        }
+        for (const i of items) {
+          if (!isProductionItem(i)) continue;
+          if (i.partNumber && seen.has(i.partNumber)) continue;
+          merged.push(i);
+        }
+        return merged;
+      })();
 
   const submit = async (status: 'DRAFT' | 'SENT') => {
     const validLines = lines.filter(l => l.description.trim() && l.quantity > 0);
