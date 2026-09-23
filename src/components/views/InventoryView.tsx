@@ -89,12 +89,15 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           >
             <Download className="w-4 h-4" /> Export CSV
           </button>
-          <button
-            onClick={() => setShowImportModal(true)}
-            className="bg-surface-container-high hover:bg-surface-container-highest text-primary border border-primary/20 text-xs font-bold px-md py-2 rounded flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
-          >
-            <Upload className="w-4 h-4" /> Import CSV
-          </button>
+          {isAdmin && (
+            <button
+              onClick={() => setShowImportModal(true)}
+              className="bg-surface-container-high hover:bg-surface-container-highest text-primary border border-primary/20 text-xs font-bold px-md py-2 rounded flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+              title="Admin-only: overwrites inventory rows with the CSV contents. A backup of the current state is downloaded first."
+            >
+              <Upload className="w-4 h-4" /> Import CSV
+            </button>
+          )}
           <button
             onClick={() => setShowAddModal(true)}
             className="bg-primary text-on-primary text-xs font-bold px-md py-2 rounded flex items-center gap-1 shadow cursor-pointer"
