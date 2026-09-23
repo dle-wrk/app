@@ -12,7 +12,7 @@ import {
   FileSpreadsheet,
 } from 'lucide-react';
 import { Item, Transaction, Supplier, ProductionKit, SystemConfig, ViewType, Project, BOMItem, PickPlaceItem, UserProfile, JobCard, Client, ClientOrder, ClientOrderItem, BuildJob, BomStructure, SubAssembly, FieldedAsset, StockLedgerEntry } from './types';
-import { INITIAL_TRANSACTIONS, INITIAL_PRODUCTION_KITS, INITIAL_SYSTEM_CONFIG, INITIAL_BOM_ITEMS, INITIAL_PP_BOM_ITEMS, CSV_HEADER } from './mockData';
+import { INITIAL_TRANSACTIONS, INITIAL_PRODUCTION_KITS, INITIAL_SYSTEM_CONFIG, INITIAL_BOM_ITEMS, INITIAL_PP_BOM_ITEMS, CSV_HEADER, itemToCsvRow } from './mockData';
 import { logActivity } from './lib/activityLogger';
 import { optimisticUpdate, optimisticListDelete } from './lib/optimisticUpdate';
 import { useEscapeKey } from './lib/useEscapeKey';
@@ -1353,6 +1353,33 @@ export default function App() {
   const handleApplyImport = async () => {
     if (csvParsedPreview.length === 0) return;
 
+    // Snapshot the current inventory to a local CSV BEFORE we touch the
+    // database. Same shape as the Import/Export CSV round-trip so if the
+    // import turns out to be wrong the operator can re-import this file
+    // to restore. Named with a full timestamp so multiple imports in one
+    // day don't collide.
+    try {
+      if (items.length > 0) {
+        const rows = items.map(itemToCsvRow);
+        const csv = CSV_HEADER + '\n' + rows.join('\n') + '\n';
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `inventory_backup_${stamp}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+    } catch (err) {
+      console.warn('Pre-import backup failed:', err);
+      // Not fatal — the user is still free to import, but we surface it
+      // so they know they don't have a local rollback file.
+      triggerToast('Could not save pre-import backup CSV — proceeding anyway.', 'ERROR');
+    }
+
     const mergedMap = new Map<string, Item>();
     items.forEach(item => mergedMap.set(item.partNumber, item));
     csvParsedPreview.forEach(item => mergedMap.set(item.partNumber, item));
@@ -1946,6 +1973,7 @@ export default function App() {
                   handleResetFilters={handleResetFilters}
                   setShowImportModal={setShowImportModal}
                   setShowAddModal={setShowAddModal}
+                  isAdmin={(currentUser?.role || '').toLowerCase() === 'admin'}
                 />
               );
             }

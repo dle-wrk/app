@@ -27,6 +27,7 @@ interface InventoryViewProps {
   setShowImportModal: (show: boolean) => void;
   setShowAddModal: (show: boolean) => void;
   setSelectedDetailPartNumber: (partNumber: string | null) => void;
+  isAdmin?: boolean;
 }
 
 export const InventoryView: React.FC<InventoryViewProps> = ({
@@ -49,7 +50,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   handleResetFilters,
   setShowImportModal,
   setShowAddModal,
-  setSelectedDetailPartNumber
+  setSelectedDetailPartNumber,
+  isAdmin = false,
 }) => {
   return (
     <div className="p-container-margin space-y-4 max-w-7xl mx-auto w-full">
