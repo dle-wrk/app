@@ -204,16 +204,31 @@ export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChang
                         <div className="absolute top-full left-0 right-0 mt-2 bg-surface-container-high border border-outline-variant/40 rounded-lg shadow-lg z-50 max-h-64 overflow-y-auto">
                           {(() => {
                             try {
-                              const filtered = items
-                                .filter((i: any) =>
-                                  !searchQuery ||
-                                  (String(i?.partNumber || '').toLowerCase().includes(searchQuery.toLowerCase())) ||
-                                  ((i?.name || i?.description || '').toLowerCase().includes(searchQuery.toLowerCase()))
-                                )
-                                .slice(0, 12);
+                              const q = searchQuery.toLowerCase();
+                              // Search across the inventory serial + name +
+                              // description AND the per-supplier PN columns
+                              // (supPns) and manufacturer PN columns (manPns),
+                              // so an operator raising a PO can paste the
+                              // supplier's own SKU (Digikey / Mouser / LCSC /
+                              // manufacturer) and still land on the right
+                              // inventory row. Match is returned so we can
+                              // surface which supplier PN hit — otherwise a
+                              // matched item that has no other visible field
+                              // containing the query looks like a false hit.
+                              const matched = items
+                                .map((i: any) => {
+                                  const supHit = (Array.isArray(i?.supPns) ? i.supPns : []).find((p: string) => p && p.toLowerCase().includes(q));
+                                  const manHit = (Array.isArray(i?.manPns) ? i.manPns : []).find((p: string) => p && p.toLowerCase().includes(q));
+                                  const partHit = String(i?.partNumber || '').toLowerCase().includes(q);
+                                  const textHit = (i?.name || i?.description || '').toLowerCase().includes(q);
+                                  const anyHit = !q || partHit || textHit || !!supHit || !!manHit;
+                                  return { item: i, anyHit, supHit, manHit };
+                                })
+                                .filter(r => r.anyHit)
+                                .slice(0, 15);
 
-                              return filtered.length > 0 ? (
-                                filtered.map((item: any) => (
+                              return matched.length > 0 ? (
+                                matched.map(({ item, supHit, manHit }: any) => (
                                   <button
                                     key={item?.partNumber || Math.random()}
                                     type="button"
@@ -232,7 +247,19 @@ export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChang
                                       <span className="text-xs text-on-surface-variant/60">{fmtMoney(Number(item?.price) || 0, currency)}</span>
                                     </div>
                                     <div className="text-sm text-on-surface-variant truncate">{item?.name || item?.description || 'No description'}</div>
-                                    <div className="text-xs text-on-surface-variant/60 mt-1">Stock: {item?.stockLevel || 0}</div>
+                                    <div className="flex items-center gap-2 flex-wrap text-[10px] text-on-surface-variant/60 mt-1">
+                                      <span>Stock: {item?.stockLevel || 0}</span>
+                                      {supHit && (
+                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-primary/10 text-primary font-mono">
+                                          sup: {supHit}
+                                        </span>
+                                      )}
+                                      {manHit && (
+                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-secondary/10 text-secondary font-mono">
+                                          mfr: {manHit}
+                                        </span>
+                                      )}
+                                    </div>
                                   </button>
                                 ))
                               ) : (
