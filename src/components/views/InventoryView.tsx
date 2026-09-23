@@ -1,7 +1,8 @@
 import React from 'react';
-import { Upload, Plus, Search } from 'lucide-react';
+import { Upload, Plus, Search, Download } from 'lucide-react';
 import { Item } from '../../types';
 import { fmtUSD, fmtZAR, fmtNumber } from '../../lib/formatMoney';
+import { CSV_HEADER, itemToCsvRow } from '../../mockData';
 
 const USD_TO_ZAR_RATE = 18.50;
 
@@ -61,6 +62,31 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           </p>
         </div>
         <div className="flex items-center gap-sm shrink-0">
+          <button
+            onClick={() => {
+              // Round-trip with Import CSV: same delimiter, same column
+              // order, same escaping — an exported file re-imports cleanly.
+              // Exports the CURRENT filter view so operators can share a
+              // slice (e.g. all critical stock) rather than the whole
+              // catalogue every time.
+              const rows = filteredItems.map(itemToCsvRow);
+              const csv = CSV_HEADER + '\n' + rows.join('\n') + '\n';
+              const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              const stamp = new Date().toISOString().slice(0, 10);
+              a.download = `inventory_${stamp}.csv`;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              URL.revokeObjectURL(url);
+            }}
+            className="bg-surface-container-high hover:bg-surface-container-highest text-primary border border-primary/20 text-xs font-bold px-md py-2 rounded flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+            title={`Export ${filteredItems.length} rows (current filter) as CSV`}
+          >
+            <Download className="w-4 h-4" /> Export CSV
+          </button>
           <button
             onClick={() => setShowImportModal(true)}
             className="bg-surface-container-high hover:bg-surface-container-highest text-primary border border-primary/20 text-xs font-bold px-md py-2 rounded flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
