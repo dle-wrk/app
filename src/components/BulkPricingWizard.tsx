@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { confirmDialog } from '../lib/confirmDialog';
 import { fmtUSD, fmtNumber } from '../lib/formatMoney';
+import { detectLedSwatch, ledSwatchBackground } from '../lib/ledColor';
 import {
   Lock,
   Search,
@@ -413,6 +414,17 @@ export default function BulkPricingWizard({ items, onUpdatePrices, onShowNotific
                     </td>
                     <td className="px-lg py-sm">
                       <div className="font-bold text-on-surface flex flex-wrap items-center gap-xs">
+                        {(() => {
+                          const led = detectLedSwatch(item);
+                          if (!led) return null;
+                          return (
+                            <span
+                              className="inline-block w-3 h-3 rounded-full border border-outline-variant/60 shadow-inner shrink-0"
+                              style={{ background: ledSwatchBackground(led) }}
+                              title={`LED colour: ${led.label}`}
+                            />
+                          );
+                        })()}
                         <span>{item.name}</span>
                         {isMouser && <span className="bg-primary/10 border border-primary/20 text-primary text-[9px] font-mono px-1.5 py-0.5 rounded uppercase font-extrabold tracking-wider shrink-0">Mouser</span>}
                         {isDigiKey && <span className="bg-amber-500/10 border border-amber-500/20 text-amber-500 text-[9px] font-mono px-1.5 py-0.5 rounded uppercase font-extrabold tracking-wider shrink-0">DigiKey</span>}

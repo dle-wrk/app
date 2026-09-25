@@ -2300,7 +2300,22 @@ function KitBrowserDialog({ kits, busy, projects, defaultProjectId, onLoad, onDe
                     <tbody className="divide-y divide-outline-variant/20">
                       {pending.bom.slice(0, 8).map((l, i) => (
                         <tr key={i}>
-                          <td className="px-2 py-1 font-mono font-bold text-primary">{l.stockCode}</td>
+                          <td className="px-2 py-1 font-mono font-bold text-primary">
+                            <span className="inline-flex items-center gap-1.5">
+                              {(() => {
+                                const led = detectLedSwatch({ partNumber: l.stockCode, description: l.description });
+                                if (!led) return null;
+                                return (
+                                  <span
+                                    className="inline-block w-3 h-3 rounded-full border border-outline-variant/60 shadow-inner shrink-0"
+                                    style={{ background: ledSwatchBackground(led) }}
+                                    title={`LED colour: ${led.label}`}
+                                  />
+                                );
+                              })()}
+                              <span>{l.stockCode}</span>
+                            </span>
+                          </td>
                           <td className="px-2 py-1 text-right font-mono">{l.qtyPerPcb}</td>
                           <td className="px-2 py-1 font-mono text-outline">{l.designator || '—'}</td>
                           <td className="px-2 py-1 text-outline truncate max-w-[240px]">{l.description || '—'}</td>

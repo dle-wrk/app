@@ -3,6 +3,7 @@ import { Item, ViewType } from '../../types';
 import { ChevronLeft, ChevronRight, Search, Settings, Database } from 'lucide-react';
 import BulkPricingWizard from '../BulkPricingWizard';
 import { fmtCurrency, fmtUSD, fmtNumber } from '../../lib/formatMoney';
+import { detectLedSwatch, ledSwatchBackground } from '../../lib/ledColor';
 
 interface PricingViewProps {
   items: Item[];
@@ -608,7 +609,20 @@ export const PricingView: React.FC<PricingViewProps> = ({
               {pageItems.map(i => (
                   <tr key={i.partNumber} className="hover:bg-surface-variant/20 transition-all duration-150">
                     <td className="px-lg py-sm font-mono font-bold text-primary">
-                      {i.partNumber}
+                      <span className="inline-flex items-center gap-1.5">
+                        {(() => {
+                          const led = detectLedSwatch(i);
+                          if (!led) return null;
+                          return (
+                            <span
+                              className="inline-block w-3 h-3 rounded-full border border-outline-variant/60 shadow-inner shrink-0"
+                              style={{ background: ledSwatchBackground(led) }}
+                              title={`LED colour: ${led.label}`}
+                            />
+                          );
+                        })()}
+                        <span>{i.partNumber}</span>
+                      </span>
                       <span className="text-[10px] text-on-surface block font-normal font-sans">{i.name}</span>
                     </td>
                     <td className="px-lg py-sm">

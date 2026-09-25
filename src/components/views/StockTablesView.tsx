@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { ProductionKit, Project, Item, Transaction } from '../../types';
 import { fmtNumber } from '../../lib/formatMoney';
+import { detectLedSwatch, ledSwatchBackground } from '../../lib/ledColor';
 
 interface StockTablesViewProps {
   setIsKitModalOpen: (open: boolean) => void;
@@ -649,7 +650,22 @@ export const StockTablesView: React.FC<StockTablesViewProps> = ({
                     // inventory row is imported from multiple sources; suffix
                     // with the map index to guarantee uniqueness.
                     <tr key={`${item.partNumber ?? ''}-${idx}`} className="hover:bg-surface-variant/10 transition-colors">
-                      <td className="px-4 py-3 text-primary font-bold">{item.partNumber}</td>
+                      <td className="px-4 py-3 text-primary font-bold">
+                        <span className="inline-flex items-center gap-1.5">
+                          {(() => {
+                            const led = detectLedSwatch(item);
+                            if (!led) return null;
+                            return (
+                              <span
+                                className="inline-block w-3 h-3 rounded-full border border-outline-variant/60 shadow-inner shrink-0"
+                                style={{ background: ledSwatchBackground(led) }}
+                                title={`LED colour: ${led.label}`}
+                              />
+                            );
+                          })()}
+                          <span>{item.partNumber}</span>
+                        </span>
+                      </td>
                       <td className="px-4 py-3 text-on-surface max-w-[200px] truncate">{item.name}</td>
                       <td className="px-4 py-3 text-on-surface-variant">{item.manufacturer || '—'}</td>
                       <td className="px-4 py-3 text-right text-on-surface font-semibold">

@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import { fmtNumber } from '../../lib/formatMoney';
+import { detectLedSwatch, ledSwatchBackground } from '../../lib/ledColor';
 
 interface MergedRow {
   part: string;
@@ -487,7 +488,22 @@ export default function ProcurementShortageCheckerView({ triggerToast }: Props) 
             <tbody className="divide-y divide-outline-variant/30 text-xs">
               {mergedRows.map(r => (
                 <tr key={r.part} className="hover:bg-surface-variant/20 transition-all">
-                  <td className="px-md py-2 font-mono font-bold text-primary">{r.part}</td>
+                  <td className="px-md py-2 font-mono font-bold text-primary">
+                    <span className="inline-flex items-center gap-1.5">
+                      {(() => {
+                        const led = detectLedSwatch({ partNumber: r.part, description: r.description });
+                        if (!led) return null;
+                        return (
+                          <span
+                            className="inline-block w-3 h-3 rounded-full border border-outline-variant/60 shadow-inner shrink-0"
+                            style={{ background: ledSwatchBackground(led) }}
+                            title={`LED colour: ${led.label}`}
+                          />
+                        );
+                      })()}
+                      <span>{r.part}</span>
+                    </span>
+                  </td>
                   <td className="px-md py-2 max-w-[340px]">
                     <div className="truncate" title={r.description}>{r.description || <span className="italic text-outline">—</span>}</div>
                   </td>
