@@ -3,7 +3,7 @@
 // status-repair maintenance endpoints, and the category-based code generator.
 //
 // The PATCH handler carries a lot of verbose logging and a retry loop for a
-// real, previously-hit Neon read-after-write consistency issue — preserved
+// real, previously-hit Neon read-after-write consistency issue â€” preserved
 // verbatim because tuning it out would just re-open that bug.
 //
 // The Zod ItemSchema + ALLOWED_ITEM_FIELDS list lives here too: outside this
@@ -12,33 +12,13 @@
 
 import type { Express } from 'express';
 import { z } from 'zod';
-import { query, queryOne, exec } from './db';
+import { query, queryOne } from './db';
+import { getAllVersions } from './dataVersion';
 
-// Small "did anyone change inventory since we last looked?" signal for
-// clients to poll. Uses a dedicated data_versions table (not the
-// inventory rows themselves) so we don't need to add updated_at to
-// every write path, and it survives across the Fly machines. Bumping
-// is fire-and-forget: a bumpDataVersion failure never breaks the
-// underlying write — the client will just miss ONE tick and pick up
-// the next change.
-const DATA_VERSION_KEY = 'inventory';
-export async function ensureDataVersionsTable(): Promise<void> {
-  await exec(`CREATE TABLE IF NOT EXISTS data_versions (
-    key TEXT PRIMARY KEY,
-    version BIGINT NOT NULL DEFAULT 0,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-  )`).catch(() => {});
-  await exec(`INSERT INTO data_versions (key, version) VALUES ('${DATA_VERSION_KEY}', 0) ON CONFLICT DO NOTHING`).catch(() => {});
-}
-async function bumpInventoryVersion(): Promise<void> {
-  try {
-    await query(
-      `INSERT INTO data_versions (key, version, updated_at) VALUES ($1, 1, now())
-       ON CONFLICT (key) DO UPDATE SET version = data_versions.version + 1, updated_at = now()`,
-      [DATA_VERSION_KEY]
-    );
-  } catch { /* silent — see comment above */ }
-}
+// Per-handler inventory bumps are no longer needed â€” the global
+// attachDataVersionMiddleware in server.ts bumps 'inventory' on any
+// 2xx write to /api/items/*. The GET endpoints stay because they
+// read the counter for clients to poll.
 
 const ItemSchema = z.object({
   serial_number: z.string().min(1),
@@ -79,7 +59,7 @@ const ItemSchema = z.object({
   weblink_4: z.string().optional(),
   weblink_5: z.string().optional(),
   // Free-text colour marker for parts where a colour matters (LEDs
-  // most obviously — Red / Green / RGB — but usable on any SKU where
+  // most obviously â€” Red / Green / RGB â€” but usable on any SKU where
   // it helps identify what's on the shelf). Optional so nothing else
   // has to know about it.
   color: z.string().max(50).optional(),
@@ -227,11 +207,11 @@ export function registerItemsRoutes(app: Express): void {
         if (data.status) {
           console.log(`[PATCH ITEM] attempt ${attempts + 1}: expected status=${data.status}, got=${row.status}`);
           if (String(row.status).toUpperCase().trim() === String(data.status).toUpperCase().trim()) {
-            console.log(`[PATCH ITEM] ✓ STATUS MATCH! Data persisted correctly`);
+            console.log(`[PATCH ITEM] âœ“ STATUS MATCH! Data persisted correctly`);
             break;
           }
         } else {
-          // No status update requested — just return the row.
+          // No status update requested â€” just return the row.
           console.log(`[PATCH ITEM] no status update requested, returning row`);
           break;
         }
@@ -254,7 +234,6 @@ export function registerItemsRoutes(app: Express): void {
       } else {
         res.json(row);
       }
-      void bumpInventoryVersion();
     } catch (err: any) {
       console.error(`[PATCH ITEM] ERROR during update:`, err.message);
       res.status(500).json({ error: 'Failed to update item', details: err.message });
@@ -283,13 +262,12 @@ export function registerItemsRoutes(app: Express): void {
     if (rowCount === 0) return res.status(404).json({ error: 'item not found' });
     const row = await queryOne(`SELECT * FROM inventory WHERE serial_number = $1`, [serial_number]);
     res.json(row);
-    void bumpInventoryVersion();
   });
 
   // Placeholder: the delete-confirmation dialog asks whether the item is
   // referenced by BOMs / pick notes so users get warned instead of silently
   // orphaning data. Real reference-counting isn't implemented yet, so the
-  // endpoint reports "no references" without erroring — the confirmation
+  // endpoint reports "no references" without erroring â€” the confirmation
   // still works, just without the extra warning.
   app.get('/api/items/:serial_number/references', async (req, res) => {
     const serial_number = decodeURIComponent(req.params.serial_number);
@@ -328,7 +306,6 @@ export function registerItemsRoutes(app: Express): void {
 
       console.log(`[DELETE ITEM] successfully soft-deleted item: ${serial_number}`);
       res.json({ success: true, message: `Item ${serial_number} deleted successfully` });
-      void bumpInventoryVersion();
     } catch (err: any) {
       console.error(`[DELETE ITEM] ERROR deleting item:`, err.message);
       res.status(500).json({ error: 'Failed to delete item', details: err.message });
@@ -377,7 +354,6 @@ export function registerItemsRoutes(app: Express): void {
       const row = await queryOne(`SELECT * FROM inventory WHERE serial_number = $1`, [serial_number]);
       console.log(`[RESTORE ITEM] successfully restored item: ${serial_number}`);
       res.json({ success: true, message: `Item ${serial_number} restored successfully`, item: row });
-      void bumpInventoryVersion();
     } catch (err: any) {
       console.error(`[RESTORE ITEM] ERROR restoring item:`, err.message);
       res.status(500).json({ error: 'Failed to restore item', details: err.message });
@@ -422,7 +398,6 @@ export function registerItemsRoutes(app: Express): void {
       await query(sqlText, vals);
       const row = await queryOne(`SELECT * FROM inventory WHERE serial_number = $1`, [data.serial_number]);
       res.status(201).json(row);
-      void bumpInventoryVersion();
     } catch (err: any) {
       res.status(500).json({ error: 'Internal Server Error' });
     }
@@ -439,7 +414,7 @@ export function registerItemsRoutes(app: Express): void {
     // Previously this wrote ALL columns (missing ones -> NULL), so a price-only
     // update would wipe an item's name, stock, part numbers, etc. Building
     // per-row SQL from the provided keys preserves untouched columns. (It also
-    // uses Postgres $1..$N placeholders — the old code used SQLite-style '?',
+    // uses Postgres $1..$N placeholders â€” the old code used SQLite-style '?',
     // which was invalid here and made every bulk update fail with a swallowed 500.)
     const upsert = async (rows: any[]) => {
       for (const data of rows) {
@@ -450,7 +425,7 @@ export function registerItemsRoutes(app: Express): void {
         const updateCols = keys.filter(f => f !== 'serial_number');
         const vals = keys.map(f => (data as any)[f]);
         if (updateCols.length === 0) {
-          // Only the PK was supplied — make sure the row exists but change nothing.
+          // Only the PK was supplied â€” make sure the row exists but change nothing.
           await query(`INSERT INTO inventory ("serial_number") VALUES ($1) ON CONFLICT (serial_number) DO NOTHING`, [data.serial_number]);
           continue;
         }
@@ -464,7 +439,6 @@ export function registerItemsRoutes(app: Express): void {
 
     try {
       await upsert(items);
-      await bumpInventoryVersion();
       res.json({ ok: true, count: items.length });
     } catch (err: any) {
       console.error('ERROR IN POST /api/items/bulk:', err.message);
@@ -472,13 +446,14 @@ export function registerItemsRoutes(app: Express): void {
     }
   });
 
-  // Shared version counter clients poll to notice when inventory changes
-  // land from someone else's session (bulk import, single edit, restore,
-  // status repair). Returns { version, updatedAt }. Client keeps the
-  // last seen value in memory and re-fetches /api/items whenever it
-  // moves. Cheap read: one indexed row lookup.
+  // Shared version counter clients poll to notice when data changes
+  // land from someone else's session. Two flavours:
+  //   /api/data-version?key=X â€” single named counter (backwards compat)
+  //   /api/data-versions       â€” all counters in one round-trip so the
+  //                              client can react to any of them from
+  //                              a single poll.
   app.get('/api/data-version', async (req, res) => {
-    const key = String(req.query.key || DATA_VERSION_KEY);
+    const key = String(req.query.key || 'inventory');
     try {
       const row = await queryOne<{ version: string; updated_at: string }>(
         `SELECT version::text, updated_at FROM data_versions WHERE key = $1`,
@@ -494,8 +469,17 @@ export function registerItemsRoutes(app: Express): void {
     }
   });
 
+  app.get('/api/data-versions', async (_req, res) => {
+    try {
+      const versions = await getAllVersions();
+      res.json({ versions });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Set every row whose status is NULL / empty / not in the enum to ACTIVE.
-  // Manual repair path — called from the UI after imports that leave the field
+  // Manual repair path â€” called from the UI after imports that leave the field
   // blank.
   app.post('/api/items/set-all-active', async (_req, res) => {
     try {
@@ -512,7 +496,7 @@ export function registerItemsRoutes(app: Express): void {
   app.post('/api/items/fix-status', async (_req, res) => {
     try {
       // Split into three passes so the UI can show which class of rows was
-      // affected (NULL vs empty vs invalid) — a single OR-ed UPDATE would
+      // affected (NULL vs empty vs invalid) â€” a single OR-ed UPDATE would
       // still work but wouldn't produce that breakdown.
       const fixNull = await query(`UPDATE inventory SET status = 'ACTIVE' WHERE status IS NULL`);
       const fixEmpty = await query(`UPDATE inventory SET status = 'ACTIVE' WHERE status = ''`);
@@ -540,7 +524,7 @@ export function registerItemsRoutes(app: Express): void {
 
   // Suggest the next code for a category by scanning the highest-numbered
   // existing serial with the same 3-letter prefix and incrementing it.
-  // Category "BUTTON" → prefix "BUT" → last row "BUT-003" → next "BUT-004".
+  // Category "BUTTON" â†’ prefix "BUT" â†’ last row "BUT-003" â†’ next "BUT-004".
   app.get('/api/items/generate-code/:category', async (req, res) => {
     try {
       const category = req.params.category?.toUpperCase();

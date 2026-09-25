@@ -421,47 +421,48 @@ export default function App() {
     return () => { cancelled = true; };
   }, [isAuthenticated, clientOrders.length]);
 
-  // Live cross-user inventory refresh. Every inventory write on the
-  // server bumps `data_versions.inventory`. Every 25s we poll that
-  // counter; when it moves past what THIS tab last observed (imports,
-  // single-item edits, restores from any other session), we silently
-  // re-fetch /api/items and update the shared items state. That's how
-  // an admin's CSV import shows up on a viewer's screen without them
-  // having to hit refresh.
-  const lastInventoryVersion = useRef<number>(-1);
+  // Live cross-user refresh across every ERP entity. Every 2xx write
+  // to a matched /api/* path bumps its data_versions counter server-
+  // side; this tab polls /api/data-versions every 25s. When ANY key
+  // has moved past what we last observed, we silently re-run the
+  // bootstrap load so shared state (items, clients, orders, suppliers,
+  // bookkeeping, projects, kits, BOM, PP) refreshes without the user
+  // having to hit reload.
+  //
+  // First tick just captures the baseline — otherwise the initial
+  // mount would immediately trigger a duplicate bootstrap.
+  const lastDataVersions = useRef<Record<string, number> | null>(null);
   useEffect(() => {
     if (!isAuthenticated) return;
     let cancelled = false;
-    const refreshItems = async () => {
-      try {
-        const r = await fetch('/api/items');
-        if (!r.ok || cancelled) return;
-        const data = await r.json();
-        if (!Array.isArray(data)) return;
-        const mapped = mapDbRowsToItems(data);
-        setItems(mapped);
-      } catch { /* transient — try again next tick */ }
-    };
     const check = async () => {
       try {
-        const r = await fetch('/api/data-version?key=inventory');
+        const r = await fetch('/api/data-versions');
         if (!r.ok || cancelled) return;
-        const { version } = await r.json();
-        const v = Number(version) || 0;
-        if (lastInventoryVersion.current === -1) {
-          lastInventoryVersion.current = v;
+        const { versions } = await r.json();
+        const next = versions && typeof versions === 'object' ? versions as Record<string, number> : {};
+        if (lastDataVersions.current === null) {
+          lastDataVersions.current = next;
           return;
         }
-        if (v !== lastInventoryVersion.current) {
-          lastInventoryVersion.current = v;
-          await refreshItems();
+        const prev = lastDataVersions.current;
+        const moved = Object.keys(next).some(k => (next[k] ?? 0) !== (prev[k] ?? 0));
+        if (moved) {
+          lastDataVersions.current = next;
+          if (typeof loadFromAPIRef.current === 'function') {
+            await loadFromAPIRef.current();
+          }
         }
-      } catch { /* silent */ }
+      } catch { /* silent — try again next tick */ }
     };
     check();
     const id = window.setInterval(check, 25_000);
     return () => { cancelled = true; window.clearInterval(id); };
   }, [isAuthenticated]);
+  // Hoisted ref so the poller effect can call the bootstrap loader
+  // without needing loadFromAPI to be declared above it. Filled in
+  // by the mount-time effect below.
+  const loadFromAPIRef = useRef<null | (() => Promise<void>)>(null);
   const [clientOrderItems, setClientOrderItems] = useState<ClientOrderItem[]>([]);
   const [buildJobs, setBuildJobs] = useState<BuildJob[]>([]);
   const [bomStructures, setBomStructures] = useState<BomStructure[]>([]);
@@ -772,6 +773,10 @@ export default function App() {
         console.error('Failed to load from API:', err);
       }
     };
+    // Expose to the version poller so a version-delta tick can re-run
+    // the same bootstrap and pull every entity's fresh state in one
+    // call — no need to duplicate per-entity refetches for each key.
+    loadFromAPIRef.current = loadFromAPI;
     loadFromAPI();
   }, []);
 
@@ -1419,29 +1424,34 @@ export default function App() {
     if (csvParsedPreview.length === 0) return;
 
     // Snapshot the current inventory to a local CSV BEFORE we touch the
-    // database. Same shape as the Import/Export CSV round-trip so if the
-    // import turns out to be wrong the operator can re-import this file
-    // to restore. Named with a full timestamp so multiple imports in one
-    // day don't collide.
+    // database, AND separately snapshot exactly what's about to be
+    // applied. Two files come out of every import:
+    //   inventory_backup_<ts>.csv  — full state right before the write
+    //                                 (re-import to restore).
+    //   inventory_import_<ts>.csv  — exactly the batch we're applying
+    //                                 (audit trail of what changed).
+    // Same delimiter/columns as Import/Export CSV so both round-trip.
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const downloadCsv = (rows: Item[], suffix: string) => {
+      const csv = CSV_HEADER + '\n' + rows.map(itemToCsvRow).join('\n') + '\n';
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `inventory_${suffix}_${stamp}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    };
     try {
-      if (items.length > 0) {
-        const rows = items.map(itemToCsvRow);
-        const csv = CSV_HEADER + '\n' + rows.join('\n') + '\n';
-        const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `inventory_backup_${stamp}.csv`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }
+      if (items.length > 0) downloadCsv(items, 'backup');
+      // The import snapshot is always safe to write — even a first-time
+      // import still has the incoming rows worth keeping.
+      if (csvParsedPreview.length > 0) downloadCsv(csvParsedPreview, 'import');
+      triggerToast(`Saved 2 local files: pre-import backup + applied batch (${csvParsedPreview.length} rows).`, 'INFO');
     } catch (err) {
-      console.warn('Pre-import backup failed:', err);
-      // Not fatal — the user is still free to import, but we surface it
-      // so they know they don't have a local rollback file.
+      console.warn('Pre-import snapshot failed:', err);
       triggerToast('Could not save pre-import backup CSV — proceeding anyway.', 'ERROR');
     }
 
