@@ -82,9 +82,13 @@ interface ItemDetailModalProps {
   onClose: () => void;
   onSave: (updatedItem: Item) => void;
   onDelete?: (item: Item) => void;
+  /** Total qty reserved for this part across every OPEN sales order.
+   * Fed from the App-level /api/inventory/reservations/summary map.
+   * Missing / 0 = the row hides the reserved-vs-available breakdown. */
+  reservedQty?: number;
 }
 
-export default function ItemDetailModal({ item, onClose, onSave, onDelete }: ItemDetailModalProps) {
+export default function ItemDetailModal({ item, onClose, onSave, onDelete, reservedQty = 0 }: ItemDetailModalProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -391,6 +395,28 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete }: Ite
                         <AlertTriangle className="w-2.5 h-2.5 shrink-0" /> Low Stock
                       </span>
                     )}
+                    {reservedQty > 0 && (() => {
+                      const available = (item.stockLevel ?? 0) - reservedQty;
+                      if (available < 0) {
+                        return (
+                          <span
+                            className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold border bg-error/10 text-error border-error/30 whitespace-nowrap"
+                            title="Reservations from open sales orders exceed the physical stock on hand."
+                          >
+                            <AlertTriangle className="w-2.5 h-2.5 shrink-0" /> OVERBOOKED · short {fmtNumber(-available)}
+                          </span>
+                        );
+                      }
+                      return (
+                        <div
+                          className="mt-1 text-[10px] font-mono text-outline leading-tight"
+                          title="Reserved by open sales orders — released when the SO is invoiced with deduct-stock or the delivery-note is completed."
+                        >
+                          <div>{fmtNumber(reservedQty)} reserved</div>
+                          <div className="text-on-surface-variant font-bold">{fmtNumber(available)} available</div>
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   <div className="bg-surface-container-high/40 p-sm rounded-lg border border-outline-variant/50">

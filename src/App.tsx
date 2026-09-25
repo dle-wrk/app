@@ -397,6 +397,29 @@ export default function App() {
   // Bookkeeping States
   const [clients, setClients] = useState<Client[]>([]);
   const [clientOrders, setClientOrders] = useState<ClientOrder[]>([]);
+  // Per-part reserved qty aggregated across every OPEN sales order.
+  // Populated by /api/inventory/reservations/summary and re-fetched
+  // whenever a SO change (create / delete / auto-fulfil batch) could
+  // move the numbers. Used by InventoryView, ItemDetailModal and the
+  // BOM Manager audit to show "N reserved · M available" instead of
+  // just the raw stock number.
+  const [reservedByPart, setReservedByPart] = useState<Record<string, number>>({});
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    let cancelled = false;
+    fetch('/api/inventory/reservations/summary')
+      .then(r => r.ok ? r.json() : [])
+      .then(rows => {
+        if (cancelled) return;
+        const map: Record<string, number> = {};
+        for (const r of (Array.isArray(rows) ? rows : [])) {
+          if (r?.partNumber) map[r.partNumber] = Number(r.reservedQty) || 0;
+        }
+        setReservedByPart(map);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [isAuthenticated, clientOrders.length]);
   const [clientOrderItems, setClientOrderItems] = useState<ClientOrderItem[]>([]);
   const [buildJobs, setBuildJobs] = useState<BuildJob[]>([]);
   const [bomStructures, setBomStructures] = useState<BomStructure[]>([]);
@@ -1974,6 +1997,7 @@ export default function App() {
                   setShowImportModal={setShowImportModal}
                   setShowAddModal={setShowAddModal}
                   isAdmin={(currentUser?.role || '').toLowerCase() === 'admin'}
+                  reservedByPart={reservedByPart}
                 />
               );
             }
@@ -2137,6 +2161,7 @@ export default function App() {
                   bomItems={bomItems}
                   triggerToast={triggerToast}
                   onItemClick={setSelectedDetailPartNumber}
+                  reservedByPart={reservedByPart}
                 />
               );
             }
@@ -3001,6 +3026,7 @@ if (currentView === 'alternates') {
             onClose={() => setSelectedDetailPartNumber(null)}
             onSave={handleSaveItemDetail}
             onDelete={handleDeleteItem}
+            reservedQty={reservedByPart[detailItem.partNumber] || 0}
           />
         )}
 

@@ -29,6 +29,11 @@ interface InventoryViewProps {
   setShowAddModal: (show: boolean) => void;
   setSelectedDetailPartNumber: (partNumber: string | null) => void;
   isAdmin?: boolean;
+  /** Per-part reserved qty aggregated across every OPEN sales order.
+   * Populated at the App level from /api/inventory/reservations/summary
+   * and refreshed whenever the SO list moves. Missing entries mean "no
+   * reservations for this part" — treat as 0 in the render. */
+  reservedByPart?: Record<string, number>;
 }
 
 export const InventoryView: React.FC<InventoryViewProps> = ({
@@ -53,6 +58,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   setShowAddModal,
   setSelectedDetailPartNumber,
   isAdmin = false,
+  reservedByPart = {},
 }) => {
   return (
     <div className="p-container-margin space-y-4 max-w-7xl mx-auto w-full">
@@ -249,6 +255,30 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 <span className={`font-mono text-sm font-bold ${item.stockLevel < 19 ? 'text-tertiary' : 'text-on-surface'}`}>
                   {fmtNumber(item.stockLevel ?? 0)} units
                 </span>
+                {(() => {
+                  const reserved = reservedByPart[item.partNumber] || 0;
+                  if (reserved <= 0) return null;
+                  const stock = item.stockLevel ?? 0;
+                  const available = stock - reserved;
+                  if (available < 0) {
+                    return (
+                      <span
+                        className="inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-bold border bg-error/10 text-error border-error/30 whitespace-nowrap"
+                        title="Reservations from open sales orders exceed the physical stock on hand — some orders will need procurement before they can ship."
+                      >
+                        OVERBOOKED · short {fmtNumber(-available)}
+                      </span>
+                    );
+                  }
+                  return (
+                    <span
+                      className="block text-[9.5px] text-outline font-mono mt-0.5"
+                      title="Reserved by open sales orders — released when the SO is invoiced with deduct-stock or the delivery-note is completed."
+                    >
+                      {fmtNumber(reserved)} reserved · <span className="text-on-surface-variant font-bold">{fmtNumber(available)} available</span>
+                    </span>
+                  );
+                })()}
               </div>
               <div className="text-right">
                 <span className="text-[9px] text-outline uppercase font-label-caps block">Price</span>

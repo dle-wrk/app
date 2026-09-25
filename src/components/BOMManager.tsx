@@ -35,6 +35,11 @@ interface BOMManagerProps {
   bomItems: BOMItem[];
   triggerToast: (msg: string, type?: 'SUCCESS' | 'ERROR' | 'INFO') => void;
   onItemClick?: (partNumber: string) => void;
+  /** Per-part reserved qty across every OPEN sales order. Displayed as
+   * a soft annotation under the On-hand cell — the OK/SHORTAGE badge
+   * still uses raw stock (changing that math would ripple into
+   * procurement outputs and is out of scope for this display change). */
+  reservedByPart?: Record<string, number>;
 }
 
 export default function BOMManager({
@@ -45,7 +50,8 @@ export default function BOMManager({
   projects,
   bomItems,
   triggerToast,
-  onItemClick
+  onItemClick,
+  reservedByPart = {},
 }: BOMManagerProps) {
   const [selectedProjectId, setSelectedProjectId] = useState<number>(1); // Default to TCU06
 
@@ -573,6 +579,19 @@ export default function BOMManager({
                           <span className="text-[9px] text-[#8c909f] block">
                             {inventoryItem?.status === 'DISCONTINUED' ? 'DISCONTINUED' : 'In Stock'}
                           </span>
+                          {(() => {
+                            const reserved = reservedByPart[resolvedCode] || 0;
+                            if (reserved <= 0) return null;
+                            const available = currentStock - reserved;
+                            return (
+                              <span
+                                className={`text-[9px] font-mono block mt-0.5 ${available < 0 ? 'text-error font-bold' : 'text-outline'}`}
+                                title="Reserved by open sales orders — the OK/SHORTAGE badge above still uses raw on-hand stock; this is the softer picture."
+                              >
+                                {fmtNumber(reserved)} reserved · {fmtNumber(available)} free
+                              </span>
+                            );
+                          })()}
                         </td>
 
                         {/* Status checks */}

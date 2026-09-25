@@ -651,6 +651,32 @@ export function registerBookkeepingRoutes(app: Express) {
     }
   });
 
+  // Per-part aggregate for the Inventory grid + Item Detail + BOM audit.
+  // We only count reservations against OPEN sales orders — a stuck row
+  // left behind by a bug against a FULFILLED / CANCELLED order would
+  // otherwise falsely reduce the "available" figure on every screen
+  // that quotes it. Empty totals are dropped by HAVING so the response
+  // stays as small as possible.
+  app.get('/api/inventory/reservations/summary', async (_req, res) => {
+    try {
+      const { rows } = await query(
+        `SELECT r.part_number,
+                COALESCE(SUM(r.reserved_qty), 0)::text AS reserved
+         FROM client_order_reservations r
+         JOIN client_orders o ON o.id = r.client_order_id
+         WHERE o.status NOT IN ('FULFILLED', 'CANCELLED')
+         GROUP BY r.part_number
+         HAVING COALESCE(SUM(r.reserved_qty), 0) > 0`
+      );
+      res.json(rows.map(r => ({
+        partNumber: r.part_number,
+        reservedQty: Number(r.reserved) || 0,
+      })));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get('/api/client-orders/:id/reservations', async (req, res) => {
     const id = parseInt(req.params.id);
     try {
