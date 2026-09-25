@@ -2,6 +2,7 @@ import React from 'react';
 import { Search } from 'lucide-react';
 import { Item, Transaction, Supplier } from '../../types';
 import { fmtUSD, fmtNumber } from '../../lib/formatMoney';
+import { detectLedSwatch, ledSwatchBackground } from '../../lib/ledColor';
 
 interface SearchViewProps {
   searchQuery: string;
@@ -86,7 +87,24 @@ export const SearchView: React.FC<SearchViewProps> = ({
                     >
                       {item.partNumber}
                     </td>
-                    <td className="px-lg py-sm font-semibold">{item.name} <span className="text-[10px] font-normal text-on-surface-variant block">{item.description}</span></td>
+                    <td className="px-lg py-sm font-semibold">
+                      {(() => {
+                        const led = detectLedSwatch(item);
+                        if (!led) return <>{item.name}</>;
+                        return (
+                          <span className="inline-flex items-center gap-1.5">
+                            <span
+                              className="inline-block w-3 h-3 rounded-full border border-outline-variant/60 shadow-inner shrink-0"
+                              style={{ background: ledSwatchBackground(led) }}
+                              title={`LED colour: ${led.label}`}
+                            />
+                            <span>{item.name}</span>
+                            <span className="text-[10px] font-bold text-outline uppercase tracking-wider">· {led.label}</span>
+                          </span>
+                        );
+                      })()}
+                      <span className="text-[10px] font-normal text-on-surface-variant block">{item.description}</span>
+                    </td>
                     <td className="px-lg py-sm font-mono text-xs text-on-surface-variant">{item.category}</td>
                     <td className="px-lg py-sm font-mono text-xs text-right text-on-surface font-black">{fmtNumber(item.stockLevel ?? 0)}</td>
                     <td className="px-lg py-sm font-mono text-xs text-right text-green-400">{fmtUSD(Number(item.price ?? 0))}</td>
