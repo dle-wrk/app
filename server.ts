@@ -106,6 +106,14 @@ app.use((_req, res, next) => {
 // Scoped to /api so static asset requests don't trigger a DB lookup.
 app.use('/api', (req, res, next) => attachSessionUser(req, res, next));
 
+// Cross-cutting: bump the shared data-version counters on any 2xx write
+// to a matched /api/... path so other tabs / users notice changes via
+// the /api/data-versions poll and re-fetch the affected slice. MUST run
+// BEFORE every register* call — Express matches routes in registration
+// order, so a handler registered before this middleware never gets its
+// `res.on('finish')` listener attached and its writes never bump.
+attachDataVersionMiddleware(app);
+
 // Serve static files from dist directory
 app.use(express.static(DIST_DIR));
 
@@ -140,13 +148,6 @@ registerPricingRoutes(app);
 // Exchange rate (/api/exchange-rate, /api/exchange-rate/update). Consumed by
 // the pricing bulk-refresh; also refreshed on boot and daily at 06:00 UTC.
 registerExchangeRateRoutes(app);
-
-// Cross-cutting: bump the shared data-version counters on any 2xx write
-// to a matched /api/... path so other tabs / users notice changes via
-// the /api/data-versions poll and re-fetch the affected slice. Must
-// run BEFORE the route registrations so `res.on('finish')` fires for
-// every subsequently-registered handler.
-attachDataVersionMiddleware(app);
 
 // Items (/api/items/*). Inventory CRUD, bulk upsert, status-repair helpers,
 // and the category-based next-code generator.
