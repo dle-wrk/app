@@ -3,6 +3,7 @@ import { useEscapeKey } from '../lib/useEscapeKey';
 import { Item, Transaction, Project, BOMItem } from '../types';
 import { mapDbRowsToItems } from '../lib/mapDbItem';
 import { fmtNumber } from '../lib/formatMoney';
+import { detectLedSwatch, ledSwatchBackground } from '../lib/ledColor';
 import BuildQtyPicker from './BuildQtyPicker';
 import { colorToCssBackground } from './views/KitBookingView';
 import { 
@@ -497,14 +498,29 @@ export default function BOMManager({
                             title="Click to view/edit component details"
                           >
                             {resolvedCode}
-                            {inventoryItem?.color && (
+                            {inventoryItem?.color ? (
                               <span
                                 className="inline-block w-3.5 h-3.5 rounded-full border border-white/25 shadow-sm shrink-0"
                                 style={{ background: colorToCssBackground(inventoryItem.color) }}
                                 title={`Colour: ${inventoryItem.color}`}
                                 aria-label={`Colour: ${inventoryItem.color}`}
                               />
-                            )}
+                            ) : (() => {
+                              // Fall back to LED colour detection so LED
+                              // rows still get a swatch even when nobody
+                              // has stamped the color column by hand.
+                              // Manually-set colour above always wins.
+                              const led = detectLedSwatch(inventoryItem || { partNumber: resolvedCode });
+                              if (!led) return null;
+                              return (
+                                <span
+                                  className="inline-block w-3.5 h-3.5 rounded-full border border-outline-variant/60 shadow-inner shrink-0"
+                                  style={{ background: ledSwatchBackground(led) }}
+                                  title={`LED colour: ${led.label}`}
+                                  aria-label={`LED colour: ${led.label}`}
+                                />
+                              );
+                            })()}
                           </div>
                           <span className="text-[10px] text-outline block max-w-[220px] truncate leading-normal">
                             {inventoryItem ? inventoryItem.description : line.comment}
