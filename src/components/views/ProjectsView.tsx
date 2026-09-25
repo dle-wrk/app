@@ -3,6 +3,7 @@ import { Plus, Folder, X, Link as LinkIcon, Trash2, Edit, Search, Calendar, User
 import ProcurementShortageCheckerView from './ProcurementShortageCheckerView';
 import { Item, Project, JobCard } from '../../types';
 import { useEscapeKey } from '../../lib/useEscapeKey';
+import { detectLedSwatch, ledSwatchBackground } from '../../lib/ledColor';
 
 // Compact human-friendly "N units ago" for the Last-edited chip.
 // Falls back to a locale date string once we're past a week — beyond
@@ -746,7 +747,20 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
                           }`}
                         >
                           <div className="flex flex-col">
-                            <span className="font-mono text-xs font-bold">{item.partNumber}</span>
+                            <span className="font-mono text-xs font-bold flex items-center gap-1.5">
+                              {(() => {
+                                const led = detectLedSwatch(item);
+                                if (!led) return null;
+                                return (
+                                  <span
+                                    className="inline-block w-3 h-3 rounded-full border border-outline-variant/60 shadow-inner shrink-0"
+                                    style={{ background: ledSwatchBackground(led) }}
+                                    title={`LED colour: ${led.label}`}
+                                  />
+                                );
+                              })()}
+                              <span>{item.partNumber}</span>
+                            </span>
                             <span className="text-[10px] text-on-surface-variant truncate max-w-[200px]">{item.name}</span>
                           </div>
                           <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-surface-container-high text-outline">
@@ -784,7 +798,20 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
                           </button>
 
                           <div className="flex flex-col">
-                            <span className="font-mono text-xs font-bold text-primary">{stockCode}</span>
+                            <span className="font-mono text-xs font-bold text-primary flex items-center gap-1.5">
+                              {(() => {
+                                const led = detectLedSwatch(itemDetails || { partNumber: stockCode });
+                                if (!led) return null;
+                                return (
+                                  <span
+                                    className="inline-block w-3 h-3 rounded-full border border-outline-variant/60 shadow-inner shrink-0"
+                                    style={{ background: ledSwatchBackground(led) }}
+                                    title={`LED colour: ${led.label}`}
+                                  />
+                                );
+                              })()}
+                              <span>{stockCode}</span>
+                            </span>
                             <span className="text-[10px] text-on-surface-variant truncate max-w-[250px]">{itemDetails?.name || 'Unknown Item'}</span>
                           </div>
 
