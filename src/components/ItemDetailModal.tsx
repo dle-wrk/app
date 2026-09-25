@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useEscapeKey } from '../lib/useEscapeKey';
 import { Item } from '../types';
 import { fmtUSD, fmtZAR, fmtNumber } from '../lib/formatMoney';
+import { detectLedSwatch, ledSwatchBackground } from '../lib/ledColor';
 import {
   X,
   Edit3,
@@ -312,8 +313,23 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete }: Ite
             <span className="font-mono text-[10px] text-primary uppercase font-extrabold tracking-wider bg-primary/10 border border-primary/20 px-1.5 py-0.5 rounded">
               SKU: {item.partNumber}
             </span>
-            <h3 className="font-bold text-base text-on-surface select-none pr-8">
-              {isEditing ? `Edit SKU ${item.partNumber}` : item.name}
+            <h3 className="font-bold text-base text-on-surface select-none pr-8 flex items-center gap-2">
+              {(() => {
+                if (isEditing) return <>Edit SKU {item.partNumber}</>;
+                const led = detectLedSwatch(item);
+                if (!led) return <>{item.name}</>;
+                return (
+                  <>
+                    <span
+                      className="inline-block w-4 h-4 rounded-full border border-outline-variant/60 shadow-inner shrink-0"
+                      style={{ background: ledSwatchBackground(led) }}
+                      title={`LED colour: ${led.label}`}
+                    />
+                    <span>{item.name}</span>
+                    <span className="text-[10px] font-bold text-outline uppercase tracking-wider">· {led.label}</span>
+                  </>
+                );
+              })()}
             </h3>
           </div>
 
