@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { PickPlaceItem, Project } from '../types';
+import { detectLedSwatch, ledSwatchBackground } from '../lib/ledColor';
 import { 
   Lock, 
   Download, 
@@ -244,10 +245,30 @@ export default function PickPlaceManager({
                         <td className="px-lg py-sm" data-label="Stock code">
                           <span
                             onClick={() => onItemClick?.(item.stockCode)}
-                            className="text-primary font-bold hover:underline cursor-pointer select-none"
+                            className="text-primary font-bold hover:underline cursor-pointer select-none inline-flex items-center gap-1.5"
                             title="Click to view/edit component details"
                           >
-                            {item.stockCode}
+                            {(() => {
+                              // PickPlaceItem doesn't carry the full name /
+                              // itemType — feed the stockCode as partNumber
+                              // so the "LED-" prefix rule fires, then let
+                              // comment + description drive the colour word
+                              // match.
+                              const led = detectLedSwatch({
+                                partNumber: item.stockCode,
+                                name: item.comment,
+                                description: item.description,
+                              });
+                              if (!led) return null;
+                              return (
+                                <span
+                                  className="inline-block w-3 h-3 rounded-full border border-outline-variant/60 shadow-inner shrink-0"
+                                  style={{ background: ledSwatchBackground(led) }}
+                                  title={`LED colour: ${led.label}`}
+                                />
+                              );
+                            })()}
+                            <span>{item.stockCode}</span>
                           </span>
                         </td>
                         <td className="px-lg py-sm" data-label="Note & library">
