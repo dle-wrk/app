@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Item } from '../types';
 import { fmtNumber } from '../lib/formatMoney';
+import { detectLedSwatch, ledSwatchBackground } from '../lib/ledColor';
 import {
   ArrowRightLeft,
   Search,
@@ -151,9 +152,32 @@ export default function AlternatesManager({
                     <span className="text-[10px] uppercase font-extrabold px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 tracking-wide">
                       {group.commonCategory}
                     </span>
-                    <h4 className="text-sm font-bold text-on-surface tracking-tight">
-                      {group.commonName}
-                    </h4>
+                    {(() => {
+                      // All alternates in a group share name/value/footprint,
+                      // so a single detection on the first row is enough for
+                      // the group banner. Individual rows still run their own
+                      // detection below in case one row's description drifts.
+                      const rep = group.alternates[0];
+                      const led = rep ? detectLedSwatch(rep) : null;
+                      if (!led) {
+                        return (
+                          <h4 className="text-sm font-bold text-on-surface tracking-tight">
+                            {group.commonName}
+                          </h4>
+                        );
+                      }
+                      return (
+                        <h4 className="text-sm font-bold text-on-surface tracking-tight flex items-center gap-1.5">
+                          <span
+                            className="inline-block w-3.5 h-3.5 rounded-full border border-outline-variant/60 shadow-inner shrink-0"
+                            style={{ background: ledSwatchBackground(led) }}
+                            title={`LED colour: ${led.label}`}
+                          />
+                          <span>{group.commonName}</span>
+                          <span className="text-[10px] font-bold text-outline uppercase tracking-wider">· {led.label}</span>
+                        </h4>
+                      );
+                    })()}
                   </div>
                   <p className="text-[11px] font-mono text-on-surface-variant/90 leading-relaxed">
                     Spec-Match: <span className="text-on-surface font-bold">{group.commonValue}</span> &bull; Footprint: <span className="text-on-surface font-bold">{group.commonFootprint}</span>
@@ -185,8 +209,19 @@ export default function AlternatesManager({
                         <div className="flex items-start gap-3 min-w-0 flex-1">
                           <div className="w-2 h-2 rounded-full mt-1.5 shrink-0 bg-outline-variant group-hover/item:bg-primary transition-colors"></div>
                           <div className="min-w-0">
-                            <span className="font-mono text-xs font-bold text-on-surface tracking-tight group-hover/item:text-primary transition-colors block truncate">
-                              {altItem.partNumber}
+                            <span className="font-mono text-xs font-bold text-on-surface tracking-tight group-hover/item:text-primary transition-colors flex items-center gap-1.5 truncate">
+                              {(() => {
+                                const led = detectLedSwatch(altItem);
+                                if (!led) return null;
+                                return (
+                                  <span
+                                    className="inline-block w-3 h-3 rounded-full border border-outline-variant/60 shadow-inner shrink-0"
+                                    style={{ background: ledSwatchBackground(led) }}
+                                    title={`LED colour: ${led.label}`}
+                                  />
+                                );
+                              })()}
+                              <span className="truncate">{altItem.partNumber}</span>
                             </span>
                             <span className="text-[11px] text-on-surface-variant/70 line-clamp-1 mt-0.5">
                               {altItem.description}
