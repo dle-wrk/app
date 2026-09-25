@@ -3,56 +3,9 @@ import { Upload, Plus, Search, Download } from 'lucide-react';
 import { Item } from '../../types';
 import { fmtUSD, fmtZAR, fmtNumber } from '../../lib/formatMoney';
 import { CSV_HEADER, itemToCsvRow } from '../../mockData';
+import { detectLedSwatch, ledSwatchBackground } from '../../lib/ledColor';
 
 const USD_TO_ZAR_RATE = 18.50;
-
-// LED colour detection — scan the item name + description for known
-// LED colour keywords and hand back the swatch colour(s) to render.
-// Ordered longest-first so YELLOW-GREEN wins over YELLOW when both
-// substrings match. Returns [] for non-LED rows or LEDs with no
-// recognisable colour (e.g. RGB where every string is present).
-interface LedSwatch {
-  label: string;
-  colors: string[]; // one for solid, multiple for split-fill / RGB
-}
-
-const LED_COLOR_TABLE: Array<{ match: RegExp; label: string; colors: string[] }> = [
-  // Multi-colour first so RGB / BI-COLOR win over the single-word matches.
-  { match: /\bRGB\b/i, label: 'RGB', colors: ['#ef4444', '#22c55e', '#3b82f6'] },
-  { match: /\bBI[- ]?COLOU?R\b|\bBICOLOU?R\b/i, label: 'Bi-colour', colors: ['#ef4444', '#22c55e'] },
-  { match: /\bYELLOW[- ]GREEN\b/i, label: 'Yellow-green', colors: ['#a3e635'] },
-  { match: /\bYELLOW[- ]ORANGE\b/i, label: 'Yellow-orange', colors: ['#fb923c'] },
-  { match: /\bCOOL[- ]WHITE\b/i, label: 'Cool white', colors: ['#e0f2fe'] },
-  { match: /\bWARM[- ]WHITE\b/i, label: 'Warm white', colors: ['#fef3c7'] },
-  { match: /\bINFRA[- ]?RED\b|\bIR\b/i, label: 'Infrared', colors: ['#7f1d1d'] },
-  // Single-word.
-  { match: /\bAMBER\b/i, label: 'Amber', colors: ['#f59e0b'] },
-  { match: /\bORANGE\b/i, label: 'Orange', colors: ['#f97316'] },
-  { match: /\bYELLOW\b/i, label: 'Yellow', colors: ['#eab308'] },
-  { match: /\bGREEN\b/i, label: 'Green', colors: ['#22c55e'] },
-  { match: /\bBLUE\b/i, label: 'Blue', colors: ['#3b82f6'] },
-  { match: /\bWHITE\b|\bCOLORLESS\b|\bCOLOURLESS\b/i, label: 'White', colors: ['#f8fafc'] },
-  { match: /\bRED\b/i, label: 'Red', colors: ['#ef4444'] },
-  { match: /\bPURPLE\b|\bVIOLET\b/i, label: 'Purple', colors: ['#a855f7'] },
-  { match: /\bPINK\b/i, label: 'Pink', colors: ['#f472b6'] },
-  { match: /\bUV\b|\bULTRAVIOLET\b/i, label: 'UV', colors: ['#c084fc'] },
-];
-
-function detectLedSwatch(item: { name?: string; description?: string; itemType?: string; partNumber?: string }): LedSwatch | null {
-  const pn = String(item.partNumber || '');
-  const name = String(item.name || '');
-  const type = String(item.itemType || '');
-  // Only run on rows that look like LEDs — the description column has
-  // colour words for other components too (a resistor bag colour, a PCB
-  // silkscreen note) and we don't want a false-positive swatch on those.
-  const isLed = /^LED\b/i.test(name) || /^LED[- ]/i.test(pn) || /\bLED\b/i.test(type);
-  if (!isLed) return null;
-  const haystack = `${name} ${item.description || ''}`;
-  for (const row of LED_COLOR_TABLE) {
-    if (row.match.test(haystack)) return { label: row.label, colors: row.colors };
-  }
-  return null;
-}
 
 interface InventoryViewProps {
   items: Item[];
@@ -275,15 +228,11 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 if (!led) {
                   return <h4 className="font-bold text-sm text-on-surface leading-tight mt-1">{item.name}</h4>;
                 }
-                // Split-fill for multi-colour, solid for single.
-                const bg = led.colors.length === 1
-                  ? led.colors[0]
-                  : `linear-gradient(90deg, ${led.colors.map((c, i) => `${c} ${(i / led.colors.length) * 100}%, ${c} ${((i + 1) / led.colors.length) * 100}%`).join(', ')})`;
                 return (
                   <div className="flex items-center gap-1.5 mt-1">
                     <span
                       className="inline-block w-3.5 h-3.5 rounded-full border border-outline-variant/60 shadow-inner shrink-0"
-                      style={{ background: bg }}
+                      style={{ background: ledSwatchBackground(led) }}
                       title={`LED colour: ${led.label}`}
                     />
                     <h4 className="font-bold text-sm text-on-surface leading-tight">{item.name}</h4>

@@ -7,6 +7,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 const PRESET_QTYS = [50, 100, 250, 500, 1000] as const;
 import { Project } from '../../types';
 import { fmtNumber } from '../../lib/formatMoney';
+import { detectLedSwatch, ledSwatchBackground } from '../../lib/ledColor';
 import ShortageToPOModal from '../ShortageToPOModal';
 import BomLineEditorModal from '../BomLineEditorModal';
 import BuildQtyPicker from '../BuildQtyPicker';
@@ -2629,7 +2630,27 @@ function KitAllocationDialog({ stockCode, needed, existing, autoResolved, reserv
                         </div>
                       </td>
                       <td className="px-md py-2 max-w-[280px]">
-                        <div className="truncate text-on-surface">{c.name || c.description}</div>
+                        {(() => {
+                          const led = detectLedSwatch({
+                            name: c.name,
+                            description: c.description,
+                            partNumber: c.serialNumber,
+                          });
+                          if (!led) {
+                            return <div className="truncate text-on-surface">{c.name || c.description}</div>;
+                          }
+                          return (
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span
+                                className="inline-block w-3 h-3 rounded-full border border-outline-variant/60 shadow-inner shrink-0"
+                                style={{ background: ledSwatchBackground(led) }}
+                                title={`LED colour: ${led.label}`}
+                              />
+                              <span className="truncate text-on-surface">{c.name || c.description}</span>
+                              <span className="text-[10px] font-bold text-outline uppercase tracking-wider shrink-0">· {led.label}</span>
+                            </div>
+                          );
+                        })()}
                         <div className="text-[10px] text-outline font-mono">{c.footprint || '—'} · {c.matchNote}</div>
                       </td>
                       <td className="px-md py-2 text-right font-mono text-on-surface">{c.stock}</td>
