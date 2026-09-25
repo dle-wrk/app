@@ -22,7 +22,7 @@ import { registerDocsRoutes } from './src/lib/docsRoutes';
 import { registerSuppliersRoutes } from './src/lib/suppliersRoutes';
 import { registerPricingRoutes } from './src/lib/pricingRoutes';
 import { registerExchangeRateRoutes, updateExchangeRate } from './src/lib/exchangeRate';
-import { registerItemsRoutes } from './src/lib/itemsRoutes';
+import { registerItemsRoutes, ensureDataVersionsTable } from './src/lib/itemsRoutes';
 import { registerProductionRoutes, ensureProductionCostsSchema } from './src/lib/productionRoutes';
 import { registerKitsRoutes, ensureKitsSchema } from './src/lib/kitsRoutes';
 import { registerProcurementRoutes, ensureProcurementSchema } from './src/lib/procurementRoutes';
@@ -1085,6 +1085,7 @@ async function runSchemaBootstrap() {
     await ensureProductionCostsSchema().catch((e) => console.error('Failed to bootstrap production costs schema:', e));
     await ensureKitsSchema().catch((e) => console.error('Failed to bootstrap kits schema:', e));
     await ensureProcurementSchema().catch((e) => console.error('Failed to bootstrap procurement schema:', e));
+    await ensureDataVersionsTable().catch((e) => console.error('Failed to bootstrap data_versions table:', e));
 
     // Legacy fix: every db_bom_project_<N> table was created with
     // PRIMARY KEY (internal_stock_number), which forbids multiple rows

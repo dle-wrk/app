@@ -420,6 +420,48 @@ export default function App() {
       .catch(() => {});
     return () => { cancelled = true; };
   }, [isAuthenticated, clientOrders.length]);
+
+  // Live cross-user inventory refresh. Every inventory write on the
+  // server bumps `data_versions.inventory`. Every 25s we poll that
+  // counter; when it moves past what THIS tab last observed (imports,
+  // single-item edits, restores from any other session), we silently
+  // re-fetch /api/items and update the shared items state. That's how
+  // an admin's CSV import shows up on a viewer's screen without them
+  // having to hit refresh.
+  const lastInventoryVersion = useRef<number>(-1);
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    let cancelled = false;
+    const refreshItems = async () => {
+      try {
+        const r = await fetch('/api/items');
+        if (!r.ok || cancelled) return;
+        const data = await r.json();
+        if (!Array.isArray(data)) return;
+        const mapped = mapDbRowsToItems(data);
+        setItems(mapped);
+      } catch { /* transient — try again next tick */ }
+    };
+    const check = async () => {
+      try {
+        const r = await fetch('/api/data-version?key=inventory');
+        if (!r.ok || cancelled) return;
+        const { version } = await r.json();
+        const v = Number(version) || 0;
+        if (lastInventoryVersion.current === -1) {
+          lastInventoryVersion.current = v;
+          return;
+        }
+        if (v !== lastInventoryVersion.current) {
+          lastInventoryVersion.current = v;
+          await refreshItems();
+        }
+      } catch { /* silent */ }
+    };
+    check();
+    const id = window.setInterval(check, 25_000);
+    return () => { cancelled = true; window.clearInterval(id); };
+  }, [isAuthenticated]);
   const [clientOrderItems, setClientOrderItems] = useState<ClientOrderItem[]>([]);
   const [buildJobs, setBuildJobs] = useState<BuildJob[]>([]);
   const [bomStructures, setBomStructures] = useState<BomStructure[]>([]);
@@ -1470,30 +1512,50 @@ export default function App() {
     setIsDraggingCsv(false);
   };
 
+  // File → CSV text pipeline. .xlsx / .xls goes through SheetJS which
+  // reads the ArrayBuffer, picks the first sheet and emits semicolon-
+  // delimited CSV (the same shape parseCSVData expects). Everything
+  // else is read as text and handed straight through. Kept as one
+  // helper so drag-and-drop, file-picker and any future entry point
+  // stay in step.
+  const readSpreadsheetOrCsv = async (file: File): Promise<string> => {
+    const name = file.name.toLowerCase();
+    const isXlsx = name.endsWith('.xlsx') || name.endsWith('.xls');
+    if (isXlsx) {
+      const XLSX = await import('xlsx');
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: 'array' });
+      const firstSheet = wb.Sheets[wb.SheetNames[0]];
+      // FS ';' matches CSV_HEADER's delimiter so the same parser handles
+      // both formats. blankrows:false keeps stray empty rows out of the
+      // preview count.
+      return XLSX.utils.sheet_to_csv(firstSheet, { FS: ';', blankrows: false });
+    }
+    return await file.text();
+  };
+
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDraggingCsv(false);
     const file = e.dataTransfer.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const text = event.target?.result as string;
-        setCsvParsedPreview(parseCSVData(text));
-      };
-      reader.readAsText(file);
-    }
+    if (!file) return;
+    readSpreadsheetOrCsv(file)
+      .then(text => setCsvParsedPreview(parseCSVData(text)))
+      .catch(err => {
+        console.error('Failed to read file:', err);
+        triggerToast(`Could not read ${file.name} — ${err?.message || 'unsupported format'}.`, 'ERROR');
+      });
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const text = event.target?.result as string;
-        setCsvParsedPreview(parseCSVData(text));
-      };
-      reader.readAsText(file);
-    }
+    if (!file) return;
+    readSpreadsheetOrCsv(file)
+      .then(text => setCsvParsedPreview(parseCSVData(text)))
+      .catch(err => {
+        console.error('Failed to read file:', err);
+        triggerToast(`Could not read ${file.name} — ${err?.message || 'unsupported format'}.`, 'ERROR');
+      });
   };
 
   const loadDefaultCSV = () => {
@@ -2642,19 +2704,19 @@ if (currentView === 'alternates') {
                     <label className="w-full h-full flex flex-col items-center justify-center cursor-pointer">
                       <input
                         type="file"
-                        accept=".csv"
+                        accept=".csv,.xlsx,.xls,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                         className="hidden"
                         onChange={handleFileChange}
                       />
                       <Upload className={`w-10 h-10 mb-sm text-outline ${isDraggingCsv ? 'animate-bounce text-primary' : ''}`} />
                       <span className="font-bold text-xs text-on-surface block mb-1">
-                        Drag & Drop your maininventory.csv file here
+                        Drag & Drop your maininventory.csv or .xlsx file here
                       </span>
                       <span className="text-[11px] text-on-surface-variant block mb-3">
                         or click to browse local files
                       </span>
                       <span className="text-[10px] bg-surface-container border border-outline-variant text-primary px-3 py-1.5 rounded font-mono font-bold hover:bg-surface-container-high transition-colors">
-                        Choose CSV File
+                        Choose CSV or XLSX File
                       </span>
                     </label>
                   </div>

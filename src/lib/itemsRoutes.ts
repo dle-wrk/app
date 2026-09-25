@@ -12,7 +12,33 @@
 
 import type { Express } from 'express';
 import { z } from 'zod';
-import { query, queryOne } from './db';
+import { query, queryOne, exec } from './db';
+
+// Small "did anyone change inventory since we last looked?" signal for
+// clients to poll. Uses a dedicated data_versions table (not the
+// inventory rows themselves) so we don't need to add updated_at to
+// every write path, and it survives across the Fly machines. Bumping
+// is fire-and-forget: a bumpDataVersion failure never breaks the
+// underlying write — the client will just miss ONE tick and pick up
+// the next change.
+const DATA_VERSION_KEY = 'inventory';
+export async function ensureDataVersionsTable(): Promise<void> {
+  await exec(`CREATE TABLE IF NOT EXISTS data_versions (
+    key TEXT PRIMARY KEY,
+    version BIGINT NOT NULL DEFAULT 0,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`).catch(() => {});
+  await exec(`INSERT INTO data_versions (key, version) VALUES ('${DATA_VERSION_KEY}', 0) ON CONFLICT DO NOTHING`).catch(() => {});
+}
+async function bumpInventoryVersion(): Promise<void> {
+  try {
+    await query(
+      `INSERT INTO data_versions (key, version, updated_at) VALUES ($1, 1, now())
+       ON CONFLICT (key) DO UPDATE SET version = data_versions.version + 1, updated_at = now()`,
+      [DATA_VERSION_KEY]
+    );
+  } catch { /* silent — see comment above */ }
+}
 
 const ItemSchema = z.object({
   serial_number: z.string().min(1),
@@ -228,6 +254,7 @@ export function registerItemsRoutes(app: Express): void {
       } else {
         res.json(row);
       }
+      void bumpInventoryVersion();
     } catch (err: any) {
       console.error(`[PATCH ITEM] ERROR during update:`, err.message);
       res.status(500).json({ error: 'Failed to update item', details: err.message });
@@ -256,6 +283,7 @@ export function registerItemsRoutes(app: Express): void {
     if (rowCount === 0) return res.status(404).json({ error: 'item not found' });
     const row = await queryOne(`SELECT * FROM inventory WHERE serial_number = $1`, [serial_number]);
     res.json(row);
+    void bumpInventoryVersion();
   });
 
   // Placeholder: the delete-confirmation dialog asks whether the item is
@@ -300,6 +328,7 @@ export function registerItemsRoutes(app: Express): void {
 
       console.log(`[DELETE ITEM] successfully soft-deleted item: ${serial_number}`);
       res.json({ success: true, message: `Item ${serial_number} deleted successfully` });
+      void bumpInventoryVersion();
     } catch (err: any) {
       console.error(`[DELETE ITEM] ERROR deleting item:`, err.message);
       res.status(500).json({ error: 'Failed to delete item', details: err.message });
@@ -348,6 +377,7 @@ export function registerItemsRoutes(app: Express): void {
       const row = await queryOne(`SELECT * FROM inventory WHERE serial_number = $1`, [serial_number]);
       console.log(`[RESTORE ITEM] successfully restored item: ${serial_number}`);
       res.json({ success: true, message: `Item ${serial_number} restored successfully`, item: row });
+      void bumpInventoryVersion();
     } catch (err: any) {
       console.error(`[RESTORE ITEM] ERROR restoring item:`, err.message);
       res.status(500).json({ error: 'Failed to restore item', details: err.message });
@@ -392,6 +422,7 @@ export function registerItemsRoutes(app: Express): void {
       await query(sqlText, vals);
       const row = await queryOne(`SELECT * FROM inventory WHERE serial_number = $1`, [data.serial_number]);
       res.status(201).json(row);
+      void bumpInventoryVersion();
     } catch (err: any) {
       res.status(500).json({ error: 'Internal Server Error' });
     }
@@ -433,10 +464,33 @@ export function registerItemsRoutes(app: Express): void {
 
     try {
       await upsert(items);
+      await bumpInventoryVersion();
       res.json({ ok: true, count: items.length });
     } catch (err: any) {
       console.error('ERROR IN POST /api/items/bulk:', err.message);
       res.status(500).json({ error: 'Internal Server Error', details: err.message });
+    }
+  });
+
+  // Shared version counter clients poll to notice when inventory changes
+  // land from someone else's session (bulk import, single edit, restore,
+  // status repair). Returns { version, updatedAt }. Client keeps the
+  // last seen value in memory and re-fetches /api/items whenever it
+  // moves. Cheap read: one indexed row lookup.
+  app.get('/api/data-version', async (req, res) => {
+    const key = String(req.query.key || DATA_VERSION_KEY);
+    try {
+      const row = await queryOne<{ version: string; updated_at: string }>(
+        `SELECT version::text, updated_at FROM data_versions WHERE key = $1`,
+        [key]
+      );
+      res.json({
+        key,
+        version: row ? Number(row.version) || 0 : 0,
+        updatedAt: row?.updated_at || null,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
     }
   });
 
