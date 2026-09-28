@@ -261,8 +261,11 @@ export const SalesOrdersTab: React.FC<ModuleDataProps & SalesOrdersTabExtras> = 
           onCreated={(created) => {
             if (setClientOrders) setClientOrders(prev => [created, ...prev]);
             setShowEditor(false);
-            // Open the fresh order so the user can immediately attach a POP.
-            setViewing({ ...created, items: [] });
+            // Open the fresh order so the user can immediately attach a
+            // POP or print. Line items live on their own endpoint so
+            // pull them in the background — otherwise the print / view
+            // shows "No line items" for a doc that clearly has some.
+            openView(created);
           }}
         />
       )}
@@ -1107,7 +1110,7 @@ function renderPrintableSalesOrder(order: any, clientName: string): string {
   .footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid #ddd; font-size: 10px; color: #999; text-align: center; }
   @media print { body { padding: 20px; } }
 </style></head><body>
-  ${renderBrandHeader({ title: 'Sales Order', number: order.orderNumber })}
+  ${renderBrandHeader({ title: order.status === 'QUOTATION' ? 'Quotation' : 'Sales Order', number: order.orderNumber })}
 
   <div class="grid">
     <div>
