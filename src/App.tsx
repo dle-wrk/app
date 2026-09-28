@@ -571,6 +571,25 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [dateTimeStr, setDateTimeStr] = useState<string>('Loading system time...');
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
+  // Live list of every 3-letter stock-code prefix already in use across
+  // the shared inventory, plus the next-available number for each. Fed
+  // by /api/items/code-prefixes so every user sees the same options —
+  // pick ENC in the modal and you get ENC-004 (or whatever's actually
+  // free) instantly. Refreshed on modal open + on inventory version
+  // deltas so a colleague's just-added ENC-004 shifts you to ENC-005.
+  const [codePrefixes, setCodePrefixes] = useState<Array<{ prefix: string; count: number; nextNumber: number; nextCode: string }>>([]);
+  useEffect(() => {
+    if (!showAddModal) return;
+    let cancelled = false;
+    fetch('/api/items/code-prefixes')
+      .then(r => r.ok ? r.json() : [])
+      .then(rows => { if (!cancelled && Array.isArray(rows)) setCodePrefixes(rows); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+    // Depend on items.length so the live-sync bootstrap refresh (which
+    // moves items) also refreshes the prefix list next time the modal
+    // opens without needing its own poller.
+  }, [showAddModal, items.length]);
   const [showImportModal, setShowImportModal] = useState<boolean>(false);
   const [csvParsedPreview, setCsvParsedPreview] = useState<Item[]>([]);
   const [isDraggingCsv, setIsDraggingCsv] = useState<boolean>(false);
@@ -2471,42 +2490,34 @@ if (currentView === 'alternates') {
                 <div className="flex flex-col gap-1">
                   <label className="font-bold text-outline">Stock Code / SKU Part Number</label>
                   <div className="flex gap-1">
+                    <select
+                      value=""
+                      onChange={(e) => {
+                        const chosen = codePrefixes.find(p => p.prefix === e.target.value);
+                        if (chosen) setNewItem({ ...newItem, partNumber: chosen.nextCode });
+                      }}
+                      title="Pick a prefix — the next available 3-digit number for that family fills the input. Same list every user sees, refreshed every time the modal opens."
+                      className="bg-surface-container-high border border-outline-variant rounded p-2 text-on-surface outline-none font-mono text-xs w-32"
+                    >
+                      <option value="">— Prefix… —</option>
+                      {codePrefixes.map(p => (
+                        <option key={p.prefix} value={p.prefix}>
+                          {p.prefix} → {p.nextCode} ({p.count})
+                        </option>
+                      ))}
+                    </select>
                     <input
                       name="partNumber"
-                      placeholder="e.g. STM32G031F6P6 or auto-generate from category"
+                      placeholder="e.g. STM32G031F6P6 or pick a prefix →"
                       className="flex-1 bg-surface-container-high border border-outline-variant rounded p-2 text-on-surface outline-none focus:border-primary font-mono text-xs uppercase"
                       type="text"
                       required
                       value={newItem.partNumber}
                       onChange={(e) => setNewItem({ ...newItem, partNumber: e.target.value })}
                     />
-                    <button
-                      type="button"
-                      disabled={!newItem.category}
-                      onClick={async () => {
-                        // Server-side next-code generator: takes the
-                        // 3-letter uppercased category prefix, finds the
-                        // highest existing serial with that prefix, and
-                        // returns prefix-###. Lets the operator generate a
-                        // canonical stock code without typing (and without
-                        // having to know how the numbering works).
-                        try {
-                          const r = await fetch(`/api/items/generate-code/${encodeURIComponent(newItem.category)}`);
-                          if (!r.ok) throw new Error(`HTTP ${r.status}`);
-                          const { code } = await r.json();
-                          if (code) setNewItem({ ...newItem, partNumber: code });
-                        } catch (err: any) {
-                          triggerToast(`Could not generate stock code: ${err.message || err}`, 'ERROR');
-                        }
-                      }}
-                      title={newItem.category ? `Generate the next stock code for category "${newItem.category}"` : 'Pick a category first'}
-                      className="px-3 rounded text-[10px] font-bold uppercase bg-primary/10 border border-primary/30 text-primary hover:bg-primary/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
-                    >
-                      Auto
-                    </button>
                   </div>
                   <span className="text-[10px] text-outline mt-0.5">
-                    Type your own supplier / manufacturer SKU, or hit Auto to get the next code in the selected category ({newItem.category ? `→ ${newItem.category.substring(0, 3).toUpperCase()}-###` : 'e.g. LED-014, RES-127'}).
+                    Type your own supplier / manufacturer SKU, or pick a family prefix ({codePrefixes.length} in use) and the next number in that family fills automatically. Prefixes come from live inventory so every user sees the same list.
                   </span>
                 </div>
 

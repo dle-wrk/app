@@ -522,6 +522,42 @@ export function registerItemsRoutes(app: Express): void {
     }
   });
 
+  // Every distinct 3-letter prefix in use across the inventory PLUS
+  // the next-available number for each. Powers the "pick a prefix →
+  // get PREFIX-###" dropdown in the Add SKU modal so an operator can
+  // add a new component under any historically-used code family (ENC,
+  // LED, RES, MP-C, whatever) without having to type it. Uses a single
+  // GROUP BY so a busy inventory produces a small, cheap response.
+  app.get('/api/items/code-prefixes', async (_req, res) => {
+    try {
+      const { rows } = await query<{ prefix: string; next_num: string; count: string }>(`
+        WITH parsed AS (
+          SELECT
+            UPPER(SUBSTRING(serial_number FROM 1 FOR 3)) AS prefix,
+            NULLIF(REGEXP_REPLACE(serial_number, '^.*[^0-9]([0-9]+)$', '\\1'), serial_number)::int AS num
+          FROM inventory
+          WHERE deleted != true AND serial_number IS NOT NULL AND LENGTH(serial_number) >= 3
+        )
+        SELECT prefix,
+               COUNT(*)::text AS count,
+               (COALESCE(MAX(num), 0) + 1)::text AS next_num
+        FROM parsed
+        WHERE prefix ~ '^[A-Z]{3}$'
+        GROUP BY prefix
+        ORDER BY prefix
+      `);
+      res.json(rows.map(r => ({
+        prefix: r.prefix,
+        count: Number(r.count) || 0,
+        nextNumber: Number(r.next_num) || 1,
+        nextCode: `${r.prefix}-${String(Number(r.next_num) || 1).padStart(3, '0')}`,
+      })));
+    } catch (err: any) {
+      console.error('ERROR IN GET /api/items/code-prefixes:', err.message);
+      res.status(500).json({ error: 'Internal Server Error', details: err.message });
+    }
+  });
+
   // Suggest the next code for a category by scanning the highest-numbered
   // existing serial with the same 3-letter prefix and incrementing it.
   // Category "BUTTON" â†’ prefix "BUT" â†’ last row "BUT-003" â†’ next "BUT-004".
