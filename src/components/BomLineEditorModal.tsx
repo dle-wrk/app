@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Pencil, Save, Plus, Trash2, Loader2, X, AlertTriangle } from 'lucide-react';
 import { useEscapeKey } from '../lib/useEscapeKey';
+import { StockCodePrefixPicker } from './StockCodePrefixPicker';
 
 // Admin-only modal for editing the raw BOM rows behind a single audit
 // line. The audit table aggregates by stock code — the same part can
@@ -259,13 +260,20 @@ export default function BomLineEditorModal({ projectId, stockCode, onClose, onSa
 
                     <div className="grid grid-cols-2 md:grid-cols-12 gap-sm">
                       <Field label="Stock code" span={4} required>
-                        <input
-                          value={r.stockCode}
-                          disabled={r._isDeleted}
-                          onChange={(e) => patch(r.id, { stockCode: e.target.value })}
-                          className="w-full px-2 py-1.5 rounded border border-outline-variant bg-surface-container-low text-on-surface text-xs font-mono focus:outline-none focus:border-primary disabled:opacity-50"
-                          placeholder="e.g. CAP-019"
-                        />
+                        <div className="flex gap-1">
+                          <StockCodePrefixPicker
+                            onPick={(nextCode) => patch(r.id, { stockCode: nextCode })}
+                            className="w-24 shrink-0 px-1.5 py-1.5 rounded border border-outline-variant bg-surface-container-low text-on-surface text-[10px] font-mono focus:outline-none focus:border-primary"
+                            placeholder="Prefix…"
+                          />
+                          <input
+                            value={r.stockCode}
+                            disabled={r._isDeleted}
+                            onChange={(e) => patch(r.id, { stockCode: e.target.value })}
+                            className="flex-1 min-w-0 px-2 py-1.5 rounded border border-outline-variant bg-surface-container-low text-on-surface text-xs font-mono focus:outline-none focus:border-primary disabled:opacity-50"
+                            placeholder="e.g. CAP-019"
+                          />
+                        </div>
                       </Field>
                       <Field label="Qty per unit" span={2} required>
                         <input

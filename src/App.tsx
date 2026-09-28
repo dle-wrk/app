@@ -19,6 +19,7 @@ import { useEscapeKey } from './lib/useEscapeKey';
 import { ConfirmDialogHost, confirmDialog } from './lib/confirmDialog';
 import { setToastHandler } from './lib/toast';
 import BOMManager from './components/BOMManager';
+import { StockCodePrefixPicker } from './components/StockCodePrefixPicker';
 import { SupplierBOMGeneratorView } from './components/views/SupplierBOMGeneratorView';
 import { mapDbRowsToItems } from './lib/mapDbItem';
 import { mapDbRowsToTransactions, formatTrxDateTime } from './lib/mapDbTransaction';
@@ -2490,22 +2491,11 @@ if (currentView === 'alternates') {
                 <div className="flex flex-col gap-1">
                   <label className="font-bold text-outline">Stock Code / SKU Part Number</label>
                   <div className="flex gap-1">
-                    <select
-                      value=""
-                      onChange={(e) => {
-                        const chosen = codePrefixes.find(p => p.prefix === e.target.value);
-                        if (chosen) setNewItem({ ...newItem, partNumber: chosen.nextCode });
-                      }}
-                      title="Pick a prefix — the next available 3-digit number for that family fills the input. Same list every user sees, refreshed every time the modal opens."
+                    <StockCodePrefixPicker
+                      prefixes={codePrefixes}
+                      onPick={(nextCode) => setNewItem({ ...newItem, partNumber: nextCode })}
                       className="bg-surface-container-high border border-outline-variant rounded p-2 text-on-surface outline-none font-mono text-xs w-32"
-                    >
-                      <option value="">— Prefix… —</option>
-                      {codePrefixes.map(p => (
-                        <option key={p.prefix} value={p.prefix}>
-                          {p.prefix} → {p.nextCode} ({p.count})
-                        </option>
-                      ))}
-                    </select>
+                    />
                     <input
                       name="partNumber"
                       placeholder="e.g. STM32G031F6P6 or pick a prefix →"
@@ -2596,7 +2586,10 @@ if (currentView === 'alternates') {
                       name="stockLevel"
                       className="bg-surface-container-high border border-outline-variant rounded p-2 text-on-surface outline-none font-mono text-xs"
                       type="number"
-                      min="1"
+                      // 0 is valid: registering a SKU before any stock is
+                      // physically on hand (waiting on the PO, awaiting
+                      // receipt) is a normal flow. Only reject negative.
+                      min="0"
                       required
                       value={newItem.stockLevel}
                       onChange={(e) => setNewItem({ ...newItem, stockLevel: Number(e.target.value) })}
