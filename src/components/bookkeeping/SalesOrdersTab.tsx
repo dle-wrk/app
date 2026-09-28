@@ -71,9 +71,16 @@ export const SalesOrdersTab: React.FC<ModuleDataProps & SalesOrdersTabExtras> = 
   // generic "failed to delete" toast. Handled inline so the specific message
   // reaches the user.
   const handleDelete = async (id: number) => {
+    // Wording flexes for quotations because they can't have invoices,
+    // dispatch notes or build jobs referencing them yet — the blocker
+    // paragraph is misleading noise on that row.
+    const target = clientOrders.find(o => o.id === id);
+    const isQuote = target?.status === 'QUOTATION';
     if (!(await confirmDialog({
-      title: 'Delete sales order',
-      message: 'Delete this sales order? This cannot be undone.\n\nIf any invoices, delivery/collection notes, or build jobs reference this order, the delete will be blocked — void those first.',
+      title: isQuote ? 'Delete quotation' : 'Delete sales order',
+      message: isQuote
+        ? 'Delete this quotation? This cannot be undone.\n\nNo stock was reserved and no ledger entries were posted, so nothing else needs unwinding first.'
+        : 'Delete this sales order? This cannot be undone.\n\nIf any invoices, delivery/collection notes, or build jobs reference this order, the delete will be blocked — void those first.',
       confirmLabel: 'Delete',
       destructive: true,
     }))) return;
@@ -86,16 +93,16 @@ export const SalesOrdersTab: React.FC<ModuleDataProps & SalesOrdersTabExtras> = 
       const res = await fetch(`/api/client-orders/${id}`, { method: 'DELETE' });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        const msg = body?.error || `Failed to delete sales order (${res.status})`;
+        const msg = body?.error || `Failed to delete ${isQuote ? 'quotation' : 'sales order'} (${res.status})`;
         if (setClientOrders) setClientOrders(snap);
         triggerToast(msg, 'ERROR');
         return;
       }
-      triggerToast('Sales order deleted.');
+      triggerToast(`${isQuote ? 'Quotation' : 'Sales order'} deleted.`);
       if (!setClientOrders) await refresh();
     } catch (err: any) {
       if (setClientOrders) setClientOrders(snap);
-      triggerToast(err?.message || 'Failed to delete sales order', 'ERROR');
+      triggerToast(err?.message || `Failed to delete ${isQuote ? 'quotation' : 'sales order'}`, 'ERROR');
     }
   };
 
