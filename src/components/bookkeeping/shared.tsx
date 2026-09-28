@@ -135,6 +135,7 @@ export const StatCard: React.FC<{ label: string; value: string; accent?: 'primar
 };
 
 const STATUS_STYLES: Record<string, string> = {
+  QUOTATION: 'bg-blue-500/10 text-blue-400 border-blue-500/25',
   DRAFT: 'bg-surface-container-highest text-on-surface-variant border-outline-variant',
   SENT: 'bg-secondary-container/40 text-secondary border-secondary/20',
   AWAITING_PAYMENT: 'bg-secondary-container/40 text-secondary border-secondary/20',

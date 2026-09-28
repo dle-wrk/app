@@ -172,7 +172,15 @@ export function registerClientsRoutes(app: Express): void {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      const finalOrderNumber = orderNumber || await nextDocNumber(client, 'SO', 'sales_order_seq');
+      // Quotations get their own doc series (QUO-YYYY-NNNN) so a quote
+      // number never collides with a sales-order number, and a client
+      // can tell at a glance whether they're looking at a proposal or
+      // a commitment. On Accept we mint a fresh SO number.
+      const isQuotation = status === 'QUOTATION';
+      const finalOrderNumber = orderNumber
+        || (isQuotation
+          ? await nextDocNumber(client, 'QUO', 'quotation_seq')
+          : await nextDocNumber(client, 'SO', 'sales_order_seq'));
       const { rows: orderRows } = await client.query(
         `INSERT INTO client_orders (client_id, order_number, order_date, required_date, status, currency, subtotal, tax, total, notes)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
@@ -188,19 +196,69 @@ export function registerClientsRoutes(app: Express): void {
             [order.id, it.partNumber || null, it.description || '', it.quantity || 1, it.unitPrice || 0, it.lineTotal || 0]
           );
         }
-        // Auto-reserve stock for every line on save. Draft orders reserve
-        // too so a half-typed order still surfaces its shortfall — the
-        // memory here is cheap and the release path on delete/complete
-        // stays symmetric regardless of status.
-        await rewriteReservations(
-          client,
-          order.id,
-          items.map((it: any) => ({ partNumber: it.partNumber || null, quantity: Number(it.quantity) || 1 })),
-        );
+        // Quotations DO NOT reserve stock — they're proposals, not
+        // commitments. Reservations only start once the quote is
+        // accepted (or the row was created as a real sales order to
+        // begin with).
+        if (!isQuotation) {
+          await rewriteReservations(
+            client,
+            order.id,
+            items.map((it: any) => ({ partNumber: it.partNumber || null, quantity: Number(it.quantity) || 1 })),
+          );
+        }
       }
 
       await client.query('COMMIT');
       res.status(201).json(mapClientOrder(order));
+    } catch (err: any) {
+      await client.query('ROLLBACK').catch(() => {});
+      res.status(500).json({ error: err.message });
+    } finally {
+      client.release();
+    }
+  });
+
+  // Accept a quotation: mint a fresh SO number, flip status QUOTATION →
+  // DRAFT, and write the reservations that were deliberately skipped
+  // at quote time. Idempotent on non-quotation rows (returns 400 so the
+  // UI can toast a clear error rather than silently no-oping).
+  app.post('/api/client-orders/:id/accept', async (req, res) => {
+    const id = parseInt(req.params.id);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const { rows: orderRows } = await client.query(
+        `SELECT * FROM client_orders WHERE id = $1 FOR UPDATE`,
+        [id]
+      );
+      if (orderRows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'quotation not found' });
+      }
+      const current = orderRows[0];
+      if (current.status !== 'QUOTATION') {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: `Only quotations can be accepted (current status: ${current.status}).` });
+      }
+      const soNumber = await nextDocNumber(client, 'SO', 'sales_order_seq');
+      const { rows: updated } = await client.query(
+        `UPDATE client_orders
+            SET order_number = $1, status = 'DRAFT'
+          WHERE id = $2 RETURNING *`,
+        [soNumber, id]
+      );
+      const { rows: lineRows } = await client.query(
+        `SELECT part_number, quantity FROM client_order_items WHERE client_order_id = $1`,
+        [id]
+      );
+      await rewriteReservations(
+        client,
+        id,
+        lineRows.map(r => ({ partNumber: r.part_number, quantity: Number(r.quantity) || 0 }))
+      );
+      await client.query('COMMIT');
+      res.json(mapClientOrder(updated[0]));
     } catch (err: any) {
       await client.query('ROLLBACK').catch(() => {});
       res.status(500).json({ error: err.message });

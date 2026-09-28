@@ -6,7 +6,7 @@ import { LineItemsEditor, EditableLine, newEditableLine, lineTotals } from './Li
 import { confirmDialog } from '../../lib/confirmDialog';
 import { renderBrandHeader, waitForBrandImage } from '../../lib/printBrand';
 
-const STATUS_FILTERS = ['ALL', 'DRAFT', 'APPROVED', 'FULFILLED', 'CANCELLED'];
+const STATUS_FILTERS = ['ALL', 'QUOTATION', 'DRAFT', 'APPROVED', 'FULFILLED', 'CANCELLED'];
 
 // 10MB soft cap in the UI so the user gets a friendlier message than the
 // server's 20MB backstop. Chosen to fit a typical customer PO PDF with
@@ -120,7 +120,7 @@ export const SalesOrdersTab: React.FC<ModuleDataProps & SalesOrdersTabExtras> = 
   // operator queue up guaranteed failures.
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [batchOpen, setBatchOpen] = useState(false);
-  const canSelect = (o: ClientOrder) => o.status !== 'FULFILLED' && o.status !== 'CANCELLED';
+  const canSelect = (o: ClientOrder) => o.status !== 'FULFILLED' && o.status !== 'CANCELLED' && o.status !== 'QUOTATION';
   const eligibleInFilter = filtered.filter(canSelect);
   const allEligibleSelected = eligibleInFilter.length > 0 && eligibleInFilter.every(o => selectedIds.has(o.id));
   const toggleAll = () => {
@@ -277,6 +277,14 @@ export const SalesOrdersTab: React.FC<ModuleDataProps & SalesOrdersTabExtras> = 
           onClose={() => setViewing(null)}
           onDelete={() => handleDelete(viewing.id)}
           onDocChanged={() => refetchOrder(viewing.id)}
+          onAccepted={async () => {
+            // Quotation → SO conversion just landed. Pull the fresh row
+            // so the view swaps to the new SO number + DRAFT status,
+            // and refresh the list in the background.
+            await refetchOrder(viewing.id);
+            setViewing(null);
+            await refresh();
+          }}
           accounts={props.accounts}
           onCreateDispatch={props.onCreateDispatch ? (noteType) => {
             setViewing(null);
@@ -310,7 +318,7 @@ export const SalesOrdersTab: React.FC<ModuleDataProps & SalesOrdersTabExtras> = 
 // in the view modal instead of here to keep create flow lean: create first,
 // then attach the doc when it arrives.
 // ---------------------------------------------------------------------------
-const SalesOrderEditorModal: React.FC<ModuleDataProps & { onClose: () => void; onCreated: (order: ClientOrder) => void }> = ({ onClose, onCreated, clients, items, taxRates, triggerToast }) => {
+const SalesOrderEditorModal: React.FC<ModuleDataProps & { onClose: () => void; onCreated: (order: ClientOrder) => void; initialAsQuotation?: boolean }> = ({ onClose, onCreated, clients, items, taxRates, triggerToast, initialAsQuotation = false }) => {
   const [clientId, setClientId] = useState<string>('');
   const [orderDate, setOrderDate] = useState<string>(todayISO());
   const [requiredDate, setRequiredDate] = useState<string>('');
@@ -318,6 +326,10 @@ const SalesOrderEditorModal: React.FC<ModuleDataProps & { onClose: () => void; o
   const [notes, setNotes] = useState<string>('');
   const [lines, setLines] = useState<EditableLine[]>([newEditableLine()]);
   const [saving, setSaving] = useState(false);
+  // "Save as Quotation" toggle. When on, the row is created with
+  // status=QUOTATION and doc-numbered QUO-YYYY-NNNN; no reservations
+  // are written. Flipping it back before save reverts to a normal SO.
+  const [asQuotation, setAsQuotation] = useState<boolean>(initialAsQuotation);
 
   // Sales orders sell FINISHED goods — production_products (its own
   // catalogue) plus any inventory rows tagged Product / Sub-Assembly.
@@ -386,7 +398,7 @@ const SalesOrderEditorModal: React.FC<ModuleDataProps & { onClose: () => void; o
         clientId: Number(clientId),
         orderDate,
         requiredDate: requiredDate || null,
-        status: 'DRAFT',
+        status: asQuotation ? 'QUOTATION' : 'DRAFT',
         currency,
         subtotal: totals.subtotal,
         tax: totals.tax,
@@ -404,7 +416,7 @@ const SalesOrderEditorModal: React.FC<ModuleDataProps & { onClose: () => void; o
         }),
       };
       const created = await apiPost('/api/client-orders', payload);
-      triggerToast(`Sales order ${created.orderNumber} created.`);
+      triggerToast(`${asQuotation ? 'Quotation' : 'Sales order'} ${created.orderNumber} created.`);
       onCreated(created);
     } catch (err: any) {
       triggerToast(err?.message || 'Failed to create sales order', 'ERROR');
@@ -414,7 +426,30 @@ const SalesOrderEditorModal: React.FC<ModuleDataProps & { onClose: () => void; o
   };
 
   return (
-    <Modal title="New Sales Order" subtitle="Auto-numbered as SO-YYYY-NNNN. You can attach the POP/PO after saving." onClose={onClose} maxWidth="max-w-4xl">
+    <Modal
+      title={asQuotation ? 'New Quotation' : 'New Sales Order'}
+      subtitle={asQuotation
+        ? 'Auto-numbered as QUO-YYYY-NNNN. Does not reserve stock. Accept later to convert into an SO.'
+        : 'Auto-numbered as SO-YYYY-NNNN. You can attach the POP/PO after saving.'}
+      onClose={onClose}
+      maxWidth="max-w-4xl"
+    >
+      <div className="mb-md flex items-center gap-3 p-3 rounded-lg border border-outline-variant/40 bg-surface-container-low">
+        <label className="inline-flex items-center gap-2 cursor-pointer text-xs">
+          <input
+            type="checkbox"
+            checked={asQuotation}
+            onChange={(e) => setAsQuotation(e.target.checked)}
+            className="w-4 h-4 accent-primary"
+          />
+          <span className="font-bold text-on-surface">Save as Quotation</span>
+        </label>
+        <span className="text-[10px] text-outline">
+          {asQuotation
+            ? 'Proposal only — no stock reservation. Client accepts → convert to SO.'
+            : 'Commitment — reserves stock immediately.'}
+        </span>
+      </div>
       <div className="grid grid-cols-1 md:grid-cols-4 gap-md">
         <div className="md:col-span-2">
           <FieldLabel>Client</FieldLabel>
@@ -491,8 +526,9 @@ const SalesOrderViewModal: React.FC<{
   onCreateDispatch?: (noteType: 'DELIVERY' | 'COLLECTION') => void;
   onDelete: () => void;
   onDocChanged: () => void;
+  onAccepted?: () => void;
   accounts?: any[];
-}> = ({ order, clientName, busy, setBusy, triggerToast, onClose, onDelete, onDocChanged, onCreateDispatch, accounts }) => {
+}> = ({ order, clientName, busy, setBusy, triggerToast, onClose, onDelete, onDocChanged, onCreateDispatch, onAccepted, accounts }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [autoFulfilOpen, setAutoFulfilOpen] = useState(false);
 
@@ -675,7 +711,27 @@ const SalesOrderViewModal: React.FC<{
         <div className="flex items-center gap-sm flex-wrap">
           <DangerButton icon={<Trash2 className="w-3.5 h-3.5" />} onClick={onDelete} disabled={busy}>Delete</DangerButton>
           <SecondaryButton icon={<Printer className="w-3.5 h-3.5" />} onClick={openPrint}>Print</SecondaryButton>
-          {order.status !== 'FULFILLED' && order.status !== 'CANCELLED' && (
+          {order.status === 'QUOTATION' && (
+            <PrimaryButton
+              icon={<CheckCircle2 className="w-3.5 h-3.5" />}
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true);
+                try {
+                  await apiPost(`/api/client-orders/${order.id}/accept`, {});
+                  triggerToast('Quotation accepted — converted to sales order.');
+                  onAccepted?.();
+                } catch (err: any) {
+                  triggerToast(err?.message || 'Failed to accept quotation', 'ERROR');
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              Accept → Convert to SO
+            </PrimaryButton>
+          )}
+          {order.status !== 'FULFILLED' && order.status !== 'CANCELLED' && order.status !== 'QUOTATION' && (
             <PrimaryButton icon={<Zap className="w-3.5 h-3.5" />} onClick={() => setAutoFulfilOpen(true)} disabled={busy}>Auto-Fulfil…</PrimaryButton>
           )}
           {onCreateDispatch && (
