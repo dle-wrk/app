@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { Plus, Trash2, ChevronDown, Copy } from 'lucide-react';
 import { Item, TaxRate, Account } from '../../types';
 import { fmtMoney, inputClass, selectClass } from './shared';
-import { StockCodePrefixPicker } from '../StockCodePrefixPicker';
 
 // Toggle switch for boolean line-item options (deductStock / receiveStock)
 const LineToggle: React.FC<{ checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string }> = ({ checked, onChange, label, hint }) => (
@@ -183,11 +182,6 @@ export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChang
                     <label className="block text-xs font-semibold text-outline mb-1.5 uppercase tracking-wide">SKU / Part #</label>
                     <div className="relative">
                       <div className="flex items-center gap-2">
-                        <StockCodePrefixPicker
-                          onPick={(nextCode) => update(line.key, { partNumber: nextCode })}
-                          className={`${inputClass} py-2.5 px-2 text-xs font-mono w-28 shrink-0`}
-                          placeholder="Prefix…"
-                        />
                         <input
                           type="text"
                           // Bound directly to the line's partNumber so a free-

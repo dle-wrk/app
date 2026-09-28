@@ -319,6 +319,52 @@ const SalesOrderEditorModal: React.FC<ModuleDataProps & { onClose: () => void; o
   const [lines, setLines] = useState<EditableLine[]>([newEditableLine()]);
   const [saving, setSaving] = useState(false);
 
+  // Sales orders sell FINISHED goods — production_products (its own
+  // catalogue) plus any inventory rows tagged Product / Sub-Assembly.
+  // We deliberately hide raw components: a client PO shouldn't be able
+  // to line-item a 0402 resistor by mistake. Mirrors Customer PO in
+  // PurchaseOrdersTab.tsx so the two flows show the same short list.
+  const isProductionItem = (i: any) => i?.itemType === 'Product' || i?.itemType === 'Sub-Assembly';
+  const [productionProducts, setProductionProducts] = useState<any[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const rows: any[] = await apiGet('/api/production-products');
+        if (cancelled) return;
+        const shaped = (rows || []).map((r: any) => ({
+          partNumber: r.model_number || r.modelNumber,
+          name: r.description || r.model_number || r.modelNumber || '',
+          description: r.description || '',
+          itemType: 'Product',
+          stockLevel: 0,
+          price: Number(r.selling_price ?? r.sellingPrice) || 0,
+          category: r.category || undefined,
+        }));
+        setProductionProducts(shaped);
+      } catch {
+        /* best-effort — SO editor still works with the inventory subset alone */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const salesItems: any[] = useMemo(() => {
+    const seen = new Set<string>();
+    const merged: any[] = [];
+    for (const p of productionProducts) {
+      if (!p.partNumber) continue;
+      seen.add(p.partNumber);
+      merged.push(p);
+    }
+    for (const i of items) {
+      if (!isProductionItem(i)) continue;
+      if (i.partNumber && seen.has(i.partNumber)) continue;
+      merged.push(i);
+    }
+    return merged;
+  }, [productionProducts, items]);
+
   const totals = useMemo(() => {
     let subtotal = 0, tax = 0;
     for (const line of lines) {
@@ -405,7 +451,7 @@ const SalesOrderEditorModal: React.FC<ModuleDataProps & { onClose: () => void; o
         <LineItemsEditor
           lines={lines}
           onChange={setLines}
-          items={items}
+          items={salesItems}
           taxRates={taxRates}
           mode="SALES"
           currency={currency}
