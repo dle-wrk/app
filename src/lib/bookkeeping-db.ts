@@ -375,6 +375,7 @@ export async function ensureBookkeepingSchema() {
   await exec(`CREATE SEQUENCE IF NOT EXISTS dispatch_delivery_seq`).catch(() => {});
   await exec(`CREATE SEQUENCE IF NOT EXISTS dispatch_collection_seq`).catch(() => {});
   await exec(`CREATE SEQUENCE IF NOT EXISTS sales_order_seq`).catch(() => {});
+  await exec(`CREATE SEQUENCE IF NOT EXISTS quotation_seq`).catch(() => {});
 
   // --- Default Chart of Accounts (seeded once) ---------------------------------
   const acctCount = await queryOne<{ count: string }>(`SELECT COUNT(*) as count FROM accounts`);
