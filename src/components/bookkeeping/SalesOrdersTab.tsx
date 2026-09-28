@@ -633,11 +633,23 @@ const SalesOrderViewModal: React.FC<{
   // Direct-to-PDF download: renders the same printable HTML in an
   // offscreen container, hands it to html2pdf, and triggers a real
   // file download without going through the browser's print dialog.
-  // Same layout the print flow produces, just save-as-PDF automated.
+  //
+  // renderPrintableSalesOrder returns a FULL <!doctype html> document.
+  // Injecting that as innerHTML on a <div> silently drops the <html>/
+  // <head>/<body>/<style> wrappers, so the unstyled body text becomes
+  // ~nothing and html2canvas rasterises a near-blank container. Parse
+  // the string with DOMParser, extract the <style> blocks + body's
+  // inner HTML, and rebuild the styled subtree inside the container.
   const downloadPdf = async () => {
     setBusy(true);
     try {
       const html = renderPrintableSalesOrder(order, clientName);
+      const parsed = new DOMParser().parseFromString(html, 'text/html');
+      const styleHtml = Array.from(parsed.querySelectorAll('style'))
+        .map(s => s.outerHTML)
+        .join('\n');
+      const bodyHtml = parsed.body ? parsed.body.innerHTML : html;
+
       const container = document.createElement('div');
       container.style.position = 'fixed';
       container.style.left = '-99999px';
@@ -645,32 +657,34 @@ const SalesOrderViewModal: React.FC<{
       // Fixed A4-ish width so html2canvas scales predictably rather than
       // inheriting whatever the viewport happens to be.
       container.style.width = '900px';
-      container.innerHTML = html;
+      container.style.background = '#ffffff';
+      container.style.color = '#111';
+      container.innerHTML = styleHtml + bodyHtml;
       document.body.appendChild(container);
 
       // Wait for any embedded brand-logo <img> to decode; html2canvas
       // rasterises whatever's currently painted, so an unready image
       // would render as a broken-image placeholder in the PDF.
       const imgs = Array.from(container.querySelectorAll('img'));
-      await Promise.all(imgs.map(img => (img as HTMLImageElement).complete
+      await Promise.all(imgs.map(img => (img as HTMLImageElement).complete && (img as HTMLImageElement).naturalWidth > 0
         ? Promise.resolve()
         : new Promise<void>(resolve => {
           img.addEventListener('load', () => resolve(), { once: true });
           img.addEventListener('error', () => resolve(), { once: true });
         })
       ));
+      // One extra tick so any newly-inserted <style> has actually been
+      // applied to the layout the canvas will capture.
+      await new Promise(r => requestAnimationFrame(() => r(null)));
 
       const html2pdf = (await import('html2pdf.js')).default;
       const docKind = order.status === 'QUOTATION' ? 'quotation' : 'sales-order';
       const filename = `${docKind}-${order.orderNumber}.pdf`;
-      // Cast to any: the current @types/html2pdf.js is missing the
-      // pagebreak option (added in the library later) so a strict
-      // check would reject it. The runtime accepts it fine.
       await (html2pdf as any)().set({
         margin: [10, 10, 10, 10],
         filename,
         image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', windowWidth: 900 },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
         pagebreak: { mode: ['css', 'legacy'] },
       }).from(container).save();
