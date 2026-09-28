@@ -630,6 +630,60 @@ const SalesOrderViewModal: React.FC<{
     w.print();
   };
 
+  // Direct-to-PDF download: renders the same printable HTML in an
+  // offscreen container, hands it to html2pdf, and triggers a real
+  // file download without going through the browser's print dialog.
+  // Same layout the print flow produces, just save-as-PDF automated.
+  const downloadPdf = async () => {
+    setBusy(true);
+    try {
+      const html = renderPrintableSalesOrder(order, clientName);
+      const container = document.createElement('div');
+      container.style.position = 'fixed';
+      container.style.left = '-99999px';
+      container.style.top = '0';
+      // Fixed A4-ish width so html2canvas scales predictably rather than
+      // inheriting whatever the viewport happens to be.
+      container.style.width = '900px';
+      container.innerHTML = html;
+      document.body.appendChild(container);
+
+      // Wait for any embedded brand-logo <img> to decode; html2canvas
+      // rasterises whatever's currently painted, so an unready image
+      // would render as a broken-image placeholder in the PDF.
+      const imgs = Array.from(container.querySelectorAll('img'));
+      await Promise.all(imgs.map(img => (img as HTMLImageElement).complete
+        ? Promise.resolve()
+        : new Promise<void>(resolve => {
+          img.addEventListener('load', () => resolve(), { once: true });
+          img.addEventListener('error', () => resolve(), { once: true });
+        })
+      ));
+
+      const html2pdf = (await import('html2pdf.js')).default;
+      const docKind = order.status === 'QUOTATION' ? 'quotation' : 'sales-order';
+      const filename = `${docKind}-${order.orderNumber}.pdf`;
+      // Cast to any: the current @types/html2pdf.js is missing the
+      // pagebreak option (added in the library later) so a strict
+      // check would reject it. The runtime accepts it fine.
+      await (html2pdf as any)().set({
+        margin: [10, 10, 10, 10],
+        filename,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+        pagebreak: { mode: ['css', 'legacy'] },
+      }).from(container).save();
+
+      document.body.removeChild(container);
+      triggerToast(`Downloaded ${filename}.`);
+    } catch (err: any) {
+      triggerToast(err?.message || 'Failed to generate PDF', 'ERROR');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <Modal title={order.orderNumber} subtitle={`${clientName} · ${fmtDate(order.orderDate)}`} onClose={onClose} maxWidth="max-w-3xl">
       <div className="flex items-center gap-2 mb-md flex-wrap">
@@ -721,6 +775,7 @@ const SalesOrderViewModal: React.FC<{
         <div className="flex items-center gap-sm flex-wrap">
           <DangerButton icon={<Trash2 className="w-3.5 h-3.5" />} onClick={onDelete} disabled={busy}>Delete</DangerButton>
           <SecondaryButton icon={<Printer className="w-3.5 h-3.5" />} onClick={openPrint}>Print</SecondaryButton>
+          <SecondaryButton icon={<Download className="w-3.5 h-3.5" />} onClick={downloadPdf} disabled={busy}>Save PDF</SecondaryButton>
           {order.status === 'QUOTATION' && (
             <PrimaryButton
               icon={<CheckCircle2 className="w-3.5 h-3.5" />}
