@@ -2469,16 +2469,45 @@ if (currentView === 'alternates') {
 
               <form onSubmit={handleAddItem} className="space-y-sm text-xs">
                 <div className="flex flex-col gap-1">
-                  <label className="font-bold text-outline">SKU Part Number Designation</label>
-                  <input
-                    name="partNumber"
-                    placeholder="e.g. STM32G031F6P6"
-                    className="bg-surface-container-high border border-outline-variant rounded p-2 text-on-surface outline-none focus:border-primary font-mono text-xs uppercase"
-                    type="text"
-                    required
-                    value={newItem.partNumber}
-                    onChange={(e) => setNewItem({ ...newItem, partNumber: e.target.value })}
-                  />
+                  <label className="font-bold text-outline">Stock Code / SKU Part Number</label>
+                  <div className="flex gap-1">
+                    <input
+                      name="partNumber"
+                      placeholder="e.g. STM32G031F6P6 or auto-generate from category"
+                      className="flex-1 bg-surface-container-high border border-outline-variant rounded p-2 text-on-surface outline-none focus:border-primary font-mono text-xs uppercase"
+                      type="text"
+                      required
+                      value={newItem.partNumber}
+                      onChange={(e) => setNewItem({ ...newItem, partNumber: e.target.value })}
+                    />
+                    <button
+                      type="button"
+                      disabled={!newItem.category}
+                      onClick={async () => {
+                        // Server-side next-code generator: takes the
+                        // 3-letter uppercased category prefix, finds the
+                        // highest existing serial with that prefix, and
+                        // returns prefix-###. Lets the operator generate a
+                        // canonical stock code without typing (and without
+                        // having to know how the numbering works).
+                        try {
+                          const r = await fetch(`/api/items/generate-code/${encodeURIComponent(newItem.category)}`);
+                          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                          const { code } = await r.json();
+                          if (code) setNewItem({ ...newItem, partNumber: code });
+                        } catch (err: any) {
+                          triggerToast(`Could not generate stock code: ${err.message || err}`, 'ERROR');
+                        }
+                      }}
+                      title={newItem.category ? `Generate the next stock code for category "${newItem.category}"` : 'Pick a category first'}
+                      className="px-3 rounded text-[10px] font-bold uppercase bg-primary/10 border border-primary/30 text-primary hover:bg-primary/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+                    >
+                      Auto
+                    </button>
+                  </div>
+                  <span className="text-[10px] text-outline mt-0.5">
+                    Type your own supplier / manufacturer SKU, or hit Auto to get the next code in the selected category ({newItem.category ? `→ ${newItem.category.substring(0, 3).toUpperCase()}-###` : 'e.g. LED-014, RES-127'}).
+                  </span>
                 </div>
 
                 <div className="flex flex-col gap-1">
