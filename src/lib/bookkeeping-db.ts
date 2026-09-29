@@ -373,6 +373,95 @@ export async function ensureBookkeepingSchema() {
   await exec(`CREATE INDEX IF NOT EXISTS idx_bank_lines_match ON bank_statement_lines(matched_type, matched_id)`).catch(() => {});
   await exec(`CREATE SEQUENCE IF NOT EXISTS bank_statement_seq`).catch(() => {});
 
+  // --- Credit notes ----------------------------------------------------------
+  // A credit note reverses part or all of an invoice's ledger impact and
+  // creates a customer credit that can be applied against future invoices
+  // or refunded in cash. `amount_applied` + `amount_refunded` = `total`
+  // when the row is fully consumed. Restock flag on each line lets the
+  // issue path put returned stock back on the shelf.
+  await exec(`CREATE TABLE IF NOT EXISTS credit_notes (
+    id SERIAL PRIMARY KEY,
+    credit_note_number TEXT UNIQUE NOT NULL,
+    invoice_id INTEGER REFERENCES invoices(id),
+    client_id INTEGER REFERENCES clients(id),
+    credit_date DATE NOT NULL,
+    reason TEXT,
+    currency TEXT DEFAULT 'ZAR',
+    subtotal NUMERIC(14,2) DEFAULT 0,
+    tax_total NUMERIC(14,2) DEFAULT 0,
+    total NUMERIC(14,2) DEFAULT 0,
+    amount_applied NUMERIC(14,2) DEFAULT 0,
+    amount_refunded NUMERIC(14,2) DEFAULT 0,
+    status TEXT DEFAULT 'DRAFT' CHECK (status IN ('DRAFT','ISSUED','APPLIED','REFUNDED','VOID')),
+    journal_entry_id INTEGER REFERENCES journal_entries(id),
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`).catch(() => {});
+  await exec(`CREATE TABLE IF NOT EXISTS credit_note_items (
+    id SERIAL PRIMARY KEY,
+    credit_note_id INTEGER REFERENCES credit_notes(id) ON DELETE CASCADE,
+    invoice_item_id INTEGER REFERENCES invoice_items(id),
+    part_number TEXT,
+    description TEXT NOT NULL,
+    quantity NUMERIC(12,2) NOT NULL DEFAULT 1,
+    unit_price NUMERIC(18,7) DEFAULT 0,
+    tax_rate_id INTEGER REFERENCES tax_rates(id),
+    tax_amount NUMERIC(14,2) DEFAULT 0,
+    line_total NUMERIC(14,2) DEFAULT 0,
+    restock BOOLEAN DEFAULT FALSE
+  )`).catch(() => {});
+  await exec(`CREATE TABLE IF NOT EXISTS credit_note_allocations (
+    id SERIAL PRIMARY KEY,
+    credit_note_id INTEGER REFERENCES credit_notes(id) ON DELETE CASCADE,
+    invoice_id INTEGER REFERENCES invoices(id),
+    amount_applied NUMERIC(14,2) NOT NULL,
+    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`).catch(() => {});
+  await exec(`CREATE SEQUENCE IF NOT EXISTS credit_note_seq`).catch(() => {});
+
+  // --- Landed cost -----------------------------------------------------------
+  // A landed-cost batch bolts freight / duty / bank charges onto one or
+  // more supplier bills so the actual per-unit inventory cost reflects
+  // reality (Digikey $52.20 + $15 freight + R400 duty, not just $52.20).
+  // Each `landed_cost_lines` row is one adjustment applied to one
+  // received item — carrying the before/after cost so a void can
+  // restore the original.
+  await exec(`CREATE TABLE IF NOT EXISTS landed_cost_batches (
+    id SERIAL PRIMARY KEY,
+    batch_number TEXT UNIQUE NOT NULL,
+    batch_date DATE NOT NULL,
+    currency TEXT DEFAULT 'ZAR',
+    allocation_method TEXT DEFAULT 'BY_VALUE' CHECK (allocation_method IN ('BY_VALUE','BY_QTY','MANUAL')),
+    status TEXT DEFAULT 'DRAFT' CHECK (status IN ('DRAFT','POSTED','VOID')),
+    posted_at TIMESTAMP,
+    journal_entry_id INTEGER REFERENCES journal_entries(id),
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`).catch(() => {});
+  await exec(`CREATE TABLE IF NOT EXISTS landed_cost_goods_bills (
+    id SERIAL PRIMARY KEY,
+    batch_id INTEGER REFERENCES landed_cost_batches(id) ON DELETE CASCADE,
+    bill_id INTEGER REFERENCES bills(id)
+  )`).catch(() => {});
+  await exec(`CREATE TABLE IF NOT EXISTS landed_cost_addon_bills (
+    id SERIAL PRIMARY KEY,
+    batch_id INTEGER REFERENCES landed_cost_batches(id) ON DELETE CASCADE,
+    bill_id INTEGER REFERENCES bills(id),
+    cost_type TEXT               -- 'FREIGHT' | 'DUTY' | 'BANK' | 'OTHER'
+  )`).catch(() => {});
+  await exec(`CREATE TABLE IF NOT EXISTS landed_cost_lines (
+    id SERIAL PRIMARY KEY,
+    batch_id INTEGER REFERENCES landed_cost_batches(id) ON DELETE CASCADE,
+    bill_item_id INTEGER REFERENCES bill_items(id),
+    part_number TEXT,
+    quantity NUMERIC(12,2),
+    original_unit_cost NUMERIC(18,7),
+    allocated_addon NUMERIC(14,2) DEFAULT 0,   -- per-unit addition
+    new_unit_cost NUMERIC(18,7)
+  )`).catch(() => {});
+  await exec(`CREATE SEQUENCE IF NOT EXISTS landed_cost_seq`).catch(() => {});
+
   // --- Extend existing entities with light-weight accounting fields -----------
   await exec(`ALTER TABLE clients ADD COLUMN IF NOT EXISTS payment_terms_days INTEGER DEFAULT 30`).catch(() => {});
   await exec(`ALTER TABLE clients ADD COLUMN IF NOT EXISTS opening_balance NUMERIC(14,2) DEFAULT 0`).catch(() => {});
@@ -434,6 +523,7 @@ export async function ensureBookkeepingSchema() {
       ['3000', "Owner's Equity", 'EQUITY', 'EQUITY', 'CREDIT', false],
       ['3900', 'Retained Earnings', 'EQUITY', 'EQUITY', 'CREDIT', true],
       ['4000', 'Sales Revenue', 'INCOME', 'SALES', 'CREDIT', true],
+      ['4050', 'Sales Returns & Allowances', 'INCOME', 'SALES', 'DEBIT', true],
       ['4100', 'Service Revenue', 'INCOME', 'SALES', 'CREDIT', false],
       ['4900', 'Other Income', 'INCOME', 'OTHER_INCOME', 'CREDIT', false],
       ['5000', 'Cost of Goods Sold', 'EXPENSE', 'COGS', 'DEBIT', true],
@@ -519,7 +609,9 @@ export const SYSTEM_ACCOUNT_CODES = {
   AP: '2000',
   VAT: '2100',
   SALES: '4000',
+  SALES_RETURNS: '4050',
   COGS: '5000',
+  INVENTORY: '1200',
   DEFAULT_EXPENSE: '6900',
   DEFAULT_BANK: '1010',
 } as const;

@@ -2731,6 +2731,615 @@ If a field is unreadable, use null (or [] for lineItems). Never invent values.`;
       res.status(500).json({ error: err.message });
     }
   });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Credit notes
+  // ───────────────────────────────────────────────────────────────────────
+  // Reverses part or all of an invoice's ledger impact and creates a
+  // customer credit that can be applied against future invoices or
+  // refunded in cash. DRAFT rows can be freely edited; ISSUED rows are
+  // frozen and only advance via /apply and /refund.
+  // ═══════════════════════════════════════════════════════════════════════
+
+  const CreditNoteItemSchema = z.object({
+    invoiceItemId: z.number().nullable().optional(),
+    partNumber: z.string().optional(),
+    description: z.string().min(1),
+    quantity: z.number().positive(),
+    unitPrice: z.number().min(0),
+    taxRateId: z.number().nullable().optional(),
+    restock: z.boolean().optional(),
+  });
+  const CreditNoteCreateSchema = z.object({
+    invoiceId: z.number().nullable().optional(),
+    clientId: z.number().nullable().optional(),
+    creditDate: z.string().optional(),
+    reason: z.string().optional(),
+    currency: z.string().optional(),
+    notes: z.string().optional(),
+    items: z.array(CreditNoteItemSchema).min(1),
+  });
+
+  const mapCreditNote = (r: any) => ({
+    id: r.id,
+    creditNoteNumber: r.credit_note_number,
+    invoiceId: r.invoice_id,
+    invoiceNumber: r.invoice_number || null,
+    clientId: r.client_id,
+    clientName: r.client_name || null,
+    creditDate: r.credit_date,
+    reason: r.reason,
+    currency: r.currency,
+    subtotal: parseFloat(r.subtotal) || 0,
+    taxTotal: parseFloat(r.tax_total) || 0,
+    total: parseFloat(r.total) || 0,
+    amountApplied: parseFloat(r.amount_applied) || 0,
+    amountRefunded: parseFloat(r.amount_refunded) || 0,
+    remaining: r2((parseFloat(r.total) || 0) - (parseFloat(r.amount_applied) || 0) - (parseFloat(r.amount_refunded) || 0)),
+    status: r.status,
+    journalEntryId: r.journal_entry_id,
+    notes: r.notes,
+    createdAt: r.created_at,
+  });
+  const mapCreditNoteItem = (r: any) => ({
+    id: r.id,
+    creditNoteId: r.credit_note_id,
+    invoiceItemId: r.invoice_item_id,
+    partNumber: r.part_number,
+    description: r.description,
+    quantity: parseFloat(r.quantity) || 0,
+    unitPrice: parseFloat(r.unit_price) || 0,
+    taxRateId: r.tax_rate_id,
+    taxAmount: parseFloat(r.tax_amount) || 0,
+    lineTotal: parseFloat(r.line_total) || 0,
+    restock: !!r.restock,
+  });
+
+  app.get('/api/credit-notes', async (_req, res) => {
+    try {
+      const { rows } = await query(`
+        SELECT cn.*, i.invoice_number, c.client_name
+        FROM credit_notes cn
+        LEFT JOIN invoices i ON i.id = cn.invoice_id
+        LEFT JOIN clients c ON c.id = cn.client_id
+        ORDER BY cn.id DESC
+      `);
+      res.json(rows.map(mapCreditNote));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/credit-notes/:id', async (req, res) => {
+    const id = parseInt(req.params.id);
+    try {
+      const row = await queryOne<any>(`
+        SELECT cn.*, i.invoice_number, c.client_name
+        FROM credit_notes cn
+        LEFT JOIN invoices i ON i.id = cn.invoice_id
+        LEFT JOIN clients c ON c.id = cn.client_id
+        WHERE cn.id = $1
+      `, [id]);
+      if (!row) return res.status(404).json({ error: 'credit note not found' });
+      const { rows: items } = await query(`SELECT * FROM credit_note_items WHERE credit_note_id = $1 ORDER BY id`, [id]);
+      const { rows: allocations } = await query(`
+        SELECT a.*, i.invoice_number
+        FROM credit_note_allocations a
+        LEFT JOIN invoices i ON i.id = a.invoice_id
+        WHERE a.credit_note_id = $1
+        ORDER BY a.id
+      `, [id]);
+      res.json({
+        ...mapCreditNote(row),
+        items: items.map(mapCreditNoteItem),
+        allocations: allocations.map(a => ({
+          id: a.id, invoiceId: a.invoice_id, invoiceNumber: a.invoice_number,
+          amountApplied: parseFloat(a.amount_applied) || 0, appliedAt: a.applied_at,
+        })),
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/credit-notes', async (req, res) => {
+    const parsed = CreditNoteCreateSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid payload', details: parsed.error.flatten() });
+    const body = parsed.data;
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      // If linked to an invoice: pull client + currency from the parent
+      // so a bad payload can't create a CN attributed to nobody.
+      let clientId = body.clientId ?? null;
+      let currency = body.currency || 'ZAR';
+      if (body.invoiceId) {
+        const inv = await queryOne<any>(`SELECT client_id, currency, status FROM invoices WHERE id = $1`, [body.invoiceId]);
+        if (!inv) throw new Error('Source invoice not found');
+        if (inv.status === 'VOID' || inv.status === 'DRAFT') throw new Error(`Cannot credit-note a ${inv.status} invoice.`);
+        clientId = inv.client_id;
+        currency = inv.currency || 'ZAR';
+      }
+
+      // Line totals, computed the same way as invoices.
+      const computedLines = await Promise.all(body.items.map(async (it) => {
+        const taxPct = await resolveTaxPercent(it.taxRateId ?? null);
+        return { ...it, ...computeLineTotals({ ...it, taxRatePercent: taxPct, taxInclusive: false }) };
+      }));
+      const { subtotal, taxTotal, total } = computeDocumentTotals(computedLines, 0);
+
+      const number = await nextDocNumber(client, 'CN', 'credit_note_seq');
+      const creditDate = body.creditDate || new Date().toISOString().slice(0, 10);
+      const cnRes = await client.query(
+        `INSERT INTO credit_notes (credit_note_number, invoice_id, client_id, credit_date, reason, currency, subtotal, tax_total, total, notes)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+        [number, body.invoiceId || null, clientId, creditDate, body.reason || null, currency, subtotal, taxTotal, total, body.notes || null]
+      );
+      const cnId = cnRes.rows[0].id;
+      for (const l of computedLines) {
+        await client.query(
+          `INSERT INTO credit_note_items (credit_note_id, invoice_item_id, part_number, description, quantity, unit_price, tax_rate_id, tax_amount, line_total, restock)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+          [cnId, l.invoiceItemId || null, l.partNumber || null, l.description, l.quantity, l.unitPrice, l.taxRateId || null, l.taxAmount, l.lineTotal, !!l.restock]
+        );
+      }
+      await client.query('COMMIT');
+      const finalRow = await queryOne<any>(`
+        SELECT cn.*, i.invoice_number, c.client_name
+        FROM credit_notes cn
+        LEFT JOIN invoices i ON i.id = cn.invoice_id
+        LEFT JOIN clients c ON c.id = cn.client_id
+        WHERE cn.id = $1
+      `, [cnId]);
+      res.status(201).json(mapCreditNote(finalRow));
+    } catch (err: any) {
+      await client.query('ROLLBACK');
+      res.status(400).json({ error: err.message });
+    } finally {
+      client.release();
+    }
+  });
+
+  // Issue: post the reversing journal, restock returned lines, then
+  // if there's a source invoice, apply the credit against it (up to
+  // the invoice's remaining balance). Any overhang stays as a customer
+  // credit on the CN, applicable to future invoices or refundable.
+  app.post('/api/credit-notes/:id/issue', async (req, res) => {
+    const id = parseInt(req.params.id);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const cn = await queryOne<any>(`SELECT * FROM credit_notes WHERE id = $1`, [id]);
+      if (!cn) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'credit note not found' }); }
+      if (cn.status !== 'DRAFT') { await client.query('ROLLBACK'); return res.status(400).json({ error: `Cannot issue a ${cn.status} credit note.` }); }
+
+      const arId       = await getAccountIdByCode(SYSTEM_ACCOUNT_CODES.AR);
+      const returnsId  = await getAccountIdByCode(SYSTEM_ACCOUNT_CODES.SALES_RETURNS);
+      const vatId      = await getAccountIdByCode(SYSTEM_ACCOUNT_CODES.VAT);
+
+      const sub = parseFloat(cn.subtotal) || 0;
+      const vat = parseFloat(cn.tax_total) || 0;
+      const total = parseFloat(cn.total) || 0;
+
+      // Journal: DR Sales Returns + DR VAT payable, CR AR (customer owes less)
+      const lines = [] as any[];
+      if (sub > 0) lines.push({ accountId: returnsId, debit: sub, credit: 0, description: `Credit note ${cn.credit_note_number}` });
+      if (vat > 0) lines.push({ accountId: vatId, debit: vat, credit: 0, description: `VAT reversal on ${cn.credit_note_number}` });
+      if (total > 0) lines.push({ accountId: arId, debit: 0, credit: total, description: `Credit note ${cn.credit_note_number}` });
+      const journalEntryId = await postJournalEntry(client, {
+        entryDate: cn.credit_date,
+        memo: `Credit note ${cn.credit_note_number}`,
+        sourceType: 'INVOICE',   // reuse INVOICE bucket — journal_entries source_type list is closed
+        sourceId: id,
+        lines,
+      });
+      await client.query(`UPDATE credit_notes SET status = 'ISSUED', journal_entry_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [journalEntryId, id]);
+
+      // Restock any line the operator flagged as returned to inventory.
+      const { rows: items } = await client.query(`SELECT part_number, quantity, restock FROM credit_note_items WHERE credit_note_id = $1`, [id]);
+      for (const it of items) {
+        if (it.restock && it.part_number) {
+          await adjustStock(client, it.part_number, Math.abs(Number(it.quantity) || 0), 'INBOUND', `Credit note ${cn.credit_note_number} — restock`);
+        }
+      }
+
+      // Auto-apply to the source invoice up to its remaining balance.
+      let applied = 0;
+      if (cn.invoice_id) {
+        const inv = await queryOne<any>(`SELECT balance_due FROM invoices WHERE id = $1 FOR UPDATE`, [cn.invoice_id]);
+        if (inv) {
+          const canApply = Math.min(total, parseFloat(inv.balance_due) || 0);
+          if (canApply > 0.005) {
+            await client.query(
+              `INSERT INTO credit_note_allocations (credit_note_id, invoice_id, amount_applied) VALUES ($1,$2,$3)`,
+              [id, cn.invoice_id, canApply]
+            );
+            await client.query(
+              `UPDATE invoices
+                  SET amount_paid = amount_paid + $1,
+                      balance_due = balance_due - $1,
+                      status = CASE WHEN balance_due - $1 <= 0.005 THEN 'PAID' ELSE 'PARTIAL' END,
+                      updated_at = CURRENT_TIMESTAMP
+                WHERE id = $2`,
+              [canApply, cn.invoice_id]
+            );
+            applied = canApply;
+            await client.query(
+              `UPDATE credit_notes SET amount_applied = amount_applied + $1, status = CASE WHEN amount_applied + $1 >= total - 0.005 THEN 'APPLIED' ELSE status END WHERE id = $2`,
+              [canApply, id]
+            );
+          }
+        }
+      }
+
+      await client.query('COMMIT');
+      const finalRow = await queryOne<any>(`
+        SELECT cn.*, i.invoice_number, c.client_name FROM credit_notes cn
+        LEFT JOIN invoices i ON i.id = cn.invoice_id
+        LEFT JOIN clients c ON c.id = cn.client_id WHERE cn.id = $1
+      `, [id]);
+      res.json({ ...mapCreditNote(finalRow), autoApplied: applied });
+    } catch (err: any) {
+      await client.query('ROLLBACK');
+      res.status(400).json({ error: err.message });
+    } finally {
+      client.release();
+    }
+  });
+
+  // Apply credit against another (open) invoice.
+  app.post('/api/credit-notes/:id/apply', async (req, res) => {
+    const id = parseInt(req.params.id);
+    const invoiceId = Number(req.body?.invoiceId);
+    const amount = Number(req.body?.amount);
+    if (!invoiceId || !(amount > 0)) return res.status(400).json({ error: 'invoiceId and positive amount required' });
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const cn = await queryOne<any>(`SELECT * FROM credit_notes WHERE id = $1 FOR UPDATE`, [id]);
+      if (!cn) throw new Error('credit note not found');
+      if (cn.status === 'DRAFT' || cn.status === 'VOID') throw new Error(`Cannot apply a ${cn.status} credit note — issue it first.`);
+      const remaining = (parseFloat(cn.total) || 0) - (parseFloat(cn.amount_applied) || 0) - (parseFloat(cn.amount_refunded) || 0);
+      if (amount - remaining > 0.005) throw new Error(`Only ${remaining.toFixed(2)} remaining on this credit note.`);
+      const inv = await queryOne<any>(`SELECT balance_due FROM invoices WHERE id = $1 FOR UPDATE`, [invoiceId]);
+      if (!inv) throw new Error('Target invoice not found');
+      if (amount - parseFloat(inv.balance_due) > 0.005) throw new Error(`Amount exceeds invoice balance (${inv.balance_due}).`);
+
+      await client.query(`INSERT INTO credit_note_allocations (credit_note_id, invoice_id, amount_applied) VALUES ($1,$2,$3)`, [id, invoiceId, amount]);
+      await client.query(
+        `UPDATE invoices SET amount_paid = amount_paid + $1, balance_due = balance_due - $1,
+             status = CASE WHEN balance_due - $1 <= 0.005 THEN 'PAID' ELSE 'PARTIAL' END,
+             updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+        [amount, invoiceId]
+      );
+      await client.query(
+        `UPDATE credit_notes SET amount_applied = amount_applied + $1,
+             status = CASE WHEN amount_applied + $1 + amount_refunded >= total - 0.005 THEN 'APPLIED' ELSE status END,
+             updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+        [amount, id]
+      );
+      await client.query('COMMIT');
+      res.json({ ok: true });
+    } catch (err: any) {
+      await client.query('ROLLBACK');
+      res.status(400).json({ error: err.message });
+    } finally {
+      client.release();
+    }
+  });
+
+  // Refund: cash out the remaining credit. Body { amount, bankAccountId }.
+  app.post('/api/credit-notes/:id/refund', async (req, res) => {
+    const id = parseInt(req.params.id);
+    const amount = Number(req.body?.amount);
+    const bankAccountId = Number(req.body?.bankAccountId);
+    if (!(amount > 0) || !bankAccountId) return res.status(400).json({ error: 'amount and bankAccountId required' });
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const cn = await queryOne<any>(`SELECT * FROM credit_notes WHERE id = $1 FOR UPDATE`, [id]);
+      if (!cn) throw new Error('credit note not found');
+      if (cn.status !== 'ISSUED' && cn.status !== 'APPLIED') throw new Error(`Cannot refund a ${cn.status} credit note.`);
+      const remaining = (parseFloat(cn.total) || 0) - (parseFloat(cn.amount_applied) || 0) - (parseFloat(cn.amount_refunded) || 0);
+      if (amount - remaining > 0.005) throw new Error(`Only ${remaining.toFixed(2)} remaining on this credit note.`);
+
+      const arId = await getAccountIdByCode(SYSTEM_ACCOUNT_CODES.AR);
+      // Journal: DR AR (credit balance reduces), CR Bank (cash out).
+      // NB: We debit AR because a customer-credit balance sits as a
+      // negative-AR (or a separate customer-credits liability if you'd
+      // rather split it — kept combined here to avoid schema surgery).
+      const journalEntryId = await postJournalEntry(client, {
+        entryDate: new Date().toISOString().slice(0, 10),
+        memo: `Refund on credit note ${cn.credit_note_number}`,
+        sourceType: 'PAYMENT_MADE',
+        sourceId: id,
+        lines: [
+          { accountId: arId, debit: amount, credit: 0, description: `Refund ${cn.credit_note_number}` },
+          { accountId: bankAccountId, debit: 0, credit: amount, description: `Refund ${cn.credit_note_number}` },
+        ],
+      });
+      void journalEntryId; // referenced via source_id/source_type
+
+      await client.query(
+        `UPDATE credit_notes SET amount_refunded = amount_refunded + $1,
+             status = CASE WHEN amount_applied + amount_refunded + $1 >= total - 0.005 THEN 'REFUNDED' ELSE status END,
+             updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+        [amount, id]
+      );
+      await client.query('COMMIT');
+      res.json({ ok: true });
+    } catch (err: any) {
+      await client.query('ROLLBACK');
+      res.status(400).json({ error: err.message });
+    } finally {
+      client.release();
+    }
+  });
+
+  app.delete('/api/credit-notes/:id', async (req, res) => {
+    const id = parseInt(req.params.id);
+    try {
+      const cn = await queryOne<any>(`SELECT status FROM credit_notes WHERE id = $1`, [id]);
+      if (!cn) return res.status(404).json({ error: 'credit note not found' });
+      if (cn.status !== 'DRAFT') return res.status(400).json({ error: `Cannot delete a ${cn.status} credit note — void a posted one via the ledger.` });
+      await query(`DELETE FROM credit_notes WHERE id = $1`, [id]);
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Landed cost
+  // ═══════════════════════════════════════════════════════════════════════
+  const LandedCostCreateSchema = z.object({
+    batchDate: z.string().optional(),
+    currency: z.string().optional(),
+    allocationMethod: z.enum(['BY_VALUE', 'BY_QTY']).optional(),
+    goodsBillIds: z.array(z.number()).min(1),
+    addonBills: z.array(z.object({
+      billId: z.number(),
+      costType: z.string().optional(),
+    })).min(1),
+    notes: z.string().optional(),
+  });
+
+  const mapLandedBatch = (r: any) => ({
+    id: r.id,
+    batchNumber: r.batch_number,
+    batchDate: r.batch_date,
+    currency: r.currency,
+    allocationMethod: r.allocation_method,
+    status: r.status,
+    postedAt: r.posted_at,
+    journalEntryId: r.journal_entry_id,
+    notes: r.notes,
+    createdAt: r.created_at,
+  });
+
+  // Preview: compute per-line allocation without touching inventory. Used
+  // by the client for the confirmation step.
+  async function computeAllocation(client: any, batchId: number, method: string) {
+    // Total additional cost = sum of addon bill totals.
+    const { rows: addonRows } = await client.query(`
+      SELECT b.id AS bill_id, b.total, b.currency FROM landed_cost_addon_bills lab
+      JOIN bills b ON b.id = lab.bill_id
+      WHERE lab.batch_id = $1`, [batchId]);
+    const totalAddon = addonRows.reduce((s: number, r: any) => s + (parseFloat(r.total) || 0), 0);
+
+    // Every line on every goods bill.
+    const { rows: itemRows } = await client.query(`
+      SELECT bi.id AS bill_item_id, bi.part_number, bi.quantity, bi.unit_price, bi.line_total
+      FROM landed_cost_goods_bills lgb
+      JOIN bill_items bi ON bi.bill_id = lgb.bill_id
+      WHERE lgb.batch_id = $1
+        AND bi.part_number IS NOT NULL`, [batchId]);
+
+    // Compute the allocation basis per line + total basis for normalisation.
+    interface LineBasis { billItemId: number; partNumber: string; quantity: number; unitCost: number; basis: number; }
+    const linesWithBasis: LineBasis[] = itemRows.map((r: any) => ({
+      billItemId: r.bill_item_id,
+      partNumber: r.part_number,
+      quantity: Number(r.quantity) || 0,
+      unitCost: Number(r.unit_price) || 0,
+      basis: method === 'BY_QTY' ? (Number(r.quantity) || 0) : (Number(r.line_total) || 0),
+    }));
+    const totalBasis = linesWithBasis.reduce((s: number, l: LineBasis) => s + l.basis, 0) || 1;
+
+    return linesWithBasis.map((l: LineBasis) => {
+      const share = totalAddon * (l.basis / totalBasis);
+      const perUnit = l.quantity > 0 ? share / l.quantity : 0;
+      return {
+        billItemId: l.billItemId,
+        partNumber: l.partNumber,
+        quantity: l.quantity,
+        originalUnitCost: l.unitCost,
+        allocatedShare: r2(share),
+        allocatedPerUnit: perUnit,
+        newUnitCost: l.unitCost + perUnit,
+      };
+    });
+  }
+
+  app.get('/api/landed-cost-batches', async (_req, res) => {
+    try {
+      const { rows } = await query(`SELECT * FROM landed_cost_batches ORDER BY id DESC`);
+      res.json(rows.map(mapLandedBatch));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/landed-cost-batches/:id', async (req, res) => {
+    const id = parseInt(req.params.id);
+    try {
+      const b = await queryOne<any>(`SELECT * FROM landed_cost_batches WHERE id = $1`, [id]);
+      if (!b) return res.status(404).json({ error: 'batch not found' });
+      const goods = await query(`
+        SELECT lgb.bill_id, b.bill_number, b.total, b.supplier_id, s.name AS supplier
+        FROM landed_cost_goods_bills lgb JOIN bills b ON b.id = lgb.bill_id
+        LEFT JOIN suppliers s ON s.id = b.supplier_id
+        WHERE lgb.batch_id = $1`, [id]);
+      const addons = await query(`
+        SELECT lab.bill_id, lab.cost_type, b.bill_number, b.total, b.supplier_id, s.name AS supplier
+        FROM landed_cost_addon_bills lab JOIN bills b ON b.id = lab.bill_id
+        LEFT JOIN suppliers s ON s.id = b.supplier_id
+        WHERE lab.batch_id = $1`, [id]);
+      const lines = await query(`SELECT * FROM landed_cost_lines WHERE batch_id = $1 ORDER BY id`, [id]);
+      res.json({
+        ...mapLandedBatch(b),
+        goodsBills: goods.rows,
+        addonBills: addons.rows,
+        lines: lines.rows.map((r: any) => ({
+          id: r.id, billItemId: r.bill_item_id, partNumber: r.part_number,
+          quantity: parseFloat(r.quantity) || 0,
+          originalUnitCost: parseFloat(r.original_unit_cost) || 0,
+          allocatedAddon: parseFloat(r.allocated_addon) || 0,
+          newUnitCost: parseFloat(r.new_unit_cost) || 0,
+        })),
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/landed-cost-batches', async (req, res) => {
+    const parsed = LandedCostCreateSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid payload', details: parsed.error.flatten() });
+    const body = parsed.data;
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const number = await nextDocNumber(client, 'LC', 'landed_cost_seq');
+      const batchDate = body.batchDate || new Date().toISOString().slice(0, 10);
+      const method = body.allocationMethod || 'BY_VALUE';
+      const bRes = await client.query(
+        `INSERT INTO landed_cost_batches (batch_number, batch_date, currency, allocation_method, notes)
+         VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+        [number, batchDate, body.currency || 'ZAR', method, body.notes || null]
+      );
+      const batchId = bRes.rows[0].id;
+      for (const bid of body.goodsBillIds) {
+        await client.query(`INSERT INTO landed_cost_goods_bills (batch_id, bill_id) VALUES ($1,$2)`, [batchId, bid]);
+      }
+      for (const ab of body.addonBills) {
+        await client.query(`INSERT INTO landed_cost_addon_bills (batch_id, bill_id, cost_type) VALUES ($1,$2,$3)`, [batchId, ab.billId, ab.costType || 'FREIGHT']);
+      }
+      await client.query('COMMIT');
+      const final = await queryOne<any>(`SELECT * FROM landed_cost_batches WHERE id = $1`, [batchId]);
+      res.status(201).json(mapLandedBatch(final));
+    } catch (err: any) {
+      await client.query('ROLLBACK');
+      res.status(400).json({ error: err.message });
+    } finally {
+      client.release();
+    }
+  });
+
+  app.post('/api/landed-cost-batches/:id/preview', async (req, res) => {
+    const id = parseInt(req.params.id);
+    const client = await pool.connect();
+    try {
+      const batch = await queryOne<any>(`SELECT * FROM landed_cost_batches WHERE id = $1`, [id]);
+      if (!batch) return res.status(404).json({ error: 'batch not found' });
+      const alloc = await computeAllocation(client, id, batch.allocation_method);
+      const totalAddonRow = await queryOne<{ total: string }>(`
+        SELECT COALESCE(SUM(b.total), 0)::text AS total
+        FROM landed_cost_addon_bills lab JOIN bills b ON b.id = lab.bill_id
+        WHERE lab.batch_id = $1`, [id]);
+      const totalAddon = parseFloat(totalAddonRow?.total || '0');
+      const allocatedSum = alloc.reduce((s: number, l: any) => s + (l.allocatedShare || 0), 0);
+      res.json({
+        totalAddon: r2(totalAddon),
+        allocatedSum: r2(allocatedSum),
+        rounding: r2(totalAddon - allocatedSum),
+        lines: alloc,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    } finally {
+      client.release();
+    }
+  });
+
+  app.post('/api/landed-cost-batches/:id/post', async (req, res) => {
+    const id = parseInt(req.params.id);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const batch = await queryOne<any>(`SELECT * FROM landed_cost_batches WHERE id = $1 FOR UPDATE`, [id]);
+      if (!batch) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'batch not found' }); }
+      if (batch.status !== 'DRAFT') { await client.query('ROLLBACK'); return res.status(400).json({ error: `Cannot post a ${batch.status} batch.` }); }
+
+      const alloc = await computeAllocation(client, id, batch.allocation_method);
+
+      // Snapshot originals + write new unit costs on inventory.
+      for (const l of alloc) {
+        await client.query(`
+          INSERT INTO landed_cost_lines (batch_id, bill_item_id, part_number, quantity, original_unit_cost, allocated_addon, new_unit_cost)
+          VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          [id, l.billItemId, l.partNumber, l.quantity, l.originalUnitCost, l.allocatedShare, l.newUnitCost]
+        );
+        // Rewrite current_cost_dollar on the inventory row so downstream
+        // COGS + margin reports see the landed cost. Historical
+        // transactions rows are untouched (they carry their own cost).
+        await client.query(
+          `UPDATE inventory SET current_cost_dollar = $1 WHERE serial_number = $2`,
+          [l.newUnitCost, l.partNumber]
+        );
+      }
+
+      // Journal: DR Inventory (increase), CR Freight-Expense (or the
+      // addon bills' original expense accounts). Simplification here:
+      // debit inventory, credit the DEFAULT_EXPENSE bucket. Fancier
+      // per-bill account routing is a follow-up.
+      const totalAddonRow = await queryOne<{ total: string }>(`
+        SELECT COALESCE(SUM(b.total), 0)::text AS total
+        FROM landed_cost_addon_bills lab JOIN bills b ON b.id = lab.bill_id
+        WHERE lab.batch_id = $1`, [id]);
+      const totalAddon = parseFloat(totalAddonRow?.total || '0');
+      const inventoryId = await getAccountIdByCode(SYSTEM_ACCOUNT_CODES.INVENTORY);
+      const expenseId = await getAccountIdByCode(SYSTEM_ACCOUNT_CODES.DEFAULT_EXPENSE);
+      let journalEntryId: number | null = null;
+      if (totalAddon > 0.005) {
+        journalEntryId = await postJournalEntry(client, {
+          entryDate: batch.batch_date,
+          memo: `Landed cost ${batch.batch_number}`,
+          sourceType: 'MANUAL',
+          sourceId: id,
+          lines: [
+            { accountId: inventoryId, debit: r2(totalAddon), credit: 0, description: `Landed cost ${batch.batch_number}` },
+            { accountId: expenseId,   debit: 0, credit: r2(totalAddon), description: `Landed cost ${batch.batch_number}` },
+          ],
+        });
+      }
+      await client.query(
+        `UPDATE landed_cost_batches SET status = 'POSTED', posted_at = CURRENT_TIMESTAMP, journal_entry_id = $1 WHERE id = $2`,
+        [journalEntryId, id]
+      );
+      await client.query('COMMIT');
+      res.json({ ok: true, journalEntryId, totalAddon: r2(totalAddon) });
+    } catch (err: any) {
+      await client.query('ROLLBACK');
+      res.status(400).json({ error: err.message });
+    } finally {
+      client.release();
+    }
+  });
+
+  app.delete('/api/landed-cost-batches/:id', async (req, res) => {
+    const id = parseInt(req.params.id);
+    try {
+      const b = await queryOne<any>(`SELECT status FROM landed_cost_batches WHERE id = $1`, [id]);
+      if (!b) return res.status(404).json({ error: 'batch not found' });
+      if (b.status === 'POSTED') return res.status(400).json({ error: 'Cannot delete a posted batch. Void via ledger reversal instead.' });
+      await query(`DELETE FROM landed_cost_batches WHERE id = $1`, [id]);
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
 }
 
 // Round to 2 dp — jsPDF and the VAT201/statement outputs both want

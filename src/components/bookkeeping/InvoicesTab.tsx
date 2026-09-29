@@ -299,6 +299,40 @@ export const InvoicesTab: React.FC<ModuleDataProps> = (props) => {
               // payments); we still gate on amountPaid to be defensive.
               <SecondaryButton onClick={() => { openEdit(viewingInvoice); setViewingInvoice(null); }}>Edit</SecondaryButton>
             )}
+            {['SENT', 'PARTIAL', 'OVERDUE', 'PAID'].includes(viewingInvoice.status) && (
+              <SecondaryButton
+                icon={<FileText className="w-3.5 h-3.5" />}
+                onClick={async () => {
+                  // Quick credit-note draft prefilled from the invoice.
+                  // Operator lands on the CN viewer with every line
+                  // pre-populated at its full price; they can trim
+                  // qtys and tick restock before hitting Issue.
+                  try {
+                    const reason = window.prompt('Reason for the credit note?', 'Return');
+                    if (reason === null) return;
+                    const restockAll = window.confirm('Restock all lines back to inventory?');
+                    const cn = await apiPost('/api/credit-notes', {
+                      invoiceId: viewingInvoice.id,
+                      reason,
+                      items: (viewingInvoice.items || []).map((it: any) => ({
+                        invoiceItemId: it.id,
+                        partNumber: it.partNumber || undefined,
+                        description: it.description,
+                        quantity: it.quantity,
+                        unitPrice: it.unitPrice,
+                        taxRateId: it.taxRateId || undefined,
+                        restock: restockAll,
+                      })),
+                    });
+                    triggerToast(`Draft credit note ${cn.creditNoteNumber} created. Open Credit Notes tab to adjust + issue.`);
+                  } catch (err: any) {
+                    triggerToast(err?.message || 'Failed to create credit note', 'ERROR');
+                  }
+                }}
+              >
+                Issue Credit Note
+              </SecondaryButton>
+            )}
             {['SENT', 'PARTIAL', 'OVERDUE'].includes(viewingInvoice.status) && (
               <>
                 <PrimaryButton icon={<Wallet className="w-3.5 h-3.5" />} onClick={() => { setPayingInvoice(viewingInvoice); setViewingInvoice(null); }}>Record Payment</PrimaryButton>

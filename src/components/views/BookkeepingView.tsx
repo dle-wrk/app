@@ -20,6 +20,8 @@ import { ProductionTab } from '../bookkeeping/ProductionTab';
 import { ReportsTab } from '../bookkeeping/ReportsTab';
 import { DispatchTab } from '../bookkeeping/DispatchTab';
 import { BankRecTab } from '../bookkeeping/BankRecTab';
+import { CreditNotesTab } from '../bookkeeping/CreditNotesTab';
+import { LandedCostTab } from '../bookkeeping/LandedCostTab';
 
 interface BookkeepingViewProps {
   clients: Client[];
@@ -51,8 +53,8 @@ interface BookkeepingViewProps {
 }
 
 type Section = 'OVERVIEW' | 'SALES' | 'PURCHASES' | 'ACCOUNTING' | 'PRODUCTION' | 'REPORTS';
-type SalesSub = 'CUSTOMERS' | 'ORDERS' | 'INVOICES' | 'PAYMENTS' | 'DISPATCH';
-type PurchasesSub = 'VENDORS' | 'ORDERS' | 'BILLS' | 'PAYMENTS' | 'EXPENSES';
+type SalesSub = 'CUSTOMERS' | 'ORDERS' | 'INVOICES' | 'CREDIT_NOTES' | 'PAYMENTS' | 'DISPATCH';
+type PurchasesSub = 'VENDORS' | 'ORDERS' | 'BILLS' | 'LANDED_COST' | 'PAYMENTS' | 'EXPENSES';
 
 const SECTIONS: { key: Section; label: string; icon: React.ReactNode }[] = [
   { key: 'OVERVIEW', label: 'Overview', icon: <LayoutDashboard className="w-4 h-4" /> },
@@ -67,6 +69,7 @@ const SALES_SUBS: { key: SalesSub; label: string; icon: React.ReactNode }[] = [
   { key: 'CUSTOMERS', label: 'Customers', icon: <Users className="w-3.5 h-3.5" /> },
   { key: 'ORDERS', label: 'Sales Orders', icon: <FileText className="w-3.5 h-3.5" /> },
   { key: 'INVOICES', label: 'Invoices', icon: <Receipt className="w-3.5 h-3.5" /> },
+  { key: 'CREDIT_NOTES', label: 'Credit Notes', icon: <Receipt className="w-3.5 h-3.5" /> },
   { key: 'PAYMENTS', label: 'Payments Received', icon: <Wallet className="w-3.5 h-3.5" /> },
   { key: 'DISPATCH', label: 'Delivery & Collection', icon: <Truck className="w-3.5 h-3.5" /> },
 ];
@@ -75,6 +78,7 @@ const PURCHASES_SUBS: { key: PurchasesSub; label: string; icon: React.ReactNode 
   { key: 'VENDORS', label: 'Vendors', icon: <Truck className="w-3.5 h-3.5" /> },
   { key: 'ORDERS', label: 'Purchase Orders', icon: <FileText className="w-3.5 h-3.5" /> },
   { key: 'BILLS', label: 'Bills', icon: <Receipt className="w-3.5 h-3.5" /> },
+  { key: 'LANDED_COST', label: 'Landed Cost', icon: <Wallet className="w-3.5 h-3.5" /> },
   { key: 'PAYMENTS', label: 'Payments Made', icon: <CreditCard className="w-3.5 h-3.5" /> },
   { key: 'EXPENSES', label: 'Expenses', icon: <Wallet className="w-3.5 h-3.5" /> },
 ];
@@ -207,6 +211,7 @@ export const BookkeepingView: React.FC<BookkeepingViewProps> = ({
           )}
           {salesSub === 'INVOICES' && <InvoicesTab {...moduleData} />}
           {salesSub === 'PAYMENTS' && <PaymentsReceivedTab {...moduleData} />}
+          {salesSub === 'CREDIT_NOTES' && <CreditNotesTab {...moduleData} />}
           {salesSub === 'DISPATCH' && (
             <DispatchTab
               {...moduleData}
@@ -245,6 +250,7 @@ export const BookkeepingView: React.FC<BookkeepingViewProps> = ({
           )}
           {purchasesSub === 'PAYMENTS' && <PaymentsMadeTab {...moduleData} />}
           {purchasesSub === 'EXPENSES' && <ExpensesTab {...moduleData} />}
+          {purchasesSub === 'LANDED_COST' && <LandedCostTab {...moduleData} />}
         </div>
       )}
 
