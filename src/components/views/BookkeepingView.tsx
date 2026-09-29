@@ -19,6 +19,7 @@ import { AccountingTab } from '../bookkeeping/AccountingTab';
 import { ProductionTab } from '../bookkeeping/ProductionTab';
 import { ReportsTab } from '../bookkeeping/ReportsTab';
 import { DispatchTab } from '../bookkeeping/DispatchTab';
+import { BankRecTab } from '../bookkeeping/BankRecTab';
 
 interface BookkeepingViewProps {
   clients: Client[];
@@ -85,6 +86,7 @@ export const BookkeepingView: React.FC<BookkeepingViewProps> = ({
   const [section, setSection] = useState<Section>(initialSection ?? 'OVERVIEW');
   const [salesSub, setSalesSub] = useState<SalesSub>(initialSalesSub ?? 'INVOICES');
   const [purchasesSub, setPurchasesSub] = useState<PurchasesSub>(initialPurchasesSub ?? 'BILLS');
+  const [accountingSub, setAccountingSub] = useState<'LEDGER' | 'BANK'>('LEDGER');
 
   // Sync with palette-driven navigation. Sub-tab keys only apply within their
   // own section, so we ignore initialSalesSub when the target isn't SALES.
@@ -246,7 +248,23 @@ export const BookkeepingView: React.FC<BookkeepingViewProps> = ({
         </div>
       )}
 
-      {section === 'ACCOUNTING' && <AccountingTab {...moduleData} />}
+      {section === 'ACCOUNTING' && (
+        <div className="space-y-4">
+          <div className="flex items-center gap-1 bg-surface-container-high/30 p-1 rounded-lg w-fit">
+            {(['LEDGER', 'BANK'] as const).map(sub => (
+              <button
+                key={sub}
+                onClick={() => setAccountingSub(sub)}
+                className={`px-3 py-1.5 rounded text-xs font-bold transition-all ${accountingSub === sub ? 'bg-primary text-white' : 'text-on-surface-variant hover:bg-surface-container-high'}`}
+              >
+                {sub === 'LEDGER' ? 'Chart of Accounts' : 'Bank Reconciliation'}
+              </button>
+            ))}
+          </div>
+          {accountingSub === 'LEDGER' && <AccountingTab {...moduleData} />}
+          {accountingSub === 'BANK' && <BankRecTab {...moduleData} />}
+        </div>
+      )}
       {section === 'PRODUCTION' && <ProductionTab {...moduleData} />}
       {section === 'REPORTS' && <ReportsTab {...moduleData} />}
     </div>

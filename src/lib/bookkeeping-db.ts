@@ -334,6 +334,45 @@ export async function ensureBookkeepingSchema() {
   )`).catch(() => {});
   await exec(`CREATE INDEX IF NOT EXISTS idx_dispatch_note_items_note ON dispatch_note_items(dispatch_note_id)`).catch(() => {});
 
+  // --- Bank reconciliation ---------------------------------------------------
+  // A bank statement is a batch of lines imported from CSV / OFX / typed by
+  // hand. Each line is either matched to an existing payments_received,
+  // payments_made or expenses row (its ledger impact is already correct),
+  // or the operator creates a new payment/expense inline while
+  // reconciling. status='RECONCILED' locks the batch so retro edits
+  // don't quietly rewrite finalised opening balances downstream.
+  await exec(`CREATE TABLE IF NOT EXISTS bank_statements (
+    id SERIAL PRIMARY KEY,
+    statement_number TEXT UNIQUE NOT NULL,
+    account_id INTEGER NOT NULL REFERENCES accounts(id),
+    statement_date DATE NOT NULL,
+    opening_balance NUMERIC(14,2) NOT NULL DEFAULT 0,
+    closing_balance NUMERIC(14,2) NOT NULL DEFAULT 0,
+    filename TEXT,
+    imported_by TEXT,
+    imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    reconciled_at TIMESTAMP,
+    status TEXT NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT','RECONCILED','VOID')),
+    notes TEXT
+  )`).catch(() => {});
+
+  await exec(`CREATE TABLE IF NOT EXISTS bank_statement_lines (
+    id SERIAL PRIMARY KEY,
+    statement_id INTEGER NOT NULL REFERENCES bank_statements(id) ON DELETE CASCADE,
+    txn_date DATE NOT NULL,
+    description TEXT,
+    amount NUMERIC(14,2) NOT NULL,
+    reference TEXT,
+    matched_type TEXT CHECK (matched_type IN ('PAYMENT_IN','PAYMENT_OUT','EXPENSE','MANUAL')),
+    matched_id INTEGER,
+    match_confidence NUMERIC(3,2),
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`).catch(() => {});
+  await exec(`CREATE INDEX IF NOT EXISTS idx_bank_lines_statement ON bank_statement_lines(statement_id)`).catch(() => {});
+  await exec(`CREATE INDEX IF NOT EXISTS idx_bank_lines_match ON bank_statement_lines(matched_type, matched_id)`).catch(() => {});
+  await exec(`CREATE SEQUENCE IF NOT EXISTS bank_statement_seq`).catch(() => {});
+
   // --- Extend existing entities with light-weight accounting fields -----------
   await exec(`ALTER TABLE clients ADD COLUMN IF NOT EXISTS payment_terms_days INTEGER DEFAULT 30`).catch(() => {});
   await exec(`ALTER TABLE clients ADD COLUMN IF NOT EXISTS opening_balance NUMERIC(14,2) DEFAULT 0`).catch(() => {});

@@ -2168,6 +2168,398 @@ If a field is unreadable, use null (or [] for lineItems). Never invent values.`;
       res.status(500).json({ error: err.message });
     }
   });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Bank reconciliation
+  // ───────────────────────────────────────────────────────────────────────
+  // Batches of imported statement lines get matched to existing payments /
+  // expenses (which already carry ledger impact), or the operator creates a
+  // new expense/payment inline while reconciling. `RECONCILED` locks the
+  // batch so retro edits don't rewrite finalised opening balances.
+  // ═══════════════════════════════════════════════════════════════════════
+
+  const BankLineSchema = z.object({
+    txnDate: z.string(),
+    description: z.string().optional().default(''),
+    amount: z.number(),
+    reference: z.string().optional(),
+  });
+  const BankStatementCreateSchema = z.object({
+    accountId: z.number(),
+    statementDate: z.string(),
+    openingBalance: z.number().optional().default(0),
+    closingBalance: z.number().optional().default(0),
+    filename: z.string().optional(),
+    notes: z.string().optional(),
+    lines: z.array(BankLineSchema).min(1).max(2000),
+  });
+
+  const mapBankStatement = (r: any) => ({
+    id: r.id,
+    statementNumber: r.statement_number,
+    accountId: r.account_id,
+    accountName: r.account_name || null,
+    statementDate: r.statement_date,
+    openingBalance: parseFloat(r.opening_balance) || 0,
+    closingBalance: parseFloat(r.closing_balance) || 0,
+    filename: r.filename,
+    importedBy: r.imported_by,
+    importedAt: r.imported_at,
+    reconciledAt: r.reconciled_at,
+    status: r.status,
+    notes: r.notes,
+    lineCount: r.line_count != null ? Number(r.line_count) : undefined,
+    matchedCount: r.matched_count != null ? Number(r.matched_count) : undefined,
+  });
+  const mapBankLine = (r: any) => ({
+    id: r.id,
+    statementId: r.statement_id,
+    txnDate: r.txn_date,
+    description: r.description,
+    amount: parseFloat(r.amount) || 0,
+    reference: r.reference,
+    matchedType: r.matched_type,
+    matchedId: r.matched_id,
+    matchConfidence: r.match_confidence != null ? parseFloat(r.match_confidence) : null,
+    notes: r.notes,
+    // Resolved match display fields (populated on GET /:id):
+    matchDocNumber: r.match_doc_number || null,
+    matchCounterparty: r.match_counterparty || null,
+  });
+
+  app.get('/api/bank/statements', async (_req, res) => {
+    try {
+      const { rows } = await query(`
+        SELECT s.*, a.name AS account_name,
+               (SELECT COUNT(*) FROM bank_statement_lines l WHERE l.statement_id = s.id) AS line_count,
+               (SELECT COUNT(*) FROM bank_statement_lines l WHERE l.statement_id = s.id AND l.matched_type IS NOT NULL) AS matched_count
+        FROM bank_statements s
+        LEFT JOIN accounts a ON a.id = s.account_id
+        WHERE s.status <> 'VOID'
+        ORDER BY s.statement_date DESC, s.id DESC
+      `);
+      res.json(rows.map(mapBankStatement));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/bank/statements/:id', async (req, res) => {
+    const id = parseInt(req.params.id);
+    try {
+      const header = await queryOne<any>(`
+        SELECT s.*, a.name AS account_name
+        FROM bank_statements s
+        LEFT JOIN accounts a ON a.id = s.account_id
+        WHERE s.id = $1
+      `, [id]);
+      if (!header) return res.status(404).json({ error: 'statement not found' });
+      // Resolve each matched line's display doc number + counterparty in
+      // one pass — union across the three source tables so the client can
+      // render "INV-2026-0007 · Lumax Energy" without follow-up calls.
+      const { rows: lines } = await query(`
+        SELECT l.*,
+               CASE l.matched_type
+                 WHEN 'PAYMENT_IN'  THEN pi.payment_number
+                 WHEN 'PAYMENT_OUT' THEN po.payment_number
+                 WHEN 'EXPENSE'     THEN e.expense_number
+                 ELSE NULL END AS match_doc_number,
+               CASE l.matched_type
+                 WHEN 'PAYMENT_IN'  THEN ci.client_name
+                 WHEN 'PAYMENT_OUT' THEN sp.name
+                 WHEN 'EXPENSE'     THEN COALESCE(e.vendor, sp2.name)
+                 ELSE NULL END AS match_counterparty
+        FROM bank_statement_lines l
+        LEFT JOIN payments_received pi ON l.matched_type='PAYMENT_IN'  AND pi.id = l.matched_id
+        LEFT JOIN clients          ci ON ci.id = pi.client_id
+        LEFT JOIN payments_made    po ON l.matched_type='PAYMENT_OUT' AND po.id = l.matched_id
+        LEFT JOIN suppliers        sp ON sp.id = po.supplier_id
+        LEFT JOIN expenses         e  ON l.matched_type='EXPENSE'     AND e.id  = l.matched_id
+        LEFT JOIN suppliers        sp2 ON sp2.id = e.supplier_id
+        WHERE l.statement_id = $1
+        ORDER BY l.txn_date, l.id
+      `, [id]);
+      res.json({ ...mapBankStatement(header), lines: lines.map(mapBankLine) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/bank/statements', async (req: any, res) => {
+    const parsed = BankStatementCreateSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid payload', details: parsed.error.flatten() });
+    const body = parsed.data;
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const stmtNumber = await nextDocNumber(client, 'STMT', 'bank_statement_seq');
+      const stRes = await client.query(
+        `INSERT INTO bank_statements (statement_number, account_id, statement_date, opening_balance, closing_balance, filename, imported_by, notes)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+        [stmtNumber, body.accountId, body.statementDate, body.openingBalance, body.closingBalance, body.filename || null, req.user?.email || null, body.notes || null]
+      );
+      const statementId = stRes.rows[0].id;
+      for (const l of body.lines) {
+        await client.query(
+          `INSERT INTO bank_statement_lines (statement_id, txn_date, description, amount, reference)
+           VALUES ($1,$2,$3,$4,$5)`,
+          [statementId, l.txnDate, l.description || '', l.amount, l.reference || null]
+        );
+      }
+      await client.query('COMMIT');
+      const finalRow = await queryOne(`
+        SELECT s.*, a.name AS account_name FROM bank_statements s LEFT JOIN accounts a ON a.id = s.account_id WHERE s.id = $1
+      `, [statementId]);
+      res.status(201).json(mapBankStatement(finalRow));
+    } catch (err: any) {
+      await client.query('ROLLBACK');
+      res.status(400).json({ error: err.message });
+    } finally {
+      client.release();
+    }
+  });
+
+  // Heuristic auto-match: reference-in-description first, then exact
+  // amount + tight date window against unmatched payments/expenses, then
+  // fuzzy amount + counterparty-in-description. Writes matched_type /
+  // matched_id / match_confidence in place; leaves existing MANUAL
+  // matches untouched so operator effort is never overwritten.
+  app.post('/api/bank/statements/:id/auto-match', async (req, res) => {
+    const id = parseInt(req.params.id);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const stmt = await queryOne<any>(`SELECT status, account_id FROM bank_statements WHERE id = $1`, [id]);
+      if (!stmt) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'statement not found' }); }
+      if (stmt.status === 'RECONCILED') { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Statement already reconciled — nothing to auto-match.' }); }
+
+      const { rows: openLines } = await client.query(
+        `SELECT * FROM bank_statement_lines WHERE statement_id = $1 AND matched_type IS NULL`,
+        [id]
+      );
+      let matched = 0;
+      for (const line of openLines) {
+        const inflow = Number(line.amount) > 0;
+        const absAmt = Math.abs(Number(line.amount));
+        const desc = String(line.description || '').toLowerCase();
+        const ref = String(line.reference || '').toLowerCase();
+        let picked: { type: string; id: number; confidence: number } | null = null;
+
+        // Pass 1: reference / description contains the doc number.
+        const refBlob = `${ref} ${desc}`;
+        const refHit = refBlob.match(/(RCPT|INV|PMT|BILL|EXP)[-]?\d{4}[-]?\d{4}/i);
+        if (refHit) {
+          const docNum = refHit[0].toUpperCase();
+          if (inflow) {
+            const r = await client.query(`SELECT id FROM payments_received WHERE payment_number = $1 LIMIT 1`, [docNum]);
+            if (r.rows.length) picked = { type: 'PAYMENT_IN', id: r.rows[0].id, confidence: 1.0 };
+          } else {
+            const p = await client.query(`SELECT id FROM payments_made WHERE payment_number = $1 LIMIT 1`, [docNum]);
+            if (p.rows.length) picked = { type: 'PAYMENT_OUT', id: p.rows[0].id, confidence: 1.0 };
+            else {
+              const e = await client.query(`SELECT id FROM expenses WHERE expense_number = $1 LIMIT 1`, [docNum]);
+              if (e.rows.length) picked = { type: 'EXPENSE', id: e.rows[0].id, confidence: 1.0 };
+            }
+          }
+        }
+
+        // Pass 2: exact amount within ±3 days, no existing bank-line match.
+        if (!picked) {
+          const tbl = inflow ? 'payments_received' : 'payments_made';
+          const kind = inflow ? 'PAYMENT_IN' : 'PAYMENT_OUT';
+          const r = await client.query(
+            `SELECT p.id FROM ${tbl} p
+             WHERE ABS(p.amount - $1) < 0.005
+               AND p.payment_date BETWEEN $2::date - INTERVAL '3 days' AND $2::date + INTERVAL '3 days'
+               AND NOT EXISTS (SELECT 1 FROM bank_statement_lines b WHERE b.matched_type = $3 AND b.matched_id = p.id)
+             ORDER BY ABS(p.payment_date - $2::date) LIMIT 1`,
+            [absAmt, line.txn_date, kind]
+          );
+          if (r.rows.length) picked = { type: kind, id: r.rows[0].id, confidence: 0.9 };
+          else if (!inflow) {
+            const e = await client.query(
+              `SELECT e.id FROM expenses e
+               WHERE ABS(e.amount - $1) < 0.005
+                 AND e.expense_date BETWEEN $2::date - INTERVAL '3 days' AND $2::date + INTERVAL '3 days'
+                 AND NOT EXISTS (SELECT 1 FROM bank_statement_lines b WHERE b.matched_type = 'EXPENSE' AND b.matched_id = e.id)
+               ORDER BY ABS(e.expense_date - $2::date) LIMIT 1`,
+              [absAmt, line.txn_date]
+            );
+            if (e.rows.length) picked = { type: 'EXPENSE', id: e.rows[0].id, confidence: 0.85 };
+          }
+        }
+
+        if (picked) {
+          await client.query(
+            `UPDATE bank_statement_lines SET matched_type = $1, matched_id = $2, match_confidence = $3 WHERE id = $4`,
+            [picked.type, picked.id, picked.confidence, line.id]
+          );
+          matched++;
+        }
+      }
+      await client.query('COMMIT');
+      res.json({ ok: true, considered: openLines.length, matched });
+    } catch (err: any) {
+      await client.query('ROLLBACK');
+      res.status(500).json({ error: err.message });
+    } finally {
+      client.release();
+    }
+  });
+
+  // Manual match: caller has picked a specific payment/expense/manual
+  // note. Nothing here posts to the ledger — the linked row already
+  // did that when it was created.
+  const BankLineMatchSchema = z.object({
+    matchedType: z.enum(['PAYMENT_IN', 'PAYMENT_OUT', 'EXPENSE', 'MANUAL']),
+    matchedId: z.number().nullable().optional(),
+    notes: z.string().optional(),
+  });
+  app.post('/api/bank/statement-lines/:id/match', async (req, res) => {
+    const id = parseInt(req.params.id);
+    const parsed = BankLineMatchSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid payload', details: parsed.error.flatten() });
+    try {
+      const row = await queryOne<any>(
+        `UPDATE bank_statement_lines SET matched_type = $1, matched_id = $2, match_confidence = 1.0, notes = COALESCE($3, notes)
+           WHERE id = $4 RETURNING *`,
+        [parsed.data.matchedType, parsed.data.matchedId ?? null, parsed.data.notes ?? null, id]
+      );
+      if (!row) return res.status(404).json({ error: 'line not found' });
+      res.json(mapBankLine(row));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/bank/statement-lines/:id/unmatch', async (req, res) => {
+    const id = parseInt(req.params.id);
+    try {
+      const row = await queryOne<any>(
+        `UPDATE bank_statement_lines SET matched_type = NULL, matched_id = NULL, match_confidence = NULL WHERE id = $1 RETURNING *`,
+        [id]
+      );
+      if (!row) return res.status(404).json({ error: 'line not found' });
+      res.json(mapBankLine(row));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Complete: verifies opening + sum(lines) = closing and no line is
+  // still unmatched, then locks the batch. Force=true skips the
+  // unmatched-line check for the "these are legit uncleared items"
+  // case; the balance check is still enforced either way.
+  app.post('/api/bank/statements/:id/complete', async (req, res) => {
+    const id = parseInt(req.params.id);
+    const force = !!req.body?.force;
+    try {
+      const stmt = await queryOne<any>(`SELECT * FROM bank_statements WHERE id = $1`, [id]);
+      if (!stmt) return res.status(404).json({ error: 'statement not found' });
+      if (stmt.status === 'RECONCILED') return res.status(400).json({ error: 'Already reconciled.' });
+      const { rows: sumRows } = await query(`SELECT COALESCE(SUM(amount), 0)::text AS s FROM bank_statement_lines WHERE statement_id = $1`, [id]);
+      const linesSum = Number(sumRows[0]?.s) || 0;
+      const expected = (parseFloat(stmt.opening_balance) || 0) + linesSum;
+      const closing = parseFloat(stmt.closing_balance) || 0;
+      if (Math.abs(expected - closing) > 0.02) {
+        return res.status(400).json({
+          error: `Balance mismatch: opening ${stmt.opening_balance} + lines ${linesSum.toFixed(2)} = ${expected.toFixed(2)}, expected closing ${closing.toFixed(2)}. Fix the amounts before completing.`,
+        });
+      }
+      if (!force) {
+        const { rows: unmatched } = await query(
+          `SELECT COUNT(*)::text AS n FROM bank_statement_lines WHERE statement_id = $1 AND matched_type IS NULL`,
+          [id]
+        );
+        if (Number(unmatched[0]?.n) > 0) {
+          return res.status(400).json({ error: `${unmatched[0].n} line(s) still unmatched. Match or Ignore them, or pass { force: true }.` });
+        }
+      }
+      await query(`UPDATE bank_statements SET status = 'RECONCILED', reconciled_at = CURRENT_TIMESTAMP WHERE id = $1`, [id]);
+      const final = await queryOne<any>(`
+        SELECT s.*, a.name AS account_name FROM bank_statements s LEFT JOIN accounts a ON a.id = s.account_id WHERE s.id = $1
+      `, [id]);
+      res.json(mapBankStatement(final));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete('/api/bank/statements/:id', async (req, res) => {
+    const id = parseInt(req.params.id);
+    try {
+      const stmt = await queryOne<any>(`SELECT status FROM bank_statements WHERE id = $1`, [id]);
+      if (!stmt) return res.status(404).json({ error: 'statement not found' });
+      if (stmt.status === 'RECONCILED') return res.status(400).json({ error: 'Cannot delete a reconciled statement — void it instead.' });
+      await query(`DELETE FROM bank_statements WHERE id = $1`, [id]);
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Cheap picker feed for the manual-match UI: recent unmatched
+  // payments-in / payments-out / expenses for a given account, filtered
+  // by rough amount if provided. Small deliberate window — the UI can
+  // widen with a search box if needed.
+  app.get('/api/bank/candidates', async (req, res) => {
+    const accountId = req.query.accountId ? parseInt(String(req.query.accountId)) : null;
+    const type = String(req.query.type || 'PAYMENT_IN');
+    const amount = req.query.amount ? parseFloat(String(req.query.amount)) : null;
+    try {
+      const params: any[] = [];
+      const like = amount != null ? ` AND ABS(p.amount - $${params.length + 1}) < 500` : '';
+      if (amount != null) params.push(Math.abs(amount));
+
+      if (type === 'PAYMENT_IN') {
+        const acctClause = accountId ? ` AND p.deposit_account_id = $${params.length + 1}` : '';
+        if (accountId) params.push(accountId);
+        const { rows } = await query(`
+          SELECT p.id, p.payment_number, p.payment_date, p.amount, c.client_name AS counterparty
+          FROM payments_received p
+          LEFT JOIN clients c ON c.id = p.client_id
+          WHERE NOT EXISTS (SELECT 1 FROM bank_statement_lines b WHERE b.matched_type='PAYMENT_IN' AND b.matched_id = p.id)
+          ${acctClause}
+          ${like}
+          ORDER BY p.payment_date DESC LIMIT 40
+        `, params);
+        return res.json(rows);
+      }
+      if (type === 'PAYMENT_OUT') {
+        const acctClause = accountId ? ` AND p.source_account_id = $${params.length + 1}` : '';
+        if (accountId) params.push(accountId);
+        const { rows } = await query(`
+          SELECT p.id, p.payment_number, p.payment_date, p.amount, s.name AS counterparty
+          FROM payments_made p
+          LEFT JOIN suppliers s ON s.id = p.supplier_id
+          WHERE NOT EXISTS (SELECT 1 FROM bank_statement_lines b WHERE b.matched_type='PAYMENT_OUT' AND b.matched_id = p.id)
+          ${acctClause}
+          ${like}
+          ORDER BY p.payment_date DESC LIMIT 40
+        `, params);
+        return res.json(rows);
+      }
+      if (type === 'EXPENSE') {
+        const acctClause = accountId ? ` AND p.payment_account_id = $${params.length + 1}` : '';
+        if (accountId) params.push(accountId);
+        const { rows } = await query(`
+          SELECT p.id, p.expense_number AS payment_number, p.expense_date AS payment_date, p.amount,
+                 COALESCE(p.vendor, s.name) AS counterparty
+          FROM expenses p
+          LEFT JOIN suppliers s ON s.id = p.supplier_id
+          WHERE NOT EXISTS (SELECT 1 FROM bank_statement_lines b WHERE b.matched_type='EXPENSE' AND b.matched_id = p.id)
+          ${acctClause}
+          ${like}
+          ORDER BY p.expense_date DESC LIMIT 40
+        `, params);
+        return res.json(rows);
+      }
+      return res.status(400).json({ error: 'Invalid type' });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
 }
 
 function buildAgingReport(rows: any[], idField: string, nameField: string, asOf: string) {
