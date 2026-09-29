@@ -169,6 +169,41 @@
             color: #155724;
         }
 
+        /* Inline screenshots, added for the v2.7 update. Keep the
+           frame minimal so a wide screenshot doesn't blow past the
+           narrower text column above and below it. */
+        .shot {
+            display: block;
+            max-width: 100%;
+            margin: 18px auto;
+            border: 1px solid #d0d0d0;
+            border-radius: 6px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+        }
+        .shot-caption {
+            display: block;
+            text-align: center;
+            font-size: 0.85em;
+            color: #666;
+            margin-top: -8px;
+            margin-bottom: 20px;
+            font-style: italic;
+        }
+        /* Placeholder box for a screenshot we haven't captured yet,
+           so it's visually obvious in the doc when one is missing. */
+        .shot-todo {
+            display: block;
+            margin: 18px auto;
+            padding: 30px 20px;
+            border: 2px dashed #ffb84d;
+            background: #fff8e1;
+            border-radius: 6px;
+            text-align: center;
+            color: #8a5a00;
+            font-size: 0.9em;
+            font-family: 'Courier New', monospace;
+        }
+
         .menu-path {
             background: #f0f0f0;
             padding: 8px 12px;
@@ -302,6 +337,7 @@
         <div class="toc">
             <h2>📋 Table of Contents</h2>
             <ul>
+                <li><a href="#whats-new-v27">What's New (v2.7)</a></li>
                 <li><a href="#whats-new">What's New (v2.6)</a></li>
                 <li><a href="#getting-started">Getting Started</a></li>
                 <li><a href="#dashboard">Dashboard Overview</a></li>
@@ -317,7 +353,210 @@
             </ul>
         </div>
 
-        <!-- What's New -->
+        <!-- ═══════════════════════════════════════════════════════════
+             What's New — v2.7
+             ═══════════════════════════════════════════════════════════
+             Screenshots: this section references files under public/guide/.
+             login-v27.jpg was captured with the built-in browser; every
+             other screenshot needs an authenticated session, so those
+             slots are placeholders. Log in to the live app, capture the
+             views described in each shot-todo box, drop the JPGs into
+             public/guide/ with the filenames referenced, and swap the
+             shot-todo divs for real <img class="shot"> tags.
+             ═══════════════════════════════════════════════════════════ -->
+        <div class="section" id="whats-new-v27">
+            <h2>🆕 What's New (v2.7)</h2>
+            <p style="margin-bottom: 20px;">A very large release — five major pro-ERP features (Quotations, Bank Reconciliation, VAT201, Credit Notes, Landed Cost), a full pipeline of Save-PDF exports, live cross-user sync so an admin's import updates every open browser within seconds, and a wave of quality-of-life polish on the Add SKU form, inventory grid, and sales-order flow.</p>
+
+            <img class="shot" src="guide/login-v27.jpg" alt="Tracklab IM sign-in screen showing the branded welcome header, email and password fields, forgot-password link and the orange Sign In button." style="max-width: 720px;">
+            <span class="shot-caption">Sign-in screen — the entry point for every session (unchanged, but included here for reference).</span>
+
+            <h3>Sales Orders → Quotations</h3>
+            <div class="step">
+                <p>The sales-order editor now has a <strong>Save as Quotation</strong> toggle. When on, the row is created with status <code>QUOTATION</code>, numbered <code>QUO-YYYY-NNNN</code> from its own sequence, and — critically — does not reserve stock.</p>
+                <ul>
+                    <li>Quotations are proposals, not commitments. No inventory movement until the client accepts.</li>
+                    <li>Every quote gets its own doc series so a QUO number never collides with an SO number.</li>
+                    <li>On the SO viewer, a green <strong>Accept → Convert to SO</strong> button flips status to <code>DRAFT</code>, mints a fresh SO number, and writes the deferred reservations transactionally.</li>
+                    <li><code>QUOTATION</code> is a new status pill (blue) and a new filter chip on the SO list.</li>
+                </ul>
+            </div>
+            <div class="shot-todo">
+                📷 SCREENSHOT SLOT — <code>guide/quotation-viewer.jpg</code><br>
+                Capture: SO viewer with a QUOTATION status pill, the "Accept → Convert to SO" button visible in the action row, plus a couple of line items in the table.
+            </div>
+
+            <h3>Auto-Fulfil macro (single &amp; batch)</h3>
+            <div class="step">
+                <p>The SO viewer has a new <strong>Auto-Fulfil…</strong> button that runs the whole sales-order fulfilment chain in one transaction: create invoice → send (posts journal, decrements stock, releases reservation) → create delivery note → issue + complete → optional full-amount payment received. Every stage is a checkbox — turn any of them off and the rest still work.</p>
+                <ul>
+                    <li><strong>Batch mode:</strong> tick multiple SO rows in the list, and an <em>Auto-Fulfil N…</em> button appears next to New Sales Order. It runs each order in its own transaction so a bad row (missing lines, wrong status) shows as <code>FAILED</code> without dragging the rest down. Results table names every created invoice / delivery / payment number.</li>
+                    <li><strong>Safety:</strong> if the invoice already booked stock out, the delivery-note lines skip a second decrement automatically.</li>
+                </ul>
+            </div>
+            <div class="shot-todo">
+                📷 SCREENSHOT SLOT — <code>guide/auto-fulfil-batch-results.jpg</code><br>
+                Capture: the Batch Auto-Fulfil modal after running, showing the per-order results table with ✓ SUCCESS pills and the invoice / dispatch / payment numbers per row.
+            </div>
+
+            <h3>Bookkeeping — Save PDF everywhere</h3>
+            <div class="step">
+                <p>Every doc viewer in Bookkeeping has a <strong>Save PDF</strong> button next to Print. Clicking it downloads a properly-typeset PDF directly to your machine — no print-dialog dance, no "Save as PDF" destination picker.</p>
+                <ul>
+                    <li>Sales orders → <code>sales-order-SO-2026-0007.pdf</code></li>
+                    <li>Quotations → <code>quotation-QUO-2026-0002.pdf</code></li>
+                    <li>Invoices → <code>invoice-INV-2026-0011.pdf</code> (with Amount Paid + Balance Due lines)</li>
+                    <li>Bills → <code>bill-BILL-2026-0004.pdf</code></li>
+                    <li>Delivery notes → <code>delivery-note-DN-2026-0004.pdf</code> (Serial Numbers column, no money)</li>
+                    <li>Collection notes → <code>collection-note-CN-2026-0001.pdf</code></li>
+                    <li>Credit notes → <code>credit-note-CN-2026-0001.pdf</code></li>
+                    <li>Customer statements (from the Customers tab) → <code>customer-statement-Lumax-Energy-2026-01-31.pdf</code></li>
+                    <li>VAT201 return → <code>vat201-return-2026-01-01_2026-03-31.pdf</code></li>
+                </ul>
+                <p>Every doc uses the shared TRACKLAB brand header, autoTable line items, and SANS 24 money formatting so figures match the on-screen totals exactly.</p>
+            </div>
+
+            <h3>Bank Reconciliation</h3>
+            <div class="step">
+                <p>New tab under Bookkeeping → Accounting → <strong>Bank Reconciliation</strong>. Reconcile a bank statement in three steps:</p>
+                <ol>
+                    <li><strong>Import CSV</strong> — pick the bank account, drop the file. The importer sniffs date / description / amount / reference columns (override if the guess is wrong) and normalises common date formats and comma decimals.</li>
+                    <li><strong>Auto-match</strong> runs immediately on save. Three passes: doc number found in the reference (100% confidence), exact amount within ±3 day window (90%), same for expenses (85%). Only unmatched lines are touched, so anything you resolved by hand stays put.</li>
+                    <li><strong>Reconcile</strong> per line — Pick a specific payment / expense, or Ignore for legit uncleared items. Complete when opening + lines = closing and every line is matched. Reconciled statements lock so retro edits can't quietly rewrite next month's opening balance.</li>
+                </ol>
+            </div>
+            <div class="shot-todo">
+                📷 SCREENSHOT SLOT — <code>guide/bank-rec-grid.jpg</code><br>
+                Capture: reconciliation modal open with a mix of matched (blue "Received" pill + doc number) and unmatched (red row) statement lines, showing the balance-diff strip at the top.
+            </div>
+
+            <h3>VAT201 return</h3>
+            <div class="step">
+                <p>Bookkeeping → Reports → VAT201. Pick a period, hit Run. Dashboard cards for Output tax (Box 4) / Input tax (Box 15) / Net VAT / Zero-rated sales. Box breakdown table walks through Box 1, 2, 4, 14, 15 the same way SARS's eFiling form is laid out. Two supporting lists at the bottom expand every invoice and every bill that fed the numbers so an auditor can drill in.</p>
+                <ul>
+                    <li>Only rows with a live ledger status (invoices SENT / PARTIAL / PAID / OVERDUE; bills AWAITING_PAYMENT and onward) contribute. DRAFT and VOID are excluded.</li>
+                    <li><strong>Export CSV</strong> gives the full detail for review.</li>
+                    <li><strong>Save PDF</strong> produces an auditable printable version with a "verify each box on SARS eFiling before submission" disclaimer baked in.</li>
+                </ul>
+            </div>
+            <div class="warning">
+                ⚠ <strong>Reminder:</strong> the report is a computation aid, not a substitute for the SARS eFiling submission. Always cross-check every field on your official return before filing.
+            </div>
+
+            <h3>Customer statements</h3>
+            <div class="step">
+                <p>On the Customers tab, every row now has a <strong>📄 Statement</strong> button. Click it and a full PDF statement downloads immediately:</p>
+                <ul>
+                    <li>Interleaves every invoice (debit) and payment received (credit) chronologically with a running balance from opening.</li>
+                    <li>Aging matrix — Current / 1–30 / 31–60 / 61–90 / 90+ — on any still-open amount.</li>
+                    <li>Sorted list of overdue invoices with days-overdue.</li>
+                    <li>Filename: <code>customer-statement-&lt;client-name&gt;-&lt;YYYY-MM-DD&gt;.pdf</code></li>
+                </ul>
+                <p>Combined with the new credit-limit feature (planned next), this makes end-of-month collections a two-click job.</p>
+            </div>
+
+            <h3>Credit Notes</h3>
+            <div class="step">
+                <p>New tab under Bookkeeping → Sales → <strong>Credit Notes</strong>. Refunds / returns / write-offs now have a proper primitive:</p>
+                <ul>
+                    <li>Create one directly from an invoice viewer via the new <strong>Issue Credit Note</strong> button. Prompts for a reason and whether to restock returned lines. Every line pre-fills from the invoice at its original price.</li>
+                    <li>On <strong>Issue</strong>, the server posts <em>DR Sales Returns (4050) + DR VAT, CR AR</em>; restocks the flagged lines; and auto-applies the credit against the source invoice up to its remaining balance (dropping status back to PARTIAL or PAID).</li>
+                    <li>Any credit left over can be <strong>Applied</strong> against another open invoice for the same client, or <strong>Refunded</strong> as cash (DR AR, CR Bank).</li>
+                    <li>Status chain: <code>DRAFT → ISSUED → APPLIED / REFUNDED</code>.</li>
+                    <li>Save PDF includes Applied + Refunded + Remaining rows.</li>
+                </ul>
+            </div>
+            <div class="tip">
+                💡 <strong>Tip:</strong> the "Issue Credit Note" prompt has a "restock all lines back to inventory" confirmation. Say yes for a physical return, no for a price adjustment / goodwill credit.
+            </div>
+
+            <h3>Landed Cost</h3>
+            <div class="step">
+                <p>New tab under Bookkeeping → Purchases → <strong>Landed Cost</strong>. Bolt freight / duty / bank-charge bills onto the underlying goods bill so each unit's cost reflects its true landed price — not just what Digi-Key charged.</p>
+                <ol>
+                    <li>Record the goods bill as normal (e.g. <code>BILL-2026-0042</code> at $52.20 for 5000 resistors).</li>
+                    <li>Record the freight and duty bills separately (<code>BILL-2026-0043</code> R850, <code>BILL-2026-0044</code> R1240).</li>
+                    <li>Create a Landed Cost Batch — pick the goods bill on the left, the addon bills on the right (each tagged Freight / Duty / Bank / Other), and an allocation method (BY_VALUE = proportional to line total, BY_QTY = per unit).</li>
+                    <li>Preview shows every affected line's original → new unit cost + rounding delta.</li>
+                    <li><strong>Post</strong> writes a snapshot per line, rewrites <code>inventory.current_cost_dollar</code>, and posts <em>DR Inventory / CR Default Expense</em> for the total addon.</li>
+                </ol>
+                <p>Every downstream COGS + margin report picks up the landed cost automatically — no follow-up steps.</p>
+            </div>
+            <div class="shot-todo">
+                📷 SCREENSHOT SLOT — <code>guide/landed-cost-preview.jpg</code><br>
+                Capture: Landed-Cost batch viewer in DRAFT with the preview table visible: original unit cost, allocated share, new unit cost — plus the total-addon strip at the top.
+            </div>
+
+            <h3>Inventory grid — LED colours, reserved quantities, prefix picker</h3>
+            <div class="step">
+                <p>Three related upgrades on the Items page:</p>
+                <ul>
+                    <li><strong>LED colour swatches</strong> — every LED row (Inventory grid, Search results, Item Detail modal, BOM Manager audit, Kit Booking Allocate modal, Alternates, Pick &amp; Place, Projects, Stock Tables, Pricing, Bulk Pricing Wizard, Procurement Shortage) shows a coloured dot next to the name with the detected colour (RGB / bi-colour split-fill for multi-colour LEDs). Detection reads name + description; non-LED rows are unaffected.</li>
+                    <li><strong>Reserved qty</strong> — cards for parts held by open sales-order reservations now show <em>"N reserved · M available"</em> under the stock number. If reservations exceed on-hand, that becomes a red <strong>OVERBOOKED · short K</strong> pill. Same breakdown surfaces on the Item Detail modal and the BOM Manager audit.</li>
+                    <li><strong>Add SKU stock-code prefix picker</strong> — in the New SKU modal, next to the Stock Code input, is a dropdown of every 3-letter prefix already used in inventory (ENC → ENC-004 (127), LED → LED-014 (9), etc.). Picking a prefix fills the input with the next available number in that family.</li>
+                </ul>
+            </div>
+            <div class="shot-todo">
+                📷 SCREENSHOT SLOT — <code>guide/inventory-led-swatches.jpg</code><br>
+                Capture: Inventory grid filtered to <code>led-</code>, showing four or five cards each with their coloured dot + "· Blue" / "· Yellow-green" / etc. label chip.
+            </div>
+
+            <h3>New SKU — supplier PN + MFN PN, comboboxes</h3>
+            <div class="step">
+                <p>The Register New Inventory Component modal has grown up:</p>
+                <ul>
+                    <li><strong>Supplier part number</strong> input (e.g. <code>STM32G031F6P6-ND</code> for Digi-Key) and <strong>Manufacturer part number</strong> input (e.g. <code>STM32G031F6P6</code>) sit in a 2-column grid under the Preferred Supplier picker. They populate <code>sup_pn_1</code> and <code>man_pn_1</code>. Edit mode reads from the same slots so a round-trip preserves everything.</li>
+                    <li><strong>Category Class</strong> is now a type-to-search combobox. Filters as you type; if what you typed isn't in the list, the top row of the dropdown becomes "Add '&lt;typed&gt;' as new category" — Enter or click commits it. Same combobox in the Edit form.</li>
+                    <li><strong>Preferred Supplier</strong> is the same combobox in strict mode: filter as you type against the live suppliers list, but you can't commit a supplier that doesn't exist. If the supplier is genuinely new, add them under Bookkeeping → Vendors first — the hint in the empty dropdown says exactly that.</li>
+                    <li>Initial Stock Qty now accepts 0 (registering a SKU before its first PO arrives is a normal flow).</li>
+                    <li>Line-item SKU inputs on invoice / bill / PO editors also accept free-typed values now, so a supplier's own SKU that isn't in inventory yet doesn't force you to bail out and create the item first.</li>
+                </ul>
+            </div>
+            <div class="shot-todo">
+                📷 SCREENSHOT SLOT — <code>guide/new-sku-combobox.jpg</code><br>
+                Capture: New SKU modal with the Category Class combobox open, showing filtered options + the "Add '<code>&lt;typed&gt;</code>' as new category" row at the top. Include the supplier + MFN PN inputs visible below.
+            </div>
+
+            <h3>Import CSV — XLSX support, admin-gated, auto-backup</h3>
+            <div class="step">
+                <p>Bulk import on the Items page picked up three related upgrades:</p>
+                <ul>
+                    <li><strong>XLSX and XLS accepted</strong> alongside CSV. SheetJS parses the workbook client-side, converts the first sheet to CSV in memory, and the existing preview + upsert path handles it.</li>
+                    <li><strong>Admin-only</strong>. Only accounts with role admin see the Import CSV button; the same button is available for Export CSV to everyone.</li>
+                    <li><strong>Two backup files</strong> download automatically before the DB write: <code>inventory_backup_&lt;timestamp&gt;.csv</code> (full state before) and <code>inventory_import_&lt;timestamp&gt;.csv</code> (exactly the batch being applied). Rollback is a re-import of the backup file.</li>
+                </ul>
+            </div>
+
+            <h3>Live cross-user sync</h3>
+            <div class="step">
+                <p>Every 2xx write to any major entity now bumps a shared version counter on the server. Every open browser polls that counter every 25 seconds and, when anything moves, silently re-runs the initial bootstrap. So when an admin lands a CSV import, edits a client, posts a bill, or accepts a quotation, every other logged-in tab picks up the change within a single tick — no refresh needed.</p>
+                <p>Coverage: inventory · clients · client_orders · suppliers · bookkeeping (invoices / bills / POs / payments / dispatch) · projects · production_kits · BOM · pick-place.</p>
+            </div>
+
+            <h3>Supplier BOM Generator</h3>
+            <div class="step">
+                <p>Manufacturing → <strong>Supplier BOM Generator</strong>. Ported from the legacy Python desktop tool. Upload a pick-and-place BOM CSV; the tool resolves each part against the three inventory supplier-PN columns (Mouser = <code>sup_pn_1</code>, DigiKey = <code>sup_pn_2</code>, LCSC = <code>sup_pn_3</code>) with an equivalent-reel fallback for empty columns.</p>
+                <ul>
+                    <li>Auto-skips DNF rows during parse. Merges duplicates by summing qty-per-PCB.</li>
+                    <li>Per-supplier tabs with colour-coded rows: red for missing PN in that supplier, "NO PART" pill for parts unlisted at all three.</li>
+                    <li>Bulk toggles per tab: Check all / Uncheck all / Check only rows with PN.</li>
+                    <li>Board qty spinner multiplies through to every exported row.</li>
+                    <li>Exports in each supplier's preferred upload shape: Mouser <code>PN|qty</code>, DigiKey <code>Quantity,"Part Number"</code>, LCSC <code>Comment,Designator,Footprint,LCSC Part #,Quantity</code>.</li>
+                </ul>
+            </div>
+
+            <h3>Money formatting standard (SANS 24 / ISO 31)</h3>
+            <div class="step">
+                <p>Every user-visible money and grouped-count display now routes through one shared formatter (<code>src/lib/formatMoney.ts</code>). Standard is South African: non-breaking-space thousands separator, dot decimal, no space between currency symbol and first digit. <code>R1 234 567.89</code>, <code>-$89.00</code>. Every card, table, PDF, and CSV picks it up automatically so a value never appears with one grouping on the dashboard and another on the invoice.</p>
+            </div>
+
+            <h3>Alternates — Simulation Map</h3>
+            <div class="step">
+                <p>In Manufacturing → Component Alternates, the "Simulation map active" chip in each group's footer is now a real button that opens a radial SVG view of the group: the highest-stock alternate at the centre, every other alternate arranged around it. Node radius scales with stock level, fill colour reports stock health (green / amber / red), and clicking a node opens that SKU in Item Detail.</p>
+            </div>
+        </div>
+
+        <!-- What's New (v2.6) -->
         <div class="section" id="whats-new">
             <h2>🆕 What's New (v2.6)</h2>
 
