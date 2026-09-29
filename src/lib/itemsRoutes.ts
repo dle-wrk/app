@@ -386,13 +386,20 @@ export function registerItemsRoutes(app: Express): void {
       }
     }
 
+    // Always resurrect the row on conflict: a prior soft-delete would
+    // otherwise leave `deleted = true` intact, so the "created" item
+    // stays hidden from every list query and looks to the user like the
+    // save silently vanished. Bug repro: DELETE ANT-007 in July, POST
+    // /api/items ANT-007 today → row exists with deleted=true, UI shows
+    // nothing.
+    const undelete = `"deleted" = false`;
     let sqlText;
     if (updates.length > 0) {
       sqlText = `INSERT INTO inventory (${fields.join(', ')}) VALUES (${placeholders.join(', ')})
-                 ON CONFLICT(serial_number) DO UPDATE SET ${updates.join(', ')}`;
+                 ON CONFLICT(serial_number) DO UPDATE SET ${updates.join(', ')}, ${undelete}`;
     } else {
       sqlText = `INSERT INTO inventory (${fields.join(', ')}) VALUES (${placeholders.join(', ')})
-                 ON CONFLICT(serial_number) DO NOTHING`;
+                 ON CONFLICT(serial_number) DO UPDATE SET ${undelete}`;
     }
     try {
       await query(sqlText, vals);
