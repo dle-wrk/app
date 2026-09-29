@@ -2555,16 +2555,24 @@ if (currentView === 'alternates') {
 
                   <div className="flex flex-col gap-1">
                     <label className="font-bold text-outline">Preferred Supplier</label>
-                    <select aria-label="Filter"
-                      className="bg-surface-container-high border border-outline-variant rounded p-2 text-on-surface outline-none"
+                    {/* Type-to-filter against the live suppliers list.
+                        Strict mode (allowCreate=false): only existing
+                        suppliers are commitable, so a typo can't stamp
+                        an orphaned string that won't link to any bill /
+                        PO / landed-cost flow later. If the supplier
+                        genuinely doesn't exist yet, add them in the
+                        Vendors tab first — the hint below reminds the
+                        operator of that. */}
+                    <CategoryCombobox
                       value={newItem.supplier}
-                      onChange={(e) => setNewItem({ ...newItem, supplier: e.target.value })}
-                    >
-                      <option value="">Select Supplier</option>
-                      {suppliers.map(sup => (
-                        <option key={sup.id} value={sup.name}>{sup.name}</option>
-                      ))}
-                    </select>
+                      onChange={(v) => setNewItem({ ...newItem, supplier: v })}
+                      canonicalOptions={[]}
+                      extraOptions={suppliers.map(s => s.name)}
+                      allowCreate={false}
+                      noun="supplier"
+                      emptyHint="No matching supplier — add them under Bookkeeping → Vendors first."
+                      placeholder="Type to search suppliers…"
+                    />
                   </div>
                 </div>
 

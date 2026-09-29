@@ -31,6 +31,23 @@ interface Props {
    * for use cases like inline filters. Default true. */
   required?: boolean;
   id?: string;
+  /** Whether the operator can commit a typed value that isn't in the
+   * options list. When true (the default) an "Add '<typed>' as new
+   * <noun>" action shows at the top of the dropdown. When false, only
+   * existing options are commitable — useful for pickers against real
+   * entities (suppliers, clients) where a bare string wouldn't link
+   * anywhere. */
+  allowCreate?: boolean;
+  /** The word after "as new" in the create action + the "not found"
+   * hint. Default "category". Ignored when allowCreate is false. */
+  noun?: string;
+  /** Message shown in the empty dropdown when allowCreate is false and
+   * nothing matches the query. */
+  emptyHint?: string;
+  /** Restrict the canonical list. Defaults to ITEM_CATEGORIES — pass
+   * an empty array when using this component for a non-category domain
+   * (e.g. suppliers, where extraOptions carries the whole feed). */
+  canonicalOptions?: readonly string[];
 }
 
 export const CategoryCombobox: React.FC<Props> = ({
@@ -41,6 +58,10 @@ export const CategoryCombobox: React.FC<Props> = ({
   placeholder = 'Type a category or pick from the list',
   required = false,
   id,
+  allowCreate = true,
+  noun = 'category',
+  emptyHint = 'No matches',
+  canonicalOptions = ITEM_CATEGORIES,
 }) => {
   const [query, setQuery] = useState<string>(value);
   const [open, setOpen] = useState<boolean>(false);
@@ -53,13 +74,13 @@ export const CategoryCombobox: React.FC<Props> = ({
   const options = useMemo(() => {
     // De-duplicate case-insensitively but keep the canonical casing.
     const seen = new Map<string, string>();
-    for (const c of ITEM_CATEGORIES) seen.set(c.toLowerCase(), c);
+    for (const c of canonicalOptions) seen.set(c.toLowerCase(), c);
     for (const c of (extraOptions || [])) {
       const key = String(c || '').trim().toLowerCase();
       if (key && !seen.has(key)) seen.set(key, c);
     }
     return Array.from(seen.values()).sort((a, b) => a.localeCompare(b));
-  }, [extraOptions]);
+  }, [extraOptions, canonicalOptions]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -69,7 +90,7 @@ export const CategoryCombobox: React.FC<Props> = ({
 
   const trimmedQ = query.trim();
   const exactMatch = options.some(c => c.toLowerCase() === trimmedQ.toLowerCase());
-  const showAdd = !!trimmedQ && !exactMatch;
+  const showAdd = allowCreate && !!trimmedQ && !exactMatch;
 
   // Reset the active row when the filter changes so keyboard nav
   // doesn't point off the end of the list.
@@ -112,13 +133,35 @@ export const CategoryCombobox: React.FC<Props> = ({
       if (open && rows[activeIdx]) {
         e.preventDefault();
         commit(rows[activeIdx].value);
-      } else if (trimmedQ) {
-        // Enter with no dropdown open (or empty rows): commit typed text.
+      } else if (trimmedQ && allowCreate) {
+        // Enter with no dropdown open (or empty rows), create mode on:
+        // commit whatever was typed.
         e.preventDefault();
         commit(trimmedQ);
       }
+      // In strict mode (allowCreate=false) an Enter with no highlighted
+      // row is a no-op — the input keeps focus, dropdown stays as-is.
     } else if (e.key === 'Escape') {
       setOpen(false);
+      // Strict mode snap-back: if the current input doesn't match an
+      // option, revert to the last committed value on blur/escape so
+      // we never leave orphaned strings hanging on the field.
+      if (!allowCreate && !exactMatch) setQuery(value);
+    }
+  };
+
+  // Same snap-back on blur, deferred so a click on a dropdown row still
+  // wins (that's still handled by onMouseDown → commit()).
+  const onBlur = () => {
+    if (!allowCreate) {
+      setTimeout(() => {
+        // Recheck against the latest value/query — refs would be safer
+        // but this closure captures the render's snapshot which is
+        // exactly what we want (blur intent from THIS input event).
+        if (!options.some(c => c.toLowerCase() === query.trim().toLowerCase())) {
+          setQuery(value);
+        }
+      }, 150);
     }
   };
 
@@ -135,6 +178,7 @@ export const CategoryCombobox: React.FC<Props> = ({
           onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
           onFocus={() => setOpen(true)}
           onKeyDown={onKey}
+          onBlur={onBlur}
           autoComplete="off"
         />
         <button
@@ -148,7 +192,7 @@ export const CategoryCombobox: React.FC<Props> = ({
         </button>
       </div>
 
-      {open && rows.length > 0 && (
+      {open && (rows.length > 0 || (!allowCreate && !!trimmedQ)) && (
         <div
           className="absolute z-50 left-0 right-0 mt-1 max-h-64 overflow-y-auto rounded-lg border border-outline-variant/60 bg-surface-container-high shadow-lg"
           role="listbox"
@@ -170,7 +214,7 @@ export const CategoryCombobox: React.FC<Props> = ({
                   <Plus className="w-3 h-3 shrink-0" />
                   <span className="text-outline">Add</span>
                   <span className="font-mono font-bold">"{r.value}"</span>
-                  <span className="text-outline">as new category</span>
+                  <span className="text-outline">as new {noun}</span>
                 </button>
               );
             }
@@ -186,6 +230,11 @@ export const CategoryCombobox: React.FC<Props> = ({
               </button>
             );
           })}
+          {!allowCreate && rows.length === 0 && trimmedQ && (
+            <div className="px-3 py-2 text-[11px] text-outline italic">
+              {emptyHint}
+            </div>
+          )}
         </div>
       )}
     </div>
