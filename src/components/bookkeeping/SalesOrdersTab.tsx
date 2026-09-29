@@ -1174,7 +1174,7 @@ function renderPrintableSalesOrder(order: any, clientName: string): string {
     </div>
     <div>
       <div class="label">${order.status === 'QUOTATION' ? 'Valid' : 'Required'}</div>
-      <div class="val">${escapeHtml(order.requiredDate || '—')}</div>
+      <div class="val">${escapeHtml(fmtDate(order.requiredDate) || '—')}</div>
     </div>
   </div>
 
