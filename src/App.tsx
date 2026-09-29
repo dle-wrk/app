@@ -21,6 +21,7 @@ import { setToastHandler } from './lib/toast';
 import BOMManager from './components/BOMManager';
 import { StockCodePrefixPicker } from './components/StockCodePrefixPicker';
 import { ITEM_CATEGORIES } from './lib/itemCategories';
+import { CategoryCombobox } from './components/CategoryCombobox';
 import { SupplierBOMGeneratorView } from './components/views/SupplierBOMGeneratorView';
 import { mapDbRowsToItems } from './lib/mapDbItem';
 import { mapDbRowsToTransactions, formatTrxDateTime } from './lib/mapDbTransaction';
@@ -2542,15 +2543,14 @@ if (currentView === 'alternates') {
                 <div className="grid grid-cols-2 gap-sm">
                   <div className="flex flex-col gap-1">
                     <label className="font-bold text-outline">Category Class</label>
-                    <select aria-label="Filter"
-                      name="category"
-                      className="bg-surface-container-high border border-outline-variant rounded p-2 text-on-surface outline-none"
+                    {/* Type-to-search: matches existing categories as you
+                        type, and offers "Add '<typed>' as new category"
+                        at the top of the list when nothing matches. */}
+                    <CategoryCombobox
                       value={newItem.category}
-                      onChange={(e) => setNewItem({ ...newItem, category: e.target.value })}
-                    >
-                      <option value="">Select Category</option>
-                      {ITEM_CATEGORIES.map(cat => <option key={cat} value={cat}>{cat}</option>)}
-                    </select>
+                      onChange={(v) => setNewItem({ ...newItem, category: v })}
+                      extraOptions={items.map(i => i.category).filter(Boolean) as string[]}
+                    />
                   </div>
 
                   <div className="flex flex-col gap-1">

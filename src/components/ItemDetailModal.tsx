@@ -4,6 +4,7 @@ import { Item } from '../types';
 import { fmtUSD, fmtZAR, fmtNumber } from '../lib/formatMoney';
 import { detectLedSwatch, ledSwatchBackground } from '../lib/ledColor';
 import { ITEM_CATEGORIES } from '../lib/itemCategories';
+import { CategoryCombobox } from './CategoryCombobox';
 import {
   X,
   Edit3,
@@ -607,44 +608,24 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete, reser
                       />
                     </div>
 
-                     <div className="flex flex-col gap-2">
-                      <div className="flex flex-col gap-1">
-                        <label className="font-bold text-outline">Preferred Sourcing Category</label>
-                        <select aria-label="Selection"
-                          className="w-full bg-surface-container-high border border-outline-variant rounded p-2 text-on-surface outline-none focus:border-primary" 
-                          name="category"
-                          value={edited.category}
-                          onChange={handleChange}
-                          title="Preferred Sourcing Category"
-                        >
-                          {categories.map((cat) => (
-                            <option key={cat} value={cat}>{cat}</option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div className="flex items-center gap-xs">
-                        <input 
-                          type="text"
-                          placeholder="Or type new category..."
-                          value={newCategory}
-                          onChange={(e) => setNewCategory(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
-                              handleAddCategory();
-                            }
-                          }}
-                          className="flex-1 bg-surface-container-high border border-outline-variant rounded px-2.5 py-1 text-xs text-on-surface outline-none focus:border-primary placeholder-muted"
-                        />
-                        <button
-                          type="button"
-                          onClick={handleAddCategory}
-                          className="bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 px-3 py-1 rounded text-xs font-bold transition-all shrink-0"
-                        >
-                          + Add
-                        </button>
-                      </div>
+                     <div className="flex flex-col gap-1">
+                      <label className="font-bold text-outline">Preferred Sourcing Category</label>
+                      {/* Same combobox the Add SKU form uses — start
+                          typing to filter, hit Enter (or click "Add
+                          '<typed>' as new category") to commit any
+                          fresh value. Extras come from `categories`
+                          which already includes whatever the current
+                          row has stamped. */}
+                      <CategoryCombobox
+                        value={edited.category || ''}
+                        onChange={(v) => {
+                          setEdited(prev => ({ ...prev, category: v }));
+                          if (v && !categories.some(c => c.toLowerCase() === v.toLowerCase())) {
+                            setCategories(prev => [...prev, v]);
+                          }
+                        }}
+                        extraOptions={categories}
+                      />
                     </div>
                   </div>
 
