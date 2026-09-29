@@ -630,51 +630,75 @@ const SalesOrderViewModal: React.FC<{
     w.print();
   };
 
-  // Direct-to-PDF download: renders the same printable HTML in an
-  // offscreen container, hands it to html2pdf, and triggers a real
-  // file download without going through the browser's print dialog.
-  //
-  // renderPrintableSalesOrder returns a FULL <!doctype html> document.
-  // Injecting that as innerHTML on a <div> silently drops the <html>/
-  // <head>/<body>/<style> wrappers, so the unstyled body text becomes
-  // ~nothing and html2canvas rasterises a near-blank container. Parse
-  // the string with DOMParser, extract the <style> blocks + body's
-  // inner HTML, and rebuild the styled subtree inside the container.
+  // Direct-to-PDF download of the printable sales-order layout.
+  // Approach: render the full <!doctype> HTML into an offscreen iframe
+  // so its <style> block is honoured and its layout resolves against a
+  // real document. Grab a self-contained clone of the iframe body,
+  // reattach it into the host document (still offscreen), and hand it
+  // to html2pdf. Cloning is what unblocks html2canvas — it can't reach
+  // across an iframe boundary reliably, but it CAN rasterise a fully-
+  // styled subtree in its own document.
   const downloadPdf = async () => {
     setBusy(true);
+    const cleanup: Array<() => void> = [];
     try {
       const html = renderPrintableSalesOrder(order, clientName);
-      const parsed = new DOMParser().parseFromString(html, 'text/html');
-      const styleHtml = Array.from(parsed.querySelectorAll('style'))
+
+      // Step 1: render inside a hidden iframe so <style> applies.
+      const iframe = document.createElement('iframe');
+      iframe.style.position = 'fixed';
+      iframe.style.left = '-99999px';
+      iframe.style.top = '0';
+      iframe.style.width = '900px';
+      iframe.style.height = '1400px';
+      iframe.style.border = '0';
+      iframe.setAttribute('aria-hidden', 'true');
+      document.body.appendChild(iframe);
+      cleanup.push(() => iframe.remove());
+
+      const doc = iframe.contentDocument;
+      if (!doc) throw new Error('Could not open iframe document');
+      doc.open();
+      doc.write(html);
+      doc.close();
+
+      // Wait for load + images (brand logo, verification badges).
+      await new Promise<void>(res => {
+        if (doc.readyState === 'complete') return res();
+        iframe.addEventListener('load', () => res(), { once: true });
+      });
+      const imgs = Array.from(doc.images);
+      await Promise.all(imgs.map(img =>
+        img.complete && img.naturalWidth > 0
+          ? Promise.resolve()
+          : new Promise<void>(r => {
+              img.addEventListener('load', () => r(), { once: true });
+              img.addEventListener('error', () => r(), { once: true });
+            })
+      ));
+      await new Promise(r => requestAnimationFrame(() => r(null)));
+
+      // Step 2: pull the styled subtree back into the parent document so
+      // html2canvas can capture it. Bring the <style> blocks along or
+      // colours/fonts collapse to browser defaults.
+      const wrapper = document.createElement('div');
+      wrapper.style.position = 'fixed';
+      wrapper.style.left = '-99999px';
+      wrapper.style.top = '0';
+      wrapper.style.width = '900px';
+      wrapper.style.background = '#ffffff';
+      wrapper.style.color = '#111';
+      // Isolate the styles: renderPrintableSalesOrder uses selectors
+      // like `body { … }`, so we wrap the body content in a fresh div
+      // that starts a new stacking / style context — the styles still
+      // scope to descendants, they just don't hit the app's own body.
+      const stylesHtml = Array.from(doc.querySelectorAll('style'))
         .map(s => s.outerHTML)
         .join('\n');
-      const bodyHtml = parsed.body ? parsed.body.innerHTML : html;
-
-      const container = document.createElement('div');
-      container.style.position = 'fixed';
-      container.style.left = '-99999px';
-      container.style.top = '0';
-      // Fixed A4-ish width so html2canvas scales predictably rather than
-      // inheriting whatever the viewport happens to be.
-      container.style.width = '900px';
-      container.style.background = '#ffffff';
-      container.style.color = '#111';
-      container.innerHTML = styleHtml + bodyHtml;
-      document.body.appendChild(container);
-
-      // Wait for any embedded brand-logo <img> to decode; html2canvas
-      // rasterises whatever's currently painted, so an unready image
-      // would render as a broken-image placeholder in the PDF.
-      const imgs = Array.from(container.querySelectorAll('img'));
-      await Promise.all(imgs.map(img => (img as HTMLImageElement).complete && (img as HTMLImageElement).naturalWidth > 0
-        ? Promise.resolve()
-        : new Promise<void>(resolve => {
-          img.addEventListener('load', () => resolve(), { once: true });
-          img.addEventListener('error', () => resolve(), { once: true });
-        })
-      ));
-      // One extra tick so any newly-inserted <style> has actually been
-      // applied to the layout the canvas will capture.
+      const bodyHtml = doc.body ? doc.body.innerHTML : html;
+      wrapper.innerHTML = stylesHtml + `<div style="width:900px;padding:40px;background:#ffffff;color:#111;box-sizing:border-box;">${bodyHtml}</div>`;
+      document.body.appendChild(wrapper);
+      cleanup.push(() => wrapper.remove());
       await new Promise(r => requestAnimationFrame(() => r(null)));
 
       const html2pdf = (await import('html2pdf.js')).default;
@@ -684,16 +708,17 @@ const SalesOrderViewModal: React.FC<{
         margin: [10, 10, 10, 10],
         filename,
         image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', windowWidth: 900 },
+        html2canvas: { scale: 2, useCORS: true, allowTaint: true, backgroundColor: '#ffffff', windowWidth: 900 },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
         pagebreak: { mode: ['css', 'legacy'] },
-      }).from(container).save();
+      }).from(wrapper).save();
 
-      document.body.removeChild(container);
       triggerToast(`Downloaded ${filename}.`);
     } catch (err: any) {
+      console.error('Save PDF failed:', err);
       triggerToast(err?.message || 'Failed to generate PDF', 'ERROR');
     } finally {
+      cleanup.forEach(fn => { try { fn(); } catch { /* */ } });
       setBusy(false);
     }
   };
