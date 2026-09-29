@@ -1963,6 +1963,177 @@ If a field is unreadable, use null (or [] for lineItems). Never invent values.`;
     }
   });
 
+  // ── VAT201 return ────────────────────────────────────────────────────
+  // Rolls up output VAT (sent/paid invoices) minus input VAT (recorded
+  // bills) into the SARS box layout. Only counts docs whose status
+  // implies the ledger entry actually landed — DRAFT / VOID never
+  // contribute. The date used for the period cut is invoice_date /
+  // bill_date, not amount_paid_at, matching SARS's accrual basis
+  // guidance for VAT vendors above the R30 M turnover threshold.
+  app.get('/api/reports/vat201', async (req, res) => {
+    const to = String(req.query.to || new Date().toISOString().slice(0, 10));
+    const from = String(req.query.from || `${to.slice(0, 4)}-01-01`);
+    try {
+      const [invRes, billRes] = await Promise.all([
+        query<any>(`
+          SELECT i.id, i.invoice_number, i.invoice_date, i.subtotal, i.tax_total, i.total,
+                 c.client_name
+          FROM invoices i
+          LEFT JOIN clients c ON c.id = i.client_id
+          WHERE i.invoice_date BETWEEN $1 AND $2
+            AND i.status IN ('SENT','PARTIAL','PAID','OVERDUE')
+          ORDER BY i.invoice_date, i.id
+        `, [from, to]),
+        query<any>(`
+          SELECT b.id, b.bill_number, b.bill_date, b.subtotal, b.tax_total, b.total,
+                 s.name AS supplier_name
+          FROM bills b
+          LEFT JOIN suppliers s ON s.id = b.supplier_id
+          WHERE b.bill_date BETWEEN $1 AND $2
+            AND b.status IN ('AWAITING_PAYMENT','PARTIAL','PAID','OVERDUE')
+          ORDER BY b.bill_date, b.id
+        `, [from, to]),
+      ]);
+
+      // Zero-rated / exempt = subtotal appears but tax_total is 0. Not
+      // perfect (a line with a mixed tax rate on the invoice would
+      // straddle both), but adequate for a small business's VAT201.
+      let standardTaxable = 0, standardVat = 0, zeroRated = 0;
+      for (const r of invRes.rows) {
+        const sub = parseFloat(r.subtotal) || 0;
+        const vat = parseFloat(r.tax_total) || 0;
+        if (vat > 0.005) { standardTaxable += sub; standardVat += vat; }
+        else { zeroRated += sub; }
+      }
+      let inputTaxable = 0, inputVat = 0;
+      for (const r of billRes.rows) {
+        inputTaxable += parseFloat(r.subtotal) || 0;
+        inputVat     += parseFloat(r.tax_total) || 0;
+      }
+
+      const netVatDue = Math.round((standardVat - inputVat) * 100) / 100;
+
+      res.json({
+        period: { from, to },
+        standardRateSales:     { taxable: r2(standardTaxable), vat: r2(standardVat) },
+        zeroRatedSales:        r2(zeroRated),
+        standardRatePurchases: { taxable: r2(inputTaxable), vat: r2(inputVat) },
+        totalOutputTax: r2(standardVat),
+        totalInputTax:  r2(inputVat),
+        netVatDue,                     // positive = pay SARS, negative = refund
+        invoices: invRes.rows.map(r => ({
+          number: r.invoice_number, date: r.invoice_date, client: r.client_name,
+          taxable: parseFloat(r.subtotal) || 0, vat: parseFloat(r.tax_total) || 0,
+        })),
+        bills: billRes.rows.map(r => ({
+          number: r.bill_number, date: r.bill_date, supplier: r.supplier_name,
+          taxable: parseFloat(r.subtotal) || 0, vat: parseFloat(r.tax_total) || 0,
+        })),
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Customer statement ───────────────────────────────────────────────
+  // Every invoice + every payment applied against this client, running
+  // balance, aging buckets on any still-open amount. asOf clips the
+  // window: transactions on or before that date only.
+  app.get('/api/reports/customer-statement', async (req, res) => {
+    const clientId = parseInt(String(req.query.clientId || '0'));
+    if (!clientId) return res.status(400).json({ error: 'clientId is required' });
+    const asOf = String(req.query.asOf || new Date().toISOString().slice(0, 10));
+    const from = req.query.from ? String(req.query.from) : null;
+    try {
+      const client = await queryOne<any>(`
+        SELECT id, client_name, contact_email, phone, physical_address, opening_balance
+        FROM clients WHERE id = $1
+      `, [clientId]);
+      if (!client) return res.status(404).json({ error: 'client not found' });
+
+      const dateClause = from
+        ? `BETWEEN '${from}'::date AND '${asOf}'::date`
+        : `<= '${asOf}'::date`;
+
+      // Invoices go on as debits (increase what client owes).
+      const { rows: invoices } = await query<any>(`
+        SELECT id, invoice_number, invoice_date, due_date, total, amount_paid, balance_due, status
+        FROM invoices
+        WHERE client_id = $1 AND invoice_date ${dateClause} AND status <> 'DRAFT' AND status <> 'VOID'
+        ORDER BY invoice_date, id
+      `, [clientId]);
+
+      // Payments received go on as credits (reduce what client owes).
+      const { rows: payments } = await query<any>(`
+        SELECT id, payment_number, payment_date, amount, method, reference
+        FROM payments_received
+        WHERE client_id = $1 AND payment_date ${dateClause}
+        ORDER BY payment_date, id
+      `, [clientId]);
+
+      // Interleave chronologically for a running balance.
+      const events: any[] = [
+        ...invoices.map(i => ({
+          date: i.invoice_date, type: 'INVOICE', docNumber: i.invoice_number,
+          description: `Invoice`,
+          debit: parseFloat(i.total) || 0,
+          credit: 0,
+          dueDate: i.due_date,
+          balanceDue: parseFloat(i.balance_due) || 0,
+          status: i.status,
+        })),
+        ...payments.map(p => ({
+          date: p.payment_date, type: 'PAYMENT', docNumber: p.payment_number,
+          description: `Payment · ${p.method || ''}${p.reference ? ` · ${p.reference}` : ''}`,
+          debit: 0,
+          credit: parseFloat(p.amount) || 0,
+        })),
+      ];
+      events.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : (a.type === 'INVOICE' ? -1 : 1));
+
+      const opening = parseFloat(client.opening_balance) || 0;
+      let running = opening;
+      for (const e of events) { running += e.debit - e.credit; e.runningBalance = r2(running); }
+      const closingBalance = r2(running);
+
+      // Aging matrix on still-open invoices only.
+      const asOfMs = new Date(asOf).getTime();
+      const aging = { current: 0, d30: 0, d60: 0, d90plus: 0, total: 0 };
+      const overdueInvoices: any[] = [];
+      for (const i of invoices) {
+        const open = parseFloat(i.balance_due) || 0;
+        if (open <= 0.005) continue;
+        const due = i.due_date ? new Date(i.due_date).getTime() : new Date(i.invoice_date).getTime();
+        const daysOverdue = Math.floor((asOfMs - due) / (1000 * 60 * 60 * 24));
+        if (daysOverdue <= 0)      aging.current  += open;
+        else if (daysOverdue <= 30) aging.d30     += open;
+        else if (daysOverdue <= 60) aging.d60     += open;
+        else                        aging.d90plus += open;
+        aging.total += open;
+        if (daysOverdue > 0) overdueInvoices.push({
+          number: i.invoice_number, date: i.invoice_date, dueDate: i.due_date,
+          daysOverdue, amount: open,
+        });
+      }
+      overdueInvoices.sort((a, b) => b.daysOverdue - a.daysOverdue);
+
+      res.json({
+        client: {
+          id: client.id, name: client.client_name,
+          email: client.contact_email, phone: client.phone, address: client.physical_address,
+        },
+        period: { from, asOf },
+        openingBalance: opening,
+        closingBalance,
+        transactions: events,
+        aging: { current: r2(aging.current), d30: r2(aging.d30), d60: r2(aging.d60), d90plus: r2(aging.d90plus), total: r2(aging.total) },
+        overdueInvoices,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get('/api/reports/general-ledger', async (req, res) => {
     const accountId = parseInt(String(req.query.accountId || '0'));
     if (!accountId) return res.status(400).json({ error: 'accountId is required' });
@@ -2561,6 +2732,10 @@ If a field is unreadable, use null (or [] for lineItems). Never invent values.`;
     }
   });
 }
+
+// Round to 2 dp — jsPDF and the VAT201/statement outputs both want
+// currency-clean numbers with no float noise from summation.
+function r2(n: number): number { return Math.round((Number(n) || 0) * 100) / 100; }
 
 function buildAgingReport(rows: any[], idField: string, nameField: string, asOf: string) {
   const asOfDate = new Date(asOf);

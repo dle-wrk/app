@@ -1,9 +1,10 @@
 import React, { useMemo, useState } from 'react';
-import { Eye, Trash2 } from 'lucide-react';
+import { Eye, Trash2, FileText } from 'lucide-react';
 import { Client } from '../../types';
-import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, EmptyState, SectionCard } from './shared';
+import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, EmptyState, SectionCard, apiGet } from './shared';
 import { optimisticListDelete } from '../../lib/optimisticUpdate';
 import { confirmDialog } from '../../lib/confirmDialog';
+import { buildAndSaveDocPdf } from '../../lib/pdfDocs';
 
 export const CustomersTab: React.FC<ModuleDataProps> = ({ clients, setClients, invoices, paymentsReceived, triggerToast }) => {
   const [viewing, setViewing] = useState<Client | null>(null);
@@ -87,7 +88,47 @@ export const CustomersTab: React.FC<ModuleDataProps> = ({ clients, setClients, i
                   <td className="px-lg py-sm"><StatusPill status={c.status || 'ACTIVE'} /></td>
                   <td className="px-lg py-sm text-right font-mono font-bold">{(balances.get(c.id) || 0) > 0 ? fmtMoney(balances.get(c.id)) : '—'}</td>
                   <td className="px-lg py-sm text-right flex gap-1 justify-end">
-                    <button onClick={() => setViewing(c)} className="p-1.5 rounded hover:bg-surface-container-high text-on-surface-variant" title="Statement"><Eye className="w-3.5 h-3.5" /></button>
+                    <button onClick={() => setViewing(c)} className="p-1.5 rounded hover:bg-surface-container-high text-on-surface-variant" title="Statement summary"><Eye className="w-3.5 h-3.5" /></button>
+                    <button
+                      onClick={async () => {
+                        try {
+                          const asOf = new Date().toISOString().slice(0, 10);
+                          // Server bundles invoices + payments + aging in one
+                          // shot so the PDF has the numbers even if the client-
+                          // side lists happen to be stale.
+                          const s: any = await apiGet(`/api/reports/customer-statement?clientId=${c.id}&asOf=${asOf}`);
+                          const lines = s.transactions.map((t: any) => ({
+                            description: `${t.docNumber || ''}  ${t.description}${t.type === 'INVOICE' && t.dueDate ? ` · due ${t.dueDate}` : ''}`.trim(),
+                            quantity: t.type === 'INVOICE' ? 'Invoice' : 'Payment',
+                            unitPrice: t.debit > 0 ? t.debit : (t.credit > 0 ? -t.credit : 0),
+                            lineTotal: t.runningBalance,
+                          }));
+                          const agingBlurb = `Current ${fmtMoney(s.aging.current)}  ·  1-30 ${fmtMoney(s.aging.d30)}  ·  31-60 ${fmtMoney(s.aging.d60)}  ·  90+ ${fmtMoney(s.aging.d90plus)}`;
+                          await buildAndSaveDocPdf({
+                            docType: 'Customer Statement',
+                            docNumber: `${c.clientName.replace(/[^a-zA-Z0-9]+/g, '-')}-${asOf}`,
+                            meta: [
+                              { label: 'Client', value: s.client.name },
+                              { label: 'As of', value: s.period.asOf },
+                              { label: 'Opening', value: fmtMoney(s.openingBalance) },
+                              { label: 'Closing', value: fmtMoney(s.closingBalance) },
+                              { label: 'Contact', value: s.client.email || s.client.phone || '—' },
+                              { label: 'Total open', value: fmtMoney(s.aging.total) },
+                            ],
+                            lines,
+                            totals: { subtotal: s.openingBalance, total: s.closingBalance },
+                            notes: `Aging on open items — ${agingBlurb}.${s.overdueInvoices.length > 0 ? `  ${s.overdueInvoices.length} invoice(s) overdue — oldest ${s.overdueInvoices[0]?.daysOverdue} days.` : ''}`,
+                          });
+                          triggerToast(`Statement downloaded — ${fmtMoney(s.aging.total)} open across ${s.overdueInvoices.length} overdue invoice(s).`);
+                        } catch (err: any) {
+                          triggerToast(err?.message || 'Failed to generate statement', 'ERROR');
+                        }
+                      }}
+                      className="p-1.5 rounded hover:bg-surface-container-high text-primary"
+                      title="Download statement PDF"
+                    >
+                      <FileText className="w-3.5 h-3.5" />
+                    </button>
                     <button onClick={() => handleDelete(c.id)} className="p-1.5 rounded hover:bg-error/10 text-error" title="Delete customer"><Trash2 className="w-3.5 h-3.5" /></button>
                   </td>
                 </tr>

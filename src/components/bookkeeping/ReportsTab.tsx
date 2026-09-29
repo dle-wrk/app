@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Download } from 'lucide-react';
+import { Download, FileText } from 'lucide-react';
 import { ModuleDataProps, fmtMoney, todayISO, apiGet, SecondaryButton, inputClass, EmptyState, SectionCard } from './shared';
+import { buildAndSaveDocPdf } from '../../lib/pdfDocs';
 
-type ReportKind = 'PL' | 'BS' | 'TB' | 'AR' | 'AP';
+type ReportKind = 'PL' | 'BS' | 'TB' | 'AR' | 'AP' | 'VAT';
 
 const REPORT_LABELS: Record<ReportKind, string> = {
   PL: 'Profit & Loss',
@@ -10,6 +11,7 @@ const REPORT_LABELS: Record<ReportKind, string> = {
   TB: 'Trial Balance',
   AR: 'AR Aging',
   AP: 'AP Aging',
+  VAT: 'VAT201',
 };
 
 function downloadCSV(filename: string, rows: string[][]) {
@@ -39,6 +41,7 @@ export const ReportsTab: React.FC<ModuleDataProps> = ({ triggerToast }) => {
       else if (kind === 'TB') url = `/api/reports/trial-balance?asOf=${asOf}`;
       else if (kind === 'AR') url = `/api/reports/ar-aging?asOf=${asOf}`;
       else if (kind === 'AP') url = `/api/reports/ap-aging?asOf=${asOf}`;
+      else if (kind === 'VAT') url = `/api/reports/vat201?from=${from}&to=${to}`;
       const result = await apiGet(url);
       setData(result);
     } catch (err: any) {
@@ -77,11 +80,52 @@ export const ReportsTab: React.FC<ModuleDataProps> = ({ triggerToast }) => {
         ...data.rows.map((r: any) => [r.code, r.name, r.debit, r.credit]),
         ['', 'Total', data.totalDebit, data.totalCredit],
       ]);
+    } else if (kind === 'VAT') {
+      downloadCSV(`vat201_${data.period.from}_${data.period.to}.csv`, [
+        ['Section', 'Doc #', 'Date', 'Party', 'Taxable', 'VAT'],
+        ...data.invoices.map((r: any) => ['Output tax', r.number, r.date, r.client, r.taxable, r.vat]),
+        ...data.bills.map((r: any) => ['Input tax', r.number, r.date, r.supplier, r.taxable, r.vat]),
+        ['', '', '', 'Total Output Tax', data.standardRateSales.taxable, data.totalOutputTax],
+        ['', '', '', 'Total Input Tax', data.standardRatePurchases.taxable, data.totalInputTax],
+        ['', '', '', 'Net VAT Due', '', data.netVatDue],
+      ]);
     } else {
       downloadCSV(`${kind.toLowerCase()}_aging.csv`, [
         ['Entity', 'Current', '1-30', '31-60', '61-90', '90+', 'Total'],
         ...data.map((r: any) => [r.entityName, r.current, r.d30, r.d60, r.d90, r.d90plus, r.total]),
       ]);
+    }
+  };
+
+  const savePdf = async () => {
+    if (!data || kind !== 'VAT') return;
+    try {
+      await buildAndSaveDocPdf({
+        docType: 'VAT201 Return',
+        docNumber: `${data.period.from}_${data.period.to}`,
+        meta: [
+          { label: 'Period From', value: data.period.from },
+          { label: 'Period To', value: data.period.to },
+          { label: 'Net VAT Due', value: fmtMoney(data.netVatDue) },
+          { label: 'Direction', value: data.netVatDue >= 0 ? 'Payable to SARS' : 'Refund due' },
+        ],
+        lines: [
+          { description: 'Box 1 · Standard-rated sales (taxable)',   quantity: '', lineTotal: data.standardRateSales.taxable },
+          { description: 'Box 4 · Output VAT on standard sales',      quantity: '', lineTotal: data.standardRateSales.vat },
+          { description: 'Box 2 · Zero-rated sales',                  quantity: '', lineTotal: data.zeroRatedSales },
+          { description: 'Box 14 · Standard-rated purchases (taxable)', quantity: '', lineTotal: data.standardRatePurchases.taxable },
+          { description: 'Box 15 · Input VAT on standard purchases',  quantity: '', lineTotal: data.standardRatePurchases.vat },
+          { description: 'Net VAT (Output − Input)',                  quantity: '', lineTotal: data.netVatDue },
+        ],
+        totals: {
+          subtotal: data.totalOutputTax,
+          tax: -data.totalInputTax,
+          total: data.netVatDue,
+        },
+        notes: 'This report is a computation aid — verify each box against SARS eFiling before submission. Only invoices and bills with a live ledger status (SENT/PARTIAL/PAID/OVERDUE for invoices, AWAITING_PAYMENT and onward for bills) contribute. DRAFT and VOID are excluded.',
+      });
+    } catch (err: any) {
+      triggerToast(err?.message || 'Failed to generate PDF', 'ERROR');
     }
   };
 
@@ -94,7 +138,7 @@ export const ReportsTab: React.FC<ModuleDataProps> = ({ triggerToast }) => {
           ))}
         </div>
         <div className="flex items-center gap-2 ml-auto">
-          {kind === 'PL' ? (
+          {(kind === 'PL' || kind === 'VAT') ? (
             <>
               <input type="date" className={`${inputClass} py-1.5 text-xs w-36`} value={from} onChange={(e) => setFrom(e.target.value)} />
               <span className="text-xs text-outline">to</span>
@@ -105,6 +149,7 @@ export const ReportsTab: React.FC<ModuleDataProps> = ({ triggerToast }) => {
           )}
           <SecondaryButton onClick={load}>Run</SecondaryButton>
           <SecondaryButton icon={<Download className="w-3.5 h-3.5" />} onClick={exportCurrent} disabled={!data}>Export CSV</SecondaryButton>
+          {kind === 'VAT' && <SecondaryButton icon={<FileText className="w-3.5 h-3.5" />} onClick={savePdf} disabled={!data}>Save PDF</SecondaryButton>}
         </div>
       </div>
 
@@ -113,9 +158,89 @@ export const ReportsTab: React.FC<ModuleDataProps> = ({ triggerToast }) => {
       {!loading && data && kind === 'BS' && <BalanceSheetView data={data} />}
       {!loading && data && kind === 'TB' && <TrialBalanceView data={data} />}
       {!loading && data && (kind === 'AR' || kind === 'AP') && <AgingView data={data} label={kind === 'AR' ? 'Customer' : 'Supplier'} />}
+      {!loading && data && kind === 'VAT' && <Vat201View data={data} />}
     </div>
   );
 };
+
+const Vat201View: React.FC<{ data: any }> = ({ data }) => (
+  <SectionCard title="VAT201 — Return Computation" badge={`${data.period.from} → ${data.period.to}`}>
+    <div className="p-lg space-y-lg">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-md">
+        <div className="p-3 rounded-lg border border-outline-variant/40 bg-surface-container-low">
+          <div className="text-[10px] uppercase text-outline">Output tax (Box 4)</div>
+          <div className="font-mono font-bold text-green-400">{fmtMoney(data.totalOutputTax)}</div>
+        </div>
+        <div className="p-3 rounded-lg border border-outline-variant/40 bg-surface-container-low">
+          <div className="text-[10px] uppercase text-outline">Input tax (Box 15)</div>
+          <div className="font-mono font-bold text-secondary">{fmtMoney(data.totalInputTax)}</div>
+        </div>
+        <div className={`p-3 rounded-lg border ${data.netVatDue >= 0 ? 'border-error/40 bg-error/10' : 'border-green-500/40 bg-green-500/10'}`}>
+          <div className="text-[10px] uppercase text-outline">Net VAT</div>
+          <div className={`font-mono font-bold ${data.netVatDue >= 0 ? 'text-error' : 'text-green-400'}`}>{fmtMoney(data.netVatDue)}</div>
+          <div className="text-[9px] text-outline">{data.netVatDue >= 0 ? 'Payable to SARS' : 'Refund due'}</div>
+        </div>
+        <div className="p-3 rounded-lg border border-outline-variant/40 bg-surface-container-low">
+          <div className="text-[10px] uppercase text-outline">Zero-rated sales</div>
+          <div className="font-mono font-bold">{fmtMoney(data.zeroRatedSales)}</div>
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-outline-variant/40 p-md text-xs space-y-1">
+        <div className="flex justify-between"><span>Box 1 — Standard-rated sales (taxable)</span><span className="font-mono font-bold">{fmtMoney(data.standardRateSales.taxable)}</span></div>
+        <div className="flex justify-between"><span>Box 2 — Zero-rated sales</span><span className="font-mono">{fmtMoney(data.zeroRatedSales)}</span></div>
+        <div className="flex justify-between border-t border-outline-variant/40 pt-1"><span className="font-bold">Box 4 — Output VAT</span><span className="font-mono font-bold text-green-400">{fmtMoney(data.standardRateSales.vat)}</span></div>
+        <div className="flex justify-between pt-2"><span>Box 14 — Standard-rated purchases (taxable)</span><span className="font-mono font-bold">{fmtMoney(data.standardRatePurchases.taxable)}</span></div>
+        <div className="flex justify-between border-t border-outline-variant/40 pt-1"><span className="font-bold">Box 15 — Input VAT</span><span className="font-mono font-bold text-secondary">{fmtMoney(data.standardRatePurchases.vat)}</span></div>
+        <div className="flex justify-between border-t-2 border-outline-variant pt-2 text-sm"><span className="font-black">Net VAT (Output − Input)</span><span className={`font-mono font-black ${data.netVatDue >= 0 ? 'text-error' : 'text-green-400'}`}>{fmtMoney(data.netVatDue)}</span></div>
+      </div>
+
+      <details className="rounded-lg border border-outline-variant/40 bg-surface-container-low">
+        <summary className="cursor-pointer px-3 py-2 text-xs font-bold uppercase tracking-wider">Supporting invoices ({data.invoices.length})</summary>
+        <div className="max-h-64 overflow-y-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-surface-container-high/60 text-outline text-[10px] uppercase sticky top-0">
+              <tr><th className="px-md py-1.5">Number</th><th className="px-md py-1.5">Date</th><th className="px-md py-1.5">Client</th><th className="px-md py-1.5 text-right">Taxable</th><th className="px-md py-1.5 text-right">VAT</th></tr>
+            </thead>
+            <tbody>
+              {data.invoices.map((r: any) => (
+                <tr key={r.number} className="border-t border-outline-variant/20">
+                  <td className="px-md py-1 font-mono text-primary">{r.number}</td>
+                  <td className="px-md py-1 font-mono">{r.date}</td>
+                  <td className="px-md py-1">{r.client}</td>
+                  <td className="px-md py-1 text-right font-mono">{fmtMoney(r.taxable)}</td>
+                  <td className="px-md py-1 text-right font-mono">{fmtMoney(r.vat)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </details>
+
+      <details className="rounded-lg border border-outline-variant/40 bg-surface-container-low">
+        <summary className="cursor-pointer px-3 py-2 text-xs font-bold uppercase tracking-wider">Supporting bills ({data.bills.length})</summary>
+        <div className="max-h-64 overflow-y-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-surface-container-high/60 text-outline text-[10px] uppercase sticky top-0">
+              <tr><th className="px-md py-1.5">Number</th><th className="px-md py-1.5">Date</th><th className="px-md py-1.5">Supplier</th><th className="px-md py-1.5 text-right">Taxable</th><th className="px-md py-1.5 text-right">VAT</th></tr>
+            </thead>
+            <tbody>
+              {data.bills.map((r: any) => (
+                <tr key={r.number} className="border-t border-outline-variant/20">
+                  <td className="px-md py-1 font-mono text-primary">{r.number}</td>
+                  <td className="px-md py-1 font-mono">{r.date}</td>
+                  <td className="px-md py-1">{r.supplier}</td>
+                  <td className="px-md py-1 text-right font-mono">{fmtMoney(r.taxable)}</td>
+                  <td className="px-md py-1 text-right font-mono">{fmtMoney(r.vat)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </details>
+    </div>
+  </SectionCard>
+);
 
 const ProfitLossView: React.FC<{ data: any }> = ({ data }) => (
   <SectionCard title="Profit & Loss" badge={`${data.from} → ${data.to}`}>
