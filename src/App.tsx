@@ -1829,7 +1829,28 @@ export default function App() {
 
   // Force the remainder onto critical to ensure they always aggregate to a clean 100%
   const criticalPercent = totalItemsCount > 0 ? 100 - okPercent - lowPercent : 0;
-  const detailItem = items.find(i => i.partNumber === selectedDetailPartNumber);
+  // Detail-modal item held in local state (not derived) so a mid-session
+  // items-list rewrite — the live-sync poller re-runs the /api/bootstrap
+  // fetch on any data-version bump — never unmounts the open modal.
+  // Before this was `items.find(...)` inline: a brief window where the
+  // just-added SKU hadn't reached the server yet (Neon read-after-write
+  // lag) let bootstrap return a list without it, `find` returned undef,
+  // and the modal disappeared under the user's cursor mid-edit.
+  //
+  // Rules:
+  //   - Close signal (selectedDetailPartNumber → null): clear.
+  //   - Row present in items: refresh detailItem to the current copy.
+  //   - Row missing but modal open: KEEP the previous detailItem so the
+  //     modal survives transient bootstrap churn.
+  const [detailItem, setDetailItem] = useState<Item | null>(null);
+  useEffect(() => {
+    if (!selectedDetailPartNumber) { setDetailItem(null); return; }
+    const found = items.find(i => i.partNumber === selectedDetailPartNumber);
+    if (found) setDetailItem(found);
+    // else: keep the stale detailItem — user still sees the row they
+    //   opened; if the row is genuinely gone (deleted server-side) the
+    //   next save will 404 and error out cleanly.
+  }, [selectedDetailPartNumber, items]);
 
   // Password reset landing — the /?reset=TOKEN link lands here regardless of
   // auth state. On success we clear the URL and drop back to the login card.
