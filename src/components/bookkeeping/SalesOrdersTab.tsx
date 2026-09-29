@@ -1119,13 +1119,14 @@ const BatchAutoFulfilModal: React.FC<{
 function renderPrintableSalesOrder(order: any, clientName: string): string {
   const money = (n: number) => fmtMoney(n, order.currency);
   const rows = (order.items || []).map((it: any) => `
-    <tr>
-      <td>${it.partNumber ? `<span class="pn">${escapeHtml(it.partNumber)}</span> ` : ''}${escapeHtml(it.description)}</td>
-      <td class="num">${it.quantity}</td>
-      <td class="num">${escapeHtml(money(it.unitPrice))}</td>
-      <td class="num strong">${escapeHtml(money(it.lineTotal))}</td>
-    </tr>
-  `).join('');
+  <tr>
+    <td>${escapeHtml(it.partNumber || '')}</td>
+    <td>${escapeHtml(it.description)}</td>
+    <td class="num">${it.quantity}</td>
+    <td class="num">${escapeHtml(money(it.unitPrice))}</td>
+    <td class="num strong">${escapeHtml(money(it.lineTotal))}</td>
+  </tr>
+`).join('');
 
   return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(order.orderNumber)}</title>
 <style>
@@ -1180,13 +1181,14 @@ function renderPrintableSalesOrder(order: any, clientName: string): string {
   <table>
     <thead>
       <tr>
+        <th>Modal No</th>
         <th>Description</th>
         <th style="text-align:right">Qty</th>
-        <th style="text-align:right">Unit Price</th>
+        <th style="text-align:right">Price</th>
         <th style="text-align:right">Total</th>
       </tr>
     </thead>
-    <tbody>${rows || '<tr><td colspan="4" style="text-align:center;color:#999;padding:20px">No line items</td></tr>'}</tbody>
+    <tbody>${rows || '<tr><td colspan="5" style="text-align:center;color:#999;padding:20px">No line items</td></tr>'}</tbody>
   </table>
 
   <div class="totals">
