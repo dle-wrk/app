@@ -1,7 +1,8 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { Plus, Send, Ban, Eye, Wallet, Camera, Image as ImageIcon, X, Trash2, Sparkles } from 'lucide-react';
+import { Plus, Send, Ban, Eye, Wallet, Camera, Image as ImageIcon, X, Trash2, Sparkles, Download } from 'lucide-react';
 import { Bill, PurchaseOrder } from '../../types';
 import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, addDaysISO, apiPost, apiGet, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
+import { buildAndSaveDocPdf } from '../../lib/pdfDocs';
 import { runOcr, OcrResult } from '../../lib/receiptOcr';
 import { LineItemsEditor, EditableLine, newEditableLine } from './LineItemsEditor';
 import { ErrorBoundary } from '../ErrorBoundary';
@@ -238,6 +239,44 @@ export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
             </div>
           </div>
           <div className="flex flex-wrap gap-2 justify-end pt-2 border-t border-outline-variant/20">
+            <SecondaryButton
+              icon={<Download className="w-3.5 h-3.5" />}
+              onClick={async () => {
+                try {
+                  const name = await buildAndSaveDocPdf({
+                    docType: 'Bill',
+                    docNumber: viewing.billNumber,
+                    currency: viewing.currency,
+                    meta: [
+                      { label: 'Supplier', value: viewing.supplierName || String(viewing.supplierId || '') },
+                      { label: 'Status', value: String(viewing.status || '') },
+                      { label: 'Bill Date', value: fmtDate(viewing.billDate) },
+                      { label: 'Due Date', value: fmtDate(viewing.dueDate) },
+                    ],
+                    lines: (viewing.items || []).map((it: any) => ({
+                      partNumber: it.partNumber,
+                      description: it.description,
+                      quantity: it.quantity,
+                      unitPrice: it.unitPrice,
+                      lineTotal: it.lineTotal,
+                    })),
+                    totals: {
+                      subtotal: viewing.subtotal,
+                      tax: viewing.taxTotal,
+                      total: viewing.total,
+                      amountPaid: viewing.amountPaid,
+                      balanceDue: viewing.balanceDue,
+                    },
+                    notes: viewing.notes,
+                  });
+                  triggerToast(`Downloaded ${name}.`);
+                } catch (err: any) {
+                  triggerToast(err?.message || 'Failed to generate PDF', 'ERROR');
+                }
+              }}
+            >
+              Save PDF
+            </SecondaryButton>
             {viewing.status === 'DRAFT' && (
               <>
                 <PrimaryButton icon={<Send className="w-3.5 h-3.5" />} onClick={() => handleFinalize(viewing.id)} disabled={busy}>Finalize</PrimaryButton>

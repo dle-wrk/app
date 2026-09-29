@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from 'react';
-import { Plus, Printer, Ban, Eye, Wallet, FileText } from 'lucide-react';
+import { Plus, Printer, Ban, Eye, Wallet, FileText, Download } from 'lucide-react';
 import { Invoice, InvoiceItem } from '../../types';
 import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, addDaysISO, apiPost, apiPut, apiDelete, apiGet, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
+import { buildAndSaveDocPdf } from '../../lib/pdfDocs';
 import { LineItemsEditor, EditableLine, newEditableLine, lineTotals } from './LineItemsEditor';
 import { ErrorBoundary } from '../ErrorBoundary';
 import { confirmDialog } from '../../lib/confirmDialog';
@@ -240,6 +241,45 @@ export const InvoicesTab: React.FC<ModuleDataProps> = (props) => {
               onClick={() => printInvoice(viewingInvoice, clientName(viewingInvoice.clientId))}
             >
               Print
+            </SecondaryButton>
+            <SecondaryButton
+              icon={<Download className="w-3.5 h-3.5" />}
+              onClick={async () => {
+                try {
+                  const name = await buildAndSaveDocPdf({
+                    docType: 'Invoice',
+                    docNumber: viewingInvoice.invoiceNumber,
+                    currency: viewingInvoice.currency,
+                    meta: [
+                      { label: 'Client', value: clientName(viewingInvoice.clientId) },
+                      { label: 'Status', value: String(viewingInvoice.status || '') },
+                      { label: 'Invoice Date', value: fmtDate(viewingInvoice.invoiceDate) },
+                      { label: 'Due Date', value: fmtDate(viewingInvoice.dueDate) },
+                    ],
+                    lines: (viewingInvoice.items || []).map((it: any) => ({
+                      partNumber: it.partNumber,
+                      description: it.description,
+                      quantity: it.quantity,
+                      unitPrice: it.unitPrice,
+                      lineTotal: it.lineTotal,
+                    })),
+                    totals: {
+                      subtotal: viewingInvoice.subtotal,
+                      discount: viewingInvoice.discountTotal,
+                      tax: viewingInvoice.taxTotal,
+                      total: viewingInvoice.total,
+                      amountPaid: viewingInvoice.amountPaid,
+                      balanceDue: viewingInvoice.balanceDue,
+                    },
+                    notes: viewingInvoice.notes,
+                  });
+                  props.triggerToast(`Downloaded ${name}.`);
+                } catch (err: any) {
+                  props.triggerToast(err?.message || 'Failed to generate PDF', 'ERROR');
+                }
+              }}
+            >
+              Save PDF
             </SecondaryButton>
             {viewingInvoice.status === 'DRAFT' && (
               <>

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Plus, Eye, Send, CheckCircle2, Ban, Trash2, Printer, X, Truck, PackageCheck } from 'lucide-react';
+import { Plus, Eye, Send, CheckCircle2, Ban, Trash2, Printer, X, Truck, PackageCheck, Download } from 'lucide-react';
+import { buildAndSaveDocPdf } from '../../lib/pdfDocs';
 import { DispatchNote, DispatchNoteItem, DispatchNoteType } from '../../types';
 import {
   ModuleDataProps, Modal, StatusPill, fmtDate, todayISO, apiGet, apiPost, apiPut, apiDelete,
@@ -551,6 +552,41 @@ const DispatchViewModal: React.FC<{
 
       <div className="flex flex-wrap gap-2 justify-end pt-2 border-t border-outline-variant/20">
         <SecondaryButton icon={<Printer className="w-3.5 h-3.5" />} onClick={printNote}>Print</SecondaryButton>
+        <SecondaryButton
+          icon={<Download className="w-3.5 h-3.5" />}
+          onClick={async () => {
+            try {
+              await buildAndSaveDocPdf({
+                docType: meta.label, // "Delivery Note" or "Collection Note"
+                docNumber: note.noteNumber,
+                meta: [
+                  { label: 'Client', value: clientName },
+                  { label: 'Status', value: String(note.status || '') },
+                  { label: 'Note Date', value: fmtDate(note.noteDate) },
+                  { label: note.noteType === 'DELIVERY' ? 'Delivery Date' : 'Collection Date', value: fmtDate(note.scheduledDate) },
+                  ...(note.orderNumber ? [{ label: 'Order', value: note.orderNumber }] : []),
+                  ...(note.contactPerson ? [{ label: meta.partyLabel, value: note.contactPerson }] : []),
+                  ...(note.address ? [{ label: meta.addressLabel, value: note.address }] : []),
+                  ...(note.carrier ? [{ label: note.noteType === 'DELIVERY' ? 'Carrier' : 'Collected via', value: note.carrier }] : []),
+                  ...(note.reference ? [{ label: 'Reference', value: note.reference }] : []),
+                ],
+                lines: (note.items || []).map((it: DispatchNoteItem) => ({
+                  partNumber: it.partNumber,
+                  description: it.description,
+                  quantity: it.quantity,
+                  extra: it.serialNumbers || '',
+                })),
+                extraColumnHeader: 'Serial numbers',
+                notes: note.notes,
+              });
+            } catch (err) {
+              console.error('Save PDF failed:', err);
+              alert(`Failed to generate PDF: ${(err as any)?.message || err}`);
+            }
+          }}
+        >
+          Save PDF
+        </SecondaryButton>
         {note.status === 'DRAFT' && (
           <>
             <SecondaryButton onClick={onEdit}>Edit</SecondaryButton>

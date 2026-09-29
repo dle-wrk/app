@@ -3,6 +3,7 @@ import { Plus, Eye, Trash2, Upload, Download, Paperclip, CheckCircle2, XCircle, 
 import { ClientOrder } from '../../types';
 import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, apiGet, apiPost, apiDelete, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
 import { LineItemsEditor, EditableLine, newEditableLine, lineTotals } from './LineItemsEditor';
+import { buildAndSaveDocPdf } from '../../lib/pdfDocs';
 import { confirmDialog } from '../../lib/confirmDialog';
 import { renderBrandHeader, waitForBrandImage } from '../../lib/printBrand';
 
@@ -630,144 +631,34 @@ const SalesOrderViewModal: React.FC<{
     w.print();
   };
 
-  // Direct-to-PDF download. Builds the PDF from `order` data with
-  // jsPDF instead of trying to rasterise the printable HTML — every
-  // HTML→canvas path we tried caught a blank frame (CSS variables not
-  // resolving, cross-iframe/style-isolation quirks, layout timing).
-  // Working from the raw fields is deterministic and produces the same
-  // rand totals, line items, and header the printable view shows.
   const downloadPdf = async () => {
     setBusy(true);
     try {
-      const [{ default: jsPDF }, autoTableMod] = await Promise.all([
-        import('jspdf'),
-        import('jspdf-autotable'),
-      ]);
-      const autoTable = (autoTableMod as any).default || (autoTableMod as any);
-
       const isQuote = order.status === 'QUOTATION';
-      const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
-      const pageWidth = doc.internal.pageSize.getWidth();
-      const M = 15; // page margin
-
-      // Brand header. Solid TRACKLAB wordmark in the app orange plus a
-      // subtitle, mirroring the printable view without relying on the
-      // remote logo image.
-      doc.setTextColor(247, 145, 43); // #f7912b
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(26);
-      doc.text('TRACKLAB', M, 22);
-      doc.setFontSize(9);
-      doc.setTextColor(120, 120, 120);
-      doc.text('INVENTORY · MANUFACTURING · COMPLIANCE', M, 28);
-
-      // Doc-type block, right-aligned.
-      doc.setTextColor(0, 0, 0);
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(18);
-      doc.text(isQuote ? 'Quotation' : 'Sales Order', pageWidth - M, 22, { align: 'right' });
-      doc.setFont('courier', 'normal');
-      doc.setFontSize(11);
-      doc.setTextColor(247, 145, 43);
-      doc.text(String(order.orderNumber || ''), pageWidth - M, 28, { align: 'right' });
-
-      // Orange rule under the header.
-      doc.setDrawColor(247, 145, 43);
-      doc.setLineWidth(0.8);
-      doc.line(M, 32, pageWidth - M, 32);
-
-      // Meta block: client + dates + status, two columns.
-      const metaTop = 40;
-      const rowH = 6;
-      const labelColor = 120;
-      const drawLabel = (text: string, x: number, y: number) => {
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(8);
-        doc.setTextColor(labelColor);
-        doc.text(text, x, y);
-      };
-      const drawVal = (text: string, x: number, y: number) => {
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(11);
-        doc.setTextColor(0);
-        doc.text(text || '—', x, y);
-      };
-      drawLabel('CLIENT', M, metaTop);
-      drawVal(clientName, M, metaTop + rowH);
-      drawLabel('STATUS', pageWidth / 2, metaTop);
-      drawVal(String(order.status || ''), pageWidth / 2, metaTop + rowH);
-      drawLabel('ORDER DATE', M, metaTop + rowH * 2.5);
-      drawVal(fmtDate(order.orderDate), M, metaTop + rowH * 3.5);
-      drawLabel('REQUIRED', pageWidth / 2, metaTop + rowH * 2.5);
-      drawVal(fmtDate(order.requiredDate), pageWidth / 2, metaTop + rowH * 3.5);
-
-      // Line items table.
-      const items = Array.isArray(order.items) ? order.items : [];
-      const money = (n: any) => fmtMoney(Number(n) || 0, order.currency);
-      autoTable(doc, {
-        startY: metaTop + rowH * 5.5,
-        head: [['Description', 'Qty', 'Unit Price', 'Total']],
-        body: items.length > 0
-          ? items.map((it: any) => [
-              `${it.partNumber ? `${it.partNumber}  ` : ''}${it.description || ''}`,
-              String(it.quantity ?? ''),
-              money(it.unitPrice),
-              money(it.lineTotal),
-            ])
-          : [['No line items', '', '', '']],
-        styles: { fontSize: 9, cellPadding: 2.5, textColor: 20 },
-        headStyles: { fillColor: [30, 30, 30], textColor: 255, fontStyle: 'bold', fontSize: 8 },
-        columnStyles: {
-          0: { cellWidth: 'auto' },
-          1: { halign: 'right', cellWidth: 20 },
-          2: { halign: 'right', cellWidth: 30 },
-          3: { halign: 'right', cellWidth: 30, fontStyle: 'bold' },
+      const filename = await buildAndSaveDocPdf({
+        docType: isQuote ? 'Quotation' : 'Sales Order',
+        docNumber: order.orderNumber,
+        currency: order.currency,
+        meta: [
+          { label: 'Client', value: clientName },
+          { label: 'Status', value: String(order.status || '') },
+          { label: 'Order Date', value: fmtDate(order.orderDate) },
+          { label: 'Required', value: fmtDate(order.requiredDate) },
+        ],
+        lines: (order.items || []).map((it: any) => ({
+          partNumber: it.partNumber,
+          description: it.description,
+          quantity: it.quantity,
+          unitPrice: it.unitPrice,
+          lineTotal: it.lineTotal,
+        })),
+        totals: {
+          subtotal: order.subtotal,
+          tax: order.tax,
+          total: order.total,
         },
-        margin: { left: M, right: M },
-        theme: 'grid',
+        notes: order.notes,
       });
-
-      const finalY = (doc as any).lastAutoTable?.finalY || metaTop + 60;
-
-      // Totals box, right-aligned.
-      const totalsX = pageWidth - M - 60;
-      const totalsW = 60;
-      let ty = finalY + 8;
-      const totalLine = (label: string, val: string, strong = false) => {
-        doc.setFont('helvetica', strong ? 'bold' : 'normal');
-        doc.setFontSize(strong ? 12 : 10);
-        doc.setTextColor(strong ? 247 : 60, strong ? 145 : 60, strong ? 43 : 60);
-        doc.text(label, totalsX, ty);
-        doc.text(val, totalsX + totalsW, ty, { align: 'right' });
-        ty += strong ? 8 : 6;
-      };
-      totalLine('Subtotal', money(order.subtotal));
-      totalLine('Tax', money(order.tax));
-      doc.setDrawColor(180);
-      doc.setLineWidth(0.3);
-      doc.line(totalsX, ty - 2, totalsX + totalsW, ty - 2);
-      totalLine('Total', money(order.total), true);
-
-      // Notes block.
-      if (order.notes) {
-        doc.setFont('helvetica', 'italic');
-        doc.setFontSize(9);
-        doc.setTextColor(80);
-        doc.text('Notes:', M, ty + 8);
-        const noteLines = doc.splitTextToSize(String(order.notes), pageWidth - M * 2);
-        doc.text(noteLines, M, ty + 13);
-      }
-
-      // Footer.
-      const pageH = doc.internal.pageSize.getHeight();
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(8);
-      doc.setTextColor(160);
-      doc.text(`TRACKLAB IM · Generated ${new Date().toLocaleString()}`, pageWidth / 2, pageH - 8, { align: 'center' });
-
-      const docKind = isQuote ? 'quotation' : 'sales-order';
-      const filename = `${docKind}-${order.orderNumber}.pdf`;
-      doc.save(filename);
       triggerToast(`Downloaded ${filename}.`);
     } catch (err: any) {
       console.error('Save PDF failed:', err);
