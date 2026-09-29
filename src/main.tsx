@@ -17,6 +17,27 @@ console.error = function (...args: any[]) {
   return originalError.apply(console, args);
 };
 
+// Stale-chunk recovery. After a redeploy, a tab still holding the old
+// index.html may try to load a code-split chunk whose hash no longer
+// exists on the server ("Failed to fetch dynamically imported module").
+// Auto-reload ONCE so the user picks up the fresh bundle without seeing
+// the raw error. A sessionStorage flag prevents an infinite loop when
+// the server genuinely can't serve the chunk.
+const STALE_CHUNK_KEY = 'stale-chunk-reload-attempted';
+window.addEventListener('unhandledrejection', (event) => {
+  const msg = String(event.reason?.message || event.reason || '');
+  const stale = /dynamically imported module|Loading chunk|Failed to fetch dynamically/i.test(msg);
+  if (!stale) return;
+  if (sessionStorage.getItem(STALE_CHUNK_KEY)) return;
+  sessionStorage.setItem(STALE_CHUNK_KEY, '1');
+  event.preventDefault();
+  console.warn('[stale-chunk] reloading to pick up latest build:', msg);
+  location.reload();
+});
+// Clear the flag after any successful chunk import — the presence of
+// working code past mount means the reload worked.
+window.setTimeout(() => sessionStorage.removeItem(STALE_CHUNK_KEY), 15_000);
+
 // Attach the current session id to every /api call so admin-gated
 // endpoints know who's calling. Doing this once at the app boundary
 // means every fetch — including third-party libs — picks up auth

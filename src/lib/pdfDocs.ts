@@ -50,11 +50,33 @@ export interface BuildDocPdfInput {
 }
 
 export async function buildAndSaveDocPdf(input: BuildDocPdfInput): Promise<string> {
-  const [{ default: jsPDF }, autoTableMod] = await Promise.all([
-    import('jspdf'),
-    import('jspdf-autotable'),
-  ]);
-  const autoTable: any = (autoTableMod as any).default || autoTableMod;
+  // Wrap the dynamic imports so a stale-chunk error (old tab holding
+  // a bundle whose jspdf chunk hash no longer exists on the server
+  // after a redeploy) surfaces as a clear reload prompt instead of the
+  // opaque "Failed to fetch dynamically imported module" message.
+  let jsPDF: any, autoTableMod: any;
+  try {
+    [{ default: jsPDF }, autoTableMod] = await Promise.all([
+      import('jspdf'),
+      import('jspdf-autotable'),
+    ]);
+  } catch (err: any) {
+    const msg = String(err?.message || err);
+    if (/dynamically imported module|Loading chunk|Failed to fetch/i.test(msg)) {
+      // Auto-reload once. Guarded by sessionStorage so we don't loop if
+      // the server genuinely can't serve the chunk.
+      const key = 'pdf-chunk-reload-attempted';
+      if (!sessionStorage.getItem(key)) {
+        sessionStorage.setItem(key, '1');
+        alert('This tab is running an older version of the app. Reloading to pick up the latest build.');
+        location.reload();
+        throw new Error('Reloading to fetch latest build');
+      }
+      throw new Error('Could not load the PDF library. Refresh the page (Ctrl+Shift+R / Cmd+Shift+R) and try again.');
+    }
+    throw err;
+  }
+  const autoTable: any = autoTableMod.default || autoTableMod;
 
   const currency = input.currency || 'ZAR';
   const money = (n: any) => fmtCurrency(Number(n) || 0, currency);
