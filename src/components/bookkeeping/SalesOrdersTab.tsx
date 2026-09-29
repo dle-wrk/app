@@ -630,95 +630,149 @@ const SalesOrderViewModal: React.FC<{
     w.print();
   };
 
-  // Direct-to-PDF download of the printable sales-order layout.
-  // Approach: render the full <!doctype> HTML into an offscreen iframe
-  // so its <style> block is honoured and its layout resolves against a
-  // real document. Grab a self-contained clone of the iframe body,
-  // reattach it into the host document (still offscreen), and hand it
-  // to html2pdf. Cloning is what unblocks html2canvas — it can't reach
-  // across an iframe boundary reliably, but it CAN rasterise a fully-
-  // styled subtree in its own document.
+  // Direct-to-PDF download. Builds the PDF from `order` data with
+  // jsPDF instead of trying to rasterise the printable HTML — every
+  // HTML→canvas path we tried caught a blank frame (CSS variables not
+  // resolving, cross-iframe/style-isolation quirks, layout timing).
+  // Working from the raw fields is deterministic and produces the same
+  // rand totals, line items, and header the printable view shows.
   const downloadPdf = async () => {
     setBusy(true);
-    const cleanup: Array<() => void> = [];
     try {
-      const html = renderPrintableSalesOrder(order, clientName);
+      const [{ default: jsPDF }, autoTableMod] = await Promise.all([
+        import('jspdf'),
+        import('jspdf-autotable'),
+      ]);
+      const autoTable = (autoTableMod as any).default || (autoTableMod as any);
 
-      // Step 1: render inside a hidden iframe so <style> applies.
-      const iframe = document.createElement('iframe');
-      iframe.style.position = 'fixed';
-      iframe.style.left = '-99999px';
-      iframe.style.top = '0';
-      iframe.style.width = '900px';
-      iframe.style.height = '1400px';
-      iframe.style.border = '0';
-      iframe.setAttribute('aria-hidden', 'true');
-      document.body.appendChild(iframe);
-      cleanup.push(() => iframe.remove());
+      const isQuote = order.status === 'QUOTATION';
+      const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const M = 15; // page margin
 
-      const doc = iframe.contentDocument;
-      if (!doc) throw new Error('Could not open iframe document');
-      doc.open();
-      doc.write(html);
-      doc.close();
+      // Brand header. Solid TRACKLAB wordmark in the app orange plus a
+      // subtitle, mirroring the printable view without relying on the
+      // remote logo image.
+      doc.setTextColor(247, 145, 43); // #f7912b
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(26);
+      doc.text('TRACKLAB', M, 22);
+      doc.setFontSize(9);
+      doc.setTextColor(120, 120, 120);
+      doc.text('INVENTORY · MANUFACTURING · COMPLIANCE', M, 28);
 
-      // Wait for load + images (brand logo, verification badges).
-      await new Promise<void>(res => {
-        if (doc.readyState === 'complete') return res();
-        iframe.addEventListener('load', () => res(), { once: true });
+      // Doc-type block, right-aligned.
+      doc.setTextColor(0, 0, 0);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(18);
+      doc.text(isQuote ? 'Quotation' : 'Sales Order', pageWidth - M, 22, { align: 'right' });
+      doc.setFont('courier', 'normal');
+      doc.setFontSize(11);
+      doc.setTextColor(247, 145, 43);
+      doc.text(String(order.orderNumber || ''), pageWidth - M, 28, { align: 'right' });
+
+      // Orange rule under the header.
+      doc.setDrawColor(247, 145, 43);
+      doc.setLineWidth(0.8);
+      doc.line(M, 32, pageWidth - M, 32);
+
+      // Meta block: client + dates + status, two columns.
+      const metaTop = 40;
+      const rowH = 6;
+      const labelColor = 120;
+      const drawLabel = (text: string, x: number, y: number) => {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8);
+        doc.setTextColor(labelColor);
+        doc.text(text, x, y);
+      };
+      const drawVal = (text: string, x: number, y: number) => {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(11);
+        doc.setTextColor(0);
+        doc.text(text || '—', x, y);
+      };
+      drawLabel('CLIENT', M, metaTop);
+      drawVal(clientName, M, metaTop + rowH);
+      drawLabel('STATUS', pageWidth / 2, metaTop);
+      drawVal(String(order.status || ''), pageWidth / 2, metaTop + rowH);
+      drawLabel('ORDER DATE', M, metaTop + rowH * 2.5);
+      drawVal(fmtDate(order.orderDate), M, metaTop + rowH * 3.5);
+      drawLabel('REQUIRED', pageWidth / 2, metaTop + rowH * 2.5);
+      drawVal(fmtDate(order.requiredDate), pageWidth / 2, metaTop + rowH * 3.5);
+
+      // Line items table.
+      const items = Array.isArray(order.items) ? order.items : [];
+      const money = (n: any) => fmtMoney(Number(n) || 0, order.currency);
+      autoTable(doc, {
+        startY: metaTop + rowH * 5.5,
+        head: [['Description', 'Qty', 'Unit Price', 'Total']],
+        body: items.length > 0
+          ? items.map((it: any) => [
+              `${it.partNumber ? `${it.partNumber}  ` : ''}${it.description || ''}`,
+              String(it.quantity ?? ''),
+              money(it.unitPrice),
+              money(it.lineTotal),
+            ])
+          : [['No line items', '', '', '']],
+        styles: { fontSize: 9, cellPadding: 2.5, textColor: 20 },
+        headStyles: { fillColor: [30, 30, 30], textColor: 255, fontStyle: 'bold', fontSize: 8 },
+        columnStyles: {
+          0: { cellWidth: 'auto' },
+          1: { halign: 'right', cellWidth: 20 },
+          2: { halign: 'right', cellWidth: 30 },
+          3: { halign: 'right', cellWidth: 30, fontStyle: 'bold' },
+        },
+        margin: { left: M, right: M },
+        theme: 'grid',
       });
-      const imgs = Array.from(doc.images);
-      await Promise.all(imgs.map(img =>
-        img.complete && img.naturalWidth > 0
-          ? Promise.resolve()
-          : new Promise<void>(r => {
-              img.addEventListener('load', () => r(), { once: true });
-              img.addEventListener('error', () => r(), { once: true });
-            })
-      ));
-      await new Promise(r => requestAnimationFrame(() => r(null)));
 
-      // Step 2: pull the styled subtree back into the parent document so
-      // html2canvas can capture it. Bring the <style> blocks along or
-      // colours/fonts collapse to browser defaults.
-      const wrapper = document.createElement('div');
-      wrapper.style.position = 'fixed';
-      wrapper.style.left = '-99999px';
-      wrapper.style.top = '0';
-      wrapper.style.width = '900px';
-      wrapper.style.background = '#ffffff';
-      wrapper.style.color = '#111';
-      // Isolate the styles: renderPrintableSalesOrder uses selectors
-      // like `body { … }`, so we wrap the body content in a fresh div
-      // that starts a new stacking / style context — the styles still
-      // scope to descendants, they just don't hit the app's own body.
-      const stylesHtml = Array.from(doc.querySelectorAll('style'))
-        .map(s => s.outerHTML)
-        .join('\n');
-      const bodyHtml = doc.body ? doc.body.innerHTML : html;
-      wrapper.innerHTML = stylesHtml + `<div style="width:900px;padding:40px;background:#ffffff;color:#111;box-sizing:border-box;">${bodyHtml}</div>`;
-      document.body.appendChild(wrapper);
-      cleanup.push(() => wrapper.remove());
-      await new Promise(r => requestAnimationFrame(() => r(null)));
+      const finalY = (doc as any).lastAutoTable?.finalY || metaTop + 60;
 
-      const html2pdf = (await import('html2pdf.js')).default;
-      const docKind = order.status === 'QUOTATION' ? 'quotation' : 'sales-order';
+      // Totals box, right-aligned.
+      const totalsX = pageWidth - M - 60;
+      const totalsW = 60;
+      let ty = finalY + 8;
+      const totalLine = (label: string, val: string, strong = false) => {
+        doc.setFont('helvetica', strong ? 'bold' : 'normal');
+        doc.setFontSize(strong ? 12 : 10);
+        doc.setTextColor(strong ? 247 : 60, strong ? 145 : 60, strong ? 43 : 60);
+        doc.text(label, totalsX, ty);
+        doc.text(val, totalsX + totalsW, ty, { align: 'right' });
+        ty += strong ? 8 : 6;
+      };
+      totalLine('Subtotal', money(order.subtotal));
+      totalLine('Tax', money(order.tax));
+      doc.setDrawColor(180);
+      doc.setLineWidth(0.3);
+      doc.line(totalsX, ty - 2, totalsX + totalsW, ty - 2);
+      totalLine('Total', money(order.total), true);
+
+      // Notes block.
+      if (order.notes) {
+        doc.setFont('helvetica', 'italic');
+        doc.setFontSize(9);
+        doc.setTextColor(80);
+        doc.text('Notes:', M, ty + 8);
+        const noteLines = doc.splitTextToSize(String(order.notes), pageWidth - M * 2);
+        doc.text(noteLines, M, ty + 13);
+      }
+
+      // Footer.
+      const pageH = doc.internal.pageSize.getHeight();
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(160);
+      doc.text(`TRACKLAB IM · Generated ${new Date().toLocaleString()}`, pageWidth / 2, pageH - 8, { align: 'center' });
+
+      const docKind = isQuote ? 'quotation' : 'sales-order';
       const filename = `${docKind}-${order.orderNumber}.pdf`;
-      await (html2pdf as any)().set({
-        margin: [10, 10, 10, 10],
-        filename,
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true, allowTaint: true, backgroundColor: '#ffffff', windowWidth: 900 },
-        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-        pagebreak: { mode: ['css', 'legacy'] },
-      }).from(wrapper).save();
-
+      doc.save(filename);
       triggerToast(`Downloaded ${filename}.`);
     } catch (err: any) {
       console.error('Save PDF failed:', err);
       triggerToast(err?.message || 'Failed to generate PDF', 'ERROR');
     } finally {
-      cleanup.forEach(fn => { try { fn(); } catch { /* */ } });
       setBusy(false);
     }
   };
