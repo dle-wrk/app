@@ -944,13 +944,18 @@ export default function App() {
           });
         },
         onError: async (err) => {
+          // Surface the real server error to the user — a silent "Failed to
+          // create component SKU" hides Zod validation and duplicate-key
+          // messages that would otherwise tell them exactly what to fix.
+          const detail = String(err.message || '').slice(0, 240);
+          if (detail) triggerToast(`Add failed — ${detail}`, 'ERROR');
           await logActivity({
             userEmail: currentUser?.email || 'unknown',
             action: 'CREATE_ITEM',
             entityType: 'Item',
             entityId: createdItem.partNumber,
             status: 'ERROR',
-            details: { error: err.message },
+            details: { error: err.message, payload: mapItemToPayload(createdItem) },
           });
         },
         triggerToast,
