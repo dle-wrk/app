@@ -1173,8 +1173,8 @@ function renderPrintableSalesOrder(order: any, clientName: string): string {
       <div class="val">${escapeHtml(fmtDate(order.orderDate))}</div>
     </div>
     <div>
-      <div class="label">Required</div>
-      <div class="val">${escapeHtml(order.requiredDate ? fmtDate(order.requiredDate) : '—')}</div>
+      <div class="label">${order.status === 'QUOTATION' ? 'Valid' : 'Required'}</div>
+      <div class="val">${escapeHtml(order.requiredDate || '—')}</div>
     </div>
   </div>
 
