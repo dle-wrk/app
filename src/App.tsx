@@ -20,6 +20,7 @@ import { ConfirmDialogHost, confirmDialog } from './lib/confirmDialog';
 import { setToastHandler } from './lib/toast';
 import BOMManager from './components/BOMManager';
 import { StockCodePrefixPicker } from './components/StockCodePrefixPicker';
+import { ITEM_CATEGORIES } from './lib/itemCategories';
 import { SupplierBOMGeneratorView } from './components/views/SupplierBOMGeneratorView';
 import { mapDbRowsToItems } from './lib/mapDbItem';
 import { mapDbRowsToTransactions, formatTrxDateTime } from './lib/mapDbTransaction';
@@ -626,6 +627,12 @@ export default function App() {
     stockLevel: 100,
     price: 0.00,
     supplier: 'Digi-Key Corp',
+    // Primary supplier + manufacturer part numbers. Stored on inventory
+    // as sup_pn_1 / man_pn_1 and mirrored into the Item.supplier /
+    // Item.manufacturer scalar fields — same convention Edit uses so
+    // adding a SKU here and editing it later stays symmetrical.
+    supPn: '',
+    manPn: '',
     category: 'Micro-ctrl',
     status: 'ACTIVE' as 'ACTIVE' | 'INACTIVE' | 'BOOKED OUT' | 'DISCONTINUED',
     size: '',
@@ -866,7 +873,7 @@ export default function App() {
       partNumber: newItem.partNumber,
       name: newItem.name,
       description: newItem.description || `${newItem.name} manufactured by ${newItem.manufacturer}`,
-      manufacturer: newItem.manufacturer || 'Generic',
+      manufacturer: newItem.manPn?.trim() || newItem.manufacturer || 'Generic',
       stockLevel: Number(newItem.stockLevel),
       price: Number(newItem.price),
       supplier: newItem.supplier,
@@ -876,7 +883,13 @@ export default function App() {
       sizeMetric: newItem.sizeMetric,
       bulkPriceZar: newItem.bulkPriceZar || Number((newItem.price * 19).toFixed(5)),
       packagingQuantity: newItem.packagingQuantity,
-      packagingType: newItem.packagingType
+      packagingType: newItem.packagingType,
+      // Populate the *arrays* the mapper reads: sup_pn_1 / man_pn_1.
+      // Edit mode consumes the same arrays, so the round-trip stays
+      // symmetric — a SKU added here can be edited later without any
+      // data disappearing.
+      manPns: newItem.manPn?.trim() ? [newItem.manPn.trim()] : undefined,
+      supPns: newItem.supPn?.trim() ? [newItem.supPn.trim()] : undefined,
     };
 
     const now = new Date();
@@ -956,6 +969,8 @@ export default function App() {
       stockLevel: 100,
       price: 0.00,
       supplier: 'Digi-Key Corp',
+      supPn: '',
+      manPn: '',
       category: 'Micro-ctrl',
       status: 'ACTIVE',
       size: '',
@@ -2534,33 +2549,7 @@ if (currentView === 'alternates') {
                       onChange={(e) => setNewItem({ ...newItem, category: e.target.value })}
                     >
                       <option value="">Select Category</option>
-                      <option>Resistor</option>
-                      <option>Capacitor</option>
-                      <option>IC (Integrated Circuit)</option>
-                      <option>Diode</option>
-                      <option>Transistor</option>
-                      <option>Connector</option>
-                      <option>LED</option>
-                      <option>Inductor</option>
-                      <option>Crystal / Oscillator</option>
-                      <option>Button / Tactile Switch</option>
-                      <option>Sensors</option>
-                      <option>Hardware / Other</option>
-                      <option>Antenna</option>
-                      <option>Sub-Assembly</option>
-                      <option>Battery</option>
-                      <option>Box</option>
-                      <option>Bracket</option>
-                      <option>Kit</option>
-                      <option>Buzzer</option>
-                      <option>Cable / Flylead</option>
-                      <option>Coax</option>
-                      <option>Jumper</option>
-                      <option>Fibre</option>
-                      <option>Ethernet</option>
-                      <option>Product</option>
-                      <option>Consumable</option>
-                      <option>Tool</option>
+                      {ITEM_CATEGORIES.map(cat => <option key={cat} value={cat}>{cat}</option>)}
                     </select>
                   </div>
 
@@ -2576,6 +2565,36 @@ if (currentView === 'alternates') {
                         <option key={sup.id} value={sup.name}>{sup.name}</option>
                       ))}
                     </select>
+                  </div>
+                </div>
+
+                {/* Supplier + Manufacturer part numbers. Both are stored on
+                    inventory as sup_pn_1 / man_pn_1 and mirrored to the
+                    scalar supplier / manufacturer fields on load, so the
+                    Edit modal picks them up in the same slots without any
+                    remapping. */}
+                <div className="grid grid-cols-2 gap-sm">
+                  <div className="flex flex-col gap-1">
+                    <label className="font-bold text-outline">Supplier part number</label>
+                    <input
+                      name="supPn"
+                      type="text"
+                      placeholder="e.g. STM32G031F6P6-ND (Digi-Key)"
+                      className="bg-surface-container-high border border-outline-variant rounded p-2 text-on-surface outline-none focus:border-primary font-mono text-xs"
+                      value={newItem.supPn}
+                      onChange={(e) => setNewItem({ ...newItem, supPn: e.target.value })}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="font-bold text-outline">Manufacturer part number</label>
+                    <input
+                      name="manPn"
+                      type="text"
+                      placeholder="e.g. STM32G031F6P6 (ST Micro)"
+                      className="bg-surface-container-high border border-outline-variant rounded p-2 text-on-surface outline-none focus:border-primary font-mono text-xs"
+                      value={newItem.manPn}
+                      onChange={(e) => setNewItem({ ...newItem, manPn: e.target.value })}
+                    />
                   </div>
                 </div>
 

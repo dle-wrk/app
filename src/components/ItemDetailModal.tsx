@@ -3,6 +3,7 @@ import { useEscapeKey } from '../lib/useEscapeKey';
 import { Item } from '../types';
 import { fmtUSD, fmtZAR, fmtNumber } from '../lib/formatMoney';
 import { detectLedSwatch, ledSwatchBackground } from '../lib/ledColor';
+import { ITEM_CATEGORIES } from '../lib/itemCategories';
 import {
   X,
   Edit3,
@@ -125,36 +126,12 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete, reser
     return enriched;
   });
 
-  const initialCategories = [
-    "Resistor",
-    "Capacitor",
-    "IC (Integrated Circuit)",
-    "Diode",
-    "Transistor",
-    "Connector",
-    "LED",
-    "Inductor",
-    "Crystal / Oscillator",
-    "Button / Tactile Switch",
-    "Sensors",
-    "Hardware / Other",
-    "Antenna",
-    "Sub-Assembly",
-    "Battery",
-    "Box",
-    "Bracket",
-    "Kit",
-    "Buzzer",
-    "Cable / Flylead",
-    "Coax",
-    "Jumper",
-    "Fibre",
-    "Ethernet",
-    "Product",
-    "Consumable",
-    "Tool",
-  ];
-  const uniqueCategories = Array.from(new Set([...initialCategories, item.category].filter(Boolean)));
+  // Categories come from the shared list in src/lib/itemCategories.ts
+  // so the Edit and Add SKU forms never drift. Local state adds any
+  // fresh category the operator types via "+ Add" plus whatever the
+  // current row already has (in case a legacy row's category isn't in
+  // the shared list yet).
+  const uniqueCategories = Array.from(new Set([...ITEM_CATEGORIES, item.category].filter(Boolean)));
   const [categories, setCategories] = useState<string[]>(uniqueCategories);
   const [newCategory, setNewCategory] = useState("");
 
