@@ -1,12 +1,13 @@
 import React, { useMemo, useState } from 'react';
 import { Eye, Trash2, FileText } from 'lucide-react';
 import { Client } from '../../types';
-import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, EmptyState, SectionCard, apiGet } from './shared';
+import { ModuleDataProps, Modal, StatusPill, fmtMoney, EmptyState, SectionCard, apiGet } from './shared';
 import { optimisticListDelete } from '../../lib/optimisticUpdate';
 import { confirmDialog } from '../../lib/confirmDialog';
 import { buildAndSaveDocPdf } from '../../lib/pdfDocs';
+import { Customer360Modal } from './Customer360Modal';
 
-export const CustomersTab: React.FC<ModuleDataProps> = ({ clients, setClients, invoices, paymentsReceived, triggerToast }) => {
+export const CustomersTab: React.FC<ModuleDataProps> = ({ clients, setClients, clientOrders, invoices, paymentsReceived, triggerToast }) => {
   const [viewing, setViewing] = useState<Client | null>(null);
   const [showNewClientModal, setShowNewClientModal] = useState(false);
 
@@ -18,12 +19,6 @@ export const CustomersTab: React.FC<ModuleDataProps> = ({ clients, setClients, i
     }
     return map;
   }, [invoices]);
-
-  const statementFor = (clientId: number) => {
-    const clientInvoices = invoices.filter(i => i.clientId === clientId && i.status !== 'DRAFT').sort((a, b) => a.invoiceDate.localeCompare(b.invoiceDate));
-    const clientPayments = paymentsReceived.filter(p => p.clientId === clientId).sort((a, b) => a.paymentDate.localeCompare(b.paymentDate));
-    return { clientInvoices, clientPayments };
-  };
 
   // Optimistic delete: removes the customer from the list instantly, then
   // fires DELETE in the background. On failure the row is restored and an
@@ -88,7 +83,7 @@ export const CustomersTab: React.FC<ModuleDataProps> = ({ clients, setClients, i
                   <td className="px-lg py-sm"><StatusPill status={c.status || 'ACTIVE'} /></td>
                   <td className="px-lg py-sm text-right font-mono font-bold">{(balances.get(c.id) || 0) > 0 ? fmtMoney(balances.get(c.id)) : '—'}</td>
                   <td className="px-lg py-sm text-right flex gap-1 justify-end">
-                    <button onClick={() => setViewing(c)} className="p-1.5 rounded hover:bg-surface-container-high text-on-surface-variant" title="Statement summary"><Eye className="w-3.5 h-3.5" /></button>
+                    <button onClick={() => setViewing(c)} className="p-1.5 rounded hover:bg-surface-container-high text-on-surface-variant" title="Open customer 360"><Eye className="w-3.5 h-3.5" /></button>
                     <button
                       onClick={async () => {
                         try {
@@ -139,48 +134,16 @@ export const CustomersTab: React.FC<ModuleDataProps> = ({ clients, setClients, i
         </div>
       </SectionCard>
 
-      {viewing && (() => {
-        const { clientInvoices, clientPayments } = statementFor(viewing.id);
-        return (
-          <Modal title={`Statement — ${viewing.clientName}`} subtitle={`Outstanding: ${fmtMoney(balances.get(viewing.id) || 0)}`} onClose={() => setViewing(null)} maxWidth="max-w-2xl">
-            <div className="space-y-4">
-              <div>
-                <h5 className="text-xs font-bold text-outline uppercase mb-2">Invoices</h5>
-                <div className="space-y-1">
-                  {clientInvoices.map(inv => (
-                    <div key={inv.id} className="flex justify-between items-center text-xs bg-surface-container-low rounded px-3 py-2 border border-outline-variant/30">
-                      <div>
-                        <span className="font-mono text-primary font-bold">{inv.invoiceNumber}</span>
-                        <span className="ml-2 text-outline">{fmtDate(inv.invoiceDate)}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <StatusPill status={inv.status} />
-                        <span className="font-mono">{fmtMoney(inv.total, inv.currency)}</span>
-                      </div>
-                    </div>
-                  ))}
-                  {clientInvoices.length === 0 && <p className="text-xs text-outline italic">No invoices yet.</p>}
-                </div>
-              </div>
-              <div>
-                <h5 className="text-xs font-bold text-outline uppercase mb-2">Payments</h5>
-                <div className="space-y-1">
-                  {clientPayments.map(p => (
-                    <div key={p.id} className="flex justify-between items-center text-xs bg-surface-container-low rounded px-3 py-2 border border-outline-variant/30">
-                      <div>
-                        <span className="font-mono text-primary font-bold">{p.paymentNumber}</span>
-                        <span className="ml-2 text-outline">{fmtDate(p.paymentDate)}</span>
-                      </div>
-                      <span className="font-mono text-green-400">{fmtMoney(p.amount)}</span>
-                    </div>
-                  ))}
-                  {clientPayments.length === 0 && <p className="text-xs text-outline italic">No payments recorded yet.</p>}
-                </div>
-              </div>
-            </div>
-          </Modal>
-        );
-      })()}
+      {viewing && (
+        <Customer360Modal
+          client={viewing}
+          clientOrders={clientOrders}
+          invoices={invoices}
+          paymentsReceived={paymentsReceived}
+          triggerToast={triggerToast}
+          onClose={() => setViewing(null)}
+        />
+      )}
 
       {showNewClientModal && (
         <NewClientModal
