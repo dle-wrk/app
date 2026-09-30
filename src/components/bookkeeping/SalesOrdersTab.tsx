@@ -931,9 +931,9 @@ const SalesOrderViewModal: React.FC<{
           )}
         </div>
         <div className="w-56 space-y-1 text-xs">
-          <div className="flex justify-between text-on-surface-variant"><span>Subtotal (excl. VAT)</span><span className="font-mono">{fmtMoney(order.subtotal, order.currency)}</span></div>
-          <div className="flex justify-between text-on-surface-variant"><span>VAT</span><span className="font-mono">{fmtMoney(order.tax, order.currency)}</span></div>
-          <div className="flex justify-between font-bold text-sm border-t border-outline-variant/40 pt-1"><span>Total (incl. VAT)</span><span className="font-mono text-primary">{fmtMoney(order.total, order.currency)}</span></div>
+          <div className="flex justify-between text-on-surface-variant"><span>Total (Excl. VAT)</span><span className="font-mono">{fmtMoney(order.subtotal, order.currency)}</span></div>
+          <div className="flex justify-between text-on-surface-variant"><span>VAT amount</span><span className="font-mono">{fmtMoney(order.tax, order.currency)}</span></div>
+          <div className="flex justify-between font-bold text-sm border-t border-outline-variant/40 pt-1"><span>Total</span><span className="font-mono text-primary">{fmtMoney(order.total, order.currency)}</span></div>
         </div>
       </div>
 
@@ -1344,9 +1344,9 @@ function renderPrintableSalesOrder(order: any, clientName: string): string {
 
   <div class="totals">
     <table>
-      <tr><td>Subtotal (excl. VAT)</td><td class="num">${escapeHtml(money(order.subtotal))}</td></tr>
-      <tr><td>VAT</td><td class="num">${escapeHtml(money(order.tax))}</td></tr>
-      <tr class="total"><td>Total (incl. VAT)</td><td class="num">${escapeHtml(money(order.total))}</td></tr>
+      <tr><td>Total (Excl. VAT)</td><td class="num">${escapeHtml(money(order.subtotal))}</td></tr>
+      <tr><td>VAT amount</td><td class="num">${escapeHtml(money(order.tax))}</td></tr>
+      <tr class="total"><td>Total</td><td class="num">${escapeHtml(money(order.total))}</td></tr>
     </table>
   </div>
 
