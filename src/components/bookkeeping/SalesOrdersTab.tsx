@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, Eye, Trash2, Upload, Download, Paperclip, CheckCircle2, XCircle, Printer, Truck, AlertTriangle, Zap } from 'lucide-react';
+import { Plus, Eye, Trash2, Upload, Download, Paperclip, CheckCircle2, XCircle, Printer, Truck, AlertTriangle, Zap, Pencil } from 'lucide-react';
 import { ClientOrder } from '../../types';
-import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, apiGet, apiPost, apiDelete, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
+import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, apiGet, apiPost, apiPut, apiDelete, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
 import { LineItemsEditor, EditableLine, newEditableLine, lineTotals } from './LineItemsEditor';
 import { buildAndSaveDocPdf } from '../../lib/pdfDocs';
 import { confirmDialog } from '../../lib/confirmDialog';
@@ -18,12 +18,30 @@ interface SalesOrdersTabExtras {
   onCreateDispatch?: (orderId: number, noteType: 'DELIVERY' | 'COLLECTION') => void;
 }
 
+// The bookkeeping props chain doesn't include the logged-in user, and
+// threading a currentUser prop from App through BookkeepingView just for
+// this one gate would be a lot of plumbing. localStorage['currentUser']
+// is the same source App itself uses (see App.tsx line 85), so reading
+// it directly here keeps the check in step without new props.
+function isAdminUser(): boolean {
+  try {
+    const raw = localStorage.getItem('currentUser');
+    if (!raw) return false;
+    const u = JSON.parse(raw);
+    return String(u?.role || '').toLowerCase() === 'admin';
+  } catch { return false; }
+}
+
 export const SalesOrdersTab: React.FC<ModuleDataProps & SalesOrdersTabExtras> = (props) => {
   const { clientOrders, setClientOrders, clients, items, taxRates, triggerToast, refresh } = props;
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [showEditor, setShowEditor] = useState(false);
+  // When set, the editor opens in EDIT mode prefilled from this order.
+  // Distinct state from showEditor so the two flows can never collide.
+  const [editingOrder, setEditingOrder] = useState<any | null>(null);
   const [viewing, setViewing] = useState<any>(null);
   const [busy, setBusy] = useState(false);
+  const isAdmin = isAdminUser();
 
   const clientName = (id?: number) => clients.find(c => c.id === id)?.clientName || 'Unassigned';
 
@@ -278,6 +296,21 @@ export const SalesOrdersTab: React.FC<ModuleDataProps & SalesOrdersTabExtras> = 
         />
       )}
 
+      {editingOrder && (
+        <SalesOrderEditorModal
+          {...props}
+          initialOrder={editingOrder}
+          onClose={() => setEditingOrder(null)}
+          onCreated={(updated) => {
+            if (setClientOrders) setClientOrders(prev => prev.map(o => o.id === updated.id ? { ...o, ...updated } : o));
+            setEditingOrder(null);
+            // Re-open the viewer with the new lines pulled in fresh so
+            // the totals + line rows reflect the edit immediately.
+            openView(updated);
+          }}
+        />
+      )}
+
       {viewing && (
         <SalesOrderViewModal
           order={viewing}
@@ -285,6 +318,14 @@ export const SalesOrdersTab: React.FC<ModuleDataProps & SalesOrdersTabExtras> = 
           busy={busy}
           setBusy={setBusy}
           triggerToast={triggerToast}
+          isAdmin={isAdmin}
+          onEdit={() => {
+            // Hand the current viewing row (which already includes the
+            // hydrated `items` array from openView) straight to the editor
+            // so it prefills without a second fetch.
+            setEditingOrder(viewing);
+            setViewing(null);
+          }}
           onClose={() => setViewing(null)}
           onDelete={() => handleDelete(viewing.id)}
           onDocChanged={() => refetchOrder(viewing.id)}
@@ -329,18 +370,41 @@ export const SalesOrdersTab: React.FC<ModuleDataProps & SalesOrdersTabExtras> = 
 // in the view modal instead of here to keep create flow lean: create first,
 // then attach the doc when it arrives.
 // ---------------------------------------------------------------------------
-const SalesOrderEditorModal: React.FC<ModuleDataProps & { onClose: () => void; onCreated: (order: ClientOrder) => void; initialAsQuotation?: boolean }> = ({ onClose, onCreated, clients, items, taxRates, triggerToast, initialAsQuotation = false }) => {
-  const [clientId, setClientId] = useState<string>('');
-  const [orderDate, setOrderDate] = useState<string>(todayISO());
-  const [requiredDate, setRequiredDate] = useState<string>('');
-  const [currency, setCurrency] = useState<string>('ZAR');
-  const [notes, setNotes] = useState<string>('');
-  const [lines, setLines] = useState<EditableLine[]>([newEditableLine()]);
+const SalesOrderEditorModal: React.FC<ModuleDataProps & { onClose: () => void; onCreated: (order: ClientOrder) => void; initialAsQuotation?: boolean; initialOrder?: any }> = ({ onClose, onCreated, clients, items, taxRates, triggerToast, initialAsQuotation = false, initialOrder }) => {
+  // Edit mode: prefill every field from the incoming order (which the
+  // parent hands over already-hydrated with its `items` array, so no
+  // second fetch is needed here).
+  const isEdit = !!initialOrder;
+  const [clientId, setClientId] = useState<string>(initialOrder?.clientId != null ? String(initialOrder.clientId) : '');
+  const [orderDate, setOrderDate] = useState<string>(initialOrder?.orderDate ? String(initialOrder.orderDate).slice(0, 10) : todayISO());
+  const [requiredDate, setRequiredDate] = useState<string>(initialOrder?.requiredDate ? String(initialOrder.requiredDate).slice(0, 10) : '');
+  const [currency, setCurrency] = useState<string>(initialOrder?.currency || 'ZAR');
+  const [notes, setNotes] = useState<string>(initialOrder?.notes || '');
+  const [lines, setLines] = useState<EditableLine[]>(() => {
+    if (initialOrder?.items?.length) {
+      return initialOrder.items.map((it: any) => ({
+        ...newEditableLine(),
+        partNumber: it.partNumber || '',
+        description: it.description || '',
+        quantity: Number(it.quantity) || 1,
+        unitPrice: Number(it.unitPrice) || 0,
+        // Existing lines carry no tax-rate id in the DB shape, so leave
+        // the default LineItemsEditor tax handling to derive them.
+      }));
+    }
+    return [newEditableLine()];
+  });
   const [saving, setSaving] = useState(false);
   // "Save as Quotation" toggle. When on, the row is created with
   // status=QUOTATION and doc-numbered QUO-YYYY-NNNN; no reservations
   // are written. Flipping it back before save reverts to a normal SO.
-  const [asQuotation, setAsQuotation] = useState<boolean>(initialAsQuotation);
+  // In edit mode, seed from the row's current status so a QUOTATION
+  // stays a QUOTATION unless the admin flips it. We only support the
+  // status transitions that don't need side-effect unwinding — editing
+  // a DRAFT SO cannot flip it back to QUOTATION here.
+  const [asQuotation, setAsQuotation] = useState<boolean>(
+    isEdit ? (initialOrder?.status === 'QUOTATION') : initialAsQuotation
+  );
 
   // Sales orders sell FINISHED goods — production_products (its own
   // catalogue) plus any inventory rows tagged Product / Sub-Assembly.
@@ -405,11 +469,10 @@ const SalesOrderEditorModal: React.FC<ModuleDataProps & { onClose: () => void; o
 
     setSaving(true);
     try {
-      const payload = {
+      const payload: any = {
         clientId: Number(clientId),
         orderDate,
         requiredDate: requiredDate || null,
-        status: asQuotation ? 'QUOTATION' : 'DRAFT',
         currency,
         subtotal: totals.subtotal,
         tax: totals.tax,
@@ -426,11 +489,24 @@ const SalesOrderEditorModal: React.FC<ModuleDataProps & { onClose: () => void; o
           };
         }),
       };
-      const created = await apiPost('/api/client-orders', payload);
-      triggerToast(`${asQuotation ? 'Quotation' : 'Sales order'} ${created.orderNumber} created.`);
-      onCreated(created);
+      if (!isEdit) {
+        // Create path: status is set from the toggle (QUOTATION vs DRAFT)
+        // and the server auto-generates the doc number.
+        payload.status = asQuotation ? 'QUOTATION' : 'DRAFT';
+        const created = await apiPost('/api/client-orders', payload);
+        triggerToast(`${asQuotation ? 'Quotation' : 'Sales order'} ${created.orderNumber} created.`);
+        onCreated(created);
+        return;
+      }
+      // Edit path: keep the original doc number and status untouched (the
+      // Accept flow is the only supported way to promote a quotation into
+      // an SO — flipping status in the editor would need reservation
+      // side-effects that we deliberately keep in one place).
+      const updated = await apiPut(`/api/client-orders/${initialOrder.id}`, payload);
+      triggerToast(`${updated.status === 'QUOTATION' ? 'Quotation' : 'Sales order'} ${updated.orderNumber} updated.`);
+      onCreated(updated);
     } catch (err: any) {
-      triggerToast(err?.message || 'Failed to create sales order', 'ERROR');
+      triggerToast(err?.message || `Failed to ${isEdit ? 'update' : 'create'} sales order`, 'ERROR');
     } finally {
       setSaving(false);
     }
@@ -438,29 +514,41 @@ const SalesOrderEditorModal: React.FC<ModuleDataProps & { onClose: () => void; o
 
   return (
     <Modal
-      title={asQuotation ? 'New Quotation' : 'New Sales Order'}
-      subtitle={asQuotation
-        ? 'Auto-numbered as QUO-YYYY-NNNN. Does not reserve stock. Accept later to convert into an SO.'
-        : 'Auto-numbered as SO-YYYY-NNNN. You can attach the POP/PO after saving.'}
+      title={isEdit
+        ? `Edit ${asQuotation ? 'Quotation' : 'Sales Order'} · ${initialOrder.orderNumber}`
+        : (asQuotation ? 'New Quotation' : 'New Sales Order')}
+      subtitle={isEdit
+        ? (asQuotation
+          ? 'Editing a quotation. Doc number and status stay the same. Reservations are not affected.'
+          : 'Editing a draft sales order. Reservations will be refreshed against the new line set.')
+        : (asQuotation
+          ? 'Auto-numbered as QUO-YYYY-NNNN. Does not reserve stock. Accept later to convert into an SO.'
+          : 'Auto-numbered as SO-YYYY-NNNN. You can attach the POP/PO after saving.')}
       onClose={onClose}
       maxWidth="max-w-4xl"
     >
-      <div className="mb-md flex items-center gap-3 p-3 rounded-lg border border-outline-variant/40 bg-surface-container-low">
-        <label className="inline-flex items-center gap-2 cursor-pointer text-xs">
-          <input
-            type="checkbox"
-            checked={asQuotation}
-            onChange={(e) => setAsQuotation(e.target.checked)}
-            className="w-4 h-4 accent-primary"
-          />
-          <span className="font-bold text-on-surface">Save as Quotation</span>
-        </label>
-        <span className="text-[10px] text-outline">
-          {asQuotation
-            ? 'Proposal only — no stock reservation. Client accepts → convert to SO.'
-            : 'Commitment — reserves stock immediately.'}
-        </span>
-      </div>
+      {/* Save-as-Quotation is a create-time choice: it selects the doc
+          series (QUO vs SO) and whether reservations are written. Neither
+          can be flipped mid-life without side-effect unwinding, so the
+          toggle is hidden in edit mode. */}
+      {!isEdit && (
+        <div className="mb-md flex items-center gap-3 p-3 rounded-lg border border-outline-variant/40 bg-surface-container-low">
+          <label className="inline-flex items-center gap-2 cursor-pointer text-xs">
+            <input
+              type="checkbox"
+              checked={asQuotation}
+              onChange={(e) => setAsQuotation(e.target.checked)}
+              className="w-4 h-4 accent-primary"
+            />
+            <span className="font-bold text-on-surface">Save as Quotation</span>
+          </label>
+          <span className="text-[10px] text-outline">
+            {asQuotation
+              ? 'Proposal only — no stock reservation. Client accepts → convert to SO.'
+              : 'Commitment — reserves stock immediately.'}
+          </span>
+        </div>
+      )}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-md">
         <div className="md:col-span-2">
           <FieldLabel>Client</FieldLabel>
@@ -515,7 +603,13 @@ const SalesOrderEditorModal: React.FC<ModuleDataProps & { onClose: () => void; o
 
       <div className="flex justify-end gap-sm pt-md">
         <SecondaryButton onClick={onClose}>Cancel</SecondaryButton>
-        <PrimaryButton onClick={submit} disabled={saving}>{saving ? 'Saving…' : 'Create Sales Order'}</PrimaryButton>
+        <PrimaryButton onClick={submit} disabled={saving}>
+          {saving
+            ? 'Saving…'
+            : isEdit
+              ? `Save Changes`
+              : (asQuotation ? 'Create Quotation' : 'Create Sales Order')}
+        </PrimaryButton>
       </div>
     </Modal>
   );
@@ -539,7 +633,12 @@ const SalesOrderViewModal: React.FC<{
   onDocChanged: () => void;
   onAccepted?: () => void;
   accounts?: any[];
-}> = ({ order, clientName, busy, setBusy, triggerToast, onClose, onDelete, onDocChanged, onCreateDispatch, onAccepted, accounts }) => {
+  // Edit is admin-only and only meaningful for QUOTATION / DRAFT rows.
+  // The parent decides both — this modal just shows the button and
+  // triggers the callback.
+  isAdmin?: boolean;
+  onEdit?: () => void;
+}> = ({ order, clientName, busy, setBusy, triggerToast, onClose, onDelete, onDocChanged, onCreateDispatch, onAccepted, accounts, isAdmin, onEdit }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [autoFulfilOpen, setAutoFulfilOpen] = useState(false);
 
@@ -758,6 +857,12 @@ const SalesOrderViewModal: React.FC<{
       <div className="flex items-center justify-between pt-md mt-md border-t border-outline-variant/20 gap-sm flex-wrap">
         <div className="flex items-center gap-sm flex-wrap">
           <DangerButton icon={<Trash2 className="w-3.5 h-3.5" />} onClick={onDelete} disabled={busy}>Delete</DangerButton>
+          {/* Edit is gated to admin AND to statuses that haven't started
+              fulfillment yet — the server also blocks the other statuses
+              with a 409, but hiding the button keeps the UI honest. */}
+          {isAdmin && onEdit && (order.status === 'QUOTATION' || order.status === 'DRAFT') && (
+            <SecondaryButton icon={<Pencil className="w-3.5 h-3.5" />} onClick={onEdit} disabled={busy}>Edit</SecondaryButton>
+          )}
           <SecondaryButton icon={<Printer className="w-3.5 h-3.5" />} onClick={openPrint}>Print</SecondaryButton>
           <SecondaryButton icon={<Download className="w-3.5 h-3.5" />} onClick={downloadPdf} disabled={busy}>Save PDF</SecondaryButton>
           {order.status === 'QUOTATION' && (

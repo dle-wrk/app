@@ -269,9 +269,63 @@ export function registerClientsRoutes(app: Express): void {
 
   app.put('/api/client-orders/:id', async (req, res) => {
     const id = parseInt(req.params.id);
-    const { clientId, orderNumber, orderDate, requiredDate, status, currency, subtotal, tax, total, notes } = req.body;
+    const { clientId, orderNumber, orderDate, requiredDate, status, currency, subtotal, tax, total, notes, items } = req.body;
+    // items[] is optional — bookkeeping tabs still call PUT with just a
+    // small header change (verify toggle, notes tweak) and don't want to
+    // touch lines. When present, we replace lines atomically and refresh
+    // the reservations to match the new set. Gated to QUOTATION and DRAFT
+    // so admins can fix a proposal or an un-fulfilled SO without risking
+    // an in-flight fulfillment: once picking or invoicing starts, edits
+    // move to those flows.
+    const wantsItemsReplace = Array.isArray(items);
+
+    if (!wantsItemsReplace) {
+      try {
+        const row = await queryOne(
+          `UPDATE client_orders SET
+             client_id = COALESCE($1, client_id),
+             order_number = COALESCE($2, order_number),
+             order_date = COALESCE($3, order_date),
+             required_date = COALESCE($4, required_date),
+             status = COALESCE($5, status),
+             currency = COALESCE($6, currency),
+             subtotal = COALESCE($7, subtotal),
+             tax = COALESCE($8, tax),
+             total = COALESCE($9, total),
+             notes = COALESCE($10, notes)
+             WHERE id = $11 RETURNING *`,
+          [clientId ?? null, orderNumber ?? null, orderDate ?? null, requiredDate ?? null, status ?? null, currency ?? null, subtotal ?? null, tax ?? null, total ?? null, notes ?? null, id]
+        );
+        if (!row) return res.status(404).json({ error: 'client order not found' });
+        return res.json(mapClientOrder(row));
+      } catch (err: any) {
+        return res.status(500).json({ error: err.message });
+      }
+    }
+
+    // Full-edit path: header + line replacement in one transaction.
+    const client = await pool.connect();
     try {
-      const row = await queryOne(
+      await client.query('BEGIN');
+      const { rows: existingRows } = await client.query(
+        `SELECT * FROM client_orders WHERE id = $1 FOR UPDATE`,
+        [id]
+      );
+      if (existingRows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'client order not found' });
+      }
+      const current = existingRows[0];
+      const currentStatus = String(current.status || '').toUpperCase();
+      const editable = new Set(['QUOTATION', 'DRAFT']);
+      if (!editable.has(currentStatus)) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          error: `Cannot edit an order in status ${currentStatus}. Only QUOTATION and DRAFT can be edited.`,
+        });
+      }
+
+      const { rows: updatedRows } = await client.query(
         `UPDATE client_orders SET
            client_id = COALESCE($1, client_id),
            order_number = COALESCE($2, order_number),
@@ -286,10 +340,38 @@ export function registerClientsRoutes(app: Express): void {
            WHERE id = $11 RETURNING *`,
         [clientId ?? null, orderNumber ?? null, orderDate ?? null, requiredDate ?? null, status ?? null, currency ?? null, subtotal ?? null, tax ?? null, total ?? null, notes ?? null, id]
       );
-      if (!row) return res.status(404).json({ error: 'client order not found' });
-      res.json(mapClientOrder(row));
+
+      // Wipe-and-reinsert is simpler than diffing when the client already
+      // holds the full authoritative line set. Any FKs off client_order_items
+      // (there are none today) would need cascade handling here.
+      await client.query(`DELETE FROM client_order_items WHERE client_order_id = $1`, [id]);
+      for (const it of items) {
+        await client.query(
+          `INSERT INTO client_order_items (client_order_id, part_number, description, quantity, unit_price, line_total)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [id, it.partNumber || null, it.description || '', it.quantity || 1, it.unitPrice || 0, it.lineTotal || 0]
+        );
+      }
+
+      // Reservations only exist for real SOs, never for quotations. Refresh
+      // them from the new line set so a DRAFT edit doesn't leave stale
+      // holds against parts that are no longer on the order.
+      const finalStatus = String(updatedRows[0].status || '').toUpperCase();
+      if (finalStatus !== 'QUOTATION') {
+        await rewriteReservations(
+          client,
+          id,
+          items.map((it: any) => ({ partNumber: it.partNumber || null, quantity: Number(it.quantity) || 1 })),
+        );
+      }
+
+      await client.query('COMMIT');
+      res.json(mapClientOrder(updatedRows[0]));
     } catch (err: any) {
+      await client.query('ROLLBACK').catch(() => {});
       res.status(500).json({ error: err.message });
+    } finally {
+      client.release();
     }
   });
 
