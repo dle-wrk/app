@@ -77,12 +77,18 @@ export const CustomersTab: React.FC<ModuleDataProps> = ({ clients, setClients, c
             </thead>
             <tbody className="divide-y divide-outline-variant/30">
               {clients.map(c => (
-                <tr key={c.id} className="hover:bg-surface-variant/20 transition-all">
+                <tr
+                  key={c.id}
+                  className="hover:bg-surface-variant/20 transition-all cursor-pointer"
+                  onClick={() => setViewing(c)}
+                >
                   <td className="px-lg py-sm font-bold">{c.clientName}</td>
                   <td className="px-lg py-sm text-on-surface-variant">{c.email || c.contactName || '—'}</td>
                   <td className="px-lg py-sm"><StatusPill status={c.status || 'ACTIVE'} /></td>
                   <td className="px-lg py-sm text-right font-mono font-bold">{(balances.get(c.id) || 0) > 0 ? fmtMoney(balances.get(c.id)) : '—'}</td>
-                  <td className="px-lg py-sm text-right flex gap-1 justify-end">
+                  {/* stopPropagation on the actions cell so clicking the statement PDF
+                      or delete button doesn't also fire the row's open-drawer handler. */}
+                  <td className="px-lg py-sm text-right flex gap-1 justify-end" onClick={(e) => e.stopPropagation()}>
                     <button onClick={() => setViewing(c)} className="p-1.5 rounded hover:bg-surface-container-high text-on-surface-variant" title="Open customer 360"><Eye className="w-3.5 h-3.5" /></button>
                     <button
                       onClick={async () => {
