@@ -2091,6 +2091,11 @@ export default function App() {
                   criticalPercent={criticalPercent}
                   categoryCounts={categoryCounts}
                   maxCategoryCount={maxCategoryCount}
+                  onNavigate={(t) => handleCommand({
+                    view: t.view as any,
+                    section: (t as any).section,
+                    subSection: (t as any).subSection,
+                  } as any)}
                 />
               );
             }

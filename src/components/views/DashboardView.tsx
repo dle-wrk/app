@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { Item, ViewType } from '../../types';
 import { fmtNumber } from '../../lib/formatMoney';
+import { NeedsAttentionStrip, NavigateTarget } from './NeedsAttentionStrip';
 
 interface DashboardViewProps {
   items: Item[];
@@ -18,6 +19,12 @@ interface DashboardViewProps {
   lowPercent: number;
   criticalPercent: number;
   setView: (view: ViewType) => void;
+  // Same shape the command palette uses so a click on a "Needs
+  // attention" card jumps to the exact bookkeeping sub-tab (Sales >
+  // Orders filtered to QUOTATION, Purchases > Bills, etc). Kept
+  // optional so the dashboard still renders on hosts that haven't
+  // wired it through yet.
+  onNavigate?: (t: NavigateTarget) => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -31,7 +38,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   okPercent,
   lowPercent,
   criticalPercent,
-  setView
+  setView,
+  onNavigate,
 }) => {
   return (
     <div className="p-container-margin space-y-4 max-w-7xl mx-auto w-full">
@@ -44,6 +52,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </p>
         </div>
       </div>
+
+      {/* Needs Attention Strip — action-oriented queue at the top of
+          the dashboard. Falls back to setView(inventory)/etc when no
+          onNavigate handler is threaded through. */}
+      <NeedsAttentionStrip
+        criticalCount={criticalCount}
+        onNavigate={onNavigate || ((t) => setView(t.view as ViewType))}
+      />
 
       {/* Stats Row: Bento Style */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-md">
