@@ -27,7 +27,10 @@ import { fmtCurrency } from '../../lib/formatMoney';
 
 export type NavigateTarget =
   | { view: 'bookkeeping'; section?: string; subSection?: string; statusFilter?: string }
-  | { view: 'inventory' | 'search'; focusQuery?: string };
+  // View name matches the ViewType union in src/types.ts. The inventory
+  // page is registered as 'items' — passing 'inventory' silently
+  // dead-ends because the router falls through to an empty body.
+  | { view: 'items' | 'search'; focusQuery?: string };
 
 interface NeedsAttentionStripProps {
   criticalCount: number;
@@ -174,7 +177,7 @@ export const NeedsAttentionStrip: React.FC<NeedsAttentionStripProps> = ({ critic
           label="Critical low stock"
           count={criticalCount}
           tone={criticalCount > 0 ? 'error' : 'muted'}
-          onClick={() => onNavigate({ view: 'inventory' })}
+          onClick={() => onNavigate({ view: 'items' })}
         />
       </div>
     </div>
