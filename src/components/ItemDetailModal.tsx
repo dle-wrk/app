@@ -18,8 +18,13 @@ import {
   Package,
   Boxes,
   HelpCircle,
-  Trash2
+  Trash2,
+  Truck,
 } from 'lucide-react';
+
+// View-mode tab identifiers. Keeping the enum tiny so a new tab is a
+// deliberate addition rather than something a copy-paste stumbles into.
+type ViewTab = 'OVERVIEW' | 'PARAMETERS' | 'SOURCING';
 
 // Component costs run to sub-cent values (0402 resistors at $0.006, R0.0871),
 // so prices carry up to 7 decimal places. The inputs use step="any" to accept
@@ -92,6 +97,9 @@ interface ItemDetailModalProps {
 
 export default function ItemDetailModal({ item, onClose, onSave, onDelete, reservedQty = 0 }: ItemDetailModalProps) {
   const [isEditing, setIsEditing] = useState(false);
+  // Which read-only tab is showing. Defaults to Overview so the headline
+  // numbers + description are always the first thing the user sees.
+  const [viewTab, setViewTab] = useState<ViewTab>('OVERVIEW');
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
@@ -441,6 +449,28 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete, reser
                   </div>
                 </div>
 
+                {/* View-mode tab strip. Sits below the always-visible
+                    highlight row so the top-of-modal numbers stay put as
+                    the user flips between what-this-part-is (Overview),
+                    what-it-physically-is (Parameters), and where-it-comes-
+                    from (Sourcing). Keeps the initial paint focused. */}
+                <div className="flex gap-1 border-b border-outline-variant/30">
+                  {([
+                    { key: 'OVERVIEW' as const, label: 'Overview', icon: <FileText className="w-3.5 h-3.5" /> },
+                    { key: 'PARAMETERS' as const, label: 'Parameters', icon: <Layers className="w-3.5 h-3.5" /> },
+                    { key: 'SOURCING' as const, label: 'Sourcing', icon: <Truck className="w-3.5 h-3.5" /> },
+                  ]).map(t => (
+                    <button
+                      key={t.key}
+                      onClick={() => setViewTab(t.key)}
+                      className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold whitespace-nowrap transition-all border-b-2 ${viewTab === t.key ? 'text-primary border-primary' : 'text-on-surface-variant border-transparent hover:text-on-surface'}`}
+                    >
+                      {t.icon}{t.label}
+                    </button>
+                  ))}
+                </div>
+
+                {viewTab === 'OVERVIEW' && (<>
                 {/* Primary Descriptions */}
                 <div className="space-y-sm">
                   <h4 className="font-mono text-xs uppercase font-extrabold tracking-wider text-primary flex items-center gap-1">
@@ -482,6 +512,9 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete, reser
                   </div>
                 </div>
 
+                </>)}
+
+                {viewTab === 'PARAMETERS' && (<>
                 {/* Parameter details table */}
                 <div className="space-y-sm">
                   <h4 className="font-mono text-xs uppercase font-extrabold tracking-wider text-primary flex items-center gap-1">
@@ -544,6 +577,9 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete, reser
                   </div>
                 </div>
 
+                </>)}
+
+                {viewTab === 'SOURCING' && (<>
                 {/* Additional sourcing metrics */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-md pt-xs">
                   <div className="p-md rounded-xl bg-surface-container-high/30 border border-outline-variant/40 space-y-1.5 text-xs">
@@ -582,6 +618,7 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete, reser
                     </div>
                   </div>
                 </div>
+                </>)}
               </div>
             ) : (
               /* 编辑模式 */
