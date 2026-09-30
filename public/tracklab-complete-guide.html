@@ -37,42 +37,64 @@
         }
 
         .container {
-            max-width: 1000px;
+            max-width: 1280px;
             margin: 0 auto;
             padding: 40px 20px;
+            /* Two-column: sticky TOC on the left, main content on the
+               right. align-items: start is what lets the TOC actually
+               stick — a stretched grid item can't scroll independently. */
+            display: grid;
+            grid-template-columns: 260px 1fr;
+            gap: 40px;
+            align-items: start;
         }
 
         .toc {
             background: white;
-            padding: 30px;
+            padding: 24px 20px;
             border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            margin-bottom: 40px;
+            /* Stick to the viewport as the reader scrolls the main column.
+               max-height + overflow keeps a long TOC scrollable inside
+               its own box instead of pushing off-screen. */
+            position: sticky;
+            top: 20px;
+            max-height: calc(100vh - 40px);
+            overflow-y: auto;
         }
 
         .toc h2 {
             color: #667eea;
-            margin-bottom: 20px;
-            font-size: 1.5em;
+            margin-bottom: 16px;
+            font-size: 1.15em;
         }
 
         .toc ul {
             list-style: none;
-            columns: 2;
         }
 
         .toc li {
-            margin-bottom: 10px;
+            margin-bottom: 6px;
         }
 
         .toc a {
             color: #667eea;
             text-decoration: none;
             font-weight: 500;
+            display: block;
+            padding: 6px 8px;
+            border-radius: 4px;
+            font-size: 0.9em;
+            line-height: 1.35;
         }
 
         .toc a:hover {
-            text-decoration: underline;
+            background: #f0f2ff;
+            text-decoration: none;
+        }
+
+        .main-col {
+            min-width: 0; /* prevents grid child from overflowing wide code blocks */
         }
 
         .section {
@@ -307,13 +329,22 @@
             margin: 15px 0;
         }
 
-        @media (max-width: 768px) {
+        @media (max-width: 900px) {
             .header h1 {
                 font-size: 1.8em;
             }
 
-            .toc ul {
-                columns: 1;
+            /* Collapse the two-column layout on tablets and phones:
+               TOC falls back to top-of-page and the content flows below,
+               matching the pre-sidebar behavior. */
+            .container {
+                grid-template-columns: 1fr;
+            }
+
+            .toc {
+                position: static;
+                max-height: none;
+                margin-bottom: 20px;
             }
 
             .feature-grid {
@@ -353,6 +384,7 @@
             </ul>
         </div>
 
+        <div class="main-col">
         <!-- ═══════════════════════════════════════════════════════════
              What's New — v2.7
              ═══════════════════════════════════════════════════════════
@@ -1603,6 +1635,7 @@
                 <strong>✅ Congratulations!</strong> You now have a comprehensive understanding of Tracklab IM. Start with basic inventory management and gradually explore advanced features as you become more comfortable with the system. Don't hesitate to reference this guide whenever you need clarification!
             </div>
         </div>
+        </div><!-- /.main-col -->
     </div>
 
     <div class="footer">
