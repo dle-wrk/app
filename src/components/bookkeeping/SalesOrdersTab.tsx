@@ -388,8 +388,12 @@ const SalesOrderEditorModal: React.FC<ModuleDataProps & { onClose: () => void; o
         description: it.description || '',
         quantity: Number(it.quantity) || 1,
         unitPrice: Number(it.unitPrice) || 0,
-        // Existing lines carry no tax-rate id in the DB shape, so leave
-        // the default LineItemsEditor tax handling to derive them.
+        // Hydrate the tax classification so Exempt/Zero-Rated stays
+        // sticky across edits. taxRateId is nullable — a null means
+        // "no tax rate configured" which the editor renders as the
+        // default rate rather than crashing.
+        taxRateId: it.taxRateId ?? null,
+        taxInclusive: !!it.taxInclusive,
       }));
     }
     return [newEditableLine()];
@@ -486,6 +490,12 @@ const SalesOrderEditorModal: React.FC<ModuleDataProps & { onClose: () => void; o
             quantity: l.quantity,
             unitPrice: l.unitPrice,
             lineTotal: t.lineTotal,
+            // Pass the tax classification through so the server stores
+            // it on client_order_items and auto-fulfil can copy it to
+            // the invoice unchanged.
+            taxRateId: l.taxRateId ?? null,
+            taxAmount: t.taxAmount,
+            taxInclusive: !!l.taxInclusive,
           };
         }),
       };

@@ -555,6 +555,16 @@ export async function ensureBookkeepingSchema() {
   // (Box 2 on VAT201) whereas an exempt supply is not a taxable supply
   // at all (doesn't belong on VAT201 apart from an informational memo).
   await exec(`ALTER TABLE tax_rates ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'STANDARD'`).catch(() => {});
+
+  // Tax classification on quote/SO lines. client_order_items predates
+  // the tax kind work — without these columns, Exempt / Zero-Rated
+  // picked in the quote editor silently reverts to Standard on save
+  // and again on quote→invoice conversion. Adding them here lets the
+  // classification survive round-trips and eventually feed the VAT201
+  // report correctly.
+  await exec(`ALTER TABLE client_order_items ADD COLUMN IF NOT EXISTS tax_rate_id INTEGER REFERENCES tax_rates(id)`).catch(() => {});
+  await exec(`ALTER TABLE client_order_items ADD COLUMN IF NOT EXISTS tax_amount NUMERIC(14,2) DEFAULT 0`).catch(() => {});
+  await exec(`ALTER TABLE client_order_items ADD COLUMN IF NOT EXISTS tax_inclusive BOOLEAN DEFAULT FALSE`).catch(() => {});
   // Backfill kind for any existing rows that were seeded before this
   // column existed. Matches by name to avoid re-typing rows the user
   // has since renamed to something bespoke.

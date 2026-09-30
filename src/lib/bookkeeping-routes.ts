@@ -437,8 +437,19 @@ export function registerBookkeepingRoutes(app: Express) {
     if (so.status === 'CANCELLED' || so.status === 'FULFILLED') {
       throw new Error(`Cannot auto-fulfil a ${so.status} order.`);
     }
+    // Pull SO lines with the tax classification the quote/SO carried
+    // so auto-fulfil preserves Standard / Zero-Rated / Exempt through
+    // to the generated invoice. Joining tax_rates gives us the rate
+    // needed for computeLineTotals on lines that stored a tax_rate_id
+    // but no cached tax_amount.
     const { rows: soItems } = await client.query(
-      `SELECT part_number, description, quantity, unit_price FROM client_order_items WHERE client_order_id = $1 ORDER BY id`,
+      `SELECT ci.part_number, ci.description, ci.quantity, ci.unit_price,
+              ci.tax_rate_id, ci.tax_amount, ci.tax_inclusive,
+              tr.rate AS tax_rate_percent
+       FROM client_order_items ci
+       LEFT JOIN tax_rates tr ON tr.id = ci.tax_rate_id
+       WHERE ci.client_order_id = $1
+       ORDER BY ci.id`,
       [id]
     );
     if (soItems.length === 0) throw new Error('Sales order has no line items.');
@@ -450,22 +461,26 @@ export function registerBookkeepingRoutes(app: Express) {
     let invoiceNumber: string | null = null;
     let invoiceTotal = 0;
     if (createInvoice) {
-      const computedLines = soItems.map((it: any) => ({
-        partNumber: it.part_number,
-        description: it.description || it.part_number || '',
-        quantity: Number(it.quantity) || 0,
-        unitPrice: Number(it.unit_price) || 0,
-        taxRateId: null,
-        taxInclusive: false,
-        deductStock: !!it.part_number,
-        ...computeLineTotals({
+      const computedLines = soItems.map((it: any) => {
+        const ratePercent = Number(it.tax_rate_percent) || 0;
+        const inclusive = !!it.tax_inclusive;
+        return {
+          partNumber: it.part_number,
           description: it.description || it.part_number || '',
           quantity: Number(it.quantity) || 0,
           unitPrice: Number(it.unit_price) || 0,
-          taxRatePercent: 0,
-          taxInclusive: false,
-        }),
-      }));
+          taxRateId: it.tax_rate_id ?? null,
+          taxInclusive: inclusive,
+          deductStock: !!it.part_number,
+          ...computeLineTotals({
+            description: it.description || it.part_number || '',
+            quantity: Number(it.quantity) || 0,
+            unitPrice: Number(it.unit_price) || 0,
+            taxRatePercent: ratePercent,
+            taxInclusive: inclusive,
+          }),
+        };
+      });
       const { subtotal, taxTotal, total } = computeDocumentTotals(computedLines, 0);
       invoiceTotal = total;
       invoiceNumber = await nextDocNumber(client, 'INV', 'invoice_seq');
@@ -481,7 +496,7 @@ export function registerBookkeepingRoutes(app: Express) {
         const r = await client.query(
           `INSERT INTO invoice_items (invoice_id, part_number, description, quantity, unit_price, tax_rate_id, tax_amount, line_total, deduct_stock, tax_inclusive)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-          [invoiceId, line.partNumber || null, line.description, line.quantity, line.unitPrice, null, line.taxAmount, line.lineTotal, !!line.deductStock, false]
+          [invoiceId, line.partNumber || null, line.description, line.quantity, line.unitPrice, line.taxRateId, line.taxAmount, line.lineTotal, !!line.deductStock, line.taxInclusive]
         );
         insertedItems.push(r.rows[0]);
       }

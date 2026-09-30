@@ -191,9 +191,9 @@ export function registerClientsRoutes(app: Express): void {
       if (Array.isArray(items)) {
         for (const it of items) {
           await client.query(
-            `INSERT INTO client_order_items (client_order_id, part_number, description, quantity, unit_price, line_total)
-             VALUES ($1, $2, $3, $4, $5, $6)`,
-            [order.id, it.partNumber || null, it.description || '', it.quantity || 1, it.unitPrice || 0, it.lineTotal || 0]
+            `INSERT INTO client_order_items (client_order_id, part_number, description, quantity, unit_price, line_total, tax_rate_id, tax_amount, tax_inclusive)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+            [order.id, it.partNumber || null, it.description || '', it.quantity || 1, it.unitPrice || 0, it.lineTotal || 0, it.taxRateId ?? null, it.taxAmount ?? 0, !!it.taxInclusive]
           );
         }
         // Quotations DO NOT reserve stock — they're proposals, not
@@ -347,9 +347,9 @@ export function registerClientsRoutes(app: Express): void {
       await client.query(`DELETE FROM client_order_items WHERE client_order_id = $1`, [id]);
       for (const it of items) {
         await client.query(
-          `INSERT INTO client_order_items (client_order_id, part_number, description, quantity, unit_price, line_total)
-           VALUES ($1, $2, $3, $4, $5, $6)`,
-          [id, it.partNumber || null, it.description || '', it.quantity || 1, it.unitPrice || 0, it.lineTotal || 0]
+          `INSERT INTO client_order_items (client_order_id, part_number, description, quantity, unit_price, line_total, tax_rate_id, tax_amount, tax_inclusive)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [id, it.partNumber || null, it.description || '', it.quantity || 1, it.unitPrice || 0, it.lineTotal || 0, it.taxRateId ?? null, it.taxAmount ?? 0, !!it.taxInclusive]
         );
       }
 
@@ -539,19 +539,27 @@ export function registerClientsRoutes(app: Express): void {
   // ---------------------------------------------------------------------------
   // Client Order Items (line items on a client_order)
   // ---------------------------------------------------------------------------
+  // Common shape for a client-order line — includes tax fields so the
+  // quote/SO editor can round-trip the tax classification (Standard /
+  // Zero-Rated / Exempt) instead of losing it on save.
+  const mapClientOrderItem = (row: any) => ({
+    id: row.id,
+    clientOrderId: row.client_order_id,
+    partNumber: row.part_number,
+    description: row.description,
+    quantity: row.quantity,
+    unitPrice: row.unit_price,
+    lineTotal: row.line_total,
+    taxRateId: row.tax_rate_id ?? null,
+    taxAmount: row.tax_amount ?? 0,
+    taxInclusive: !!row.tax_inclusive,
+    createdAt: row.created_at,
+  });
+
   app.get('/api/client-order-items', async (_req, res) => {
     try {
       const { rows } = await query('SELECT * FROM client_order_items ORDER BY id');
-      res.json(rows.map((row: any) => ({
-        id: row.id,
-        clientOrderId: row.client_order_id,
-        partNumber: row.part_number,
-        description: row.description,
-        quantity: row.quantity,
-        unitPrice: row.unit_price,
-        lineTotal: row.line_total,
-        createdAt: row.created_at,
-      })));
+      res.json(rows.map(mapClientOrderItem));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -582,26 +590,17 @@ export function registerClientsRoutes(app: Express): void {
   }
 
   app.post('/api/client-order-items', async (req, res) => {
-    const { clientOrderId, partNumber, description, quantity, unitPrice, lineTotal } = req.body;
+    const { clientOrderId, partNumber, description, quantity, unitPrice, lineTotal, taxRateId, taxAmount, taxInclusive } = req.body;
     if (!description) return res.status(400).json({ error: 'description is required' });
 
     try {
       const row = await queryOne(
-        `INSERT INTO client_order_items (client_order_id, part_number, description, quantity, unit_price, line_total)
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-        [clientOrderId || null, partNumber || null, description, quantity || 1, unitPrice || 0, lineTotal || 0]
+        `INSERT INTO client_order_items (client_order_id, part_number, description, quantity, unit_price, line_total, tax_rate_id, tax_amount, tax_inclusive)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+        [clientOrderId || null, partNumber || null, description, quantity || 1, unitPrice || 0, lineTotal || 0, taxRateId ?? null, taxAmount ?? 0, !!taxInclusive]
       );
       await refreshReservationsFor(row?.client_order_id);
-      res.status(201).json({
-        id: row?.id,
-        clientOrderId: row?.client_order_id,
-        partNumber: row?.part_number,
-        description: row?.description,
-        quantity: row?.quantity,
-        unitPrice: row?.unit_price,
-        lineTotal: row?.line_total,
-        createdAt: row?.created_at,
-      });
+      res.status(201).json(row ? mapClientOrderItem(row) : null);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -609,7 +608,7 @@ export function registerClientsRoutes(app: Express): void {
 
   app.put('/api/client-order-items/:id', async (req, res) => {
     const id = parseInt(req.params.id);
-    const { clientOrderId, partNumber, description, quantity, unitPrice, lineTotal } = req.body;
+    const { clientOrderId, partNumber, description, quantity, unitPrice, lineTotal, taxRateId, taxAmount, taxInclusive } = req.body;
     try {
       const row = await queryOne(
         `UPDATE client_order_items SET
@@ -618,22 +617,16 @@ export function registerClientsRoutes(app: Express): void {
            description = COALESCE($3, description),
            quantity = COALESCE($4, quantity),
            unit_price = COALESCE($5, unit_price),
-           line_total = COALESCE($6, line_total)
-           WHERE id = $7 RETURNING *`,
-        [clientOrderId ?? null, partNumber ?? null, description ?? null, quantity ?? null, unitPrice ?? null, lineTotal ?? null, id]
+           line_total = COALESCE($6, line_total),
+           tax_rate_id = COALESCE($7, tax_rate_id),
+           tax_amount = COALESCE($8, tax_amount),
+           tax_inclusive = COALESCE($9, tax_inclusive)
+           WHERE id = $10 RETURNING *`,
+        [clientOrderId ?? null, partNumber ?? null, description ?? null, quantity ?? null, unitPrice ?? null, lineTotal ?? null, taxRateId ?? null, taxAmount ?? null, taxInclusive ?? null, id]
       );
       if (!row) return res.status(404).json({ error: 'client order item not found' });
       await refreshReservationsFor(row.client_order_id);
-      res.json({
-        id: row.id,
-        clientOrderId: row.client_order_id,
-        partNumber: row.part_number,
-        description: row.description,
-        quantity: row.quantity,
-        unitPrice: row.unit_price,
-        lineTotal: row.line_total,
-        createdAt: row.created_at,
-      });
+      res.json(mapClientOrderItem(row));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

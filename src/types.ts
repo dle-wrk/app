@@ -167,6 +167,12 @@ export interface ClientOrderItem {
   quantity: number;
   unitPrice: number;
   lineTotal: number;
+  // Tax classification carried through so quotations and SOs remember
+  // whether a line is Standard / Zero-Rated / Exempt across edits and
+  // through the accept-quote → SO → invoice chain.
+  taxRateId?: number | null;
+  taxAmount?: number;
+  taxInclusive?: boolean;
   createdAt: string;
 }
 
