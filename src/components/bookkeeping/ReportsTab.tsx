@@ -98,8 +98,82 @@ export const ReportsTab: React.FC<ModuleDataProps> = ({ triggerToast }) => {
   };
 
   const savePdf = async () => {
-    if (!data || kind !== 'VAT') return;
+    if (!data) return;
     try {
+      // Every financial report can be saved as PDF now. Each branch
+      // shapes the doc lines to fit the reused buildAndSaveDocPdf
+      // helper — headline description as "code · name" so the reader
+      // scans by account rather than by amount.
+      if (kind === 'PL') {
+        await buildAndSaveDocPdf({
+          docType: 'Profit & Loss',
+          docNumber: `${data.from}_${data.to}`,
+          meta: [
+            { label: 'From', value: data.from },
+            { label: 'To', value: data.to },
+            { label: 'Net Profit', value: fmtMoney(data.netProfit) },
+            { label: 'Direction', value: data.netProfit >= 0 ? 'Profit' : 'Loss' },
+          ],
+          lines: [
+            ...data.income.map((r: any) => ({ description: `Income · ${r.code} ${r.name}`, quantity: '', lineTotal: r.amount })),
+            { description: 'Total income', quantity: '', lineTotal: data.totalIncome },
+            ...data.expenses.map((r: any) => ({ description: `Expense · ${r.code} ${r.name}`, quantity: '', lineTotal: r.amount })),
+            { description: 'Total expenses', quantity: '', lineTotal: data.totalExpenses },
+            { description: 'Net profit / (loss)', quantity: '', lineTotal: data.netProfit },
+          ],
+          totals: { subtotal: data.totalIncome, tax: -data.totalExpenses, total: data.netProfit },
+          notes: 'Sourced from POSTED journal entries in the period. VOID and DRAFT entries are excluded.',
+        });
+        return;
+      }
+      if (kind === 'BS') {
+        await buildAndSaveDocPdf({
+          docType: 'Balance Sheet',
+          docNumber: `as_of_${data.asOf}`,
+          meta: [
+            { label: 'As of', value: data.asOf },
+            { label: 'Total Assets', value: fmtMoney(data.totalAssets) },
+            { label: 'Total Liab. + Equity', value: fmtMoney(data.totalLiabilities + data.totalEquity) },
+            { label: 'Balanced', value: data.balanced ? 'Yes ✓' : 'No — check journals' },
+          ],
+          lines: [
+            ...data.assets.map((r: any) => ({ description: `Asset · ${r.code} ${r.name}`, quantity: '', lineTotal: r.amount })),
+            { description: 'Total assets', quantity: '', lineTotal: data.totalAssets },
+            ...data.liabilities.map((r: any) => ({ description: `Liability · ${r.code} ${r.name}`, quantity: '', lineTotal: r.amount })),
+            { description: 'Total liabilities', quantity: '', lineTotal: data.totalLiabilities },
+            ...data.equity.map((r: any) => ({ description: `Equity · ${r.code} ${r.name}`, quantity: '', lineTotal: r.amount })),
+            { description: 'Total equity', quantity: '', lineTotal: data.totalEquity },
+          ],
+          totals: { subtotal: data.totalAssets, tax: 0, total: data.totalLiabilities + data.totalEquity },
+          notes: 'Assets should equal Liabilities + Equity. Current-year earnings are folded into Equity as line 3999 so the sheet balances without a formal period-close entry.',
+        });
+        return;
+      }
+      if (kind === 'TB') {
+        await buildAndSaveDocPdf({
+          docType: 'Trial Balance',
+          docNumber: `as_of_${data.asOf}`,
+          meta: [
+            { label: 'As of', value: data.asOf },
+            { label: 'Total Debits', value: fmtMoney(data.totalDebit) },
+            { label: 'Total Credits', value: fmtMoney(data.totalCredit) },
+            { label: 'Balanced', value: data.balanced ? 'Yes ✓' : 'No — check journals' },
+          ],
+          // Trial balance uses two amount cells (debit / credit) but the
+          // PDF helper only shows one. Encode both into the description
+          // and put the net side into lineTotal so at-a-glance skimming
+          // still works.
+          lines: data.rows.map((r: any) => ({
+            description: `${r.code} · ${r.name}${r.debit > 0 ? ` · DR ${fmtMoney(r.debit)}` : ''}${r.credit > 0 ? ` · CR ${fmtMoney(r.credit)}` : ''}`,
+            quantity: '',
+            lineTotal: r.debit > 0 ? r.debit : -r.credit,
+          })),
+          totals: { subtotal: data.totalDebit, tax: -data.totalCredit, total: data.totalDebit - data.totalCredit },
+          notes: 'Trial balance sums every POSTED journal line per account. Debits and credits should net to zero. If not, a journal entry is unbalanced — check Accounting > Journal.',
+        });
+        return;
+      }
+      if (kind !== 'VAT') return;
       await buildAndSaveDocPdf({
         docType: 'VAT201 Return',
         docNumber: `${data.period.from}_${data.period.to}`,
@@ -154,7 +228,9 @@ export const ReportsTab: React.FC<ModuleDataProps> = ({ triggerToast }) => {
           )}
           <SecondaryButton onClick={load}>Run</SecondaryButton>
           <SecondaryButton icon={<Download className="w-3.5 h-3.5" />} onClick={exportCurrent} disabled={!data}>Export CSV</SecondaryButton>
-          {kind === 'VAT' && <SecondaryButton icon={<FileText className="w-3.5 h-3.5" />} onClick={savePdf} disabled={!data}>Save PDF</SecondaryButton>}
+          {['PL', 'BS', 'TB', 'VAT'].includes(kind) && (
+            <SecondaryButton icon={<FileText className="w-3.5 h-3.5" />} onClick={savePdf} disabled={!data}>Save PDF</SecondaryButton>
+          )}
         </div>
       </div>
 
@@ -266,6 +342,27 @@ const Vat201View: React.FC<{ data: any }> = ({ data }) => (
 const ProfitLossView: React.FC<{ data: any }> = ({ data }) => (
   <SectionCard title="Profit & Loss" badge={`${data.from} → ${data.to}`}>
     <div className="p-lg space-y-4">
+      {/* Headline metrics up top so the reader sees the net number
+          before scrolling through the account breakdown. Margin % is
+          rendered against total income and helps benchmark month-to-
+          month even when raw revenue changes. */}
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-md">
+        <div className="p-3 rounded-lg border border-outline-variant/40 bg-surface-container-low">
+          <div className="text-[10px] uppercase text-outline">Total income</div>
+          <div className="font-mono font-bold text-green-400">{fmtMoney(data.totalIncome)}</div>
+        </div>
+        <div className="p-3 rounded-lg border border-outline-variant/40 bg-surface-container-low">
+          <div className="text-[10px] uppercase text-outline">Total expenses</div>
+          <div className="font-mono font-bold text-error">{fmtMoney(data.totalExpenses)}</div>
+        </div>
+        <div className={`p-3 rounded-lg border ${data.netProfit >= 0 ? 'border-green-500/40 bg-green-500/10' : 'border-error/40 bg-error/10'}`}>
+          <div className="text-[10px] uppercase text-outline">Net profit</div>
+          <div className={`font-mono font-bold ${data.netProfit >= 0 ? 'text-green-400' : 'text-error'}`}>{fmtMoney(data.netProfit)}</div>
+          <div className="text-[9px] text-outline">
+            {data.totalIncome > 0 ? `${Math.round((data.netProfit / data.totalIncome) * 1000) / 10}% margin` : '—'}
+          </div>
+        </div>
+      </div>
       <div>
         <h5 className="text-xs font-bold text-outline uppercase mb-2">Income</h5>
         {data.income.map((r: any) => (
@@ -295,6 +392,33 @@ const ProfitLossView: React.FC<{ data: any }> = ({ data }) => (
 
 const BalanceSheetView: React.FC<{ data: any }> = ({ data }) => (
   <SectionCard title="Balance Sheet" badge={`As of ${data.asOf}${data.balanced ? ' · Balanced ✓' : ' · ⚠ Not balanced'}`}>
+    {/* Metric strip mirrors the P&L one: total assets vs total
+        liab+equity should match, and the "Balanced" pill in the badge
+        catches unbalanced ledgers early. Current-year earnings surface
+        here so the reader sees them without hunting through equity. */}
+    <div className="p-lg pb-0 grid grid-cols-2 md:grid-cols-4 gap-md">
+      <div className="p-3 rounded-lg border border-outline-variant/40 bg-surface-container-low">
+        <div className="text-[10px] uppercase text-outline">Total assets</div>
+        <div className="font-mono font-bold text-primary">{fmtMoney(data.totalAssets)}</div>
+      </div>
+      <div className="p-3 rounded-lg border border-outline-variant/40 bg-surface-container-low">
+        <div className="text-[10px] uppercase text-outline">Total liabilities</div>
+        <div className="font-mono font-bold">{fmtMoney(data.totalLiabilities)}</div>
+      </div>
+      <div className="p-3 rounded-lg border border-outline-variant/40 bg-surface-container-low">
+        <div className="text-[10px] uppercase text-outline">Total equity</div>
+        <div className="font-mono font-bold">{fmtMoney(data.totalEquity)}</div>
+        {typeof data.currentEarnings === 'number' && Math.abs(data.currentEarnings) > 0.005 && (
+          <div className="text-[9px] text-outline">incl. {fmtMoney(data.currentEarnings)} current-year</div>
+        )}
+      </div>
+      <div className={`p-3 rounded-lg border ${data.balanced ? 'border-green-500/40 bg-green-500/10' : 'border-error/40 bg-error/10'}`}>
+        <div className="text-[10px] uppercase text-outline">A = L + E</div>
+        <div className={`font-mono font-bold ${data.balanced ? 'text-green-400' : 'text-error'}`}>
+          {data.balanced ? 'Balanced' : `Δ ${fmtMoney(Math.abs(data.totalAssets - (data.totalLiabilities + data.totalEquity)))}`}
+        </div>
+      </div>
+    </div>
     <div className="p-lg grid md:grid-cols-2 gap-lg">
       <div>
         <h5 className="text-xs font-bold text-outline uppercase mb-2">Assets</h5>
