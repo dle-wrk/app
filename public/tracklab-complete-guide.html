@@ -368,6 +368,7 @@
         <div class="toc">
             <h2>📋 Table of Contents</h2>
             <ul>
+                <li><a href="#whats-new-v28">What's New (v2.8)</a></li>
                 <li><a href="#whats-new-v27">What's New (v2.7)</a></li>
                 <li><a href="#whats-new">What's New (v2.6)</a></li>
                 <li><a href="#getting-started">Getting Started</a></li>
@@ -396,6 +397,131 @@
              public/guide/ with the filenames referenced, and swap the
              shot-todo divs for real <img class="shot"> tags.
              ═══════════════════════════════════════════════════════════ -->
+        <!-- ═══════════════════════════════════════════════════════════
+             What's New — v2.8
+             ═══════════════════════════════════════════════════════════
+             Flow polish, cross-cutting reports, and a VAT presentation
+             fix. No new pages introduced — every change lives inside
+             an existing view.
+             ═══════════════════════════════════════════════════════════ -->
+        <div class="section" id="whats-new-v28">
+            <h2>🆕 What's New (v2.8)</h2>
+            <p style="margin-bottom: 20px;">A flow-first release. Where v2.7 shipped brand-new pro-ERP features (quotations, bank rec, credit notes, landed cost, VAT201), v2.8 collapses the daily journey between them: a "Needs attention today" strip on the dashboard, Cmd+K jumps to any doc number, unified Customer / Vendor 360 drawers, a slimmed-down Item Detail with tabs, PDF exports on every financial report, and a rebuild of how VAT is presented on quotes so mixed-rate lines can never look like a double-charge.</p>
+
+            <h3>Dashboard — "Needs attention today" strip</h3>
+            <div class="step">
+                <p>New panel at the very top of the dashboard turns the passive stats board into an action queue. Five click-through cards, refreshed every 60 seconds:</p>
+                <ul>
+                    <li><strong>Quotations awaiting reply</strong> — count + open value. Click → Sales &gt; Orders filtered to QUOTATION.</li>
+                    <li><strong>Sales orders with backorders</strong> — any SO where reservations exceed on-hand.</li>
+                    <li><strong>Overdue invoices</strong> — count + total balance owing.</li>
+                    <li><strong>Bills due this week</strong> — anything AWAITING_PAYMENT / PARTIAL / OVERDUE with a due date ≤ today+7.</li>
+                    <li><strong>Critical low stock</strong> — parts flagged critical on the inventory grid.</li>
+                </ul>
+                <p>Cards render even at zero so the layout doesn't shift; when every queue is empty the strip shows a "You are clear" state with a green tick.</p>
+            </div>
+
+            <h3>Cmd+K — global doc-number search</h3>
+            <div class="step">
+                <p>The command palette (⌘K / Ctrl+K, top of the app) already searched pages, items, clients, and suppliers. It now also finds any <em>bookkeeping doc by its number</em>. Type <code>INV-</code>, <code>SO-</code>, <code>PO-</code>, <code>BILL-</code>, <code>QUO-</code>, <code>CN-</code>, or <code>DN-</code> and every match surfaces grouped by kind, with client/supplier and status in the subtitle.</p>
+                <ul>
+                    <li>Fuzzy match also runs against the subtitle so <em>"lumax invoice"</em> or <em>"digikey bill"</em> filter correctly.</li>
+                    <li>Enter jumps to the correct sub-tab (Sales &gt; Invoices for an <code>INV-</code>, Purchases &gt; Bills for a <code>BILL-</code>, etc).</li>
+                    <li>Doc index is fetched once per palette-open and cached for 60 s, so repeated ⌘K is instant.</li>
+                </ul>
+            </div>
+
+            <h3>Customer 360 drawer</h3>
+            <div class="step">
+                <p>Bookkeeping &gt; Sales &gt; Customers — click any row (or the 👁 icon) and a right-side drawer opens with everything about that customer in one place. Header identity strip (name, contact, email/phone/VAT/address, status). Four metric cards up top: Open AR · Overdue count + value · Open orders (+ quotations) · Lifetime revenue.</p>
+                <ul>
+                    <li>Tabs: <em>Overview · Orders &amp; Quotes · Invoices · Payments · Credit Notes · Deliveries · Statement</em>. Each shows a count badge.</li>
+                    <li><em>Overview</em> renders a chronological activity feed mixing every doc kind, plus an "Overdue invoices" panel when any are past due.</li>
+                    <li><em>Statement</em> tab has the existing PDF download built in — no more hunting for the 📄 icon on the list.</li>
+                </ul>
+                <p>Answers "what's happening with Lumax right now?" in one click instead of jumping across four sub-tabs.</p>
+            </div>
+
+            <h3>Vendor 360 drawer</h3>
+            <div class="step">
+                <p>Bookkeeping &gt; Purchases &gt; Vendors — same drawer pattern as Customer 360, mirror-symmetric for the purchases side. Metrics: Open AP · Overdue bills · Open POs · YTD spend. Tabs: <em>Overview · Purchase Orders · Bills · Payments · Expenses</em>. Website link on the row still opens externally without popping the drawer.</p>
+            </div>
+
+            <h3>Item Detail — three-tab view mode</h3>
+            <div class="step">
+                <p>The Item Detail modal grew to five stacked sections in view mode, which made scrolling the norm to reach the description. View mode is now split into three tabs — <em>Overview / Parameters / Sourcing</em> — with the headline metrics row (Stock / Cost / Holding value / Status / Category + reservations) pinned above the tab strip so those numbers are always one glance away.</p>
+                <ul>
+                    <li><strong>Overview</strong> — description, project, manufacturer, supplier, comments.</li>
+                    <li><strong>Parameters</strong> — CAD footprint, value/size, tolerance, bulk pricing.</li>
+                    <li><strong>Sourcing</strong> — packaging, last order date/qty, datasheet link.</li>
+                </ul>
+                <p>Edit mode is untouched — you edit less often than you view, so the full form still makes sense there.</p>
+            </div>
+
+            <h3>Financial reports — PDF export &amp; headline metrics</h3>
+            <div class="step">
+                <p>P&amp;L, Balance Sheet, and Trial Balance now render to PDF via the same shared brand-header helper VAT201 uses. Each report also gains a headline metric strip so the important numbers show without scrolling:</p>
+                <ul>
+                    <li><strong>P&amp;L</strong>: Total income · Total expenses · Net profit (with margin %).</li>
+                    <li><strong>Balance Sheet</strong>: Total assets · liabilities · equity · a live "A = L + E" balanced check that renders a green tick or the delta when the ledger drifts.</li>
+                </ul>
+                <p>Hand any of the three to your accountant as a PDF from the Reports tab.</p>
+            </div>
+
+            <h3>Quote / SO — line prices now display Excl. VAT</h3>
+            <div class="step">
+                <p>Before v2.8, the line-item "Total" column on quotes and SOs showed the stored <em>gross</em> figure (VAT-inclusive on tax-inclusive lines). A customer adding the column arrived at the grand-total figure, then saw the summary add VAT on top — reading as a double-charge. The column now shows <strong>net (Excl. VAT) prices</strong>, so the sum equals the Subtotal exactly. Column headers relabelled <em>Price (Excl. VAT) / Total (Excl. VAT)</em>. Summary reads <em>Total (Excl. VAT) · VAT amount · Total</em>.</p>
+            </div>
+
+            <h3>Quote / SO — per-line VAT column &amp; mixed-rate summary</h3>
+            <div class="step">
+                <p>Every line-item row now shows the VAT status right in the table: <strong>15%</strong> for standard-rated, <strong>Exempt</strong> (amber) for labour / financial services / residential rent / education, <strong>0% (zero-rated)</strong> (secondary) for exports and basic foods. This ends the class of finance-team flag where the top-level VAT / Subtotal ratio isn't a clean 15% because one or more lines are non-standard.</p>
+                <p>When any line is Exempt or Zero-rated, the summary block splits per bucket so an auditor sees exactly where each figure came from:</p>
+                <ul>
+                    <li>Excl. VAT — Standard-rated</li>
+                    <li>Excl. VAT — Exempt supplies</li>
+                    <li>Excl. VAT — Zero-rated</li>
+                    <li><em>Total (Excl. VAT)</em></li>
+                    <li>15% VAT (Standard-rated only)</li>
+                    <li><em>Total</em></li>
+                </ul>
+                <p>On a uniform-rate quote (all lines Standard) the summary collapses back to the simple three-line form — no visual noise for the common case.</p>
+            </div>
+
+            <h3>Quote / SO — tax classification round-trips edits &amp; auto-fulfil</h3>
+            <div class="step">
+                <p>Previously, picking Exempt or Zero-Rated on a quote line silently reverted to Standard on save (the client_order_items table didn't carry the tax field). Fixed:</p>
+                <ul>
+                    <li>Tax classification is now stored per line and re-hydrates when you re-open the editor.</li>
+                    <li>Auto-fulfil (quote / SO → invoice) copies the tax classification straight onto the generated invoice, so an Exempt quote → Exempt SO → Exempt invoice, and the Exempt total flows through VAT201 as an informational memo (not as Box 2 Zero-Rated).</li>
+                    <li>New line items now default to <strong>Standard VAT (15%)</strong> instead of "No tax" — the SA legal default for a taxable supply. Manual override to Exempt / Zero-Rated / None still one click.</li>
+                </ul>
+            </div>
+
+            <h3>VAT201 — Exempt vs Zero-Rated properly separated</h3>
+            <div class="step">
+                <p>Prior versions bucketed Exempt and Zero-Rated together on Box 2 because both have rate = 0%. VAT201 now aggregates <em>per-line</em> using a new <code>tax_rates.kind</code> column, so Standard-rated / Zero-rated / Exempt each land in the right SARS box:</p>
+                <ul>
+                    <li><strong>Box 1 &amp; 4</strong> — Standard-rated sales + output VAT.</li>
+                    <li><strong>Box 2</strong> — Zero-rated sales (turnover contributor, taxable at 0%).</li>
+                    <li><strong>Informational memo</strong> — Exempt supplies (sales) and Exempt purchases. Not a SARS box; shown so you can see they're being handled separately.</li>
+                </ul>
+                <div class="warning">
+                    ⚠ <strong>Reminder:</strong> the VAT201 report is a computation aid, not a substitute for the SARS eFiling submission. Always cross-check every field on your official return before filing.
+                </div>
+            </div>
+
+            <h3>SO editor — Admin edit for QUOTATION &amp; DRAFT</h3>
+            <div class="step">
+                <p>Admins now see an <strong>Edit</strong> button on the SO/Quote viewer when the row is <code>QUOTATION</code> or <code>DRAFT</code>. Editor opens pre-filled from the current row; save PUTs the full doc (header + line replacement) atomically. Once an order moves past DRAFT (fulfilment started), editing is blocked with a 409 — a running fulfilment can't be silently rewritten from under picking or invoicing.</p>
+            </div>
+
+            <h3>PO / Bill line item — free-typed SKU allowed</h3>
+            <div class="step">
+                <p>The SKU / Part# input on purchase-side line editors now accepts <em>free-typed</em> values, not only rows that exist in inventory. A supplier's own SKU that isn't yet in your catalogue no longer forces you to bail out and add the item first.</p>
+            </div>
+        </div>
+
         <div class="section" id="whats-new-v27">
             <h2>🆕 What's New (v2.7)</h2>
             <p style="margin-bottom: 20px;">A very large release — five major pro-ERP features (Quotations, Bank Reconciliation, VAT201, Credit Notes, Landed Cost), a full pipeline of Save-PDF exports, live cross-user sync so an admin's import updates every open browser within seconds, and a wave of quality-of-life polish on the Add SKU form, inventory grid, and sales-order flow.</p>
