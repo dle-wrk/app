@@ -334,7 +334,7 @@ export const Customer360Modal: React.FC<{
 // Kept in this file because none of them are reused elsewhere yet;
 // promote to shared.tsx if that changes.
 
-const Metric: React.FC<{ label: string; value: string; sub?: string; tone?: 'muted' | 'primary' | 'success' | 'warning' | 'error' }> = ({ label, value, sub, tone = 'muted' }) => {
+export const Metric: React.FC<{ label: string; value: string; sub?: string; tone?: 'muted' | 'primary' | 'success' | 'warning' | 'error' }> = ({ label, value, sub, tone = 'muted' }) => {
   const toneClass = {
     muted: 'text-on-surface',
     primary: 'text-primary',
@@ -351,24 +351,24 @@ const Metric: React.FC<{ label: string; value: string; sub?: string; tone?: 'mut
   );
 };
 
-const Count: React.FC<{ n: number }> = ({ n }) => (
+export const Count: React.FC<{ n: number }> = ({ n }) => (
   <span className="ml-1 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-surface-container-highest text-[9px] text-on-surface-variant font-bold">{n}</span>
 );
 
-const Panel: React.FC<{ title: string; tone?: 'default' | 'error'; children: React.ReactNode }> = ({ title, tone = 'default', children }) => (
+export const Panel: React.FC<{ title: string; tone?: 'default' | 'error'; children: React.ReactNode }> = ({ title, tone = 'default', children }) => (
   <div className={`rounded-lg border p-4 ${tone === 'error' ? 'border-error/40 bg-error/5' : 'border-outline-variant/40 bg-surface-container-low/40'}`}>
     <h5 className="text-xs font-bold uppercase text-outline mb-2 tracking-wider">{title}</h5>
     {children}
   </div>
 );
 
-const TabList: React.FC<{ rows: React.ReactNode[]; empty: string; loading?: boolean }> = ({ rows, empty, loading }) => {
+export const TabList: React.FC<{ rows: React.ReactNode[]; empty: string; loading?: boolean }> = ({ rows, empty, loading }) => {
   if (loading) return <div className="flex items-center justify-center py-12 text-outline"><Loader2 className="w-5 h-5 animate-spin" /></div>;
   if (rows.length === 0) return <div className="p-8 text-center text-xs text-outline italic">{empty}</div>;
   return <div className="space-y-1">{rows}</div>;
 };
 
-const DocRow: React.FC<{
+export const DocRow: React.FC<{
   number: string; date: string; status?: string; amount?: number; currency?: string; extra?: string; tone?: 'success' | 'warning';
 }> = ({ number, date, status, amount, currency, extra, tone }) => {
   const amountClass = tone === 'success' ? 'text-green-400' : tone === 'warning' ? 'text-orange-400' : '';

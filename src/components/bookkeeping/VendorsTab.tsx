@@ -1,8 +1,12 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { ExternalLink } from 'lucide-react';
+import { Supplier } from '../../types';
 import { ModuleDataProps, fmtMoney, EmptyState, SectionCard } from './shared';
+import { Vendor360Modal } from './Vendor360Modal';
 
-export const VendorsTab: React.FC<ModuleDataProps> = ({ suppliers, bills }) => {
+export const VendorsTab: React.FC<ModuleDataProps> = ({ suppliers, bills, purchaseOrders, paymentsMade, expenses }) => {
+  const [viewing, setViewing] = useState<Supplier | null>(null);
+
   const balances = useMemo(() => {
     const map = new Map<string, number>();
     for (const bill of bills) {
@@ -14,39 +18,68 @@ export const VendorsTab: React.FC<ModuleDataProps> = ({ suppliers, bills }) => {
   }, [bills]);
 
   return (
-    <SectionCard
-      title="Vendors"
-      badge={`${suppliers.length} suppliers`}
-      actions={<span className="text-[10px] text-outline">Full contact management lives in the Suppliers page</span>}
-    >
-      <div className="overflow-x-auto">
-        <table className="w-full text-left border-collapse text-xs">
-          <thead>
-            <tr className="bg-surface-container-high/50 text-[10px] uppercase font-bold text-outline border-b border-outline-variant">
-              <th className="px-lg py-sm">ID</th>
-              <th className="px-lg py-sm">Name</th>
-              <th className="px-lg py-sm">Contact</th>
-              <th className="px-lg py-sm text-right">Lead Time</th>
-              <th className="px-lg py-sm text-right">AP Balance</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-outline-variant/30">
-            {suppliers.map(s => (
-              <tr key={s.id} className="hover:bg-surface-variant/20 transition-all">
-                <td className="px-lg py-sm font-mono text-outline">{s.id}</td>
-                <td className="px-lg py-sm font-bold">
-                  {s.name}
-                  {s.website && <a href={s.website} target="_blank" rel="noreferrer" className="inline-block ml-1.5 text-primary align-middle"><ExternalLink className="w-3 h-3 inline" /></a>}
-                </td>
-                <td className="px-lg py-sm text-on-surface-variant">{s.contact_email || '—'}</td>
-                <td className="px-lg py-sm text-right font-mono">{s.leadTime ? `${s.leadTime}d` : '—'}</td>
-                <td className="px-lg py-sm text-right font-mono font-bold">{(balances.get(s.id) || 0) > 0 ? fmtMoney(balances.get(s.id)) : '—'}</td>
+    <>
+      <SectionCard
+        title="Vendors"
+        badge={`${suppliers.length} suppliers`}
+        actions={<span className="text-[10px] text-outline">Full contact management lives in the Suppliers page</span>}
+      >
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse text-xs">
+            <thead>
+              <tr className="bg-surface-container-high/50 text-[10px] uppercase font-bold text-outline border-b border-outline-variant">
+                <th className="px-lg py-sm">ID</th>
+                <th className="px-lg py-sm">Name</th>
+                <th className="px-lg py-sm">Contact</th>
+                <th className="px-lg py-sm text-right">Lead Time</th>
+                <th className="px-lg py-sm text-right">AP Balance</th>
               </tr>
-            ))}
-            {suppliers.length === 0 && <EmptyState message="No suppliers yet — add one from the Suppliers page." colSpan={5} />}
-          </tbody>
-        </table>
-      </div>
-    </SectionCard>
+            </thead>
+            <tbody className="divide-y divide-outline-variant/30">
+              {suppliers.map(s => (
+                <tr
+                  key={s.id}
+                  className="hover:bg-surface-variant/20 transition-all cursor-pointer"
+                  onClick={() => setViewing(s)}
+                >
+                  <td className="px-lg py-sm font-mono text-outline">{s.id}</td>
+                  <td className="px-lg py-sm font-bold">
+                    {s.name}
+                    {/* Website is an outbound link — stop the row-click handler
+                        so opening the vendor's site doesn't ALSO pop the drawer. */}
+                    {s.website && (
+                      <a
+                        href={s.website}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="inline-block ml-1.5 text-primary align-middle"
+                      >
+                        <ExternalLink className="w-3 h-3 inline" />
+                      </a>
+                    )}
+                  </td>
+                  <td className="px-lg py-sm text-on-surface-variant">{s.contact_email || '—'}</td>
+                  <td className="px-lg py-sm text-right font-mono">{s.leadTime ? `${s.leadTime}d` : '—'}</td>
+                  <td className="px-lg py-sm text-right font-mono font-bold">{(balances.get(s.id) || 0) > 0 ? fmtMoney(balances.get(s.id)) : '—'}</td>
+                </tr>
+              ))}
+              {suppliers.length === 0 && <EmptyState message="No suppliers yet — add one from the Suppliers page." colSpan={5} />}
+            </tbody>
+          </table>
+        </div>
+      </SectionCard>
+
+      {viewing && (
+        <Vendor360Modal
+          vendor={viewing}
+          purchaseOrders={purchaseOrders}
+          bills={bills}
+          paymentsMade={paymentsMade}
+          expenses={expenses}
+          onClose={() => setViewing(null)}
+        />
+      )}
+    </>
   );
 };
