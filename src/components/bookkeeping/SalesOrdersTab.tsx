@@ -754,19 +754,33 @@ const SalesOrderViewModal: React.FC<{
           { label: 'Order Date', value: fmtDate(order.orderDate) },
           { label: 'Required', value: fmtDate(order.requiredDate) },
         ],
-        lines: (order.items || []).map((it: any) => ({
-          partNumber: it.partNumber,
-          description: it.description,
-          quantity: it.quantity,
-          unitPrice: it.unitPrice,
-          lineTotal: it.lineTotal,
-        })),
+        lines: (order.items || []).map((it: any) => {
+          // Display NET (ex-VAT) figures in the line table so the
+          // customer's own column-sum equals the header Subtotal. When
+          // a line is stored tax-inclusive, line_total already contains
+          // the VAT — subtracting tax_amount recovers the net figure.
+          // On exclusive lines tax_amount is 0 and this is a no-op, so
+          // the same formula is safe for every line regardless of the
+          // per-line inclusive flag.
+          const qty = Number(it.quantity) || 1;
+          const tax = Number(it.taxAmount) || 0;
+          const gross = Number(it.lineTotal) || 0;
+          const net = gross - tax;
+          const unitNet = qty > 0 ? net / qty : (Number(it.unitPrice) || 0);
+          return {
+            partNumber: it.partNumber,
+            description: it.description,
+            quantity: it.quantity,
+            unitPrice: unitNet,
+            lineTotal: net,
+          };
+        }),
         totals: {
           subtotal: order.subtotal,
           tax: order.tax,
           total: order.total,
         },
-        notes: order.notes,
+        notes: [order.notes, 'All prices exclusive of VAT. VAT is shown separately in the totals below.'].filter(Boolean).join('  •  '),
       });
       triggerToast(`Downloaded ${filename}.`);
     } catch (err: any) {
@@ -795,22 +809,33 @@ const SalesOrderViewModal: React.FC<{
               <tr className="bg-surface-container-high/50 text-outline text-[10px] uppercase">
                 <th className="py-2 px-3">Description</th>
                 <th className="py-2 px-3 text-right">Qty</th>
-                <th className="py-2 px-3 text-right">Price</th>
-                <th className="py-2 px-3 text-right">Total</th>
+                <th className="py-2 px-3 text-right">Price (excl. VAT)</th>
+                <th className="py-2 px-3 text-right">Total (excl. VAT)</th>
               </tr>
             </thead>
             <tbody>
-              {order.items.map((it: any) => (
-                <tr key={it.id} className="border-t border-outline-variant/20">
-                  <td className="py-2 px-3">
-                    {it.partNumber && <span className="font-mono text-[10px] text-primary mr-1">{it.partNumber}</span>}
-                    {it.description}
-                  </td>
-                  <td className="py-2 px-3 text-right font-mono">{it.quantity}</td>
-                  <td className="py-2 px-3 text-right font-mono">{fmtMoney(it.unitPrice, order.currency)}</td>
-                  <td className="py-2 px-3 text-right font-mono font-bold">{fmtMoney(it.lineTotal, order.currency)}</td>
-                </tr>
-              ))}
+              {order.items.map((it: any) => {
+                // Same net-display rule as the printable + PDF: stored
+                // line_total on tax-inclusive lines is gross. Subtract
+                // tax_amount to get the ex-VAT figure the customer's
+                // sum column should show.
+                const qty = Number(it.quantity) || 1;
+                const tax = Number(it.taxAmount) || 0;
+                const gross = Number(it.lineTotal) || 0;
+                const net = gross - tax;
+                const unitNet = qty > 0 ? net / qty : (Number(it.unitPrice) || 0);
+                return (
+                  <tr key={it.id} className="border-t border-outline-variant/20">
+                    <td className="py-2 px-3">
+                      {it.partNumber && <span className="font-mono text-[10px] text-primary mr-1">{it.partNumber}</span>}
+                      {it.description}
+                    </td>
+                    <td className="py-2 px-3 text-right font-mono">{it.quantity}</td>
+                    <td className="py-2 px-3 text-right font-mono">{fmtMoney(unitNet, order.currency)}</td>
+                    <td className="py-2 px-3 text-right font-mono font-bold">{fmtMoney(net, order.currency)}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -906,9 +931,9 @@ const SalesOrderViewModal: React.FC<{
           )}
         </div>
         <div className="w-56 space-y-1 text-xs">
-          <div className="flex justify-between text-on-surface-variant"><span>Subtotal</span><span className="font-mono">{fmtMoney(order.subtotal, order.currency)}</span></div>
-          <div className="flex justify-between text-on-surface-variant"><span>Tax</span><span className="font-mono">{fmtMoney(order.tax, order.currency)}</span></div>
-          <div className="flex justify-between font-bold text-sm border-t border-outline-variant/40 pt-1"><span>Total</span><span className="font-mono text-primary">{fmtMoney(order.total, order.currency)}</span></div>
+          <div className="flex justify-between text-on-surface-variant"><span>Subtotal (excl. VAT)</span><span className="font-mono">{fmtMoney(order.subtotal, order.currency)}</span></div>
+          <div className="flex justify-between text-on-surface-variant"><span>VAT</span><span className="font-mono">{fmtMoney(order.tax, order.currency)}</span></div>
+          <div className="flex justify-between font-bold text-sm border-t border-outline-variant/40 pt-1"><span>Total (incl. VAT)</span><span className="font-mono text-primary">{fmtMoney(order.total, order.currency)}</span></div>
         </div>
       </div>
 
@@ -1233,15 +1258,26 @@ const BatchAutoFulfilModal: React.FC<{
 // ---------------------------------------------------------------------------
 function renderPrintableSalesOrder(order: any, clientName: string): string {
   const money = (n: number) => fmtMoney(n, order.currency);
-  const rows = (order.items || []).map((it: any) => `
+  const rows = (order.items || []).map((it: any) => {
+    // Show NET price and total per line so the customer's column-sum
+    // matches the header Subtotal. See the SO PDF export for the same
+    // reasoning — the two paths must agree or one of them will look
+    // like a double-charge to the reader.
+    const qty = Number(it.quantity) || 1;
+    const tax = Number(it.taxAmount) || 0;
+    const gross = Number(it.lineTotal) || 0;
+    const net = gross - tax;
+    const unitNet = qty > 0 ? net / qty : (Number(it.unitPrice) || 0);
+    return `
   <tr>
     <td>${escapeHtml(it.partNumber || '')}</td>
     <td>${escapeHtml(it.description)}</td>
     <td class="num">${it.quantity}</td>
-    <td class="num">${escapeHtml(money(it.unitPrice))}</td>
-    <td class="num strong">${escapeHtml(money(it.lineTotal))}</td>
+    <td class="num">${escapeHtml(money(unitNet))}</td>
+    <td class="num strong">${escapeHtml(money(net))}</td>
   </tr>
-`).join('');
+`;
+  }).join('');
 
   return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(order.orderNumber)}</title>
 <style>
@@ -1296,11 +1332,11 @@ function renderPrintableSalesOrder(order: any, clientName: string): string {
   <table>
     <thead>
       <tr>
-        <th>Modal No</th>
+        <th>Model No</th>
         <th>Description</th>
         <th style="text-align:right">Qty</th>
-        <th style="text-align:right">Price</th>
-        <th style="text-align:right">Total</th>
+        <th style="text-align:right">Price (excl. VAT)</th>
+        <th style="text-align:right">Total (excl. VAT)</th>
       </tr>
     </thead>
     <tbody>${rows || '<tr><td colspan="5" style="text-align:center;color:#999;padding:20px">No line items</td></tr>'}</tbody>
@@ -1308,9 +1344,9 @@ function renderPrintableSalesOrder(order: any, clientName: string): string {
 
   <div class="totals">
     <table>
-      <tr><td>Subtotal</td><td class="num">${escapeHtml(money(order.subtotal))}</td></tr>
-      <tr><td>Tax</td><td class="num">${escapeHtml(money(order.tax))}</td></tr>
-      <tr class="total"><td>Total</td><td class="num">${escapeHtml(money(order.total))}</td></tr>
+      <tr><td>Subtotal (excl. VAT)</td><td class="num">${escapeHtml(money(order.subtotal))}</td></tr>
+      <tr><td>VAT</td><td class="num">${escapeHtml(money(order.tax))}</td></tr>
+      <tr class="total"><td>Total (incl. VAT)</td><td class="num">${escapeHtml(money(order.total))}</td></tr>
     </table>
   </div>
 
