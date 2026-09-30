@@ -329,7 +329,7 @@ const DocLinkEditor: React.FC<DocLinkEditorProps> = ({ mode, doc, onClose, onSav
                   className="w-full bg-surface-container-high border border-outline-variant rounded px-3 py-2 text-sm font-mono outline-none focus:border-primary"
                 />
                 <p className="text-[10px] text-outline mt-1">
-                  External URL (Notion, Google Doc, etc.) or a path served by the app (e.g. <span className="font-mono">/tracklab-complete-guide.html</span>).
+                  External URL (Notion, Google Doc, etc.) or a path served by the app (e.g. <span className="font-mono">/docs/sales.html</span>).
                 </p>
               </>
             ) : (

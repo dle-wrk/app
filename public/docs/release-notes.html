@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Release Notes — Tracklab IM Docs</title>
+    <link rel="icon" type="image/png" href="../tracklab-logo.png">
+    <link rel="stylesheet" href="shared.css">
+</head>
+<body data-page="release-notes">
+    <div class="header compact">
+        <h1>🆕 Release Notes</h1>
+        <p>Everything that changed in v2.8, v2.7 and v2.6.</p>
+    </div>
+    <nav class="docs-nav" id="docs-nav" aria-label="Documentation">
+        <noscript><div class="docs-nav-bar"><div class="docs-nav-links"><a href="index.html">← All docs</a></div></div></noscript>
+    </nav>
+
+    <div class="container">
+        <aside class="toc" id="page-toc" aria-label="On this page"></aside>
+
+        <div class="main-col">
+        <div class="section" id="whats-new-v28">
+            <h2>🆕 What's New (v2.8)</h2>
+            <p style="margin-bottom: 20px;">A flow-first release. Where v2.7 shipped brand-new pro-ERP features (quotations, bank rec, credit notes, landed cost, VAT201), v2.8 collapses the daily journey between them: a "Needs attention today" strip on the dashboard, Cmd+K jumps to any doc number, unified Customer / Vendor 360 drawers, a slimmed-down Item Detail with tabs, PDF exports on every financial report, and a rebuild of how VAT is presented on quotes so mixed-rate lines can never look like a double-charge.</p>
+
+            <h3 id="dashboard-needs-attention-today-strip">Dashboard — "Needs attention today" strip</h3>
+            <div class="step">
+                <p>New panel at the very top of the dashboard turns the passive stats board into an action queue. Five click-through cards, refreshed every 60 seconds:</p>
+                <ul>
+                    <li><strong>Quotations awaiting reply</strong> — count + open value. Click → Sales &gt; Orders filtered to QUOTATION.</li>
+                    <li><strong>Sales orders with backorders</strong> — any SO where reservations exceed on-hand.</li>
+                    <li><strong>Overdue invoices</strong> — count + total balance owing.</li>
+                    <li><strong>Bills due this week</strong> — anything AWAITING_PAYMENT / PARTIAL / OVERDUE with a due date ≤ today+7.</li>
+                    <li><strong>Critical low stock</strong> — parts flagged critical on the inventory grid.</li>
+                </ul>
+                <p>Cards render even at zero so the layout doesn't shift; when every queue is empty the strip shows a "You are clear" state with a green tick.</p>
+            </div>
+
+            <h3 id="cmd-k-global-doc-number-search">Cmd+K — global doc-number search</h3>
+            <div class="step">
+                <p>The command palette (⌘K / Ctrl+K, top of the app) already searched pages, items, clients, and suppliers. It now also finds any <em>bookkeeping doc by its number</em>. Type <code>INV-</code>, <code>SO-</code>, <code>PO-</code>, <code>BILL-</code>, <code>QUO-</code>, <code>CN-</code>, or <code>DN-</code> and every match surfaces grouped by kind, with client/supplier and status in the subtitle.</p>
+                <ul>
+                    <li>Fuzzy match also runs against the subtitle so <em>"lumax invoice"</em> or <em>"digikey bill"</em> filter correctly.</li>
+                    <li>Enter jumps to the correct sub-tab (Sales &gt; Invoices for an <code>INV-</code>, Purchases &gt; Bills for a <code>BILL-</code>, etc).</li>
+                    <li>Doc index is fetched once per palette-open and cached for 60 s, so repeated ⌘K is instant.</li>
+                </ul>
+            </div>
+
+            <h3 id="customer-360-drawer">Customer 360 drawer</h3>
+            <div class="step">
+                <p>Bookkeeping &gt; Sales &gt; Customers — click any row (or the 👁 icon) and a right-side drawer opens with everything about that customer in one place. Header identity strip (name, contact, email/phone/VAT/address, status). Four metric cards up top: Open AR · Overdue count + value · Open orders (+ quotations) · Lifetime revenue.</p>
+                <ul>
+                    <li>Tabs: <em>Overview · Orders &amp; Quotes · Invoices · Payments · Credit Notes · Deliveries · Statement</em>. Each shows a count badge.</li>
+                    <li><em>Overview</em> renders a chronological activity feed mixing every doc kind, plus an "Overdue invoices" panel when any are past due.</li>
+                    <li><em>Statement</em> tab has the existing PDF download built in — no more hunting for the 📄 icon on the list.</li>
+                </ul>
+                <p>Answers "what's happening with Lumax right now?" in one click instead of jumping across four sub-tabs.</p>
+            </div>
+
+            <h3 id="vendor-360-drawer">Vendor 360 drawer</h3>
+            <div class="step">
+                <p>Bookkeeping &gt; Purchases &gt; Vendors — same drawer pattern as Customer 360, mirror-symmetric for the purchases side. Metrics: Open AP · Overdue bills · Open POs · YTD spend. Tabs: <em>Overview · Purchase Orders · Bills · Payments · Expenses</em>. Website link on the row still opens externally without popping the drawer.</p>
+            </div>
+
+            <h3 id="item-detail-three-tab-view-mode">Item Detail — three-tab view mode</h3>
+            <div class="step">
+                <p>The Item Detail modal grew to five stacked sections in view mode, which made scrolling the norm to reach the description. View mode is now split into three tabs — <em>Overview / Parameters / Sourcing</em> — with the headline metrics row (Stock / Cost / Holding value / Status / Category + reservations) pinned above the tab strip so those numbers are always one glance away.</p>
+                <ul>
+                    <li><strong>Overview</strong> — description, project, manufacturer, supplier, comments.</li>
+                    <li><strong>Parameters</strong> — CAD footprint, value/size, tolerance, bulk pricing.</li>
+                    <li><strong>Sourcing</strong> — packaging, last order date/qty, datasheet link.</li>
+                </ul>
+                <p>Edit mode is untouched — you edit less often than you view, so the full form still makes sense there.</p>
+            </div>
+
+            <h3 id="financial-reports-pdf-export-and-headline-metrics">Financial reports — PDF export &amp; headline metrics</h3>
+            <div class="step">
+                <p>P&amp;L, Balance Sheet, and Trial Balance now render to PDF via the same shared brand-header helper VAT201 uses. Each report also gains a headline metric strip so the important numbers show without scrolling:</p>
+                <ul>
+                    <li><strong>P&amp;L</strong>: Total income · Total expenses · Net profit (with margin %).</li>
+                    <li><strong>Balance Sheet</strong>: Total assets · liabilities · equity · a live "A = L + E" balanced check that renders a green tick or the delta when the ledger drifts.</li>
+                </ul>
+                <p>Hand any of the three to your accountant as a PDF from the Reports tab.</p>
+            </div>
+
+            <h3 id="quote-so-line-prices-now-display-excl-vat">Quote / SO — line prices now display Excl. VAT</h3>
+            <div class="step">
+                <p>Before v2.8, the line-item "Total" column on quotes and SOs showed the stored <em>gross</em> figure (VAT-inclusive on tax-inclusive lines). A customer adding the column arrived at the grand-total figure, then saw the summary add VAT on top — reading as a double-charge. The column now shows <strong>net (Excl. VAT) prices</strong>, so the sum equals the Subtotal exactly. Column headers relabelled <em>Price (Excl. VAT) / Total (Excl. VAT)</em>. Summary reads <em>Total (Excl. VAT) · VAT amount · Total</em>.</p>
+            </div>
+
+            <h3 id="quote-so-per-line-vat-column-and-mixed-rate-summary">Quote / SO — per-line VAT column &amp; mixed-rate summary</h3>
+            <div class="step">
+                <p>Every line-item row now shows the VAT status right in the table: <strong>15%</strong> for standard-rated, <strong>Exempt</strong> (amber) for labour / financial services / residential rent / education, <strong>0% (zero-rated)</strong> (secondary) for exports and basic foods. This ends the class of finance-team flag where the top-level VAT / Subtotal ratio isn't a clean 15% because one or more lines are non-standard.</p>
+                <p>When any line is Exempt or Zero-rated, the summary block splits per bucket so an auditor sees exactly where each figure came from:</p>
+                <ul>
+                    <li>Excl. VAT — Standard-rated</li>
+                    <li>Excl. VAT — Exempt supplies</li>
+                    <li>Excl. VAT — Zero-rated</li>
+                    <li><em>Total (Excl. VAT)</em></li>
+                    <li>15% VAT (Standard-rated only)</li>
+                    <li><em>Total</em></li>
+                </ul>
+                <p>On a uniform-rate quote (all lines Standard) the summary collapses back to the simple three-line form — no visual noise for the common case.</p>
+            </div>
+
+            <h3 id="quote-so-tax-classification-round-trips-edits-and-auto-fulfil">Quote / SO — tax classification round-trips edits &amp; auto-fulfil</h3>
+            <div class="step">
+                <p>Previously, picking Exempt or Zero-Rated on a quote line silently reverted to Standard on save (the client_order_items table didn't carry the tax field). Fixed:</p>
+                <ul>
+                    <li>Tax classification is now stored per line and re-hydrates when you re-open the editor.</li>
+                    <li>Auto-fulfil (quote / SO → invoice) copies the tax classification straight onto the generated invoice, so an Exempt quote → Exempt SO → Exempt invoice, and the Exempt total flows through VAT201 as an informational memo (not as Box 2 Zero-Rated).</li>
+                    <li>New line items now default to <strong>Standard VAT (15%)</strong> instead of "No tax" — the SA legal default for a taxable supply. Manual override to Exempt / Zero-Rated / None still one click.</li>
+                </ul>
+            </div>
+
+            <h3 id="vat201-exempt-vs-zero-rated-properly-separated">VAT201 — Exempt vs Zero-Rated properly separated</h3>
+            <div class="step">
+                <p>Prior versions bucketed Exempt and Zero-Rated together on Box 2 because both have rate = 0%. VAT201 now aggregates <em>per-line</em> using a new <code>tax_rates.kind</code> column, so Standard-rated / Zero-rated / Exempt each land in the right SARS box:</p>
+                <ul>
+                    <li><strong>Box 1 &amp; 4</strong> — Standard-rated sales + output VAT.</li>
+                    <li><strong>Box 2</strong> — Zero-rated sales (turnover contributor, taxable at 0%).</li>
+                    <li><strong>Informational memo</strong> — Exempt supplies (sales) and Exempt purchases. Not a SARS box; shown so you can see they're being handled separately.</li>
+                </ul>
+                <div class="warning">
+                    ⚠ <strong>Reminder:</strong> the VAT201 report is a computation aid, not a substitute for the SARS eFiling submission. Always cross-check every field on your official return before filing.
+                </div>
+            </div>
+
+            <h3 id="so-editor-admin-edit-for-quotation-and-draft">SO editor — Admin edit for QUOTATION &amp; DRAFT</h3>
+            <div class="step">
+                <p>Admins now see an <strong>Edit</strong> button on the SO/Quote viewer when the row is <code>QUOTATION</code> or <code>DRAFT</code>. Editor opens pre-filled from the current row; save PUTs the full doc (header + line replacement) atomically. Once an order moves past DRAFT (fulfilment started), editing is blocked with a 409 — a running fulfilment can't be silently rewritten from under picking or invoicing.</p>
+            </div>
+
+            <h3 id="po-bill-line-item-free-typed-sku-allowed">PO / Bill line item — free-typed SKU allowed</h3>
+            <div class="step">
+                <p>The SKU / Part# input on purchase-side line editors now accepts <em>free-typed</em> values, not only rows that exist in inventory. A supplier's own SKU that isn't yet in your catalogue no longer forces you to bail out and add the item first.</p>
+            </div>
+        </div>
+
+        <div class="section" id="whats-new-v27">
+            <h2>🆕 What's New (v2.7)</h2>
+            <p style="margin-bottom: 20px;">A very large release — five major pro-ERP features (Quotations, Bank Reconciliation, VAT201, Credit Notes, Landed Cost), a full pipeline of Save-PDF exports, live cross-user sync so an admin's import updates every open browser within seconds, and a wave of quality-of-life polish on the Add SKU form, inventory grid, and sales-order flow.</p>
+
+            <img class="shot" src="../guide/login-v27.jpg" alt="Tracklab IM sign-in screen showing the branded welcome header, email and password fields, forgot-password link and the orange Sign In button." style="max-width: 720px;">
+            <span class="shot-caption">Sign-in screen — the entry point for every session (unchanged, but included here for reference).</span>
+
+            <h3 id="sales-orders-quotations">Sales Orders → Quotations</h3>
+            <div class="step">
+                <p>The sales-order editor now has a <strong>Save as Quotation</strong> toggle. When on, the row is created with status <code>QUOTATION</code>, numbered <code>QUO-YYYY-NNNN</code> from its own sequence, and — critically — does not reserve stock.</p>
+                <ul>
+                    <li>Quotations are proposals, not commitments. No inventory movement until the client accepts.</li>
+                    <li>Every quote gets its own doc series so a QUO number never collides with an SO number.</li>
+                    <li>On the SO viewer, a green <strong>Accept → Convert to SO</strong> button flips status to <code>DRAFT</code>, mints a fresh SO number, and writes the deferred reservations transactionally.</li>
+                    <li><code>QUOTATION</code> is a new status pill (blue) and a new filter chip on the SO list.</li>
+                </ul>
+            </div>
+            <img class="shot" src="../guide/quotation-viewer.png" alt="Quotation viewer modal showing the QUOTATION status pill, line items, and the Accept → Convert to SO button">
+            <span class="shot-caption">Quotation viewer — QUO-YYYY-NNNN doc series, line items, and the green <em>Accept → Convert to SO</em> action that mints the SO number and writes reservations.</span>
+
+            <h3 id="auto-fulfil-macro-single-and-batch">Auto-Fulfil macro (single &amp; batch)</h3>
+            <div class="step">
+                <p>The SO viewer has a new <strong>Auto-Fulfil…</strong> button that runs the whole sales-order fulfilment chain in one transaction: create invoice → send (posts journal, decrements stock, releases reservation) → create delivery note → issue + complete → optional full-amount payment received. Every stage is a checkbox — turn any of them off and the rest still work.</p>
+                <ul>
+                    <li><strong>Batch mode:</strong> tick multiple SO rows in the list, and an <em>Auto-Fulfil N…</em> button appears next to New Sales Order. It runs each order in its own transaction so a bad row (missing lines, wrong status) shows as <code>FAILED</code> without dragging the rest down. Results table names every created invoice / delivery / payment number.</li>
+                    <li><strong>Safety:</strong> if the invoice already booked stock out, the delivery-note lines skip a second decrement automatically.</li>
+                </ul>
+            </div>
+            <h3 id="bookkeeping-save-pdf-everywhere">Bookkeeping — Save PDF everywhere</h3>
+            <div class="step">
+                <p>Every doc viewer in Bookkeeping has a <strong>Save PDF</strong> button next to Print. Clicking it downloads a properly-typeset PDF directly to your machine — no print-dialog dance, no "Save as PDF" destination picker.</p>
+                <ul>
+                    <li>Sales orders → <code>sales-order-SO-2026-0007.pdf</code></li>
+                    <li>Quotations → <code>quotation-QUO-2026-0002.pdf</code></li>
+                    <li>Invoices → <code>invoice-INV-2026-0011.pdf</code> (with Amount Paid + Balance Due lines)</li>
+                    <li>Bills → <code>bill-BILL-2026-0004.pdf</code></li>
+                    <li>Delivery notes → <code>delivery-note-DN-2026-0004.pdf</code> (Serial Numbers column, no money)</li>
+                    <li>Collection notes → <code>collection-note-CN-2026-0001.pdf</code></li>
+                    <li>Credit notes → <code>credit-note-CN-2026-0001.pdf</code></li>
+                    <li>Customer statements (from the Customers tab) → <code>customer-statement-Lumax-Energy-2026-01-31.pdf</code></li>
+                    <li>VAT201 return → <code>vat201-return-2026-01-01_2026-03-31.pdf</code></li>
+                </ul>
+                <p>Every doc uses the shared TRACKLAB brand header, autoTable line items, and SANS 24 money formatting so figures match the on-screen totals exactly.</p>
+            </div>
+
+            <h3 id="bank-reconciliation">Bank Reconciliation</h3>
+            <div class="step">
+                <p>New tab under Bookkeeping → Accounting → <strong>Bank Reconciliation</strong>. Reconcile a bank statement in three steps:</p>
+                <ol>
+                    <li><strong>Import CSV</strong> — pick the bank account, drop the file. The importer sniffs date / description / amount / reference columns (override if the guess is wrong) and normalises common date formats and comma decimals.</li>
+                    <li><strong>Auto-match</strong> runs immediately on save. Three passes: doc number found in the reference (100% confidence), exact amount within ±3 day window (90%), same for expenses (85%). Only unmatched lines are touched, so anything you resolved by hand stays put.</li>
+                    <li><strong>Reconcile</strong> per line — Pick a specific payment / expense, or Ignore for legit uncleared items. Complete when opening + lines = closing and every line is matched. Reconciled statements lock so retro edits can't quietly rewrite next month's opening balance.</li>
+                </ol>
+            </div>
+            <h3 id="vat201-return">VAT201 return</h3>
+            <div class="step">
+                <p>Bookkeeping → Reports → VAT201. Pick a period, hit Run. Dashboard cards for Output tax (Box 4) / Input tax (Box 15) / Net VAT / Zero-rated sales. Box breakdown table walks through Box 1, 2, 4, 14, 15 the same way SARS's eFiling form is laid out. Two supporting lists at the bottom expand every invoice and every bill that fed the numbers so an auditor can drill in.</p>
+                <ul>
+                    <li>Only rows with a live ledger status (invoices SENT / PARTIAL / PAID / OVERDUE; bills AWAITING_PAYMENT and onward) contribute. DRAFT and VOID are excluded.</li>
+                    <li><strong>Export CSV</strong> gives the full detail for review.</li>
+                    <li><strong>Save PDF</strong> produces an auditable printable version with a "verify each box on SARS eFiling before submission" disclaimer baked in.</li>
+                </ul>
+            </div>
+            <div class="warning">
+                ⚠ <strong>Reminder:</strong> the report is a computation aid, not a substitute for the SARS eFiling submission. Always cross-check every field on your official return before filing.
+            </div>
+
+            <h3 id="customer-statements">Customer statements</h3>
+            <div class="step">
+                <p>On the Customers tab, every row now has a <strong>📄 Statement</strong> button. Click it and a full PDF statement downloads immediately:</p>
+                <ul>
+                    <li>Interleaves every invoice (debit) and payment received (credit) chronologically with a running balance from opening.</li>
+                    <li>Aging matrix — Current / 1–30 / 31–60 / 61–90 / 90+ — on any still-open amount.</li>
+                    <li>Sorted list of overdue invoices with days-overdue.</li>
+                    <li>Filename: <code>customer-statement-&lt;client-name&gt;-&lt;YYYY-MM-DD&gt;.pdf</code></li>
+                </ul>
+                <p>Combined with the new credit-limit feature (planned next), this makes end-of-month collections a two-click job.</p>
+            </div>
+
+            <h3 id="credit-notes">Credit Notes</h3>
+            <div class="step">
+                <p>New tab under Bookkeeping → Sales → <strong>Credit Notes</strong>. Refunds / returns / write-offs now have a proper primitive:</p>
+                <ul>
+                    <li>Create one directly from an invoice viewer via the new <strong>Issue Credit Note</strong> button. Prompts for a reason and whether to restock returned lines. Every line pre-fills from the invoice at its original price.</li>
+                    <li>On <strong>Issue</strong>, the server posts <em>DR Sales Returns (4050) + DR VAT, CR AR</em>; restocks the flagged lines; and auto-applies the credit against the source invoice up to its remaining balance (dropping status back to PARTIAL or PAID).</li>
+                    <li>Any credit left over can be <strong>Applied</strong> against another open invoice for the same client, or <strong>Refunded</strong> as cash (DR AR, CR Bank).</li>
+                    <li>Status chain: <code>DRAFT → ISSUED → APPLIED / REFUNDED</code>.</li>
+                    <li>Save PDF includes Applied + Refunded + Remaining rows.</li>
+                </ul>
+            </div>
+            <div class="tip">
+                💡 <strong>Tip:</strong> the "Issue Credit Note" prompt has a "restock all lines back to inventory" confirmation. Say yes for a physical return, no for a price adjustment / goodwill credit.
+            </div>
+
+            <h3 id="landed-cost">Landed Cost</h3>
+            <div class="step">
+                <p>New tab under Bookkeeping → Purchases → <strong>Landed Cost</strong>. Bolt freight / duty / bank-charge bills onto the underlying goods bill so each unit's cost reflects its true landed price — not just what Digi-Key charged.</p>
+                <ol>
+                    <li>Record the goods bill as normal (e.g. <code>BILL-2026-0042</code> at $52.20 for 5000 resistors).</li>
+                    <li>Record the freight and duty bills separately (<code>BILL-2026-0043</code> R850, <code>BILL-2026-0044</code> R1240).</li>
+                    <li>Create a Landed Cost Batch — pick the goods bill on the left, the addon bills on the right (each tagged Freight / Duty / Bank / Other), and an allocation method (BY_VALUE = proportional to line total, BY_QTY = per unit).</li>
+                    <li>Preview shows every affected line's original → new unit cost + rounding delta.</li>
+                    <li><strong>Post</strong> writes a snapshot per line, rewrites <code>inventory.current_cost_dollar</code>, and posts <em>DR Inventory / CR Default Expense</em> for the total addon.</li>
+                </ol>
+                <p>Every downstream COGS + margin report picks up the landed cost automatically — no follow-up steps.</p>
+            </div>
+            <h3 id="inventory-grid-led-colours-reserved-quantities-prefix-picker">Inventory grid — LED colours, reserved quantities, prefix picker</h3>
+            <div class="step">
+                <p>Three related upgrades on the Items page:</p>
+                <ul>
+                    <li><strong>LED colour swatches</strong> — every LED row (Inventory grid, Search results, Item Detail modal, BOM Manager audit, Kit Booking Allocate modal, Alternates, Pick &amp; Place, Projects, Stock Tables, Pricing, Bulk Pricing Wizard, Procurement Shortage) shows a coloured dot next to the name with the detected colour (RGB / bi-colour split-fill for multi-colour LEDs). Detection reads name + description; non-LED rows are unaffected.</li>
+                    <li><strong>Reserved qty</strong> — cards for parts held by open sales-order reservations now show <em>"N reserved · M available"</em> under the stock number. If reservations exceed on-hand, that becomes a red <strong>OVERBOOKED · short K</strong> pill. Same breakdown surfaces on the Item Detail modal and the BOM Manager audit.</li>
+                    <li><strong>Add SKU stock-code prefix picker</strong> — in the New SKU modal, next to the Stock Code input, is a dropdown of every 3-letter prefix already used in inventory (ENC → ENC-004 (127), LED → LED-014 (9), etc.). Picking a prefix fills the input with the next available number in that family.</li>
+                </ul>
+            </div>
+            <h3 id="new-sku-supplier-pn-mfn-pn-comboboxes">New SKU — supplier PN + MFN PN, comboboxes</h3>
+            <div class="step">
+                <p>The Register New Inventory Component modal has grown up:</p>
+                <ul>
+                    <li><strong>Supplier part number</strong> input (e.g. <code>STM32G031F6P6-ND</code> for Digi-Key) and <strong>Manufacturer part number</strong> input (e.g. <code>STM32G031F6P6</code>) sit in a 2-column grid under the Preferred Supplier picker. They populate <code>sup_pn_1</code> and <code>man_pn_1</code>. Edit mode reads from the same slots so a round-trip preserves everything.</li>
+                    <li><strong>Category Class</strong> is now a type-to-search combobox. Filters as you type; if what you typed isn't in the list, the top row of the dropdown becomes "Add '&lt;typed&gt;' as new category" — Enter or click commits it. Same combobox in the Edit form.</li>
+                    <li><strong>Preferred Supplier</strong> is the same combobox in strict mode: filter as you type against the live suppliers list, but you can't commit a supplier that doesn't exist. If the supplier is genuinely new, add them under Bookkeeping → Vendors first — the hint in the empty dropdown says exactly that.</li>
+                    <li>Initial Stock Qty now accepts 0 (registering a SKU before its first PO arrives is a normal flow).</li>
+                    <li>Line-item SKU inputs on invoice / bill / PO editors also accept free-typed values now, so a supplier's own SKU that isn't in inventory yet doesn't force you to bail out and create the item first.</li>
+                </ul>
+            </div>
+            <h3 id="import-csv-xlsx-support-admin-gated-auto-backup">Import CSV — XLSX support, admin-gated, auto-backup</h3>
+            <div class="step">
+                <p>Bulk import on the Items page picked up three related upgrades:</p>
+                <ul>
+                    <li><strong>XLSX and XLS accepted</strong> alongside CSV. SheetJS parses the workbook client-side, converts the first sheet to CSV in memory, and the existing preview + upsert path handles it.</li>
+                    <li><strong>Admin-only</strong>. Only accounts with role admin see the Import CSV button; the same button is available for Export CSV to everyone.</li>
+                    <li><strong>Two backup files</strong> download automatically before the DB write: <code>inventory_backup_&lt;timestamp&gt;.csv</code> (full state before) and <code>inventory_import_&lt;timestamp&gt;.csv</code> (exactly the batch being applied). Rollback is a re-import of the backup file.</li>
+                </ul>
+            </div>
+
+            <h3 id="live-cross-user-sync">Live cross-user sync</h3>
+            <div class="step">
+                <p>Every 2xx write to any major entity now bumps a shared version counter on the server. Every open browser polls that counter every 25 seconds and, when anything moves, silently re-runs the initial bootstrap. So when an admin lands a CSV import, edits a client, posts a bill, or accepts a quotation, every other logged-in tab picks up the change within a single tick — no refresh needed.</p>
+                <p>Coverage: inventory · clients · client_orders · suppliers · bookkeeping (invoices / bills / POs / payments / dispatch) · projects · production_kits · BOM · pick-place.</p>
+            </div>
+
+            <h3 id="supplier-bom-generator">Supplier BOM Generator</h3>
+            <div class="step">
+                <p>Manufacturing → <strong>Supplier BOM Generator</strong>. Ported from the legacy Python desktop tool. Upload a pick-and-place BOM CSV; the tool resolves each part against the three inventory supplier-PN columns (Mouser = <code>sup_pn_1</code>, DigiKey = <code>sup_pn_2</code>, LCSC = <code>sup_pn_3</code>) with an equivalent-reel fallback for empty columns.</p>
+                <ul>
+                    <li>Auto-skips DNF rows during parse. Merges duplicates by summing qty-per-PCB.</li>
+                    <li>Per-supplier tabs with colour-coded rows: red for missing PN in that supplier, "NO PART" pill for parts unlisted at all three.</li>
+                    <li>Bulk toggles per tab: Check all / Uncheck all / Check only rows with PN.</li>
+                    <li>Board qty spinner multiplies through to every exported row.</li>
+                    <li>Exports in each supplier's preferred upload shape: Mouser <code>PN|qty</code>, DigiKey <code>Quantity,"Part Number"</code>, LCSC <code>Comment,Designator,Footprint,LCSC Part #,Quantity</code>.</li>
+                </ul>
+            </div>
+
+            <h3 id="money-formatting-standard-sans-24-iso-31">Money formatting standard (SANS 24 / ISO 31)</h3>
+            <div class="step">
+                <p>Every user-visible money and grouped-count display now routes through one shared formatter (<code>src/lib/formatMoney.ts</code>). Standard is South African: non-breaking-space thousands separator, dot decimal, no space between currency symbol and first digit. <code>R1 234 567.89</code>, <code>-$89.00</code>. Every card, table, PDF, and CSV picks it up automatically so a value never appears with one grouping on the dashboard and another on the invoice.</p>
+            </div>
+
+            <h3 id="alternates-simulation-map">Alternates — Simulation Map</h3>
+            <div class="step">
+                <p>In Manufacturing → Component Alternates, the "Simulation map active" chip in each group's footer is now a real button that opens a radial SVG view of the group: the highest-stock alternate at the centre, every other alternate arranged around it. Node radius scales with stock level, fill colour reports stock health (green / amber / red), and clicking a node opens that SKU in Item Detail.</p>
+            </div>
+        </div>
+
+        <div class="section" id="whats-new">
+            <h2>🆕 What's New (v2.6)</h2>
+
+            <h3 id="one-account-one-active-device">One account, one active device</h3>
+            <div class="step">
+                <p>Signing in on a new device now automatically signs the previous device out.</p>
+                <ul>
+                    <li>Log in on your phone → your desktop tab shows a toast reading <em>"Signed out — this account signed in from another device"</em> and drops back to the login screen.</li>
+                    <li>Detection happens on a 30-second heartbeat and immediately when you refocus the older tab.</li>
+                    <li>Explicit logout on either device only signs that one device out.</li>
+                </ul>
+            </div>
+            <div class="tip">
+                <strong>💡 Tip:</strong> If a device seems to hang on the login screen after signing in elsewhere, that's expected — sign back in on the device you want to use.
+            </div>
+
+            <h3 id="mobile-optimised-ui">Mobile-optimised UI</h3>
+            <div class="step">
+                <p>The app now detects screen size (breakpoint 768 px) and adapts the header and layout for phones.</p>
+                <ul>
+                    <li>The top-bar action buttons collapse to icons on small screens, freeing horizontal space.</li>
+                    <li>A new <code>useIsMobile</code> hook exposes the breakpoint to any component that needs to reflow.</li>
+                    <li>The rest of the pages are being reflowed page-by-page — check back for further mobile improvements.</li>
+                </ul>
+            </div>
+
+            <h3 id="smarter-live-price-lookup">Smarter Live Price Lookup</h3>
+            <div class="step">
+                <p>The Pricing Directory now recognises what kind of code you typed and routes the query intelligently instead of blindly asking every supplier.</p>
+                <ul>
+                    <li><strong>Internal SKU → MFN:</strong> if you type one of your own stock codes, the system looks up its stored manufacturer part number and searches suppliers by that instead.</li>
+                    <li><strong>DigiKey stock codes</strong> (anything ending in <code>-ND</code>): DigiKey is asked first to resolve the code to the real manufacturer part number, and every other supplier is then queried for that real MPN. Comparable quotes, no double DigiKey call.</li>
+                    <li><strong>LCSC stock codes</strong> (<code>C</code> followed by digits, e.g. <code>C105882</code>): only LCSC is queried. Other distributors would fuzzy-match to unrelated parts (a 100 nF capacitor was once priced at $241 via Pasternack this way).</li>
+                    <li><strong>Full supplier fan-out</strong> now covers DigiKey, Mouser, LCSC, Nexar (Octopart aggregator: Arrow, Heilind, Avnet, …), Element14/Farnell/Newark and TME.</li>
+                    <li><strong>Multi-currency:</strong> non-USD quotes (GBP, EUR, PLN, CAD, AUD, SGD) are converted to ZAR/USD automatically. Exchange rates refresh daily via a single call and are cached for 30 days.</li>
+                </ul>
+            </div>
+
+            <h3 id="api-keys-tab">API Keys tab</h3>
+            <div class="step">
+                <p>Provider credentials for every supplier can be entered and rotated from inside the app.</p>
+                <ul>
+                    <li>DigiKey now uses OAuth2 <code>client_credentials</code> where available — no more manual re-authorisation every day. Fall back to the 3-legged flow with <code>npm run digikey:authorize</code> if your account doesn't have it.</li>
+                    <li>TME uses its Private Key + Application Secret; the workflow help text now matches the current TME portal.</li>
+                    <li>The tab is protected against browser autofill hijack, so entering login credentials in your password manager will no longer redirect you to the search view.</li>
+                </ul>
+            </div>
+
+            <h3 id="distributor-stock-code-detection">Distributor stock code detection</h3>
+            <div class="step">
+                <p>Roughly 25% of items in the catalogue carry a distributor stock code in the manufacturer part number field. Live Price Lookup now handles those gracefully as described above; over time, cleaning those fields to the real MPN will give you the best cross-supplier price coverage.</p>
+            </div>
+        </div>
+
+            <nav class="pager" id="pager" aria-label="Previous and next page"></nav>
+        </div><!-- /.main-col -->
+    </div>
+
+    <div class="footer">
+        <p>© 2026 Tracklab IM · User documentation</p>
+    </div>
+    <script src="shared.js"></script>
+</body>
+</html>

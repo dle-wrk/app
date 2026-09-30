@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Suppliers &amp; Pricing — Tracklab IM Docs</title>
+    <link rel="icon" type="image/png" href="../tracklab-logo.png">
+    <link rel="stylesheet" href="shared.css">
+</head>
+<body data-page="suppliers-pricing">
+    <div class="header compact">
+        <h1>🏭 Suppliers &amp; Pricing</h1>
+        <p>Supplier records, live price lookup, bulk pricing and the price directory.</p>
+    </div>
+    <nav class="docs-nav" id="docs-nav" aria-label="Documentation">
+        <noscript><div class="docs-nav-bar"><div class="docs-nav-links"><a href="index.html">← All docs</a></div></div></noscript>
+    </nav>
+
+    <div class="container">
+        <aside class="toc" id="page-toc" aria-label="On this page"></aside>
+
+        <div class="main-col">
+        <div class="section" id="suppliers">
+            <h2>Supplier Management</h2>
+
+            <h3 id="accessing-suppliers">Accessing Suppliers</h3>
+            <div class="step">
+                <h4>Step 1: Navigate to Suppliers</h4>
+                <ol>
+                    <li>Click <span class="menu-path">Suppliers</span> in the sidebar</li>
+                    <li>View list of all registered suppliers</li>
+                    <li>Search by supplier name or ID</li>
+                </ol>
+            </div>
+
+            <h3 id="adding-a-new-supplier">Adding a New Supplier</h3>
+            <div class="step">
+                <h4>Register a Supplier</h4>
+                <ol>
+                    <li>Click <strong>Add Supplier</strong> button</li>
+                    <li>Enter supplier information:
+                        <ul>
+                            <li>Supplier Name</li>
+                            <li>Website URL</li>
+                            <li>Contact Email</li>
+                            <li>Notes (optional but recommended)</li>
+                            <li>Lead Time (in days)</li>
+                            <li>Response Time (in hours)</li>
+                        </ul>
+                    </li>
+                    <li>Click Save</li>
+                </ol>
+            </div>
+
+            <h3 id="supplier-performance-tracking">Supplier Performance Tracking</h3>
+            <div class="step">
+                <h4>Monitor Supplier Metrics</h4>
+                <ul>
+                    <li><strong>Lead Time:</strong> Average days from order to delivery</li>
+                    <li><strong>Response Time:</strong> Average hours to respond to inquiries</li>
+                    <li><strong>Quality Score:</strong> Tracked through defects and returns</li>
+                    <li><strong>Order History:</strong> View past purchase orders and completion rates</li>
+                </ul>
+            </div>
+
+            <div class="tip">
+                <strong>💡 Tip:</strong> Maintain multiple suppliers for critical components to avoid supply chain disruptions.
+            </div>
+        </div>
+
+        <div class="section" id="pricing">
+            <h2>Pricing Directory</h2>
+
+            <h3 id="accessing-pricing-tools">Accessing Pricing Tools</h3>
+            <div class="step">
+                <h4>Step 1: Open Pricing Directory</h4>
+                <ol>
+                    <li>Click <span class="menu-path">Pricing Directory</span> in the sidebar</li>
+                    <li>You'll see three tabs: Live Price Lookup, Bulk Pricing, Price Directory</li>
+                </ol>
+            </div>
+
+            <h3 id="live-price-lookup">Live Price Lookup</h3>
+            <div class="step">
+                <h4>Compare Supplier Prices in Real-Time</h4>
+                <ol>
+                    <li>Click the <strong>Live Price Lookup</strong> tab (Search icon)</li>
+                    <li>Enter one of: an internal SKU, a manufacturer part number, a DigiKey stock code (<code>…-ND</code>), or an LCSC stock code (<code>C</code> + digits)</li>
+                    <li>The system detects what you typed and queries the right suppliers:
+                        <ul>
+                            <li><strong>DigiKey</strong> (OAuth2 client_credentials or refresh token)</li>
+                            <li><strong>Mouser Electronics</strong></li>
+                            <li><strong>LCSC</strong> (live lookup + cached import)</li>
+                            <li><strong>Nexar / Octopart</strong> — aggregator covering Arrow, Heilind, Avnet and dozens more</li>
+                            <li><strong>Element14 / Farnell / Newark</strong> (Avnet)</li>
+                            <li><strong>TME</strong> (Transfer Multisort Elektronik)</li>
+                        </ul>
+                    </li>
+                    <li>Look for the notice above the result cards — it tells you when the search term was translated (SKU→MFN or DigiKey stock code → real MPN) or when a supplier was skipped because it wouldn't recognise the code (LCSC codes).</li>
+                    <li>View API usage meters to track credit consumption per provider</li>
+                    <li>Click "View listing" to visit the supplier webpage</li>
+                </ol>
+            </div>
+
+            <div class="tip">
+                <strong>💡 Tip:</strong> The system caches pricing data for 30 days per (provider, part, quantity) to keep API costs down. Non-USD quotes (GBP, EUR, PLN, CAD, AUD, SGD) are converted using daily exchange rates cached alongside them.
+            </div>
+
+            <div class="success">
+                <strong>✅ Fuzzy-match trap avoided:</strong> Sending an LCSC stock code like <code>C105882</code> to Mouser or Element14 used to return unrelated $200+ parts. Live Price Lookup now recognises those codes and only asks LCSC. If you need cross-supplier quotes for the same part, search by the real manufacturer part number instead.
+            </div>
+
+            <h3 id="bulk-pricing-wizard">Bulk Pricing Wizard</h3>
+            <div class="step">
+                <h4>Update Prices for Multiple Items</h4>
+                <ol>
+                    <li>Click the <strong>Bulk Pricing</strong> tab (Settings icon)</li>
+                    <li>Enter calibration parameters:
+                        <ul>
+                            <li>Wholesale volume breakpoints</li>
+                            <li>Percentage markups for different volumes</li>
+                        </ul>
+                    </li>
+                    <li>Select items to update</li>
+                    <li>Review calculated prices</li>
+                    <li>Click Apply to update database</li>
+                </ol>
+            </div>
+
+            <h3 id="price-directory-browser">Price Directory Browser</h3>
+            <div class="step">
+                <h4>Browse All Inventory Prices</h4>
+                <ol>
+                    <li>Click the <strong>Price Directory</strong> tab (Database icon)</li>
+                    <li>Browse paginated inventory (50 items per page)</li>
+                    <li>Filter by category using buttons (All Classes, Microcontrollers, Capacitors)</li>
+                    <li>Navigate pages using chevron buttons</li>
+                    <li>View total item count</li>
+                </ol>
+            </div>
+
+            <div class="success">
+                <strong>✅ Best Practice:</strong> Review pricing quarterly and update based on market conditions and supplier agreements.
+            </div>
+        </div>
+
+        <div class="section" id="lookup-matching">
+            <h2>How live lookup matches parts</h2>
+
+            <h3 id="smart-part-matching">Smart part matching</h3>
+            <div class="step">
+                <p>The Pricing Directory now recognises what kind of code you typed and routes the query intelligently instead of blindly asking every supplier.</p>
+                <ul>
+                    <li><strong>Internal SKU → MFN:</strong> if you type one of your own stock codes, the system looks up its stored manufacturer part number and searches suppliers by that instead.</li>
+                    <li><strong>DigiKey stock codes</strong> (anything ending in <code>-ND</code>): DigiKey is asked first to resolve the code to the real manufacturer part number, and every other supplier is then queried for that real MPN. Comparable quotes, no double DigiKey call.</li>
+                    <li><strong>LCSC stock codes</strong> (<code>C</code> followed by digits, e.g. <code>C105882</code>): only LCSC is queried. Other distributors would fuzzy-match to unrelated parts (a 100 nF capacitor was once priced at $241 via Pasternack this way).</li>
+                    <li><strong>Full supplier fan-out</strong> now covers DigiKey, Mouser, LCSC, Nexar (Octopart aggregator: Arrow, Heilind, Avnet, …), Element14/Farnell/Newark and TME.</li>
+                    <li><strong>Multi-currency:</strong> non-USD quotes (GBP, EUR, PLN, CAD, AUD, SGD) are converted to ZAR/USD automatically. Exchange rates refresh daily via a single call and are cached for 30 days.</li>
+                </ul>
+            </div>
+
+            <h3 id="distributor-stock-code-detection">Distributor stock code detection</h3>
+            <div class="step">
+                <p>Roughly 25% of items in the catalogue carry a distributor stock code in the manufacturer part number field. Live Price Lookup now handles those gracefully as described above; over time, cleaning those fields to the real MPN will give you the best cross-supplier price coverage.</p>
+            </div>
+        </div>
+
+            <nav class="pager" id="pager" aria-label="Previous and next page"></nav>
+        </div><!-- /.main-col -->
+    </div>
+
+    <div class="footer">
+        <p>© 2026 Tracklab IM · User documentation</p>
+    </div>
+    <script src="shared.js"></script>
+</body>
+</html>

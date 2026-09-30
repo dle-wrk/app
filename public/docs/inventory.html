@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Inventory &amp; Stock — Tracklab IM Docs</title>
+    <link rel="icon" type="image/png" href="../tracklab-logo.png">
+    <link rel="stylesheet" href="shared.css">
+</head>
+<body data-page="inventory">
+    <div class="header compact">
+        <h1>📦 Inventory &amp; Stock</h1>
+        <p>Items, stock levels, Add SKU, imports, item detail and stock tables.</p>
+    </div>
+    <nav class="docs-nav" id="docs-nav" aria-label="Documentation">
+        <noscript><div class="docs-nav-bar"><div class="docs-nav-links"><a href="index.html">← All docs</a></div></div></noscript>
+    </nav>
+
+    <div class="container">
+        <aside class="toc" id="page-toc" aria-label="On this page"></aside>
+
+        <div class="main-col">
+        <div class="section" id="inventory">
+            <h2>Inventory Management</h2>
+
+            <h3 id="accessing-inventory">Accessing Inventory</h3>
+            <div class="step">
+                <h4>Step 1: Navigate to Items & Inventory</h4>
+                <ol>
+                    <li>Click <span class="menu-path">Items & Inventory</span> in the sidebar</li>
+                    <li>You'll see a comprehensive table of all inventory items</li>
+                    <li>Use search (⌘K or Ctrl+K) to quickly find items by SKU, name, or ID</li>
+                </ol>
+            </div>
+
+            <h3 id="search-and-filter">Search and Filter</h3>
+            <div class="step">
+                <h4>Finding Specific Items</h4>
+                <ol>
+                    <li>Click the search box at the top: "Search SKU, name, ID..."</li>
+                    <li>Type part number, SKU, or item name</li>
+                    <li>Use dropdown filters:
+                        <ul>
+                            <li>Stock Code filter for exact SKU matches</li>
+                            <li>Status filter (Active/Inactive/etc.)</li>
+                            <li>Stock Health filter (All Levels, Low, Critical)</li>
+                        </ul>
+                    </li>
+                    <li>Results update in real-time</li>
+                </ol>
+            </div>
+
+            <div class="tip">
+                <strong>💡 Keyboard Shortcut:</strong> Press ⌘K (Mac) or Ctrl+K (Windows) from anywhere to open the global search.
+            </div>
+
+            <h3 id="adding-new-items">Adding New Items</h3>
+            <div class="step">
+                <h4>Step 1: Create a New Item</h4>
+                <ol>
+                    <li>Click the <strong>Add Item</strong> button</li>
+                    <li>Fill in required fields:
+                        <ul>
+                            <li>Part Number (unique identifier)</li>
+                            <li>Item Name</li>
+                            <li>Description</li>
+                            <li>Category (Component, Consumable, Product, etc.)</li>
+                            <li>Stock Level</li>
+                            <li>Unit Price</li>
+                            <li>Low Stock Level (threshold for alerts)</li>
+                        </ul>
+                    </li>
+                    <li>Click Save</li>
+                </ol>
+            </div>
+
+            <h3 id="updating-stock-levels">Updating Stock Levels</h3>
+            <div class="step">
+                <h4>Book In Components</h4>
+                <ol>
+                    <li>Click <strong>Book In Component</strong> button on dashboard</li>
+                    <li>Select the item to increase stock</li>
+                    <li>Enter quantity received</li>
+                    <li>Add reference/PO number</li>
+                    <li>Confirm transaction</li>
+                </ol>
+            </div>
+
+            <div class="step">
+                <h4>Book Out Components</h4>
+                <ol>
+                    <li>Select item in inventory table</li>
+                    <li>Click <strong>Book Out</strong> option</li>
+                    <li>Enter quantity used/removed</li>
+                    <li>Add project or work order reference</li>
+                    <li>Confirm transaction</li>
+                </ol>
+            </div>
+
+            <h3 id="item-details-and-editing">Item Details & Editing</h3>
+            <div class="step">
+                <h4>View Full Item Information</h4>
+                <ol>
+                    <li>Click an item row to expand details</li>
+                    <li>View all properties: manufacturer part numbers, supplier numbers, datasheets, weblinks</li>
+                    <li>Edit inline by clicking field values</li>
+                    <li>Changes save automatically</li>
+                </ol>
+            </div>
+
+            <div class="warning">
+                <strong>⚠️ Warning:</strong> Carefully verify part numbers before creating new items to avoid duplicates. Check Similar Part Numbers section before adding.
+            </div>
+        </div>
+
+        <div class="section" id="grid-and-item-detail">
+            <h2>Inventory grid & item detail</h2>
+
+            <h3 id="inventory-grid-led-colours-reserved-quantities-prefix-picker">Inventory grid — LED colours, reserved quantities, prefix picker</h3>
+            <div class="step">
+                <p>Three related upgrades on the Items page:</p>
+                <ul>
+                    <li><strong>LED colour swatches</strong> — every LED row (Inventory grid, Search results, Item Detail modal, BOM Manager audit, Kit Booking Allocate modal, Alternates, Pick &amp; Place, Projects, Stock Tables, Pricing, Bulk Pricing Wizard, Procurement Shortage) shows a coloured dot next to the name with the detected colour (RGB / bi-colour split-fill for multi-colour LEDs). Detection reads name + description; non-LED rows are unaffected.</li>
+                    <li><strong>Reserved qty</strong> — cards for parts held by open sales-order reservations now show <em>"N reserved · M available"</em> under the stock number. If reservations exceed on-hand, that becomes a red <strong>OVERBOOKED · short K</strong> pill. Same breakdown surfaces on the Item Detail modal and the BOM Manager audit.</li>
+                    <li><strong>Add SKU stock-code prefix picker</strong> — in the New SKU modal, next to the Stock Code input, is a dropdown of every 3-letter prefix already used in inventory (ENC → ENC-004 (127), LED → LED-014 (9), etc.). Picking a prefix fills the input with the next available number in that family.</li>
+                </ul>
+            </div>
+
+            <h3 id="item-detail-three-tab-view-mode">Item Detail — three-tab view mode</h3>
+            <div class="step">
+                <p>The Item Detail modal grew to five stacked sections in view mode, which made scrolling the norm to reach the description. View mode is now split into three tabs — <em>Overview / Parameters / Sourcing</em> — with the headline metrics row (Stock / Cost / Holding value / Status / Category + reservations) pinned above the tab strip so those numbers are always one glance away.</p>
+                <ul>
+                    <li><strong>Overview</strong> — description, project, manufacturer, supplier, comments.</li>
+                    <li><strong>Parameters</strong> — CAD footprint, value/size, tolerance, bulk pricing.</li>
+                    <li><strong>Sourcing</strong> — packaging, last order date/qty, datasheet link.</li>
+                </ul>
+                <p>Edit mode is untouched — you edit less often than you view, so the full form still makes sense there.</p>
+            </div>
+
+            <h3 id="new-sku-form-part-numbers-and-comboboxes">New SKU form — part numbers &amp; comboboxes</h3>
+            <div class="step">
+                <p>The Register New Inventory Component modal has grown up:</p>
+                <ul>
+                    <li><strong>Supplier part number</strong> input (e.g. <code>STM32G031F6P6-ND</code> for Digi-Key) and <strong>Manufacturer part number</strong> input (e.g. <code>STM32G031F6P6</code>) sit in a 2-column grid under the Preferred Supplier picker. They populate <code>sup_pn_1</code> and <code>man_pn_1</code>. Edit mode reads from the same slots so a round-trip preserves everything.</li>
+                    <li><strong>Category Class</strong> is now a type-to-search combobox. Filters as you type; if what you typed isn't in the list, the top row of the dropdown becomes "Add '&lt;typed&gt;' as new category" — Enter or click commits it. Same combobox in the Edit form.</li>
+                    <li><strong>Preferred Supplier</strong> is the same combobox in strict mode: filter as you type against the live suppliers list, but you can't commit a supplier that doesn't exist. If the supplier is genuinely new, add them under Bookkeeping → Vendors first — the hint in the empty dropdown says exactly that.</li>
+                    <li>Initial Stock Qty now accepts 0 (registering a SKU before its first PO arrives is a normal flow).</li>
+                    <li>Line-item SKU inputs on invoice / bill / PO editors also accept free-typed values now, so a supplier's own SKU that isn't in inventory yet doesn't force you to bail out and create the item first.</li>
+                </ul>
+            </div>
+
+            <h3 id="importing-inventory-csv-xlsx">Importing inventory (CSV / XLSX)</h3>
+            <div class="step">
+                <p>Bulk import on the Items page picked up three related upgrades:</p>
+                <ul>
+                    <li><strong>XLSX and XLS accepted</strong> alongside CSV. SheetJS parses the workbook client-side, converts the first sheet to CSV in memory, and the existing preview + upsert path handles it.</li>
+                    <li><strong>Admin-only</strong>. Only accounts with role admin see the Import CSV button; the same button is available for Export CSV to everyone.</li>
+                    <li><strong>Two backup files</strong> download automatically before the DB write: <code>inventory_backup_&lt;timestamp&gt;.csv</code> (full state before) and <code>inventory_import_&lt;timestamp&gt;.csv</code> (exactly the batch being applied). Rollback is a re-import of the backup file.</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="section" id="stock-tables-ledger">
+            <h2>Stock tables &amp; ledger</h2>
+
+            <h3 id="stock-tables-and-kits">Stock Tables & Kits</h3>
+            <div class="step">
+                <h4>Manage Stock Kits</h4>
+                <ol>
+                    <li>Navigate to <span class="menu-path">Stock Tables</span></li>
+                    <li>View all pre-assembled stock kits</li>
+                    <li>Track kit composition and availability</li>
+                    <li>Update kit status (READY, STAGING, BLOCKED, ACTIVE)</li>
+                    <li>Use kits in production for faster assembly</li>
+                </ol>
+            </div>
+
+            <h3 id="reports-and-ledger">Reports & Ledger</h3>
+            <div class="step">
+                <h4>Generate Business Reports</h4>
+                <ol>
+                    <li>Navigate to <span class="menu-path">Reports & Ledger</span></li>
+                    <li>Available reports:
+                        <ul>
+                            <li>Inventory reports (value, turnover, SKU counts)</li>
+                            <li>Transaction ledgers (all stock movements)</li>
+                            <li>Supplier performance reports</li>
+                            <li>Production cost analysis</li>
+                            <li>Quality metrics and trends</li>
+                        </ul>
+                    </li>
+                    <li>Export to PDF or Excel for sharing</li>
+                    <li>Schedule automated reports to email</li>
+                </ol>
+            </div>
+        </div>
+
+            <nav class="pager" id="pager" aria-label="Previous and next page"></nav>
+        </div><!-- /.main-col -->
+    </div>
+
+    <div class="footer">
+        <p>© 2026 Tracklab IM · User documentation</p>
+    </div>
+    <script src="shared.js"></script>
+</body>
+</html>

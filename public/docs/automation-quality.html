@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Automation &amp; Quality — Tracklab IM Docs</title>
+    <link rel="icon" type="image/png" href="../tracklab-logo.png">
+    <link rel="stylesheet" href="shared.css">
+</head>
+<body data-page="automation-quality">
+    <div class="header compact">
+        <h1>⚡ Automation &amp; Quality</h1>
+        <p>Automation rules, auto-PO, scheduled jobs, QA inspections, defects and NCRs.</p>
+    </div>
+    <nav class="docs-nav" id="docs-nav" aria-label="Documentation">
+        <noscript><div class="docs-nav-bar"><div class="docs-nav-links"><a href="index.html">← All docs</a></div></div></noscript>
+    </nav>
+
+    <div class="container">
+        <aside class="toc" id="page-toc" aria-label="On this page"></aside>
+
+        <div class="main-col">
+        <div class="section" id="automation">
+            <h2>Automation & Workflow Management</h2>
+
+            <h3 id="accessing-automation">Accessing Automation</h3>
+            <div class="step">
+                <h4>Step 1: Navigate to Automation</h4>
+                <ol>
+                    <li>Click <span class="menu-path">AUTOMATION → Automation Dashboard</span></li>
+                    <li>View real-time statistics:
+                        <ul>
+                            <li>Active Rules count</li>
+                            <li>Scheduled Jobs</li>
+                            <li>Pending Notifications</li>
+                            <li>Auto-POs Created</li>
+                        </ul>
+                    </li>
+                </ol>
+            </div>
+
+            <h3 id="creating-automation-rules">Creating Automation Rules</h3>
+            <div class="step">
+                <h4>Set Up an Automation Rule</h4>
+                <ol>
+                    <li>Click <strong>Automation Dashboard</strong> tab</li>
+                    <li>Click <strong>Create Rule</strong> button</li>
+                    <li>Define rule:
+                        <ul>
+                            <li>Rule name and description</li>
+                            <li>Trigger type (Manual, Scheduled, Event-Based)</li>
+                            <li>Conditions (e.g., stock level < 50)</li>
+                            <li>Actions to perform (Create PO, Send Email, etc.)</li>
+                        </ul>
+                    </li>
+                    <li>Set execution order if multiple actions</li>
+                    <li>Enable the rule</li>
+                </ol>
+            </div>
+
+            <h3 id="auto-po-configuration">Auto-PO Configuration</h3>
+            <div class="step">
+                <h4>Automatically Create Purchase Orders</h4>
+                <ol>
+                    <li>Click <strong>Auto-PO Config</strong> in sidebar</li>
+                    <li>For each component, configure:
+                        <ul>
+                            <li>Minimum stock level threshold</li>
+                            <li>Automatic PO quantity (how many to order)</li>
+                            <li>Preferred supplier</li>
+                            <li>Auto-approval option</li>
+                        </ul>
+                    </li>
+                    <li>Toggle component on/off for auto-PO</li>
+                    <li>System will create POs automatically when stock drops below minimum</li>
+                </ol>
+            </div>
+
+            <h3 id="scheduled-jobs">Scheduled Jobs</h3>
+            <div class="step">
+                <h4>Set Up Recurring Tasks</h4>
+                <ol>
+                    <li>Navigate to <strong>Automation Dashboard</strong></li>
+                    <li>Click <strong>Scheduled Jobs</strong> tab</li>
+                    <li>Create new job:
+                        <ul>
+                            <li>Job name and description</li>
+                            <li>Cron schedule (e.g., daily at 2 AM)</li>
+                            <li>Action to perform</li>
+                        </ul>
+                    </li>
+                    <li>Enable and monitor execution</li>
+                </ol>
+            </div>
+
+            <h3 id="event-logging">Event Logging</h3>
+            <div class="step">
+                <h4>Monitor Automation Events</h4>
+                <ol>
+                    <li>Click <strong>Event Log</strong> tab in Automation Dashboard</li>
+                    <li>View all automation activity:
+                        <ul>
+                            <li>Triggered rules</li>
+                            <li>Completed actions</li>
+                            <li>Failed operations</li>
+                            <li>Performance metrics</li>
+                        </ul>
+                    </li>
+                    <li>Export logs for analysis</li>
+                </ol>
+            </div>
+
+            <div class="success">
+                <strong>✅ Best Practice:</strong> Start with simple automation rules and gradually add complexity as you become comfortable with the system.
+            </div>
+        </div>
+
+        <div class="section" id="quality">
+            <h2>Quality & Compliance Management</h2>
+
+            <h3 id="accessing-quality-module">Accessing Quality Module</h3>
+            <div class="step">
+                <h4>Step 1: Navigate to Quality Management</h4>
+                <ol>
+                    <li>Click <span class="menu-path">QUALITY & ANALYTICS → Quality & Compliance</span></li>
+                    <li>View quality metrics dashboard with:
+                        <ul>
+                            <li>Passed inspections count</li>
+                            <li>Failed inspections count</li>
+                            <li>Open NCRs (Non-Conformance Reports)</li>
+                            <li>Defect rate percentage</li>
+                        </ul>
+                    </li>
+                </ol>
+            </div>
+
+            <h3 id="quality-assurance-inspections">Quality Assurance Inspections</h3>
+            <div class="step">
+                <h4>Schedule and Conduct QA Inspections</h4>
+                <ol>
+                    <li>Click <strong>QA Inspections</strong> tab</li>
+                    <li>Click <strong>Schedule Inspection</strong></li>
+                    <li>Define inspection:
+                        <ul>
+                            <li>Component/product to inspect</li>
+                            <li>Inspection type (incoming, in-process, final)</li>
+                            <li>Sample size</li>
+                            <li>Criteria and standards</li>
+                        </ul>
+                    </li>
+                    <li>Record results:
+                        <ul>
+                            <li>Accept/reject decision</li>
+                            <li>Defects found (if any)</li>
+                            <li>Inspector notes</li>
+                        </ul>
+                    </li>
+                    <li>System tracks pass/fail rates</li>
+                </ol>
+            </div>
+
+            <h3 id="defect-tracking">Defect Tracking</h3>
+            <div class="step">
+                <h4>Log and Manage Defects</h4>
+                <ol>
+                    <li>Click <strong>Defects</strong> tab</li>
+                    <li>Click <strong>Report Defect</strong></li>
+                    <li>Enter defect details:
+                        <ul>
+                            <li>Component/product affected</li>
+                            <li>Defect description</li>
+                            <li>Severity (CRITICAL, MAJOR, MINOR)</li>
+                            <li>Root cause (if known)</li>
+                            <li>Assigned to (person responsible for fix)</li>
+                        </ul>
+                    </li>
+                    <li>Track defect through resolution</li>
+                    <li>Close defect with closure notes</li>
+                </ol>
+            </div>
+
+            <h3 id="non-conformance-reports-ncr">Non-Conformance Reports (NCR)</h3>
+            <div class="step">
+                <h4>Create and Manage NCRs</h4>
+                <ol>
+                    <li>Click <strong>NCRs</strong> tab</li>
+                    <li>Click <strong>Create NCR</strong></li>
+                    <li>Document non-conformance:
+                        <ul>
+                            <li>NCR number (auto-generated)</li>
+                            <li>Issue description</li>
+                            <li>Item/process affected</li>
+                            <li>Date discovered</li>
+                            <li>Immediate action taken</li>
+                        </ul>
+                    </li>
+                    <li>Assign corrective actions</li>
+                    <li>Set follow-up review date</li>
+                    <li>Close NCR after verification</li>
+                </ol>
+            </div>
+
+            <div class="tip">
+                <strong>💡 Tip:</strong> Use the Quality module to maintain compliance records for ISO 9001, AS9100, or other standards your organization follows.
+            </div>
+        </div>
+
+        <div class="section" id="advanced-automation">
+            <h2>Advanced automation</h2>
+
+            <h3 id="advanced-automation-dashboard">Advanced Automation Dashboard</h3>
+            <div class="step">
+                <h4>ML Models and Predictive Analytics</h4>
+                <ol>
+                    <li>Navigate to <span class="menu-path">QUALITY & ANALYTICS → Advanced Automation</span></li>
+                    <li>Available ML features:
+                        <ul>
+                            <li><strong>Demand Forecasting:</strong> Predict future component needs</li>
+                            <li><strong>Anomaly Detection:</strong> Identify unusual patterns</li>
+                            <li><strong>Supplier Ranking:</strong> Rank suppliers by performance</li>
+                            <li><strong>Defect Prediction:</strong> Forecast quality issues</li>
+                        </ul>
+                    </li>
+                    <li>Train models on historical data</li>
+                    <li>Act on predictions to prevent issues</li>
+                </ol>
+            </div>
+        </div>
+
+            <nav class="pager" id="pager" aria-label="Previous and next page"></nav>
+        </div><!-- /.main-col -->
+    </div>
+
+    <div class="footer">
+        <p>© 2026 Tracklab IM · User documentation</p>
+    </div>
+    <script src="shared.js"></script>
+</body>
+</html>

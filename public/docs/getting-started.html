@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Getting Started — Tracklab IM Docs</title>
+    <link rel="icon" type="image/png" href="../tracklab-logo.png">
+    <link rel="stylesheet" href="shared.css">
+</head>
+<body data-page="getting-started">
+    <div class="header compact">
+        <h1>🚀 Getting Started</h1>
+        <p>First login, the interface, the dashboard and faster navigation.</p>
+    </div>
+    <nav class="docs-nav" id="docs-nav" aria-label="Documentation">
+        <noscript><div class="docs-nav-bar"><div class="docs-nav-links"><a href="index.html">← All docs</a></div></div></noscript>
+    </nav>
+
+    <div class="container">
+        <aside class="toc" id="page-toc" aria-label="On this page"></aside>
+
+        <div class="main-col">
+        <div class="section" id="getting-started">
+            <h2>Getting Started with Tracklab IM</h2>
+
+            <h3 id="first-time-login">First Time Login</h3>
+            <div class="step">
+                <h4>Step 1: Access the Application</h4>
+                <ol>
+                    <li>Open your web browser and navigate to your Tracklab IM instance URL</li>
+                    <li>You should see the main dashboard after authentication</li>
+                    <li>Your profile information appears in the bottom-left of the sidebar</li>
+                </ol>
+            </div>
+
+            <div class="tip">
+                <strong>💡 Tip:</strong> Bookmark the URL for quick access. The app works on any modern browser on desktop, tablet, or phone — the header collapses to icon buttons below 768 px so it stays usable on small screens.
+            </div>
+            <div class="tip">
+                <strong>🔐 Single-session sign-in:</strong> Only one device can be signed in per account. If you sign in on a phone while your desktop tab is still open, the desktop tab will show a toast and drop back to the login screen within 30 seconds (immediately on refocus).
+            </div>
+
+            <h3 id="understanding-the-interface">Understanding the Interface</h3>
+            <div class="step">
+                <h4>The Sidebar Navigation</h4>
+                <p>The left sidebar contains all major sections, organized into groups:</p>
+                <ul>
+                    <li><strong>Core Sections:</strong> Dashboard, Items & Inventory, Stock Tables, Reports & Ledger, Pricing Directory, Suppliers, Bookkeeping, Production Costs</li>
+                    <li><strong>CAD & Manufacturing:</strong> P&P Kit Booking, Bill of Materials, Pick & Place, Component Alternates</li>
+                    <li><strong>Project Management:</strong> Project Manager</li>
+                    <li><strong>Automation:</strong> Automation Dashboard, Auto-PO Config</li>
+                    <li><strong>Quality & Analytics:</strong> Quality & Compliance, Advanced Automation</li>
+                    <li><strong>Administration:</strong> System Config</li>
+                </ul>
+            </div>
+
+            <div class="tip">
+                <strong>💡 Tip:</strong> Click section headers in the sidebar to expand/collapse categories and reduce clutter.
+            </div>
+
+            <h3 id="essential-settings">Essential Settings</h3>
+            <div class="step">
+                <h4>Step 1: Configure Basic Settings</h4>
+                <ol>
+                    <li>Click <span class="menu-path">Settings → System Config</span></li>
+                    <li>Set your preferred visual theme (Dark/Light mode)</li>
+                    <li>Enable/disable low stock alerts</li>
+                    <li>Configure sync frequency for real-time or interval-based updates</li>
+                </ol>
+            </div>
+        </div>
+
+        <div class="section" id="dashboard">
+            <h2>Dashboard Overview</h2>
+
+            <p>The Dashboard is your command center, providing real-time insights into your inventory, projects, and business operations.</p>
+
+            <h3 id="key-metrics-cards">Key Metrics Cards</h3>
+            <div class="step">
+                <h4>Understanding the Statistics</h4>
+                <ul>
+                    <li><strong>Total Items:</strong> Complete inventory count with trend percentage</li>
+                    <li><strong>Active Projects:</strong> Current project status (Stable/At Risk)</li>
+                    <li><strong>Low Stock Alerts:</strong> Items requiring immediate attention</li>
+                    <li><strong>Critical Shortages:</strong> Number of items urgently needed</li>
+                    <li><strong>Asset Valuation:</strong> Total monetary value of inventory</li>
+                </ul>
+            </div>
+
+            <h3 id="stock-status-overview">Stock Status Overview</h3>
+            <div class="step">
+                <h4>Monitor Stock Levels (Donut Chart)</h4>
+                <ul>
+                    <li><strong>In Stock (66%):</strong> Items with adequate stock levels</li>
+                    <li><strong>Low Stock (8%):</strong> Items below low stock threshold - needs attention</li>
+                    <li><strong>Critical (26%):</strong> Items requiring urgent reordering</li>
+                </ul>
+                <p>Total SKU count displayed in center of donut chart</p>
+            </div>
+
+            <h3 id="quantity-by-component-type">Quantity by Component Type</h3>
+            <div class="step">
+                <h4>View Inventory Distribution by Component Category</h4>
+                <p>Grid display showing quantities for each component type:</p>
+                <ul>
+                    <li><strong>RES (Resistors):</strong> Total units and SKU count</li>
+                    <li><strong>CAP (Capacitors):</strong> Total units and SKU count</li>
+                    <li><strong>LED (LEDs):</strong> Total units and SKU count</li>
+                    <li><strong>And other component types:</strong> ZEN, MOS, CON, CHP, SCR, DIO, TRA, CAB, NUT, etc.</li>
+                </ul>
+                <p>Each card shows: Component type name, total units in stock, and number of unique SKUs</p>
+            </div>
+
+            <div class="success">
+                <strong>✅ Pro Tip:</strong> Check the dashboard every morning to identify critical items that need reordering.
+            </div>
+        </div>
+
+        <div class="section" id="navigating-faster">
+            <h2>Navigating faster</h2>
+
+            <h3 id="needs-attention-today-strip">“Needs attention today” strip</h3>
+            <div class="step">
+                <p>New panel at the very top of the dashboard turns the passive stats board into an action queue. Five click-through cards, refreshed every 60 seconds:</p>
+                <ul>
+                    <li><strong>Quotations awaiting reply</strong> — count + open value. Click → Sales &gt; Orders filtered to QUOTATION.</li>
+                    <li><strong>Sales orders with backorders</strong> — any SO where reservations exceed on-hand.</li>
+                    <li><strong>Overdue invoices</strong> — count + total balance owing.</li>
+                    <li><strong>Bills due this week</strong> — anything AWAITING_PAYMENT / PARTIAL / OVERDUE with a due date ≤ today+7.</li>
+                    <li><strong>Critical low stock</strong> — parts flagged critical on the inventory grid.</li>
+                </ul>
+                <p>Cards render even at zero so the layout doesn't shift; when every queue is empty the strip shows a "You are clear" state with a green tick.</p>
+            </div>
+
+            <h3 id="command-palette-k-ctrl-k">Command palette (⌘K / Ctrl+K)</h3>
+            <div class="step">
+                <p>The command palette (⌘K / Ctrl+K, top of the app) already searched pages, items, clients, and suppliers. It now also finds any <em>bookkeeping doc by its number</em>. Type <code>INV-</code>, <code>SO-</code>, <code>PO-</code>, <code>BILL-</code>, <code>QUO-</code>, <code>CN-</code>, or <code>DN-</code> and every match surfaces grouped by kind, with client/supplier and status in the subtitle.</p>
+                <ul>
+                    <li>Fuzzy match also runs against the subtitle so <em>"lumax invoice"</em> or <em>"digikey bill"</em> filter correctly.</li>
+                    <li>Enter jumps to the correct sub-tab (Sales &gt; Invoices for an <code>INV-</code>, Purchases &gt; Bills for a <code>BILL-</code>, etc).</li>
+                    <li>Doc index is fetched once per palette-open and cached for 60 s, so repeated ⌘K is instant.</li>
+                </ul>
+            </div>
+
+            <h3 id="live-cross-user-sync">Live cross-user sync</h3>
+            <div class="step">
+                <p>Every 2xx write to any major entity now bumps a shared version counter on the server. Every open browser polls that counter every 25 seconds and, when anything moves, silently re-runs the initial bootstrap. So when an admin lands a CSV import, edits a client, posts a bill, or accepts a quotation, every other logged-in tab picks up the change within a single tick — no refresh needed.</p>
+                <p>Coverage: inventory · clients · client_orders · suppliers · bookkeeping (invoices / bills / POs / payments / dispatch) · projects · production_kits · BOM · pick-place.</p>
+            </div>
+
+            <h3 id="mobile-optimised-ui">Mobile-optimised UI</h3>
+            <div class="step">
+                <p>The app now detects screen size (breakpoint 768 px) and adapts the header and layout for phones.</p>
+                <ul>
+                    <li>The top-bar action buttons collapse to icons on small screens, freeing horizontal space.</li>
+                    <li>A new <code>useIsMobile</code> hook exposes the breakpoint to any component that needs to reflow.</li>
+                    <li>The rest of the pages are being reflowed page-by-page — check back for further mobile improvements.</li>
+                </ul>
+            </div>
+        </div>
+
+            <nav class="pager" id="pager" aria-label="Previous and next page"></nav>
+        </div><!-- /.main-col -->
+    </div>
+
+    <div class="footer">
+        <p>© 2026 Tracklab IM · User documentation</p>
+    </div>
+    <script src="shared.js"></script>
+</body>
+</html>

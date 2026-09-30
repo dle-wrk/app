@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sales — Tracklab IM Docs</title>
+    <link rel="icon" type="image/png" href="../tracklab-logo.png">
+    <link rel="stylesheet" href="shared.css">
+</head>
+<body data-page="sales">
+    <div class="header compact">
+        <h1>🧾 Sales</h1>
+        <p>Customers, quotations, sales orders, VAT on quotes, invoices and credit notes.</p>
+    </div>
+    <nav class="docs-nav" id="docs-nav" aria-label="Documentation">
+        <noscript><div class="docs-nav-bar"><div class="docs-nav-links"><a href="index.html">← All docs</a></div></div></noscript>
+    </nav>
+
+    <div class="container">
+        <aside class="toc" id="page-toc" aria-label="On this page"></aside>
+
+        <div class="main-col">
+        <div class="section" id="customers">
+            <h2>Customers</h2>
+
+            <h3 id="customer-360-drawer">Customer 360 drawer</h3>
+            <div class="step">
+                <p>Bookkeeping &gt; Sales &gt; Customers — click any row (or the 👁 icon) and a right-side drawer opens with everything about that customer in one place. Header identity strip (name, contact, email/phone/VAT/address, status). Four metric cards up top: Open AR · Overdue count + value · Open orders (+ quotations) · Lifetime revenue.</p>
+                <ul>
+                    <li>Tabs: <em>Overview · Orders &amp; Quotes · Invoices · Payments · Credit Notes · Deliveries · Statement</em>. Each shows a count badge.</li>
+                    <li><em>Overview</em> renders a chronological activity feed mixing every doc kind, plus an "Overdue invoices" panel when any are past due.</li>
+                    <li><em>Statement</em> tab has the existing PDF download built in — no more hunting for the 📄 icon on the list.</li>
+                </ul>
+                <p>Answers "what's happening with Lumax right now?" in one click instead of jumping across four sub-tabs.</p>
+            </div>
+
+            <h3 id="customer-statements">Customer statements</h3>
+            <div class="step">
+                <p>On the Customers tab, every row now has a <strong>📄 Statement</strong> button. Click it and a full PDF statement downloads immediately:</p>
+                <ul>
+                    <li>Interleaves every invoice (debit) and payment received (credit) chronologically with a running balance from opening.</li>
+                    <li>Aging matrix — Current / 1–30 / 31–60 / 61–90 / 90+ — on any still-open amount.</li>
+                    <li>Sorted list of overdue invoices with days-overdue.</li>
+                    <li>Filename: <code>customer-statement-&lt;client-name&gt;-&lt;YYYY-MM-DD&gt;.pdf</code></li>
+                </ul>
+                <p>Combined with the new credit-limit feature (planned next), this makes end-of-month collections a two-click job.</p>
+            </div>
+        </div>
+
+        <div class="section" id="quotations-orders">
+            <h2>Quotations &amp; sales orders</h2>
+
+            <h3 id="quotations">Quotations</h3>
+            <div class="step">
+                <p>The sales-order editor now has a <strong>Save as Quotation</strong> toggle. When on, the row is created with status <code>QUOTATION</code>, numbered <code>QUO-YYYY-NNNN</code> from its own sequence, and — critically — does not reserve stock.</p>
+                <ul>
+                    <li>Quotations are proposals, not commitments. No inventory movement until the client accepts.</li>
+                    <li>Every quote gets its own doc series so a QUO number never collides with an SO number.</li>
+                    <li>On the SO viewer, a green <strong>Accept → Convert to SO</strong> button flips status to <code>DRAFT</code>, mints a fresh SO number, and writes the deferred reservations transactionally.</li>
+                    <li><code>QUOTATION</code> is a new status pill (blue) and a new filter chip on the SO list.</li>
+                </ul>
+            </div>
+            <img class="shot" src="../guide/quotation-viewer.png" alt="Quotation viewer modal showing the QUOTATION status pill, line items, and the Accept → Convert to SO button">
+            <span class="shot-caption">Quotation viewer — QUO-YYYY-NNNN doc series, line items, and the green <em>Accept → Convert to SO</em> action that mints the SO number and writes reservations.</span>
+
+            <h3 id="editing-quotations-and-draft-sos-admin">Editing quotations &amp; draft SOs (admin)</h3>
+            <div class="step">
+                <p>Admins now see an <strong>Edit</strong> button on the SO/Quote viewer when the row is <code>QUOTATION</code> or <code>DRAFT</code>. Editor opens pre-filled from the current row; save PUTs the full doc (header + line replacement) atomically. Once an order moves past DRAFT (fulfilment started), editing is blocked with a 409 — a running fulfilment can't be silently rewritten from under picking or invoicing.</p>
+            </div>
+
+            <h3 id="auto-fulfil-macro-single-and-batch">Auto-Fulfil macro (single &amp; batch)</h3>
+            <div class="step">
+                <p>The SO viewer has a new <strong>Auto-Fulfil…</strong> button that runs the whole sales-order fulfilment chain in one transaction: create invoice → send (posts journal, decrements stock, releases reservation) → create delivery note → issue + complete → optional full-amount payment received. Every stage is a checkbox — turn any of them off and the rest still work.</p>
+                <ul>
+                    <li><strong>Batch mode:</strong> tick multiple SO rows in the list, and an <em>Auto-Fulfil N…</em> button appears next to New Sales Order. It runs each order in its own transaction so a bad row (missing lines, wrong status) shows as <code>FAILED</code> without dragging the rest down. Results table names every created invoice / delivery / payment number.</li>
+                    <li><strong>Safety:</strong> if the invoice already booked stock out, the delivery-note lines skip a second decrement automatically.</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="section" id="vat-on-quotes">
+            <h2>VAT on quotes &amp; orders</h2>
+
+            <h3 id="line-prices-shown-excl-vat">Line prices shown Excl. VAT</h3>
+            <div class="step">
+                <p>Before v2.8, the line-item "Total" column on quotes and SOs showed the stored <em>gross</em> figure (VAT-inclusive on tax-inclusive lines). A customer adding the column arrived at the grand-total figure, then saw the summary add VAT on top — reading as a double-charge. The column now shows <strong>net (Excl. VAT) prices</strong>, so the sum equals the Subtotal exactly. Column headers relabelled <em>Price (Excl. VAT) / Total (Excl. VAT)</em>. Summary reads <em>Total (Excl. VAT) · VAT amount · Total</em>.</p>
+            </div>
+
+            <h3 id="per-line-vat-column-and-mixed-rate-summary">Per-line VAT column &amp; mixed-rate summary</h3>
+            <div class="step">
+                <p>Every line-item row now shows the VAT status right in the table: <strong>15%</strong> for standard-rated, <strong>Exempt</strong> (amber) for labour / financial services / residential rent / education, <strong>0% (zero-rated)</strong> (secondary) for exports and basic foods. This ends the class of finance-team flag where the top-level VAT / Subtotal ratio isn't a clean 15% because one or more lines are non-standard.</p>
+                <p>When any line is Exempt or Zero-rated, the summary block splits per bucket so an auditor sees exactly where each figure came from:</p>
+                <ul>
+                    <li>Excl. VAT — Standard-rated</li>
+                    <li>Excl. VAT — Exempt supplies</li>
+                    <li>Excl. VAT — Zero-rated</li>
+                    <li><em>Total (Excl. VAT)</em></li>
+                    <li>15% VAT (Standard-rated only)</li>
+                    <li><em>Total</em></li>
+                </ul>
+                <p>On a uniform-rate quote (all lines Standard) the summary collapses back to the simple three-line form — no visual noise for the common case.</p>
+            </div>
+
+            <h3 id="tax-classification-on-quote-and-so-lines">Tax classification on quote &amp; SO lines</h3>
+            <div class="step">
+                <p>Previously, picking Exempt or Zero-Rated on a quote line silently reverted to Standard on save (the client_order_items table didn't carry the tax field). Fixed:</p>
+                <ul>
+                    <li>Tax classification is now stored per line and re-hydrates when you re-open the editor.</li>
+                    <li>Auto-fulfil (quote / SO → invoice) copies the tax classification straight onto the generated invoice, so an Exempt quote → Exempt SO → Exempt invoice, and the Exempt total flows through VAT201 as an informational memo (not as Box 2 Zero-Rated).</li>
+                    <li>New line items now default to <strong>Standard VAT (15%)</strong> instead of "No tax" — the SA legal default for a taxable supply. Manual override to Exempt / Zero-Rated / None still one click.</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="section" id="invoices-credit-notes">
+            <h2>Invoices &amp; credit notes</h2>
+
+            <h3 id="creating-invoices">Creating Invoices</h3>
+            <div class="step">
+                <h4>Invoice Creation Process (Enhanced UI)</h4>
+                <ol>
+                    <li>Click <strong>Invoices</strong> tab</li>
+                    <li>Click <strong>Create Invoice</strong></li>
+                    <li>Fill invoice details:
+                        <ul>
+                            <li>Select customer</li>
+                            <li>Set invoice date and due date</li>
+                            <li>Choose currency (ZAR, USD, EUR, GBP)</li>
+                            <li>Enable <strong>Warranty Claim</strong> if this is a warranty replacement (voids all pricing)</li>
+                        </ul>
+                    </li>
+                    <li>Add line items using <strong>Smart Autocomplete</strong>:
+                        <ul>
+                            <li>Type SKU/Part # in autocomplete field</li>
+                            <li>System searches inventory and production products in real-time</li>
+                            <li>Click to select - automatically fills description and unit price</li>
+                            <li>Quantity and tax rate populated per item</li>
+                            <li>Line total updates automatically</li>
+                        </ul>
+                    </li>
+                    <li><strong>Modern Card-Based UI:</strong>
+                        <ul>
+                            <li>Each line item displayed as spacious card</li>
+                            <li>Clear visual hierarchy with line number and remove button</li>
+                            <li>Subtotal + Tax summary automatically calculated</li>
+                            <li>If warranty claim enabled, shows "Warranty claim - pricing voided"</li>
+                        </ul>
+                    </li>
+                    <li>Review subtotal, taxes, and total</li>
+                    <li>Click <strong>Finalize & Print</strong> (changed from "Finalize & Send")</li>
+                    <li>Generates print-ready PDF for delivery or email</li>
+                </ol>
+            </div>
+
+            <h3 id="invoice-features">Invoice Features</h3>
+            <div class="step">
+                <h4>Smart Item Autocomplete</h4>
+                <ul>
+                    <li><strong>Search Inventory & Production Items:</strong> Type part number to search both regular and production stock</li>
+                    <li><strong>Auto-populate Details:</strong> Selecting item fills description, unit price, and stock level</li>
+                    <li><strong>Dynamic Filtering:</strong> Results update as you type</li>
+                    <li><strong>Production Products:</strong> Invoices can include manufacturing items with selling prices</li>
+                </ul>
+            </div>
+
+            <div class="step">
+                <h4>Warranty Claims</h4>
+                <ul>
+                    <li>Enable toggle on invoice to mark as warranty claim</li>
+                    <li><strong>Effect:</strong> All line item pricing shows R0.00</li>
+                    <li><strong>Display:</strong> Shows "Warranty claim - pricing voided" indicator</li>
+                    <li><strong>Use Case:</strong> For warranty replacement orders with no charge</li>
+                </ul>
+            </div>
+
+            <h3 id="credit-notes">Credit Notes</h3>
+            <div class="step">
+                <p>New tab under Bookkeeping → Sales → <strong>Credit Notes</strong>. Refunds / returns / write-offs now have a proper primitive:</p>
+                <ul>
+                    <li>Create one directly from an invoice viewer via the new <strong>Issue Credit Note</strong> button. Prompts for a reason and whether to restock returned lines. Every line pre-fills from the invoice at its original price.</li>
+                    <li>On <strong>Issue</strong>, the server posts <em>DR Sales Returns (4050) + DR VAT, CR AR</em>; restocks the flagged lines; and auto-applies the credit against the source invoice up to its remaining balance (dropping status back to PARTIAL or PAID).</li>
+                    <li>Any credit left over can be <strong>Applied</strong> against another open invoice for the same client, or <strong>Refunded</strong> as cash (DR AR, CR Bank).</li>
+                    <li>Status chain: <code>DRAFT → ISSUED → APPLIED / REFUNDED</code>.</li>
+                    <li>Save PDF includes Applied + Refunded + Remaining rows.</li>
+                </ul>
+            </div>
+            <div class="tip">
+                💡 <strong>Tip:</strong> the "Issue Credit Note" prompt has a "restock all lines back to inventory" confirmation. Say yes for a physical return, no for a price adjustment / goodwill credit.
+            </div>
+        </div>
+
+            <nav class="pager" id="pager" aria-label="Previous and next page"></nav>
+        </div><!-- /.main-col -->
+    </div>
+
+    <div class="footer">
+        <p>© 2026 Tracklab IM · User documentation</p>
+    </div>
+    <script src="shared.js"></script>
+</body>
+</html>

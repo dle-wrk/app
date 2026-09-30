@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manufacturing &amp; Projects — Tracklab IM Docs</title>
+    <link rel="icon" type="image/png" href="../tracklab-logo.png">
+    <link rel="stylesheet" href="shared.css">
+</head>
+<body data-page="manufacturing">
+    <div class="header compact">
+        <h1>🔧 Manufacturing &amp; Projects</h1>
+        <p>BOMs, production kits, pick &amp; place, alternates, projects and supplier BOMs.</p>
+    </div>
+    <nav class="docs-nav" id="docs-nav" aria-label="Documentation">
+        <noscript><div class="docs-nav-bar"><div class="docs-nav-links"><a href="index.html">← All docs</a></div></div></noscript>
+    </nav>
+
+    <div class="container">
+        <aside class="toc" id="page-toc" aria-label="On this page"></aside>
+
+        <div class="main-col">
+        <div class="section" id="manufacturing">
+            <h2>Manufacturing & Production</h2>
+
+            <h3 id="bill-of-materials-bom">Bill of Materials (BOM)</h3>
+            <div class="step">
+                <h4>Create and Manage BOMs</h4>
+                <ol>
+                    <li>Navigate to <span class="menu-path">CAD & MANUFACTURING → Bill of Materials</span></li>
+                    <li>Click <strong>Create New BOM</strong></li>
+                    <li>Enter assembly name and description</li>
+                    <li>Add components by:
+                        <ul>
+                            <li>Searching existing inventory</li>
+                            <li>Specifying quantity needed per unit</li>
+                            <li>Adding designator (reference number)</li>
+                            <li>Including footprint and package info</li>
+                        </ul>
+                    </li>
+                    <li>Review total component cost</li>
+                    <li>Save BOM for production use</li>
+                </ol>
+            </div>
+
+            <h3 id="production-kits">Production Kits</h3>
+            <div class="step">
+                <h4>Manage Production Kits</h4>
+                <ol>
+                    <li>Navigate to <span class="menu-path">CAD & MANUFACTURING → P&P Kit Booking</span></li>
+                    <li>View available kits with status:
+                        <ul>
+                            <li>READY: Available for use</li>
+                            <li>STAGING: Being prepared</li>
+                            <li>BLOCKED: Temporarily unavailable</li>
+                            <li>ACTIVE: Currently in use</li>
+                        </ul>
+                    </li>
+                    <li>Book a kit for a production run</li>
+                    <li>Track kit status and update as production progresses</li>
+                </ol>
+            </div>
+
+            <h3 id="pick-and-place-operations">Pick & Place Operations</h3>
+            <div class="step">
+                <h4>Manage Pick & Place Components</h4>
+                <ol>
+                    <li>Navigate to <span class="menu-path">CAD & MANUFACTURING → Pick & Place</span></li>
+                    <li>View all P&P components organized by project</li>
+                    <li>Track component designators and quantities</li>
+                    <li>Update placement status as manufacturing progresses</li>
+                </ol>
+            </div>
+
+            <h3 id="production-costs">Production Costs</h3>
+            <div class="step">
+                <h4>Calculate and Track Production Costs</h4>
+                <ol>
+                    <li>Navigate to <span class="menu-path">Production Costs</span></li>
+                    <li>View products with:
+                        <ul>
+                            <li>Model numbers</li>
+                            <li>Production cost (BOM cost + labor)</li>
+                            <li>Selling price</li>
+                            <li>Margin calculation</li>
+                        </ul>
+                    </li>
+                    <li>Edit costs and prices as needed</li>
+                </ol>
+            </div>
+
+            <div class="tip">
+                <strong>💡 Tip:</strong> Track BOM costs carefully - they're the foundation of accurate pricing and margin calculations.
+            </div>
+        </div>
+
+        <div class="section" id="alternates-projects">
+            <h2>Alternates, projects &amp; supplier BOMs</h2>
+
+            <h3 id="component-alternates">Component Alternates</h3>
+            <div class="step">
+                <h4>Manage Component Substitutes</h4>
+                <ol>
+                    <li>Navigate to <span class="menu-path">CAD & MANUFACTURING → Component Alternates</span></li>
+                    <li>Define alternate components for:
+                        <ul>
+                            <li>Supply chain flexibility</li>
+                            <li>Cost optimization</li>
+                            <li>Lead time management</li>
+                        </ul>
+                    </li>
+                    <li>Mark alternates with compatibility level</li>
+                    <li>Use in BOMs when primary components unavailable</li>
+                </ol>
+            </div>
+
+            <h3 id="alternates-simulation-map">Alternates — Simulation Map</h3>
+            <div class="step">
+                <p>In Manufacturing → Component Alternates, the "Simulation map active" chip in each group's footer is now a real button that opens a radial SVG view of the group: the highest-stock alternate at the centre, every other alternate arranged around it. Node radius scales with stock level, fill colour reports stock health (green / amber / red), and clicking a node opens that SKU in Item Detail.</p>
+            </div>
+
+            <h3 id="supplier-bom-generator">Supplier BOM Generator</h3>
+            <div class="step">
+                <p>Manufacturing → <strong>Supplier BOM Generator</strong>. Ported from the legacy Python desktop tool. Upload a pick-and-place BOM CSV; the tool resolves each part against the three inventory supplier-PN columns (Mouser = <code>sup_pn_1</code>, DigiKey = <code>sup_pn_2</code>, LCSC = <code>sup_pn_3</code>) with an equivalent-reel fallback for empty columns.</p>
+                <ul>
+                    <li>Auto-skips DNF rows during parse. Merges duplicates by summing qty-per-PCB.</li>
+                    <li>Per-supplier tabs with colour-coded rows: red for missing PN in that supplier, "NO PART" pill for parts unlisted at all three.</li>
+                    <li>Bulk toggles per tab: Check all / Uncheck all / Check only rows with PN.</li>
+                    <li>Board qty spinner multiplies through to every exported row.</li>
+                    <li>Exports in each supplier's preferred upload shape: Mouser <code>PN|qty</code>, DigiKey <code>Quantity,"Part Number"</code>, LCSC <code>Comment,Designator,Footprint,LCSC Part #,Quantity</code>.</li>
+                </ul>
+            </div>
+
+            <h3 id="project-management">Project Management</h3>
+            <div class="step">
+                <h4>Manage Projects and Deployments</h4>
+                <ol>
+                    <li>Navigate to <span class="menu-path">PROJECT MANAGEMENT → Project Manager</span></li>
+                    <li>Create new projects with:
+                        <ul>
+                            <li>Project name and description</li>
+                            <li>Timeline (start/end dates)</li>
+                            <li>Assigned team members</li>
+                            <li>Design specifications</li>
+                            <li>Status tracking (Planning, Active, Completed)</li>
+                        </ul>
+                    </li>
+                    <li>Link BOMs and production kits to projects</li>
+                    <li>Track project progress and resource allocation</li>
+                </ol>
+            </div>
+        </div>
+
+            <nav class="pager" id="pager" aria-label="Previous and next page"></nav>
+        </div><!-- /.main-col -->
+    </div>
+
+    <div class="footer">
+        <p>© 2026 Tracklab IM · User documentation</p>
+    </div>
+    <script src="shared.js"></script>
+</body>
+</html>

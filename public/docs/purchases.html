@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Purchases — Tracklab IM Docs</title>
+    <link rel="icon" type="image/png" href="../tracklab-logo.png">
+    <link rel="stylesheet" href="shared.css">
+</head>
+<body data-page="purchases">
+    <div class="header compact">
+        <h1>🛒 Purchases</h1>
+        <p>Vendors, purchase orders, bills and landed cost.</p>
+    </div>
+    <nav class="docs-nav" id="docs-nav" aria-label="Documentation">
+        <noscript><div class="docs-nav-bar"><div class="docs-nav-links"><a href="index.html">← All docs</a></div></div></noscript>
+    </nav>
+
+    <div class="container">
+        <aside class="toc" id="page-toc" aria-label="On this page"></aside>
+
+        <div class="main-col">
+        <div class="section" id="vendors">
+            <h2>Vendors</h2>
+
+            <h3 id="vendor-360-drawer">Vendor 360 drawer</h3>
+            <div class="step">
+                <p>Bookkeeping &gt; Purchases &gt; Vendors — same drawer pattern as Customer 360, mirror-symmetric for the purchases side. Metrics: Open AP · Overdue bills · Open POs · YTD spend. Tabs: <em>Overview · Purchase Orders · Bills · Payments · Expenses</em>. Website link on the row still opens externally without popping the drawer.</p>
+            </div>
+        </div>
+
+        <div class="section" id="purchase-orders">
+            <h2>Purchase orders</h2>
+
+            <h3 id="purchase-orders-supplier-and-customer-modes">Purchase Orders — Supplier &amp; Customer modes</h3>
+            <div class="step">
+                <h4>Create Purchase Orders with Mode Selection</h4>
+                <ol>
+                    <li>Click <strong>Purchase Orders</strong> tab</li>
+                    <li>Click <strong>Create PO</strong></li>
+                    <li><strong>Select Order Type (NEW!):</strong>
+                        <ul>
+                            <li><strong>Supplier Mode:</strong> For ordering regular inventory/components
+                                <ul>
+                                    <li>Shows inventory items (non-production stock)</li>
+                                    <li>Select from suppliers list (Mouser, Digikey, LCSC, etc.)</li>
+                                    <li>Use for component sourcing and inventory replenishment</li>
+                                </ul>
+                            </li>
+                            <li><strong>Customer Mode:</strong> For customer production orders
+                                <ul>
+                                    <li>Shows production stock items only</li>
+                                    <li>Select from customers list (Bokpoort, Damlaagte, DEWA, Sasol, etc.)</li>
+                                    <li>Use for custom manufacturing and special orders</li>
+                                </ul>
+                            </li>
+                        </ul>
+                    </li>
+                    <li><strong>Dropdown automatically updates:</strong> Shows suppliers or customers based on selected mode</li>
+                    <li>Set order date and expected delivery date</li>
+                    <li>Add line items using smart autocomplete:
+                        <ul>
+                            <li>Items filtered based on selected mode (inventory vs production)</li>
+                            <li>Auto-populate unit price and description</li>
+                            <li>Select tax rate</li>
+                        </ul>
+                    </li>
+                    <li>System calculates subtotal, tax, and total automatically</li>
+                    <li>Click <strong>Save Draft</strong> to save without sending</li>
+                    <li>Click <strong>Save & Send</strong> to submit to supplier/customer</li>
+                </ol>
+            </div>
+
+            <h3 id="purchase-order-modes-explained">Purchase Order Modes Explained</h3>
+            <div class="step">
+                <h4>Supplier Mode vs Customer Mode</h4>
+                <table>
+                    <tr>
+                        <th>Feature</th>
+                        <th>Supplier Mode</th>
+                        <th>Customer Mode</th>
+                    </tr>
+                    <tr>
+                        <td><strong>Partner Type</strong></td>
+                        <td>External Suppliers</td>
+                        <td>Customers/Clients</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Item Filter</strong></td>
+                        <td>Regular Inventory Items</td>
+                        <td>Production Stock Items</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Use Case</strong></td>
+                        <td>Component Ordering</td>
+                        <td>Custom Manufacturing</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Status Flow</strong></td>
+                        <td>DRAFT → SENT → RECEIVED</td>
+                        <td>DRAFT → SENT → RECEIVED</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Convert to Bill</strong></td>
+                        <td>Yes (from supplier)</td>
+                        <td>Yes (bill to customer)</td>
+                    </tr>
+                </table>
+            </div>
+
+            <h3 id="free-typed-skus-on-po-and-bill-lines">Free-typed SKUs on PO &amp; bill lines</h3>
+            <div class="step">
+                <p>The SKU / Part# input on purchase-side line editors now accepts <em>free-typed</em> values, not only rows that exist in inventory. A supplier's own SKU that isn't yet in your catalogue no longer forces you to bail out and add the item first.</p>
+            </div>
+        </div>
+
+        <div class="section" id="bills-landed-cost">
+            <h2>Bills &amp; landed cost</h2>
+
+            <h3 id="managing-bills-purchase-invoices">Managing Bills (Purchase Invoices)</h3>
+            <div class="step">
+                <h4>Record Supplier Bills</h4>
+                <ol>
+                    <li>Click <strong>Bills</strong> tab</li>
+                    <li>Click <strong>Create Bill</strong></li>
+                    <li>Select supplier</li>
+                    <li>Enter bill number and date</li>
+                    <li>Add line items with amounts and accounts</li>
+                    <li>Save and track for payment processing</li>
+                </ol>
+            </div>
+
+            <h3 id="landed-cost">Landed Cost</h3>
+            <div class="step">
+                <p>New tab under Bookkeeping → Purchases → <strong>Landed Cost</strong>. Bolt freight / duty / bank-charge bills onto the underlying goods bill so each unit's cost reflects its true landed price — not just what Digi-Key charged.</p>
+                <ol>
+                    <li>Record the goods bill as normal (e.g. <code>BILL-2026-0042</code> at $52.20 for 5000 resistors).</li>
+                    <li>Record the freight and duty bills separately (<code>BILL-2026-0043</code> R850, <code>BILL-2026-0044</code> R1240).</li>
+                    <li>Create a Landed Cost Batch — pick the goods bill on the left, the addon bills on the right (each tagged Freight / Duty / Bank / Other), and an allocation method (BY_VALUE = proportional to line total, BY_QTY = per unit).</li>
+                    <li>Preview shows every affected line's original → new unit cost + rounding delta.</li>
+                    <li><strong>Post</strong> writes a snapshot per line, rewrites <code>inventory.current_cost_dollar</code>, and posts <em>DR Inventory / CR Default Expense</em> for the total addon.</li>
+                </ol>
+                <p>Every downstream COGS + margin report picks up the landed cost automatically — no follow-up steps.</p>
+            </div>
+        </div>
+
+            <nav class="pager" id="pager" aria-label="Previous and next page"></nav>
+        </div><!-- /.main-col -->
+    </div>
+
+    <div class="footer">
+        <p>© 2026 Tracklab IM · User documentation</p>
+    </div>
+    <script src="shared.js"></script>
+</body>
+</html>

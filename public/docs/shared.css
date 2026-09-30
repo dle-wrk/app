@@ -1,0 +1,662 @@
+/* Tracklab IM docs — shared styles for every page under /docs/.
+   Base rules carried over from the original single-page guide; the
+   multi-page chrome (nav, search, pager, tiles) is appended below. */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', sans-serif;
+    line-height: 1.6;
+    color: #333;
+    background-color: #f5f5f5;
+}
+
+.header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 60px 20px;
+    text-align: center;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+
+.header h1 {
+    font-size: 2.5em;
+    margin-bottom: 10px;
+}
+
+.header p {
+    font-size: 1.2em;
+    opacity: 0.9;
+}
+
+.container {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 40px 20px;
+    /* Two-column: sticky TOC on the left, main content on the
+       right. align-items: start is what lets the TOC actually
+       stick — a stretched grid item can't scroll independently. */
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    gap: 40px;
+    align-items: start;
+}
+
+.toc {
+    background: white;
+    padding: 24px 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    /* Stick to the viewport as the reader scrolls the main column.
+       max-height + overflow keeps a long TOC scrollable inside
+       its own box instead of pushing off-screen. */
+    position: sticky;
+    top: 20px;
+    max-height: calc(100vh - 40px);
+    overflow-y: auto;
+}
+
+.toc h2 {
+    color: #667eea;
+    margin-bottom: 16px;
+    font-size: 1.15em;
+}
+
+.toc ul {
+    list-style: none;
+}
+
+.toc li {
+    margin-bottom: 6px;
+}
+
+.toc a {
+    color: #667eea;
+    text-decoration: none;
+    font-weight: 500;
+    display: block;
+    padding: 6px 8px;
+    border-radius: 4px;
+    font-size: 0.9em;
+    line-height: 1.35;
+}
+
+.toc a:hover {
+    background: #f0f2ff;
+    text-decoration: none;
+}
+
+.main-col {
+    min-width: 0; /* prevents grid child from overflowing wide code blocks */
+}
+
+.section {
+    background: white;
+    padding: 40px;
+    margin-bottom: 30px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.section h2 {
+    color: #667eea;
+    font-size: 2em;
+    margin-bottom: 20px;
+    border-bottom: 3px solid #667eea;
+    padding-bottom: 10px;
+}
+
+.section h3 {
+    color: #764ba2;
+    font-size: 1.3em;
+    margin-top: 30px;
+    margin-bottom: 15px;
+}
+
+.step {
+    background: #f9f9f9;
+    border-left: 4px solid #667eea;
+    padding: 20px;
+    margin: 20px 0;
+    border-radius: 4px;
+}
+
+.step h4 {
+    color: #667eea;
+    margin-bottom: 10px;
+    font-size: 1.1em;
+}
+
+.step p {
+    color: #555;
+    margin-bottom: 10px;
+}
+
+.step ol, .step ul {
+    margin-left: 20px;
+    margin-top: 10px;
+}
+
+.step li {
+    margin-bottom: 8px;
+}
+
+.image-placeholder {
+    background: #e8e8e8;
+    border: 2px dashed #999;
+    border-radius: 4px;
+    padding: 40px;
+    text-align: center;
+    margin: 20px 0;
+    color: #666;
+}
+
+.image-placeholder img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 4px;
+}
+
+.tip {
+    background: #e8f4f8;
+    border-left: 4px solid #00a8cc;
+    padding: 15px 20px;
+    margin: 15px 0;
+    border-radius: 4px;
+    color: #00598a;
+}
+
+.warning {
+    background: #fff3cd;
+    border-left: 4px solid #ffc107;
+    padding: 15px 20px;
+    margin: 15px 0;
+    border-radius: 4px;
+    color: #856404;
+}
+
+.success {
+    background: #d4edda;
+    border-left: 4px solid #28a745;
+    padding: 15px 20px;
+    margin: 15px 0;
+    border-radius: 4px;
+    color: #155724;
+}
+
+/* Inline screenshots, added for the v2.7 update. Keep the
+   frame minimal so a wide screenshot doesn't blow past the
+   narrower text column above and below it. */
+.shot {
+    display: block;
+    max-width: 100%;
+    margin: 18px auto;
+    border: 1px solid #d0d0d0;
+    border-radius: 6px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+.shot-caption {
+    display: block;
+    text-align: center;
+    font-size: 0.85em;
+    color: #666;
+    margin-top: -8px;
+    margin-bottom: 20px;
+    font-style: italic;
+}
+/* Placeholder box for a screenshot we haven't captured yet,
+   so it's visually obvious in the doc when one is missing. */
+.shot-todo {
+    display: block;
+    margin: 18px auto;
+    padding: 30px 20px;
+    border: 2px dashed #ffb84d;
+    background: #fff8e1;
+    border-radius: 6px;
+    text-align: center;
+    color: #8a5a00;
+    font-size: 0.9em;
+    font-family: 'Courier New', monospace;
+}
+
+.menu-path {
+    background: #f0f0f0;
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-family: 'Courier New', monospace;
+    font-size: 0.95em;
+    display: inline-block;
+    margin: 5px 0;
+}
+
+.feature-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 20px;
+    margin: 20px 0;
+}
+
+.feature-card {
+    background: #f9f9f9;
+    padding: 20px;
+    border-radius: 8px;
+    border: 1px solid #e0e0e0;
+    text-align: center;
+}
+
+.feature-card h4 {
+    color: #667eea;
+    margin-bottom: 10px;
+}
+
+.feature-card p {
+    color: #666;
+    font-size: 0.95em;
+}
+
+.badge {
+    display: inline-block;
+    background: #667eea;
+    color: white;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.85em;
+    margin-right: 5px;
+    margin-bottom: 5px;
+}
+
+.badge.new {
+    background: #28a745;
+}
+
+.badge.advanced {
+    background: #764ba2;
+}
+
+.footer {
+    background: #333;
+    color: white;
+    text-align: center;
+    padding: 20px;
+    margin-top: 40px;
+    border-radius: 8px;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 20px 0;
+}
+
+table th, table td {
+    border: 1px solid #ddd;
+    padding: 12px;
+    text-align: left;
+}
+
+table th {
+    background: #667eea;
+    color: white;
+}
+
+table tr:nth-child(even) {
+    background: #f9f9f9;
+}
+
+code {
+    background: #f0f0f0;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-family: 'Courier New', monospace;
+    font-size: 0.95em;
+}
+
+.keyboard {
+    background: #333;
+    color: #0f0;
+    padding: 15px;
+    border-radius: 4px;
+    font-family: 'Courier New', monospace;
+    font-size: 0.9em;
+    overflow-x: auto;
+    margin: 15px 0;
+}
+
+@media (max-width: 900px) {
+    .header h1 {
+        font-size: 1.8em;
+    }
+
+    /* Collapse the two-column layout on tablets and phones:
+       TOC falls back to top-of-page and the content flows below,
+       matching the pre-sidebar behavior. */
+    .container {
+        grid-template-columns: 1fr;
+    }
+
+    .toc {
+        position: static;
+        max-height: none;
+        margin-bottom: 20px;
+    }
+
+    .feature-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .section {
+        padding: 20px;
+    }
+}
+
+/* ── Multi-page chrome ─────────────────────────────────────────── */
+
+.header.compact {
+    padding: 32px 20px 28px;
+}
+.header.compact h1 {
+    font-size: 2em;
+    margin-bottom: 6px;
+}
+.header.compact p {
+    font-size: 1em;
+}
+
+/* Top nav: page links + cross-doc search. Sticky so both stay one
+   glance away on long pages. */
+.docs-nav {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    background: #fff;
+    border-bottom: 1px solid #e3e3ef;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+}
+.docs-nav-bar {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 0 20px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+.docs-nav-links {
+    display: flex;
+    gap: 2px;
+    flex: 1;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+.docs-nav-links::-webkit-scrollbar {
+    display: none;
+}
+/* Edge fades hint that the row scrolls; toggled by shared.js. */
+.docs-nav-links.more-right {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent);
+}
+.docs-nav-links.more-left {
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 40px);
+    mask-image: linear-gradient(to right, transparent, #000 40px);
+}
+.docs-nav-links.more-left.more-right {
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 40px, #000 calc(100% - 40px), transparent);
+    mask-image: linear-gradient(to right, transparent, #000 40px, #000 calc(100% - 40px), transparent);
+}
+.docs-nav-links a {
+    flex: 0 0 auto;
+    padding: 13px 9px 10px;
+    font-size: 0.85em;
+    font-weight: 600;
+    color: #555;
+    text-decoration: none;
+    white-space: nowrap;
+    border-bottom: 3px solid transparent;
+}
+.docs-nav-links a:hover {
+    color: #667eea;
+}
+.docs-nav-links a.active {
+    color: #667eea;
+    border-bottom-color: #667eea;
+}
+
+.docs-search {
+    position: relative;
+    flex: 0 0 220px;
+}
+.docs-search input {
+    width: 100%;
+    padding: 7px 12px;
+    border: 1px solid #d6d6e7;
+    border-radius: 6px;
+    font: inherit;
+    font-size: 0.88em;
+    background: #fafaff;
+}
+.docs-search input:focus {
+    outline: none;
+    border-color: #667eea;
+    background: #fff;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
+}
+.docs-search-results {
+    display: none;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 6px);
+    width: min(460px, 92vw);
+    max-height: 70vh;
+    overflow-y: auto;
+    background: #fff;
+    border: 1px solid #e3e3ef;
+    border-radius: 8px;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.14);
+}
+.docs-search-results.open {
+    display: block;
+}
+.docs-search-results a {
+    display: block;
+    padding: 10px 14px;
+    color: #333;
+    text-decoration: none;
+    border-bottom: 1px solid #f0f0f5;
+}
+.docs-search-results a:hover,
+.docs-search-results a.active {
+    background: #f0f2ff;
+}
+.docs-search-results .r-page {
+    font-size: 0.72em;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.docs-search-results .r-title {
+    font-weight: 600;
+    color: #4c5fd7;
+}
+.docs-search-results .r-snippet {
+    font-size: 0.84em;
+    color: #555;
+    margin-top: 2px;
+}
+.docs-search-results mark {
+    background: #fff1a8;
+    color: inherit;
+    padding: 0 1px;
+    border-radius: 2px;
+}
+.docs-search-results .r-empty {
+    padding: 14px;
+    font-size: 0.88em;
+    color: #888;
+}
+
+/* Sidebar TOC sits under the sticky nav; headings leave room for it
+   when jumped to via an anchor. */
+.toc {
+    top: 64px;
+    max-height: calc(100vh - 84px);
+}
+.toc ul ul {
+    margin: 2px 0 8px 10px;
+}
+.toc li {
+    margin-bottom: 2px;
+}
+.toc a.toc-h2 {
+    font-weight: 700;
+    color: #444;
+}
+.toc a.active {
+    background: #f0f2ff;
+    color: #4c5fd7;
+}
+.section,
+.section h2,
+.section h3 {
+    scroll-margin-top: 72px;
+}
+
+kbd {
+    display: inline-block;
+    min-width: 1.6em;
+    padding: 1px 6px;
+    border: 1px solid #cfd2e6;
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    background: #fafaff;
+    font-family: 'Courier New', monospace;
+    font-size: 0.85em;
+    line-height: 1.4;
+    text-align: center;
+    color: #333;
+}
+
+/* Prev / next footer */
+.pager {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+}
+.pager a {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    background: #fff;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    padding: 16px 20px;
+    text-decoration: none;
+    color: #333;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+.pager a:hover {
+    border-color: #667eea;
+}
+.pager a.next {
+    text-align: right;
+}
+.pager .p-label {
+    font-size: 0.75em;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.pager .p-title {
+    font-weight: 700;
+    color: #667eea;
+}
+
+/* Landing page */
+.container.single {
+    grid-template-columns: 1fr;
+    max-width: 1100px;
+}
+.doc-tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+    gap: 16px;
+}
+.doc-tile {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    background: #fafaff;
+    border: 1px solid #e6e8f7;
+    border-radius: 10px;
+    padding: 20px;
+    color: #333;
+    text-decoration: none;
+    transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+.doc-tile:hover {
+    border-color: #667eea;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(102, 126, 234, 0.15);
+}
+.doc-tile .t-icon {
+    font-size: 1.7em;
+    line-height: 1.2;
+}
+.doc-tile .t-title {
+    font-weight: 700;
+    font-size: 1.08em;
+    color: #667eea;
+}
+.doc-tile .t-blurb {
+    font-size: 0.88em;
+    color: #666;
+}
+
+@media (max-width: 900px) {
+    .docs-nav-bar {
+        flex-wrap: wrap;
+        gap: 0;
+        padding: 0 12px;
+    }
+    /* Full-width rows: links on top, search underneath. A 0 basis here
+       would let both share one line and collapse the links to nothing. */
+    .docs-nav-links {
+        flex: 1 1 100%;
+    }
+    .docs-search {
+        flex: 1 1 100%;
+        padding: 0 0 10px;
+    }
+    .docs-search-results {
+        left: 0;
+        right: 0;
+        width: auto;
+    }
+    .section,
+    .section h2,
+    .section h3 {
+        scroll-margin-top: 112px;
+    }
+    .pager {
+        flex-direction: column;
+    }
+    .pager a.next {
+        text-align: left;
+    }
+}
+
+@media print {
+    .docs-nav,
+    .toc,
+    .pager {
+        display: none;
+    }
+    .container {
+        display: block;
+    }
+}

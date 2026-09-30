@@ -947,8 +947,12 @@ async function runSchemaBootstrap() {
     // Seed the built-in "Complete User Guide" link if nothing exists yet, so
     // a fresh install has something to show before the admin adds their own.
     await exec(`INSERT INTO app_docs (title, description, url, sort_order, updated_by)
-      SELECT 'Complete User Guide', 'Master the ERP from setup to advanced automation', '/tracklab-complete-guide.html', 1, 'seed'
+      SELECT 'Complete User Guide', 'Master the ERP from setup to advanced automation', '/docs/index.html', 1, 'seed'
        WHERE NOT EXISTS (SELECT 1 FROM app_docs)`).catch(() => {});
+    // The guide was split into /docs/ topic pages. Repoint the untouched
+    // seed row; the old URL still redirects, this just skips the hop.
+    await exec(`UPDATE app_docs SET url = '/docs/index.html'
+       WHERE updated_by = 'seed' AND url = '/tracklab-complete-guide.html'`).catch(() => {});
     await exec(`CREATE TABLE IF NOT EXISTS role_permissions (
       id SERIAL PRIMARY KEY,
       role TEXT NOT NULL,

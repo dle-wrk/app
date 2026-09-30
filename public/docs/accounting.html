@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Accounting &amp; Reports — Tracklab IM Docs</title>
+    <link rel="icon" type="image/png" href="../tracklab-logo.png">
+    <link rel="stylesheet" href="shared.css">
+</head>
+<body data-page="accounting">
+    <div class="header compact">
+        <h1>📊 Accounting &amp; Reports</h1>
+        <p>Payments, bank reconciliation, VAT201 and financial reports.</p>
+    </div>
+    <nav class="docs-nav" id="docs-nav" aria-label="Documentation">
+        <noscript><div class="docs-nav-bar"><div class="docs-nav-links"><a href="index.html">← All docs</a></div></div></noscript>
+    </nav>
+
+    <div class="container">
+        <aside class="toc" id="page-toc" aria-label="On this page"></aside>
+
+        <div class="main-col">
+        <div class="section" id="bookkeeping-module">
+            <h2>The bookkeeping module</h2>
+
+            <h3 id="accessing-the-bookkeeping-module">Accessing the Bookkeeping Module</h3>
+            <div class="step">
+                <h4>Step 1: Navigate to Bookkeeping</h4>
+                <ol>
+                    <li>Click <span class="menu-path">Bookkeeping</span> in the sidebar</li>
+                    <li>You'll see tabbed interface with sections:
+                        <ul>
+                            <li>Overview</li>
+                            <li>Chart of Accounts</li>
+                            <li>Customers - Manage customer information</li>
+                            <li>Vendors - Manage supplier information</li>
+                            <li>Invoices - Customer invoices with smart autocomplete</li>
+                            <li>Bills - Supplier bills</li>
+                            <li>Purchase Orders - Supplier or Customer orders (with mode switching)</li>
+                            <li>Payments Received - Customer payments</li>
+                            <li>Payments Made - Supplier payments</li>
+                            <li>Expenses</li>
+                            <li>Reports</li>
+                        </ul>
+                    </li>
+                </ol>
+            </div>
+
+            <h3 id="save-pdf-on-every-document">Save PDF on every document</h3>
+            <div class="step">
+                <p>Every doc viewer in Bookkeeping has a <strong>Save PDF</strong> button next to Print. Clicking it downloads a properly-typeset PDF directly to your machine — no print-dialog dance, no "Save as PDF" destination picker.</p>
+                <ul>
+                    <li>Sales orders → <code>sales-order-SO-2026-0007.pdf</code></li>
+                    <li>Quotations → <code>quotation-QUO-2026-0002.pdf</code></li>
+                    <li>Invoices → <code>invoice-INV-2026-0011.pdf</code> (with Amount Paid + Balance Due lines)</li>
+                    <li>Bills → <code>bill-BILL-2026-0004.pdf</code></li>
+                    <li>Delivery notes → <code>delivery-note-DN-2026-0004.pdf</code> (Serial Numbers column, no money)</li>
+                    <li>Collection notes → <code>collection-note-CN-2026-0001.pdf</code></li>
+                    <li>Credit notes → <code>credit-note-CN-2026-0001.pdf</code></li>
+                    <li>Customer statements (from the Customers tab) → <code>customer-statement-Lumax-Energy-2026-01-31.pdf</code></li>
+                    <li>VAT201 return → <code>vat201-return-2026-01-01_2026-03-31.pdf</code></li>
+                </ul>
+                <p>Every doc uses the shared TRACKLAB brand header, autoTable line items, and SANS 24 money formatting so figures match the on-screen totals exactly.</p>
+            </div>
+
+            <h3 id="money-formatting-standard-sans-24-iso-31">Money formatting standard (SANS 24 / ISO 31)</h3>
+            <div class="step">
+                <p>Every user-visible money and grouped-count display now routes through one shared formatter (<code>src/lib/formatMoney.ts</code>). Standard is South African: non-breaking-space thousands separator, dot decimal, no space between currency symbol and first digit. <code>R1 234 567.89</code>, <code>-$89.00</code>. Every card, table, PDF, and CSV picks it up automatically so a value never appears with one grouping on the dashboard and another on the invoice.</p>
+            </div>
+        </div>
+
+        <div class="section" id="payments-bank">
+            <h2>Payments &amp; bank reconciliation</h2>
+
+            <h3 id="recording-payments">Recording Payments</h3>
+            <div class="step">
+                <h4>Payments Received from Customers</h4>
+                <ol>
+                    <li>Click <strong>Payments Received</strong> tab</li>
+                    <li>Click <strong>Record Payment</strong></li>
+                    <li>Select customer from the customer list (Bokpoort, Damlaagte, DEWA, Sasol, etc.)</li>
+                    <li>Select invoice(s) to allocate payment against</li>
+                    <li>Enter payment method (EFT, Check, Cash, etc.) and amount</li>
+                    <li>Allocate payment to invoices</li>
+                    <li>System updates customer balance and invoice status automatically</li>
+                </ol>
+            </div>
+
+            <div class="step">
+                <h4>Payments Made to Suppliers</h4>
+                <ol>
+                    <li>Click <strong>Payments Made</strong> tab</li>
+                    <li>Click <strong>Record Payment</strong></li>
+                    <li>Select supplier and bills</li>
+                    <li>Enter payment details (method, amount, date)</li>
+                    <li>Confirm and record in accounting ledger</li>
+                </ol>
+            </div>
+
+            <h3 id="bank-reconciliation">Bank Reconciliation</h3>
+            <div class="step">
+                <p>New tab under Bookkeeping → Accounting → <strong>Bank Reconciliation</strong>. Reconcile a bank statement in three steps:</p>
+                <ol>
+                    <li><strong>Import CSV</strong> — pick the bank account, drop the file. The importer sniffs date / description / amount / reference columns (override if the guess is wrong) and normalises common date formats and comma decimals.</li>
+                    <li><strong>Auto-match</strong> runs immediately on save. Three passes: doc number found in the reference (100% confidence), exact amount within ±3 day window (90%), same for expenses (85%). Only unmatched lines are touched, so anything you resolved by hand stays put.</li>
+                    <li><strong>Reconcile</strong> per line — Pick a specific payment / expense, or Ignore for legit uncleared items. Complete when opening + lines = closing and every line is matched. Reconciled statements lock so retro edits can't quietly rewrite next month's opening balance.</li>
+                </ol>
+            </div>
+        </div>
+
+        <div class="section" id="vat">
+            <h2>VAT</h2>
+
+            <h3 id="vat201-return">VAT201 return</h3>
+            <div class="step">
+                <p>Bookkeeping → Reports → VAT201. Pick a period, hit Run. Dashboard cards for Output tax (Box 4) / Input tax (Box 15) / Net VAT / Zero-rated sales. Box breakdown table walks through Box 1, 2, 4, 14, 15 the same way SARS's eFiling form is laid out. Two supporting lists at the bottom expand every invoice and every bill that fed the numbers so an auditor can drill in.</p>
+                <ul>
+                    <li>Only rows with a live ledger status (invoices SENT / PARTIAL / PAID / OVERDUE; bills AWAITING_PAYMENT and onward) contribute. DRAFT and VOID are excluded.</li>
+                    <li><strong>Export CSV</strong> gives the full detail for review.</li>
+                    <li><strong>Save PDF</strong> produces an auditable printable version with a "verify each box on SARS eFiling before submission" disclaimer baked in.</li>
+                </ul>
+            </div>
+            <div class="warning">
+                ⚠ <strong>Reminder:</strong> the report is a computation aid, not a substitute for the SARS eFiling submission. Always cross-check every field on your official return before filing.
+            </div>
+
+            <h3 id="vat201-exempt-vs-zero-rated">VAT201 — Exempt vs Zero-Rated</h3>
+            <div class="step">
+                <p>Prior versions bucketed Exempt and Zero-Rated together on Box 2 because both have rate = 0%. VAT201 now aggregates <em>per-line</em> using a new <code>tax_rates.kind</code> column, so Standard-rated / Zero-rated / Exempt each land in the right SARS box:</p>
+                <ul>
+                    <li><strong>Box 1 &amp; 4</strong> — Standard-rated sales + output VAT.</li>
+                    <li><strong>Box 2</strong> — Zero-rated sales (turnover contributor, taxable at 0%).</li>
+                    <li><strong>Informational memo</strong> — Exempt supplies (sales) and Exempt purchases. Not a SARS box; shown so you can see they're being handled separately.</li>
+                </ul>
+                <div class="warning">
+                    ⚠ <strong>Reminder:</strong> the VAT201 report is a computation aid, not a substitute for the SARS eFiling submission. Always cross-check every field on your official return before filing.
+                </div>
+            </div>
+        </div>
+
+        <div class="section" id="financial-reports">
+            <h2>Financial reports</h2>
+
+            <h3 id="financial-reports-2">Financial Reports</h3>
+            <div class="step">
+                <h4>Generate Reports</h4>
+                <ol>
+                    <li>Click <strong>Reports</strong> tab</li>
+                    <li>Available reports:
+                        <ul>
+                            <li>Balance Sheet</li>
+                            <li>Income Statement</li>
+                            <li>Cash Flow Statement</li>
+                            <li>Accounts Receivable Aging</li>
+                            <li>Accounts Payable Aging</li>
+                        </ul>
+                    </li>
+                    <li>Select date range</li>
+                    <li>Export to PDF or Excel</li>
+                </ol>
+            </div>
+
+            <div class="warning">
+                <strong>⚠️ Important:</strong> Reconcile accounts monthly and maintain accurate records for audit purposes.
+            </div>
+
+            <h3 id="report-pdfs-and-headline-metrics">Report PDFs &amp; headline metrics</h3>
+            <div class="step">
+                <p>P&amp;L, Balance Sheet, and Trial Balance now render to PDF via the same shared brand-header helper VAT201 uses. Each report also gains a headline metric strip so the important numbers show without scrolling:</p>
+                <ul>
+                    <li><strong>P&amp;L</strong>: Total income · Total expenses · Net profit (with margin %).</li>
+                    <li><strong>Balance Sheet</strong>: Total assets · liabilities · equity · a live "A = L + E" balanced check that renders a green tick or the delta when the ledger drifts.</li>
+                </ul>
+                <p>Hand any of the three to your accountant as a PDF from the Reports tab.</p>
+            </div>
+        </div>
+
+            <nav class="pager" id="pager" aria-label="Previous and next page"></nav>
+        </div><!-- /.main-col -->
+    </div>
+
+    <div class="footer">
+        <p>© 2026 Tracklab IM · User documentation</p>
+    </div>
+    <script src="shared.js"></script>
+</body>
+</html>

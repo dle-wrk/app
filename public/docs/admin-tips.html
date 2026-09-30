@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin &amp; Pro Tips — Tracklab IM Docs</title>
+    <link rel="icon" type="image/png" href="../tracklab-logo.png">
+    <link rel="stylesheet" href="shared.css">
+</head>
+<body data-page="admin-tips">
+    <div class="header compact">
+        <h1>🛡️ Admin &amp; Pro Tips</h1>
+        <p>Accounts and devices, API keys, routines, best practices and troubleshooting.</p>
+    </div>
+    <nav class="docs-nav" id="docs-nav" aria-label="Documentation">
+        <noscript><div class="docs-nav-bar"><div class="docs-nav-links"><a href="index.html">← All docs</a></div></div></noscript>
+    </nav>
+
+    <div class="container">
+        <aside class="toc" id="page-toc" aria-label="On this page"></aside>
+
+        <div class="main-col">
+        <div class="section" id="accounts-access">
+            <h2>Accounts &amp; access</h2>
+
+            <h3 id="one-account-one-active-device">One account, one active device</h3>
+            <div class="step">
+                <p>Signing in on a new device now automatically signs the previous device out.</p>
+                <ul>
+                    <li>Log in on your phone → your desktop tab shows a toast reading <em>"Signed out — this account signed in from another device"</em> and drops back to the login screen.</li>
+                    <li>Detection happens on a 30-second heartbeat and immediately when you refocus the older tab.</li>
+                    <li>Explicit logout on either device only signs that one device out.</li>
+                </ul>
+            </div>
+            <div class="tip">
+                <strong>💡 Tip:</strong> If a device seems to hang on the login screen after signing in elsewhere, that's expected — sign back in on the device you want to use.
+            </div>
+
+            <h3 id="api-keys-tab">API Keys tab</h3>
+            <div class="step">
+                <p>Provider credentials for every supplier can be entered and rotated from inside the app.</p>
+                <ul>
+                    <li>DigiKey now uses OAuth2 <code>client_credentials</code> where available — no more manual re-authorisation every day. Fall back to the 3-legged flow with <code>npm run digikey:authorize</code> if your account doesn't have it.</li>
+                    <li>TME uses its Private Key + Application Secret; the workflow help text now matches the current TME portal.</li>
+                    <li>The tab is protected against browser autofill hijack, so entering login credentials in your password manager will no longer redirect you to the search view.</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="section" id="tips">
+            <h2>Pro Tips & Best Practices</h2>
+
+            <h3 id="daily-operations-checklist">Daily Operations Checklist</h3>
+            <div class="step">
+                <h4>Morning Routine</h4>
+                <ul>
+                    <li>Check Dashboard for critical shortages</li>
+                    <li>Review low stock alerts</li>
+                    <li>Process any pending purchase orders</li>
+                    <li>Check automation event logs for errors</li>
+                    <li>Review pending notifications</li>
+                </ul>
+            </div>
+
+            <h3 id="weekly-tasks">Weekly Tasks</h3>
+            <div class="step">
+                <h4>Weekly Maintenance</h4>
+                <ul>
+                    <li>Update inventory counts for high-value items</li>
+                    <li>Review supplier performance metrics</li>
+                    <li>Process incoming inventory</li>
+                    <li>Check quality metrics and defect trends</li>
+                    <li>Reconcile accounts receivable/payable</li>
+                </ul>
+            </div>
+
+            <h3 id="monthly-reviews">Monthly Reviews</h3>
+            <div class="step">
+                <h4>Month-End Procedures</h4>
+                <ul>
+                    <li>Complete physical inventory count</li>
+                    <li>Reconcile with system records</li>
+                    <li>Review and approve all transactions</li>
+                    <li>Generate financial reports</li>
+                    <li>Update supplier performance scores</li>
+                    <li>Review pricing and adjust as needed</li>
+                </ul>
+            </div>
+
+            <h3 id="system-optimization-tips">System Optimization Tips</h3>
+            <div class="tip">
+                <h4>Performance Improvements</h4>
+                <ul>
+                    <li><strong>Bulk Operations:</strong> Use bulk pricing wizard instead of updating items one-by-one</li>
+                    <li><strong>Keyboard Shortcuts:</strong> Use Ctrl+K/⌘K for global search instead of clicking</li>
+                    <li><strong>Filters:</strong> Apply filters before searching to reduce result set</li>
+                    <li><strong>Automation:</strong> Set up rules to eliminate manual, repetitive tasks</li>
+                    <li><strong>Caching:</strong> Pricing data cached 30 days to reduce API costs</li>
+                </ul>
+            </div>
+
+            <h3 id="data-management-best-practices">Data Management Best Practices</h3>
+            <div class="warning">
+                <h4>Critical Guidelines</h4>
+                <ul>
+                    <li><strong>Unique Part Numbers:</strong> Never duplicate SKUs - verify before creating items</li>
+                    <li><strong>Supplier Master:</strong> Maintain accurate supplier information for correspondence</li>
+                    <li><strong>Regular Backups:</strong> Ensure database backups occur regularly</li>
+                    <li><strong>Access Control:</strong> Limit admin access to authorized personnel only</li>
+                    <li><strong>Audit Trail:</strong> Monitor who makes what changes for compliance</li>
+                </ul>
+            </div>
+
+            <h3 id="troubleshooting-common-issues">Troubleshooting Common Issues</h3>
+            <div class="step">
+                <h4>Slow Performance</h4>
+                <ul>
+                    <li>Clear browser cache (Ctrl+Shift+Delete)</li>
+                    <li>Use filters to reduce large result sets</li>
+                    <li>Check internet connection speed</li>
+                    <li>Try different browser if issue persists</li>
+                </ul>
+            </div>
+
+            <div class="step">
+                <h4>Missing or Incorrect Data</h4>
+                <ul>
+                    <li>Refresh page (F5 or ⌘R)</li>
+                    <li>Clear filters to ensure complete view</li>
+                    <li>Check for pending sync operations</li>
+                    <li>Verify user permissions for field visibility</li>
+                </ul>
+            </div>
+
+            <div class="step">
+                <h4>API Connection Issues</h4>
+                <ul>
+                    <li>Check API key configuration in system settings</li>
+                    <li>Verify supplier API credentials are valid</li>
+                    <li>Check network firewall rules</li>
+                    <li>Review API rate limits and throttling</li>
+                </ul>
+            </div>
+
+            <h3 id="advanced-techniques">Advanced Techniques</h3>
+            <div class="success">
+                <h4>Power User Features</h4>
+                <ul>
+                    <li><strong>Custom Fields:</strong> Add custom attributes to items for your business needs</li>
+                    <li><strong>Bulk Import:</strong> Import items via CSV for faster onboarding</li>
+                    <li><strong>Export Templates:</strong> Create reusable export templates for reports</li>
+                    <li><strong>API Integration:</strong> Connect external systems via REST API for seamless data flow</li>
+                    <li><strong>Workflow Automation:</strong> Chain multiple rules for complex business processes</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="section" id="need-help">
+            <h2>Need Help?</h2>
+            <div class="step">
+                <h4>Resources & Support</h4>
+                <ul>
+                    <li><strong>Documentation:</strong> Visit the online help system (? button in interface)</li>
+                    <li><strong>Tutorial Videos:</strong> Check the training portal for video walkthroughs</li>
+                    <li><strong>Keyboard Shortcuts:</strong> Press ? anywhere in the app to see available shortcuts</li>
+                    <li><strong>Community Forum:</strong> Share tips and ask questions with other users</li>
+                </ul>
+            </div>
+
+            <div class="success">
+                <strong>✅ Congratulations!</strong> You now have a comprehensive understanding of Tracklab IM. Start with basic inventory management and gradually explore advanced features as you become more comfortable with the system. Don't hesitate to reference this guide whenever you need clarification!
+            </div>
+        </div>
+
+            <nav class="pager" id="pager" aria-label="Previous and next page"></nav>
+        </div><!-- /.main-col -->
+    </div>
+
+    <div class="footer">
+        <p>© 2026 Tracklab IM · User documentation</p>
+    </div>
+    <script src="shared.js"></script>
+</body>
+</html>
