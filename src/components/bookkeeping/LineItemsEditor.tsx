@@ -69,6 +69,38 @@ export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChang
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
+  // SA default: every new line ships with Standard-rated VAT (15%),
+  // not "No tax" and not Exempt. Repair services, labour, and every
+  // taxable supply are 15% by law; only financial services, residential
+  // rent, and educational services are Exempt. Falling back to Standard
+  // here removes the biggest foot-gun on the quote/SO editor — a REPAIR
+  // line silently sitting at Exempt (or "No tax") would misstate VAT on
+  // the invoice and break VAT201 aggregation. The default is picked
+  // from the tax_rates row flagged is_default; the schema seeds Standard
+  // VAT with is_default=true, and this pattern respects any org that
+  // has since changed the default.
+  const defaultTaxRateId = React.useMemo(() => {
+    const seeded = taxRates.find(t => (t as any).isDefault || (t as any).is_default);
+    if (seeded) return seeded.id;
+    // Fallback to the first STANDARD-rated row so we never accidentally
+    // pick Exempt or Zero-Rated as the default.
+    const std = taxRates.find(t => (t.rate ?? 0) > 0);
+    return std?.id ?? null;
+  }, [taxRates]);
+
+  // Any line that landed with taxRateId === null (from newEditableLine
+  // or from an older doc missing the field) gets the default filled in.
+  // Runs whenever taxRates first arrive OR a fresh line is added; edits
+  // to an existing rate on a line are preserved because we only touch
+  // rows where taxRateId is null.
+  React.useEffect(() => {
+    if (defaultTaxRateId == null) return;
+    const needsDefault = lines.some(l => l.taxRateId == null);
+    if (!needsDefault) return;
+    onChange(lines.map(l => l.taxRateId == null ? { ...l, taxRateId: defaultTaxRateId } : l));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultTaxRateId, lines.length]);
+
   const update = (key: string, patch: Partial<EditableLine>) => {
     try {
       onChange(lines.map(l => (l.key === key ? { ...l, ...patch } : l)));
