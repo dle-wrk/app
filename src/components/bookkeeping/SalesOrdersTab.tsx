@@ -318,6 +318,7 @@ export const SalesOrdersTab: React.FC<ModuleDataProps & SalesOrdersTabExtras> = 
           busy={busy}
           setBusy={setBusy}
           triggerToast={triggerToast}
+          taxRates={taxRates}
           isAdmin={isAdmin}
           onEdit={() => {
             // Hand the current viewing row (which already includes the
@@ -643,12 +644,16 @@ const SalesOrderViewModal: React.FC<{
   onDocChanged: () => void;
   onAccepted?: () => void;
   accounts?: any[];
+  // Passed through so the line-item table can label each row's VAT
+  // status (15%, Exempt, Zero-Rated). Without it the reader can't
+  // tell a mixed-rate quote from a uniform one.
+  taxRates?: any[];
   // Edit is admin-only and only meaningful for QUOTATION / DRAFT rows.
   // The parent decides both — this modal just shows the button and
   // triggers the callback.
   isAdmin?: boolean;
   onEdit?: () => void;
-}> = ({ order, clientName, busy, setBusy, triggerToast, onClose, onDelete, onDocChanged, onCreateDispatch, onAccepted, accounts, isAdmin, onEdit }) => {
+}> = ({ order, clientName, busy, setBusy, triggerToast, onClose, onDelete, onDocChanged, onCreateDispatch, onAccepted, accounts, taxRates, isAdmin, onEdit }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [autoFulfilOpen, setAutoFulfilOpen] = useState(false);
 
@@ -729,7 +734,7 @@ const SalesOrderViewModal: React.FC<{
     // the browser's own print dialog already handles cleanly.
     const w = window.open('', '_blank', 'width=900,height=1000');
     if (!w) { triggerToast('Popup blocked — allow popups to print.', 'ERROR'); return; }
-    const html = renderPrintableSalesOrder(order, clientName);
+    const html = renderPrintableSalesOrder(order, clientName, taxRates);
     w.document.open();
     w.document.write(html);
     w.document.close();
@@ -767,9 +772,22 @@ const SalesOrderViewModal: React.FC<{
           const gross = Number(it.lineTotal) || 0;
           const net = gross - tax;
           const unitNet = qty > 0 ? net / qty : (Number(it.unitPrice) || 0);
+          // Encode the VAT rate/kind into the description so the reader
+          // of the PDF can see per-line status without an extra column.
+          // buildAndSaveDocPdf doesn't support a VAT column natively;
+          // suffixing description is the least-invasive way to surface
+          // it without changing the shared helper.
+          const tr = taxRates?.find((t: any) => t.id === it.taxRateId);
+          let vatLabel = '';
+          if (tr) {
+            const kind = (tr.kind as string) || (Number(tr.rate) > 0 ? 'STANDARD' : 'NONE');
+            if (kind === 'EXEMPT') vatLabel = ' [Exempt]';
+            else if (kind === 'ZERO_RATED') vatLabel = ' [0% zero-rated]';
+            else if (kind === 'STANDARD') vatLabel = ` [VAT ${Number(tr.rate)}%]`;
+          }
           return {
             partNumber: it.partNumber,
-            description: it.description,
+            description: `${it.description}${vatLabel}`,
             quantity: it.quantity,
             unitPrice: unitNet,
             lineTotal: net,
@@ -780,7 +798,10 @@ const SalesOrderViewModal: React.FC<{
           tax: order.tax,
           total: order.total,
         },
-        notes: [order.notes, 'All prices exclusive of VAT. VAT is shown separately in the totals below.'].filter(Boolean).join('  •  '),
+        notes: [
+          order.notes,
+          'All prices exclusive of VAT. Per-line VAT status shown in [brackets] next to each description; VAT total below only reflects standard-rated supplies. Exempt supplies (labour, financial services, residential rent, etc.) carry no VAT.',
+        ].filter(Boolean).join('  •  '),
       });
       triggerToast(`Downloaded ${filename}.`);
     } catch (err: any) {
@@ -802,44 +823,79 @@ const SalesOrderViewModal: React.FC<{
         )}
       </div>
 
-      {order.items && order.items.length > 0 ? (
-        <div className="overflow-x-auto rounded-lg border border-outline-variant/40 mb-md">
-          <table className="w-full text-left text-xs">
-            <thead>
-              <tr className="bg-surface-container-high/50 text-outline text-[10px] uppercase">
-                <th className="py-2 px-3">Description</th>
-                <th className="py-2 px-3 text-right">Qty</th>
-                <th className="py-2 px-3 text-right">Price (excl. VAT)</th>
-                <th className="py-2 px-3 text-right">Total (excl. VAT)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {order.items.map((it: any) => {
-                // Same net-display rule as the printable + PDF: stored
-                // line_total on tax-inclusive lines is gross. Subtract
-                // tax_amount to get the ex-VAT figure the customer's
-                // sum column should show.
-                const qty = Number(it.quantity) || 1;
-                const tax = Number(it.taxAmount) || 0;
-                const gross = Number(it.lineTotal) || 0;
-                const net = gross - tax;
-                const unitNet = qty > 0 ? net / qty : (Number(it.unitPrice) || 0);
-                return (
-                  <tr key={it.id} className="border-t border-outline-variant/20">
-                    <td className="py-2 px-3">
-                      {it.partNumber && <span className="font-mono text-[10px] text-primary mr-1">{it.partNumber}</span>}
-                      {it.description}
-                    </td>
-                    <td className="py-2 px-3 text-right font-mono">{it.quantity}</td>
-                    <td className="py-2 px-3 text-right font-mono">{fmtMoney(unitNet, order.currency)}</td>
-                    <td className="py-2 px-3 text-right font-mono font-bold">{fmtMoney(net, order.currency)}</td>
+      {order.items && order.items.length > 0 ? (() => {
+        // Classify every line so we can (1) render a per-line VAT
+        // label and (2) split the summary into standard / exempt /
+        // zero-rated buckets. Without this an auditor sees the top-
+        // level Subtotal + VAT and can't reconcile it to 15% because
+        // some lines might be Exempt or Zero-Rated — the numbers ARE
+        // right, but the display gave no signal.
+        const rateName = (id: number | null | undefined) => {
+          if (!id || !taxRates) return null;
+          return taxRates.find((t: any) => t.id === id) || null;
+        };
+        const kindOf = (it: any) => {
+          const tr = rateName(it.taxRateId);
+          if (!tr) return { label: 'None', kind: 'NONE' as const };
+          const kind = (tr.kind as string) || (Number(tr.rate) > 0 ? 'STANDARD' : 'NONE');
+          if (kind === 'EXEMPT') return { label: 'Exempt', kind: 'EXEMPT' as const };
+          if (kind === 'ZERO_RATED') return { label: '0% (zero-rated)', kind: 'ZERO_RATED' as const };
+          if (kind === 'STANDARD') return { label: `${Number(tr.rate)}%`, kind: 'STANDARD' as const };
+          return { label: tr.name, kind: 'NONE' as const };
+        };
+        const rows: any[] = order.items.map((it: any) => {
+          const qty = Number(it.quantity) || 1;
+          const tax = Number(it.taxAmount) || 0;
+          const gross = Number(it.lineTotal) || 0;
+          const net = gross - tax;
+          const unitNet = qty > 0 ? net / qty : (Number(it.unitPrice) || 0);
+          return { it, qty, tax, gross, net, unitNet, ...kindOf(it) };
+        });
+        const totalStandardNet = rows.filter((r: any) => r.kind === 'STANDARD').reduce((s: number, r: any) => s + r.net, 0);
+        const totalExemptNet   = rows.filter((r: any) => r.kind === 'EXEMPT' || r.kind === 'NONE').reduce((s: number, r: any) => s + r.net, 0);
+        const totalZeroNet     = rows.filter((r: any) => r.kind === 'ZERO_RATED').reduce((s: number, r: any) => s + r.net, 0);
+        const hasMixed = [totalStandardNet, totalExemptNet, totalZeroNet].filter((v: number) => Math.abs(v) > 0.005).length > 1;
+        return (
+          <>
+            <div className="overflow-x-auto rounded-lg border border-outline-variant/40 mb-md">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="bg-surface-container-high/50 text-outline text-[10px] uppercase">
+                    <th className="py-2 px-3">Description</th>
+                    <th className="py-2 px-3 text-right">Qty</th>
+                    <th className="py-2 px-3 text-right">Price (Excl. VAT)</th>
+                    <th className="py-2 px-3 text-center">VAT</th>
+                    <th className="py-2 px-3 text-right">Total (Excl. VAT)</th>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      ) : (
+                </thead>
+                <tbody>
+                  {rows.map((r: any) => (
+                    <tr key={r.it.id} className="border-t border-outline-variant/20">
+                      <td className="py-2 px-3">
+                        {r.it.partNumber && <span className="font-mono text-[10px] text-primary mr-1">{r.it.partNumber}</span>}
+                        {r.it.description}
+                      </td>
+                      <td className="py-2 px-3 text-right font-mono">{r.it.quantity}</td>
+                      <td className="py-2 px-3 text-right font-mono">{fmtMoney(r.unitNet, order.currency)}</td>
+                      <td className="py-2 px-3 text-center">
+                        <span className={`text-[10px] font-bold ${r.kind === 'EXEMPT' ? 'text-amber-400' : r.kind === 'ZERO_RATED' ? 'text-secondary' : r.kind === 'NONE' ? 'text-outline' : 'text-on-surface'}`}>
+                          {r.label}
+                        </span>
+                      </td>
+                      <td className="py-2 px-3 text-right font-mono font-bold">{fmtMoney(r.net, order.currency)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {/* Stash the buckets on the order object so the summary block
+                below can render the mixed-rate breakdown without recomputing.
+                Kept as a side-effect assignment to avoid restructuring the
+                whole viewer. */}
+            {(() => { (order as any).__vatBuckets = { totalStandardNet, totalExemptNet, totalZeroNet, hasMixed }; return null; })()}
+          </>
+        );
+      })() : (
         <p className="text-xs text-outline italic mb-md">No line items on this order.</p>
       )}
 
@@ -931,8 +987,36 @@ const SalesOrderViewModal: React.FC<{
           )}
         </div>
         <div className="w-56 space-y-1 text-xs">
-          <div className="flex justify-between text-on-surface-variant"><span>Total (Excl. VAT)</span><span className="font-mono">{fmtMoney(order.subtotal, order.currency)}</span></div>
-          <div className="flex justify-between text-on-surface-variant"><span>VAT amount</span><span className="font-mono">{fmtMoney(order.tax, order.currency)}</span></div>
+          {/* When any line is Exempt or Zero-Rated, break the summary
+              out per bucket so the reader can see WHY the top-level VAT
+              isn't a clean 15% of subtotal. On a uniform-rate quote
+              this collapses back to the simple three-line summary. */}
+          {(() => {
+            const b = (order as any).__vatBuckets;
+            if (b && b.hasMixed) {
+              return (
+                <>
+                  {b.totalStandardNet > 0.005 && (
+                    <div className="flex justify-between text-on-surface-variant"><span>Excl. VAT — Standard-rated</span><span className="font-mono">{fmtMoney(b.totalStandardNet, order.currency)}</span></div>
+                  )}
+                  {b.totalExemptNet > 0.005 && (
+                    <div className="flex justify-between text-on-surface-variant"><span>Excl. VAT — Exempt supplies</span><span className="font-mono">{fmtMoney(b.totalExemptNet, order.currency)}</span></div>
+                  )}
+                  {b.totalZeroNet > 0.005 && (
+                    <div className="flex justify-between text-on-surface-variant"><span>Excl. VAT — Zero-rated</span><span className="font-mono">{fmtMoney(b.totalZeroNet, order.currency)}</span></div>
+                  )}
+                  <div className="flex justify-between text-on-surface-variant border-t border-outline-variant/40 pt-1"><span>Total (Excl. VAT)</span><span className="font-mono font-semibold">{fmtMoney(order.subtotal, order.currency)}</span></div>
+                  <div className="flex justify-between text-on-surface-variant"><span>15% VAT (Standard-rated only)</span><span className="font-mono">{fmtMoney(order.tax, order.currency)}</span></div>
+                </>
+              );
+            }
+            return (
+              <>
+                <div className="flex justify-between text-on-surface-variant"><span>Total (Excl. VAT)</span><span className="font-mono">{fmtMoney(order.subtotal, order.currency)}</span></div>
+                <div className="flex justify-between text-on-surface-variant"><span>VAT amount</span><span className="font-mono">{fmtMoney(order.tax, order.currency)}</span></div>
+              </>
+            );
+          })()}
           <div className="flex justify-between font-bold text-sm border-t border-outline-variant/40 pt-1"><span>Total</span><span className="font-mono text-primary">{fmtMoney(order.total, order.currency)}</span></div>
         </div>
       </div>
@@ -1256,28 +1340,42 @@ const BatchAutoFulfilModal: React.FC<{
 // summary + line items. window.open + document.write lets the user print or
 // save-as-PDF via the browser's own dialog with no library dependency.
 // ---------------------------------------------------------------------------
-function renderPrintableSalesOrder(order: any, clientName: string): string {
+function renderPrintableSalesOrder(order: any, clientName: string, taxRates?: any[]): string {
   const money = (n: number) => fmtMoney(n, order.currency);
-  const rows = (order.items || []).map((it: any) => {
-    // Show NET price and total per line so the customer's column-sum
-    // matches the header Subtotal. See the SO PDF export for the same
-    // reasoning — the two paths must agree or one of them will look
-    // like a double-charge to the reader.
+  // Same classification as the on-screen viewer. Standard-rated lines
+  // show the rate ("15%"), exempt/zero-rated get their SARS label so
+  // an auditor can reconcile line-by-line.
+  const kindOf = (it: any) => {
+    const tr = taxRates?.find((t: any) => t.id === it.taxRateId);
+    if (!tr) return { label: 'None', kind: 'NONE' as const };
+    const kind = (tr.kind as string) || (Number(tr.rate) > 0 ? 'STANDARD' : 'NONE');
+    if (kind === 'EXEMPT') return { label: 'Exempt', kind: 'EXEMPT' as const };
+    if (kind === 'ZERO_RATED') return { label: '0%', kind: 'ZERO_RATED' as const };
+    if (kind === 'STANDARD') return { label: `${Number(tr.rate)}%`, kind: 'STANDARD' as const };
+    return { label: tr.name || 'N/A', kind: 'NONE' as const };
+  };
+  const rowData = (order.items || []).map((it: any) => {
     const qty = Number(it.quantity) || 1;
     const tax = Number(it.taxAmount) || 0;
     const gross = Number(it.lineTotal) || 0;
     const net = gross - tax;
     const unitNet = qty > 0 ? net / qty : (Number(it.unitPrice) || 0);
-    return `
+    return { it, qty, tax, net, unitNet, ...kindOf(it) };
+  });
+  const totalStandardNet = rowData.filter((r: any) => r.kind === 'STANDARD').reduce((s: number, r: any) => s + r.net, 0);
+  const totalExemptNet   = rowData.filter((r: any) => r.kind === 'EXEMPT' || r.kind === 'NONE').reduce((s: number, r: any) => s + r.net, 0);
+  const totalZeroNet     = rowData.filter((r: any) => r.kind === 'ZERO_RATED').reduce((s: number, r: any) => s + r.net, 0);
+  const hasMixed = [totalStandardNet, totalExemptNet, totalZeroNet].filter((v: number) => Math.abs(v) > 0.005).length > 1;
+  const rows = rowData.map((r: any) => `
   <tr>
-    <td>${escapeHtml(it.partNumber || '')}</td>
-    <td>${escapeHtml(it.description)}</td>
-    <td class="num">${it.quantity}</td>
-    <td class="num">${escapeHtml(money(unitNet))}</td>
-    <td class="num strong">${escapeHtml(money(net))}</td>
+    <td>${escapeHtml(r.it.partNumber || '')}</td>
+    <td>${escapeHtml(r.it.description)}</td>
+    <td class="num">${r.it.quantity}</td>
+    <td class="num">${escapeHtml(money(r.unitNet))}</td>
+    <td class="num" style="font-size:10px">${escapeHtml(r.label)}</td>
+    <td class="num strong">${escapeHtml(money(r.net))}</td>
   </tr>
-`;
-  }).join('');
+`).join('');
 
   return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(order.orderNumber)}</title>
 <style>
@@ -1335,17 +1433,26 @@ function renderPrintableSalesOrder(order: any, clientName: string): string {
         <th>Model No</th>
         <th>Description</th>
         <th style="text-align:right">Qty</th>
-        <th style="text-align:right">Price (excl. VAT)</th>
-        <th style="text-align:right">Total (excl. VAT)</th>
+        <th style="text-align:right">Price (Excl. VAT)</th>
+        <th style="text-align:right">VAT</th>
+        <th style="text-align:right">Total (Excl. VAT)</th>
       </tr>
     </thead>
-    <tbody>${rows || '<tr><td colspan="5" style="text-align:center;color:#999;padding:20px">No line items</td></tr>'}</tbody>
+    <tbody>${rows || '<tr><td colspan="6" style="text-align:center;color:#999;padding:20px">No line items</td></tr>'}</tbody>
   </table>
 
   <div class="totals">
     <table>
-      <tr><td>Total (Excl. VAT)</td><td class="num">${escapeHtml(money(order.subtotal))}</td></tr>
-      <tr><td>VAT amount</td><td class="num">${escapeHtml(money(order.tax))}</td></tr>
+      ${hasMixed ? `
+        ${totalStandardNet > 0.005 ? `<tr><td>Excl. VAT — Standard-rated</td><td class="num">${escapeHtml(money(totalStandardNet))}</td></tr>` : ''}
+        ${totalExemptNet   > 0.005 ? `<tr><td>Excl. VAT — Exempt supplies</td><td class="num">${escapeHtml(money(totalExemptNet))}</td></tr>` : ''}
+        ${totalZeroNet     > 0.005 ? `<tr><td>Excl. VAT — Zero-rated</td><td class="num">${escapeHtml(money(totalZeroNet))}</td></tr>` : ''}
+        <tr><td>Total (Excl. VAT)</td><td class="num">${escapeHtml(money(order.subtotal))}</td></tr>
+        <tr><td>15% VAT (Standard-rated only)</td><td class="num">${escapeHtml(money(order.tax))}</td></tr>
+      ` : `
+        <tr><td>Total (Excl. VAT)</td><td class="num">${escapeHtml(money(order.subtotal))}</td></tr>
+        <tr><td>VAT amount</td><td class="num">${escapeHtml(money(order.tax))}</td></tr>
+      `}
       <tr class="total"><td>Total</td><td class="num">${escapeHtml(money(order.total))}</td></tr>
     </table>
   </div>
