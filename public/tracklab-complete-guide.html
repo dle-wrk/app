@@ -392,11 +392,6 @@
                     <li><strong>Safety:</strong> if the invoice already booked stock out, the delivery-note lines skip a second decrement automatically.</li>
                 </ul>
             </div>
-            <div class="shot-todo">
-                📷 SCREENSHOT SLOT — <code>guide/auto-fulfil-batch-results.jpg</code><br>
-                Capture: the Batch Auto-Fulfil modal after running, showing the per-order results table with ✓ SUCCESS pills and the invoice / dispatch / payment numbers per row.
-            </div>
-
             <h3>Bookkeeping — Save PDF everywhere</h3>
             <div class="step">
                 <p>Every doc viewer in Bookkeeping has a <strong>Save PDF</strong> button next to Print. Clicking it downloads a properly-typeset PDF directly to your machine — no print-dialog dance, no "Save as PDF" destination picker.</p>
@@ -423,11 +418,6 @@
                     <li><strong>Reconcile</strong> per line — Pick a specific payment / expense, or Ignore for legit uncleared items. Complete when opening + lines = closing and every line is matched. Reconciled statements lock so retro edits can't quietly rewrite next month's opening balance.</li>
                 </ol>
             </div>
-            <div class="shot-todo">
-                📷 SCREENSHOT SLOT — <code>guide/bank-rec-grid.jpg</code><br>
-                Capture: reconciliation modal open with a mix of matched (blue "Received" pill + doc number) and unmatched (red row) statement lines, showing the balance-diff strip at the top.
-            </div>
-
             <h3>VAT201 return</h3>
             <div class="step">
                 <p>Bookkeeping → Reports → VAT201. Pick a period, hit Run. Dashboard cards for Output tax (Box 4) / Input tax (Box 15) / Net VAT / Zero-rated sales. Box breakdown table walks through Box 1, 2, 4, 14, 15 the same way SARS's eFiling form is laid out. Two supporting lists at the bottom expand every invoice and every bill that fed the numbers so an auditor can drill in.</p>
@@ -480,11 +470,6 @@
                 </ol>
                 <p>Every downstream COGS + margin report picks up the landed cost automatically — no follow-up steps.</p>
             </div>
-            <div class="shot-todo">
-                📷 SCREENSHOT SLOT — <code>guide/landed-cost-preview.jpg</code><br>
-                Capture: Landed-Cost batch viewer in DRAFT with the preview table visible: original unit cost, allocated share, new unit cost — plus the total-addon strip at the top.
-            </div>
-
             <h3>Inventory grid — LED colours, reserved quantities, prefix picker</h3>
             <div class="step">
                 <p>Three related upgrades on the Items page:</p>
@@ -494,11 +479,6 @@
                     <li><strong>Add SKU stock-code prefix picker</strong> — in the New SKU modal, next to the Stock Code input, is a dropdown of every 3-letter prefix already used in inventory (ENC → ENC-004 (127), LED → LED-014 (9), etc.). Picking a prefix fills the input with the next available number in that family.</li>
                 </ul>
             </div>
-            <div class="shot-todo">
-                📷 SCREENSHOT SLOT — <code>guide/inventory-led-swatches.jpg</code><br>
-                Capture: Inventory grid filtered to <code>led-</code>, showing four or five cards each with their coloured dot + "· Blue" / "· Yellow-green" / etc. label chip.
-            </div>
-
             <h3>New SKU — supplier PN + MFN PN, comboboxes</h3>
             <div class="step">
                 <p>The Register New Inventory Component modal has grown up:</p>
@@ -510,11 +490,6 @@
                     <li>Line-item SKU inputs on invoice / bill / PO editors also accept free-typed values now, so a supplier's own SKU that isn't in inventory yet doesn't force you to bail out and create the item first.</li>
                 </ul>
             </div>
-            <div class="shot-todo">
-                📷 SCREENSHOT SLOT — <code>guide/new-sku-combobox.jpg</code><br>
-                Capture: New SKU modal with the Category Class combobox open, showing filtered options + the "Add '<code>&lt;typed&gt;</code>' as new category" row at the top. Include the supplier + MFN PN inputs visible below.
-            </div>
-
             <h3>Import CSV — XLSX support, admin-gated, auto-backup</h3>
             <div class="step">
                 <p>Bulk import on the Items page picked up three related upgrades:</p>
