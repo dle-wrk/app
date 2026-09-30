@@ -108,7 +108,7 @@ export const Customer360Modal: React.FC<{
       ...invs.map(i => ({ when: i.invoiceDate, kind: 'INVOICE' as const, docNumber: i.invoiceNumber, amount: i.total, status: i.status })),
       ...pays.map(p => ({ when: p.paymentDate, kind: 'PAYMENT' as const, docNumber: p.paymentNumber, amount: p.amount })),
       ...creditNotes.map((c: any) => ({ when: c.creditNoteDate || c.createdAt, kind: 'CREDIT' as const, docNumber: c.creditNoteNumber, amount: c.total, status: c.status })),
-      ...deliveries.map((d: any) => ({ when: d.dispatchDate || d.createdAt, kind: 'DELIVERY' as const, docNumber: d.dispatchNumber, status: d.status })),
+      ...deliveries.map((d: any) => ({ when: d.noteDate || d.createdAt, kind: 'DELIVERY' as const, docNumber: d.noteNumber, status: d.status })),
     ];
     rows.sort((a, b) => (b.when || '').localeCompare(a.when || ''));
     return rows.slice(0, 12);
@@ -287,7 +287,7 @@ export const Customer360Modal: React.FC<{
               loading={loadingExtras}
               empty="No delivery or collection notes yet."
               rows={deliveries.map((d: any) => (
-                <DocRow key={d.id} number={d.dispatchNumber} date={d.dispatchDate} status={d.status}
+                <DocRow key={d.id} number={d.noteNumber} date={d.noteDate} status={d.status}
                   extra={`${d.noteType || 'DELIVERY'}${d.orderNumber ? ` · ${d.orderNumber}` : ''}`} />
               ))}
             />

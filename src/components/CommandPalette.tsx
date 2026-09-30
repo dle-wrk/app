@@ -3,19 +3,126 @@ import {
   LayoutDashboard, Boxes, TableProperties, Tag, Factory, Receipt, Calculator, Database,
   ArrowLeftRight, ClipboardList, Zap, Settings, Shield, Brain, Activity, User,
   Users, FileText, Wallet, Truck, CreditCard, Landmark, Wrench, BarChart3,
-  Search, ArrowUp, ArrowDown, CornerDownLeft, X,
+  Search, ArrowUp, ArrowDown, CornerDownLeft, X, Package,
 } from 'lucide-react';
 import { Item, Client, Supplier } from '../types';
 import {
   CommandRoute, CommandTarget, ROUTES,
   scoreRoute, fuzzyScore, getRecent, pushRecent,
 } from '../lib/commandPalette';
+import { apiGet } from './bookkeeping/shared';
 
 const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   LayoutDashboard, Boxes, TableProperties, Tag, Factory, Receipt, Calculator, Database,
   ArrowLeftRight, ClipboardList, Zap, Settings, Shield, Brain, Activity, User,
-  Users, FileText, Wallet, Truck, CreditCard, Landmark, Wrench, BarChart3,
+  Users, FileText, Wallet, Truck, CreditCard, Landmark, Wrench, BarChart3, Package,
 };
+
+// A doc-number search result. The palette resolves each of these to a
+// CommandTarget that lands the user on the right bookkeeping sub-tab
+// (Invoices, SOs, Bills, POs, Credit Notes, Delivery/Collection notes).
+// Doc numbers double as the fuzzy-search key AND the label — no need
+// for a separate title because SO-2026-0007 already identifies itself.
+interface DocIndexEntry {
+  docNumber: string;
+  subtitle: string;      // client/supplier name + status pill text
+  group: 'Invoices' | 'Sales Orders' | 'Quotations' | 'Bills' | 'Purchase Orders' | 'Credit Notes' | 'Deliveries';
+  icon: string;
+  target: CommandTarget;
+}
+
+// Fetches every doc kind's summary list in parallel, dedupes empties,
+// and caches for INDEX_TTL_MS so repeated palette opens don't hammer
+// the network. Called once per palette-open above the TTL threshold.
+const INDEX_TTL_MS = 60_000;
+let indexCache: { at: number; entries: DocIndexEntry[] } | null = null;
+
+async function loadDocIndex(): Promise<DocIndexEntry[]> {
+  const now = Date.now();
+  if (indexCache && now - indexCache.at < INDEX_TTL_MS) return indexCache.entries;
+
+  // Every fetch is best-effort — a failing endpoint zeroes its own
+  // slice and the rest of the index still populates.
+  const [invoices, orders, bills, pos, creditNotes, dispatchNotes] = await Promise.all([
+    apiGet('/api/invoices').catch(() => []),
+    apiGet('/api/client-orders').catch(() => []),
+    apiGet('/api/bills').catch(() => []),
+    apiGet('/api/purchase-orders').catch(() => []),
+    apiGet('/api/credit-notes').catch(() => []),
+    apiGet('/api/dispatch-notes').catch(() => []),
+  ]);
+
+  const entries: DocIndexEntry[] = [];
+
+  for (const i of (invoices as any[]) || []) {
+    if (!i?.invoiceNumber) continue;
+    entries.push({
+      docNumber: i.invoiceNumber,
+      subtitle: `${i.clientName || 'client'} · ${i.status || 'DRAFT'}${i.total != null ? ` · ${i.total}` : ''}`,
+      group: 'Invoices',
+      icon: 'Receipt',
+      target: { view: 'bookkeeping', section: 'SALES', subSection: 'INVOICES', focusQuery: i.invoiceNumber },
+    });
+  }
+  for (const o of (orders as any[]) || []) {
+    if (!o?.orderNumber) continue;
+    const isQuote = o.status === 'QUOTATION';
+    entries.push({
+      docNumber: o.orderNumber,
+      subtitle: `${o.clientName || 'client'} · ${o.status || 'DRAFT'}`,
+      group: isQuote ? 'Quotations' : 'Sales Orders',
+      icon: 'FileText',
+      target: { view: 'bookkeeping', section: 'SALES', subSection: 'ORDERS', focusQuery: o.orderNumber },
+    });
+  }
+  for (const b of (bills as any[]) || []) {
+    if (!b?.billNumber) continue;
+    entries.push({
+      docNumber: b.billNumber,
+      subtitle: `${b.supplierName || b.vendorName || 'vendor'} · ${b.status || 'DRAFT'}`,
+      group: 'Bills',
+      icon: 'Receipt',
+      target: { view: 'bookkeeping', section: 'PURCHASES', subSection: 'BILLS', focusQuery: b.billNumber },
+    });
+  }
+  for (const p of (pos as any[]) || []) {
+    const num = p?.poNumber || p?.orderNumber;
+    if (!num) continue;
+    entries.push({
+      docNumber: num,
+      subtitle: `${p.supplierName || p.vendorName || 'vendor'} · ${p.status || 'DRAFT'}`,
+      group: 'Purchase Orders',
+      icon: 'FileText',
+      target: { view: 'bookkeeping', section: 'PURCHASES', subSection: 'ORDERS', focusQuery: num },
+    });
+  }
+  for (const cn of (creditNotes as any[]) || []) {
+    if (!cn?.creditNoteNumber) continue;
+    entries.push({
+      docNumber: cn.creditNoteNumber,
+      subtitle: `${cn.clientName || 'client'} · ${cn.status || 'DRAFT'}${cn.invoiceNumber ? ` · re ${cn.invoiceNumber}` : ''}`,
+      group: 'Credit Notes',
+      icon: 'Receipt',
+      target: { view: 'bookkeeping', section: 'SALES', subSection: 'CREDIT_NOTES', focusQuery: cn.creditNoteNumber },
+    });
+  }
+  for (const dn of (dispatchNotes as any[]) || []) {
+    // Dispatch endpoint returns `noteNumber` (see mapDispatchNote in
+    // bookkeeping-db.ts) — same row shape covers both delivery and
+    // collection notes.
+    if (!dn?.noteNumber) continue;
+    entries.push({
+      docNumber: dn.noteNumber,
+      subtitle: `${dn.clientName || 'client'} · ${dn.noteType || 'DELIVERY'} · ${dn.status || 'DRAFT'}`,
+      group: 'Deliveries',
+      icon: 'Truck',
+      target: { view: 'bookkeeping', section: 'SALES', subSection: 'DISPATCH', focusQuery: dn.noteNumber },
+    });
+  }
+
+  indexCache = { at: now, entries };
+  return entries;
+}
 
 interface CommandPaletteProps {
   open: boolean;
@@ -42,6 +149,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
 }) => {
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
+  const [docs, setDocs] = useState<DocIndexEntry[]>(() => indexCache?.entries || []);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -53,6 +161,10 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     }
     // Small timeout lets the modal mount before focus so the caret lands.
     const t = window.setTimeout(() => inputRef.current?.focus(), 0);
+    // Refresh the doc-number index in the background — cache hits are
+    // instant, cache misses populate results once the user starts
+    // typing. Never blocks the palette from opening.
+    loadDocIndex().then(setDocs).catch(() => { /* keep whatever we had */ });
     return () => window.clearTimeout(t);
   }, [open]);
 
@@ -103,10 +215,34 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       .sort((a, b) => b.score - a.score)
       .slice(0, MAX_PER_GROUP);
 
+    // Doc-number search. Match on the doc number AND the subtitle so
+    // "lumax invoice" or "digikey bill" also find things. Doc numbers
+    // are short and highly distinctive, so a substring hit almost
+    // always means the user meant that specific doc.
+    const docHits = docs
+      .map((d) => {
+        const numScore = fuzzyScore(q, d.docNumber).score;
+        const subScore = fuzzyScore(q, d.subtitle).score;
+        return { doc: d, score: Math.max(numScore, subScore >= 0 ? subScore * 0.5 : -Infinity) };
+      })
+      .filter((r) => r.score >= 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 12);
+
     // Interleave: pages/bookkeeping first (highest signal), then entities.
     const out: DisplayResult[] = [];
     routeHits.slice(0, 12).forEach(({ route }) => {
       out.push({ key: route.id, label: route.label, path: route.path, group: route.group, icon: route.icon, target: route.target });
+    });
+    docHits.forEach(({ doc }) => {
+      out.push({
+        key: `doc-${doc.group}-${doc.docNumber}`,
+        label: doc.docNumber,
+        path: doc.subtitle,
+        group: doc.group,
+        icon: doc.icon,
+        target: doc.target,
+      });
     });
     itemHits.forEach(({ item, label }) => {
       out.push({
@@ -139,7 +275,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       });
     });
     return out;
-  }, [query, items, clients, suppliers]);
+  }, [query, items, clients, suppliers, docs]);
 
   // Keep activeIndex within bounds when results change.
   useEffect(() => {
@@ -161,7 +297,12 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   const commit = (r: DisplayResult) => {
     // Only remember canonical route ids in recents; entity clicks aren't a
     // stable "place I want to jump back to."
-    if (!r.key.startsWith('item-') && !r.key.startsWith('client-') && !r.key.startsWith('supplier-')) {
+    if (
+      !r.key.startsWith('item-') &&
+      !r.key.startsWith('client-') &&
+      !r.key.startsWith('supplier-') &&
+      !r.key.startsWith('doc-')
+    ) {
       pushRecent(r.key);
     }
     onNavigate(r.target);
@@ -212,7 +353,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
           <input
             ref={inputRef}
             type="text"
-            placeholder="Search pages, tabs, items, clients, suppliers…"
+            placeholder="Search pages, docs (INV-…, SO-…, PO-…, BILL-…, QUO-…), items, clients, suppliers…"
             value={query}
             onChange={(e) => { setQuery(e.target.value); setActiveIndex(0); }}
             onKeyDown={onKeyDown}

@@ -21,7 +21,7 @@ export interface CommandRoute {
   keywords: string;
   target: CommandTarget;
   /** Bucket the result lands in. */
-  group: 'Pages' | 'Bookkeeping' | 'Actions' | 'Items' | 'Clients' | 'Suppliers';
+  group: 'Pages' | 'Bookkeeping' | 'Actions' | 'Items' | 'Clients' | 'Suppliers' | 'Invoices' | 'Sales Orders' | 'Quotations' | 'Bills' | 'Purchase Orders' | 'Credit Notes' | 'Deliveries';
   /** Lucide icon name — resolved to a component in CommandPalette. */
   icon: string;
 }
