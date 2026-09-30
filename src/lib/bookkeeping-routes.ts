@@ -1974,10 +1974,48 @@ If a field is unreadable, use null (or [] for lineItems). Never invent values.`;
     const to = String(req.query.to || new Date().toISOString().slice(0, 10));
     const from = String(req.query.from || `${to.slice(0, 4)}-01-01`);
     try {
-      const [invRes, billRes] = await Promise.all([
+      // Aggregate per-line joined to tax_rates.kind so mixed-line
+      // invoices split correctly. Header .tax_total alone can't tell
+      // Exempt apart from Zero-Rated (both are 0%), so the old
+      // "vat > 0.005 ? standard : zero-rated" heuristic wrongly folded
+      // Exempt into Box 2. Taxable amount per line is line_total -
+      // tax_amount; a line with no tax_rate_id falls back to STANDARD
+      // for backward compatibility with rows created before the kind
+      // column existed.
+      const [invLineRes, billLineRes, invHeaders, billHeaders] = await Promise.all([
         query<any>(`
-          SELECT i.id, i.invoice_number, i.invoice_date, i.subtotal, i.tax_total, i.total,
-                 c.client_name
+          SELECT i.id AS invoice_id, i.invoice_number, i.invoice_date, c.client_name,
+                 COALESCE(tr.kind, 'STANDARD') AS kind,
+                 ii.tax_amount,
+                 ii.line_total,
+                 ii.line_total - ii.tax_amount AS taxable
+          FROM invoice_items ii
+          JOIN invoices i ON i.id = ii.invoice_id
+          LEFT JOIN clients c ON c.id = i.client_id
+          LEFT JOIN tax_rates tr ON tr.id = ii.tax_rate_id
+          WHERE i.invoice_date BETWEEN $1 AND $2
+            AND i.status IN ('SENT','PARTIAL','PAID','OVERDUE')
+          ORDER BY i.invoice_date, i.id
+        `, [from, to]),
+        query<any>(`
+          SELECT b.id AS bill_id, b.bill_number, b.bill_date, s.name AS supplier_name,
+                 COALESCE(tr.kind, 'STANDARD') AS kind,
+                 bi.tax_amount,
+                 bi.line_total,
+                 bi.line_total - bi.tax_amount AS taxable
+          FROM bill_items bi
+          JOIN bills b ON b.id = bi.bill_id
+          LEFT JOIN suppliers s ON s.id = b.supplier_id
+          LEFT JOIN tax_rates tr ON tr.id = bi.tax_rate_id
+          WHERE b.bill_date BETWEEN $1 AND $2
+            AND b.status IN ('AWAITING_PAYMENT','PARTIAL','PAID','OVERDUE')
+          ORDER BY b.bill_date, b.id
+        `, [from, to]),
+        // Header lists kept for the supporting tables so the UI still
+        // shows every invoice/bill in the period even when it has zero
+        // lines (edge case, but possible).
+        query<any>(`
+          SELECT i.invoice_number, i.invoice_date, i.subtotal, i.tax_total, c.client_name
           FROM invoices i
           LEFT JOIN clients c ON c.id = i.client_id
           WHERE i.invoice_date BETWEEN $1 AND $2
@@ -1985,8 +2023,7 @@ If a field is unreadable, use null (or [] for lineItems). Never invent values.`;
           ORDER BY i.invoice_date, i.id
         `, [from, to]),
         query<any>(`
-          SELECT b.id, b.bill_number, b.bill_date, b.subtotal, b.tax_total, b.total,
-                 s.name AS supplier_name
+          SELECT b.bill_number, b.bill_date, b.subtotal, b.tax_total, s.name AS supplier_name
           FROM bills b
           LEFT JOIN suppliers s ON s.id = b.supplier_id
           WHERE b.bill_date BETWEEN $1 AND $2
@@ -1995,20 +2032,29 @@ If a field is unreadable, use null (or [] for lineItems). Never invent values.`;
         `, [from, to]),
       ]);
 
-      // Zero-rated / exempt = subtotal appears but tax_total is 0. Not
-      // perfect (a line with a mixed tax rate on the invoice would
-      // straddle both), but adequate for a small business's VAT201.
-      let standardTaxable = 0, standardVat = 0, zeroRated = 0;
-      for (const r of invRes.rows) {
-        const sub = parseFloat(r.subtotal) || 0;
-        const vat = parseFloat(r.tax_total) || 0;
-        if (vat > 0.005) { standardTaxable += sub; standardVat += vat; }
-        else { zeroRated += sub; }
+      // Sales side: split STANDARD / ZERO_RATED / EXEMPT.
+      let standardTaxable = 0, standardVat = 0, zeroRated = 0, exemptSupplies = 0;
+      for (const r of invLineRes.rows) {
+        const taxable = parseFloat(r.taxable) || 0;
+        const vat     = parseFloat(r.tax_amount) || 0;
+        switch (r.kind) {
+          case 'ZERO_RATED': zeroRated      += taxable; break;
+          case 'EXEMPT':     exemptSupplies += taxable; break;
+          default:           standardTaxable += taxable; standardVat += vat;
+        }
       }
-      let inputTaxable = 0, inputVat = 0;
-      for (const r of billRes.rows) {
-        inputTaxable += parseFloat(r.subtotal) || 0;
-        inputVat     += parseFloat(r.tax_total) || 0;
+      // Purchases side: only STANDARD contributes to Box 14/15. Exempt
+      // and zero-rated purchases are neither claimable nor SARS-tracked
+      // here, but exempt totals are surfaced as an informational memo.
+      let inputTaxable = 0, inputVat = 0, exemptPurchases = 0;
+      for (const r of billLineRes.rows) {
+        const taxable = parseFloat(r.taxable) || 0;
+        const vat     = parseFloat(r.tax_amount) || 0;
+        if (r.kind === 'EXEMPT') { exemptPurchases += taxable; continue; }
+        // ZERO_RATED purchases have taxable > 0 but vat = 0, which
+        // correctly folds into Box 14 with a 0 in Box 15.
+        inputTaxable += taxable;
+        inputVat     += vat;
       }
 
       const netVatDue = Math.round((standardVat - inputVat) * 100) / 100;
@@ -2017,15 +2063,17 @@ If a field is unreadable, use null (or [] for lineItems). Never invent values.`;
         period: { from, to },
         standardRateSales:     { taxable: r2(standardTaxable), vat: r2(standardVat) },
         zeroRatedSales:        r2(zeroRated),
+        exemptSupplies:        r2(exemptSupplies),      // NEW — memo only, not on SARS boxes
         standardRatePurchases: { taxable: r2(inputTaxable), vat: r2(inputVat) },
+        exemptPurchases:       r2(exemptPurchases),     // NEW — memo only
         totalOutputTax: r2(standardVat),
         totalInputTax:  r2(inputVat),
         netVatDue,                     // positive = pay SARS, negative = refund
-        invoices: invRes.rows.map(r => ({
+        invoices: invHeaders.rows.map(r => ({
           number: r.invoice_number, date: r.invoice_date, client: r.client_name,
           taxable: parseFloat(r.subtotal) || 0, vat: parseFloat(r.tax_total) || 0,
         })),
-        bills: billRes.rows.map(r => ({
+        bills: billHeaders.rows.map(r => ({
           number: r.bill_number, date: r.bill_date, supplier: r.supplier_name,
           taxable: parseFloat(r.subtotal) || 0, vat: parseFloat(r.tax_total) || 0,
         })),

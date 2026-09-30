@@ -116,13 +116,18 @@ export const ReportsTab: React.FC<ModuleDataProps> = ({ triggerToast }) => {
           { description: 'Box 14 · Standard-rated purchases (taxable)', quantity: '', lineTotal: data.standardRatePurchases.taxable },
           { description: 'Box 15 · Input VAT on standard purchases',  quantity: '', lineTotal: data.standardRatePurchases.vat },
           { description: 'Net VAT (Output − Input)',                  quantity: '', lineTotal: data.netVatDue },
+          // Memo rows — flagged so the reader understands they aren't
+          // part of the SARS boxes above. Kept in the same table for
+          // audit continuity rather than a separate page.
+          ...(data.exemptSupplies > 0 ? [{ description: 'Memo · Exempt supplies (sales) — not on VAT201', quantity: '', lineTotal: data.exemptSupplies }] : []),
+          ...(data.exemptPurchases > 0 ? [{ description: 'Memo · Exempt purchases — not on VAT201', quantity: '', lineTotal: data.exemptPurchases }] : []),
         ],
         totals: {
           subtotal: data.totalOutputTax,
           tax: -data.totalInputTax,
           total: data.netVatDue,
         },
-        notes: 'This report is a computation aid — verify each box against SARS eFiling before submission. Only invoices and bills with a live ledger status (SENT/PARTIAL/PAID/OVERDUE for invoices, AWAITING_PAYMENT and onward for bills) contribute. DRAFT and VOID are excluded.',
+        notes: 'This report is a computation aid — verify each box against SARS eFiling before submission. Only invoices and bills with a live ledger status (SENT/PARTIAL/PAID/OVERDUE for invoices, AWAITING_PAYMENT and onward for bills) contribute. DRAFT and VOID are excluded. Exempt supplies (SARS treatment: not a taxable supply) are listed as informational memos and never contribute to Box 1, 2, 4, 14 or 15.',
       });
     } catch (err: any) {
       triggerToast(err?.message || 'Failed to generate PDF', 'ERROR');
@@ -193,6 +198,22 @@ const Vat201View: React.FC<{ data: any }> = ({ data }) => (
         <div className="flex justify-between pt-2"><span>Box 14 — Standard-rated purchases (taxable)</span><span className="font-mono font-bold">{fmtMoney(data.standardRatePurchases.taxable)}</span></div>
         <div className="flex justify-between border-t border-outline-variant/40 pt-1"><span className="font-bold">Box 15 — Input VAT</span><span className="font-mono font-bold text-secondary">{fmtMoney(data.standardRatePurchases.vat)}</span></div>
         <div className="flex justify-between border-t-2 border-outline-variant pt-2 text-sm"><span className="font-black">Net VAT (Output − Input)</span><span className={`font-mono font-black ${data.netVatDue >= 0 ? 'text-error' : 'text-green-400'}`}>{fmtMoney(data.netVatDue)}</span></div>
+
+        {/* Exempt supplies are NOT part of any SARS box on VAT201 — an
+            exempt supply is not a taxable supply. Shown here as an
+            informational memo only so the user can see they're being
+            handled separately from Box 2 zero-rated sales. */}
+        {(data.exemptSupplies > 0 || data.exemptPurchases > 0) && (
+          <div className="mt-3 pt-2 border-t border-dashed border-outline-variant/40 space-y-1 text-outline">
+            <div className="text-[10px] uppercase font-bold tracking-wider text-outline">Informational — not on VAT201</div>
+            {data.exemptSupplies > 0 && (
+              <div className="flex justify-between"><span>Exempt supplies (sales)</span><span className="font-mono">{fmtMoney(data.exemptSupplies)}</span></div>
+            )}
+            {data.exemptPurchases > 0 && (
+              <div className="flex justify-between"><span>Exempt purchases</span><span className="font-mono">{fmtMoney(data.exemptPurchases)}</span></div>
+            )}
+          </div>
+        )}
       </div>
 
       <details className="rounded-lg border border-outline-variant/40 bg-surface-container-low">

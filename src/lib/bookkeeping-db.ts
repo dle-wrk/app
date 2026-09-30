@@ -549,11 +549,23 @@ export async function ensureBookkeepingSchema() {
   }
 
   // --- Default Tax Rates (seeded once) -----------------------------------------
+  // Kind distinguishes SARS-relevant categories so VAT201 can bucket
+  // supplies correctly. Rate alone can't do it — both Zero-Rated and
+  // Exempt have rate=0, but a zero-rated supply is a taxable supply
+  // (Box 2 on VAT201) whereas an exempt supply is not a taxable supply
+  // at all (doesn't belong on VAT201 apart from an informational memo).
+  await exec(`ALTER TABLE tax_rates ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'STANDARD'`).catch(() => {});
+  // Backfill kind for any existing rows that were seeded before this
+  // column existed. Matches by name to avoid re-typing rows the user
+  // has since renamed to something bespoke.
+  await pool.query(`UPDATE tax_rates SET kind = 'ZERO_RATED' WHERE kind = 'STANDARD' AND (name ILIKE '%zero%rate%' OR name ILIKE '%0%zero%')`).catch(() => {});
+  await pool.query(`UPDATE tax_rates SET kind = 'EXEMPT'     WHERE kind = 'STANDARD' AND name ILIKE '%exempt%'`).catch(() => {});
+
   const taxCount = await queryOne<{ count: string }>(`SELECT COUNT(*) as count FROM tax_rates`);
   if (parseInt(taxCount?.count || '0', 10) === 0) {
-    await pool.query(`INSERT INTO tax_rates (name, rate, is_default) VALUES ($1,$2,$3)`, ['Standard VAT (15%)', 15, true]);
-    await pool.query(`INSERT INTO tax_rates (name, rate, is_default) VALUES ($1,$2,$3)`, ['Zero-Rated (0%)', 0, false]);
-    await pool.query(`INSERT INTO tax_rates (name, rate, is_default) VALUES ($1,$2,$3)`, ['Exempt', 0, false]);
+    await pool.query(`INSERT INTO tax_rates (name, rate, is_default, kind) VALUES ($1,$2,$3,$4)`, ['Standard VAT (15%)', 15, true, 'STANDARD']);
+    await pool.query(`INSERT INTO tax_rates (name, rate, is_default, kind) VALUES ($1,$2,$3,$4)`, ['Zero-Rated (0%)', 0, false, 'ZERO_RATED']);
+    await pool.query(`INSERT INTO tax_rates (name, rate, is_default, kind) VALUES ($1,$2,$3,$4)`, ['Exempt', 0, false, 'EXEMPT']);
     console.log('Seeded default tax rates.');
   }
 
