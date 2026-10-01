@@ -1,0 +1,830 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Reference — Tracklab IM Docs</title>
+    <link rel="icon" type="image/png" href="../tracklab-logo.png">
+    <link rel="stylesheet" href="shared.css">
+</head>
+<body data-page="api">
+    <div class="header compact">
+        <h1>🔌 API Reference</h1>
+        <p>Sign-in, conventions and every endpoint, for scripts and integrations.</p>
+    </div>
+    <nav class="docs-nav" id="docs-nav" aria-label="Documentation">
+        <noscript><div class="docs-nav-bar"><div class="docs-nav-links"><a href="index.html">← All docs</a></div></div></noscript>
+    </nav>
+
+    <div class="container">
+        <aside class="toc" id="page-toc" aria-label="On this page"></aside>
+
+        <div class="main-col">
+        <div class="section" id="overview">
+            <h2>Overview</h2>
+
+            <h3 id="what-this-is">What this is</h3>
+            <div class="step">
+                <p>Tracklab IM has one API: the same one the web app uses for everything it does. A script or another system can call it to read stock, raise documents or pull reports, as long as it signs in first.</p>
+                <ul>
+                    <li>It is not versioned. Endpoints can change between releases, so check the <a href="release-notes.html">Release Notes</a> after an upgrade.</li>
+                    <li>This is not the same thing as the <strong>API Keys</strong> tab in Pricing. That tab holds the credentials Tracklab IM uses to call suppliers (DigiKey, Mouser, LCSC…), see <a href="admin-tips.html#api-keys-tab">Admin &amp; Pro Tips</a>.</li>
+                </ul>
+            </div>
+
+            <h3 id="base-address-and-format">Base address &amp; format</h3>
+            <div class="step">
+                <ul>
+                    <li><strong>Address:</strong> the address you open the app at, followed by <code>/api</code>. The examples on this page write it as <code>https://YOUR-HOST/api</code>.</li>
+                    <li><strong>Format:</strong> JSON in both directions. Send <code>Content-Type: application/json</code> with every request that has a body.</li>
+                    <li><strong>Size:</strong> a request body can be up to 20&nbsp;MB. Attachments (scanned slips, POP / PO files, uploaded docs) travel as base64 inside the JSON.</li>
+                </ul>
+            </div>
+
+            <h3 id="reading-the-endpoint-tables">Reading the endpoint tables</h3>
+            <div class="step">
+                <p>The tables further down list every endpoint by area. Three labels can appear next to a path:</p>
+                <ul>
+                    <li><span class="tag tag-admin">Admin</span> the signed-in account must have the admin role.</li>
+                    <li><span class="tag tag-public">No session</span> works without signing in (sign-in itself and password recovery).</li>
+                    <li><span class="tag tag-token">Own token</span> authenticates with its own token instead of a session.</li>
+                </ul>
+                <p>No label means any signed-in account can call it. A few internal maintenance endpoints are deliberately left out of the tables.</p>
+            </div>
+        </div>
+
+        <div class="section" id="signing-in">
+            <h2>Signing in</h2>
+
+            <h3 id="get-a-session">Get a session</h3>
+            <div class="step">
+                <p>Post an email and password to <code>/api/login</code>. The response is the user plus a <code>sessionId</code>.</p>
+<pre class="code">curl -s -X POST https://YOUR-HOST/api/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"integration@yourcompany.com","password":"..."}'
+
+{
+  "id": 12,
+  "email": "integration@yourcompany.com",
+  "firstName": "Stock",
+  "lastName": "Sync",
+  "role": "user",
+  "status": "ACTIVE",
+  "sessionId": "9f2c41d0...",
+  "mustChangePassword": false
+}</pre>
+                <p>A wrong email or password, or an inactive account, returns <code>401</code>.</p>
+            </div>
+
+            <h3 id="send-the-session-on-every-call">Send the session on every call</h3>
+            <div class="step">
+                <p>Put the session id in the <code>X-Session-Id</code> header of every request.</p>
+<pre class="code">curl -s https://YOUR-HOST/api/items \
+  -H "X-Session-Id: 9f2c41d0..."</pre>
+                <p>Without a valid session every endpoint except sign-in and password recovery answers <code>401</code> with <code>{"error":"Sign in required"}</code>.</p>
+            </div>
+
+            <h3 id="session-rules">Session rules</h3>
+            <div class="step">
+                <ul>
+                    <li><strong>One session per account.</strong> Signing in again, from anywhere, ends that account's previous session.</li>
+                    <li><strong>24 hours idle.</strong> A session that makes no calls for 24 hours expires. Sign in again to get a new one.</li>
+                    <li><strong>Check a session</strong> with <code>POST /api/session/verify</code> and <code>{"sessionId":"..."}</code>. It answers <code>{"active":true}</code>, or <code>{"active":false,"reason":"..."}</code> where the reason is <code>idle_timeout</code> or <code>signed_in_elsewhere</code>.</li>
+                    <li><strong>End a session</strong> with <code>POST /api/session/logout</code> and the same body.</li>
+                </ul>
+            </div>
+            <div class="tip">
+                💡 <strong>Tip:</strong> give each script its own user account. Because an account has one session at a time, a script that signs in as a person signs that person out of the app, and the person signing in again cuts the script off.
+            </div>
+
+            <h3 id="admin-only-endpoints">Admin-only endpoints</h3>
+            <div class="step">
+                <p>Endpoints labelled <span class="tag tag-admin">Admin</span> answer <code>403</code> with <code>{"error":"Admin access required"}</code> to any other role. They cover user accounts, changes to the Documentation page's entries, supplier API credentials, deleting a kit, and the kit-booking BOM.</p>
+            </div>
+
+            <h3 id="limits-on-sign-in-attempts">Limits on sign-in attempts</h3>
+            <div class="step">
+                <p>Too many attempts return <code>429</code> with a <code>Retry-After</code> header giving the wait in seconds.</p>
+                <table>
+                    <thead><tr><th>Call</th><th>Limit</th></tr></thead>
+                    <tbody>
+                        <tr><td>Sign in</td><td>20 per 5 minutes from one address, and 10 per 5 minutes for one address and email together</td></tr>
+                        <tr><td>Forgot password</td><td>20 per 30 minutes from one address, and 5 per 30 minutes for one email</td></tr>
+                        <tr><td>Reset password</td><td>20 per 30 minutes from one address</td></tr>
+                        <tr><td>Session check</td><td>200 per minute from one address</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <h3 id="calling-from-a-web-page-on-another-site">Calling from a web page on another site</h3>
+            <div class="step">
+                <p>This does not work, by design. A browser will not send the <code>X-Session-Id</code> header from a page served by a different site, so such a page can only reach the endpoints that need no session. Scripts and servers are not affected: call the API from your own back end, not from someone's browser.</p>
+            </div>
+        </div>
+
+        <div class="section" id="conventions">
+            <h2>Conventions</h2>
+
+            <h3 id="errors-and-status-codes">Errors &amp; status codes</h3>
+            <div class="step">
+                <p>A failed call returns a JSON body with an <code>error</code> message. Validation failures add a <code>details</code> object naming the fields.</p>
+                <table>
+                    <thead><tr><th>Status</th><th>Meaning</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>200</code> / <code>201</code></td><td>Done. <code>201</code> is used when something was created.</td></tr>
+                        <tr><td><code>400</code></td><td>The request is malformed or a field is invalid.</td></tr>
+                        <tr><td><code>401</code></td><td>Not signed in, or the session has expired. On sign-in: wrong credentials.</td></tr>
+                        <tr><td><code>403</code></td><td>Signed in, but not allowed (an admin-only endpoint, or ending someone else's session).</td></tr>
+                        <tr><td><code>404</code></td><td>The record does not exist.</td></tr>
+                        <tr><td><code>409</code></td><td>The change is blocked by the record's state. Examples: deleting a sales order that has invoices, or replacing the lines of an order that is past <code>DRAFT</code>.</td></tr>
+                        <tr><td><code>429</code></td><td>Too many attempts. Wait for the number of seconds in <code>Retry-After</code>.</td></tr>
+                        <tr><td><code>500</code> / <code>503</code></td><td>Server or database problem. Safe to retry a read; check before retrying a write.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <h3 id="field-names">Field names</h3>
+            <div class="step">
+                <ul>
+                    <li>Bookkeeping, sales and purchasing use camelCase: <code>clientId</code>, <code>orderNumber</code>, <code>unitPrice</code>.</li>
+                    <li>Inventory items are written with the stock table's own column names: <code>serial_number</code> (the stock code), <code>name</code>, <code>stock</code>, <code>low_stock_lvl</code>, <code>man_pn_1</code>, <code>sup_pn_1</code> and so on. The stock code is also what goes in the path, for example <code>/api/items/ANT-007</code>.</li>
+                </ul>
+            </div>
+
+            <h3 id="document-numbers">Document numbers</h3>
+            <div class="step">
+                <p>Leave the number out when you create a document and the server assigns the next one in the form <code>PREFIX-YEAR-NNNN</code>, for example <code>INV-2026-0007</code>.</p>
+                <table>
+                    <thead><tr><th>Prefix</th><th>Document</th><th>Prefix</th><th>Document</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>QUO</code></td><td>Quotation</td><td><code>PO</code></td><td>Purchase order</td></tr>
+                        <tr><td><code>SO</code></td><td>Sales order</td><td><code>BILL</code></td><td>Bill</td></tr>
+                        <tr><td><code>INV</code></td><td>Invoice</td><td><code>PMT</code></td><td>Payment made</td></tr>
+                        <tr><td><code>RCPT</code></td><td>Payment received</td><td><code>EXP</code></td><td>Expense</td></tr>
+                        <tr><td><code>CN</code></td><td>Credit note</td><td><code>LC</code></td><td>Landed-cost batch</td></tr>
+                        <tr><td><code>DN</code></td><td>Delivery note</td><td><code>JE</code></td><td>Journal entry</td></tr>
+                        <tr><td><code>STMT</code></td><td>Bank statement</td><td></td><td></td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <h3 id="updates-change-only-what-you-send">Updates change only what you send</h3>
+            <div class="step">
+                <p>Updating an item (<code>PATCH</code> or <code>PUT</code>) changes just the fields in the request. The same holds for <code>PUT</code> on customers, sales orders and their lines, sub-assemblies, fielded assets, parent/child part links, stock-ledger entries, alert subscriptions, auto-PO settings and automation rules.</p>
+                <p>On those <code>PUT</code> endpoints a field sent as <code>null</code> is ignored rather than cleared.</p>
+            </div>
+
+            <h3 id="amounts-tax-and-dates">Amounts, tax &amp; dates</h3>
+            <div class="step">
+                <ul>
+                    <li><strong>Amounts</strong> are plain decimals with no currency symbol or thousands separator. Some responses return them as text (<code>"1771.01"</code>), so convert before doing arithmetic.</li>
+                    <li><strong>Tax on a line</strong> is set by <code>taxRateId</code> (an id from <code>/api/tax-rates</code>) and <code>taxInclusive</code>. A line's <code>lineTotal</code> includes its tax and <code>taxAmount</code> is the tax part, so the amount before tax is <code>lineTotal − taxAmount</code>.</li>
+                    <li><strong>Sales-order and quotation totals</strong> (<code>subtotal</code>, <code>tax</code>, <code>total</code>) are stored exactly as you send them. Calculate them from the lines before you post.</li>
+                    <li><strong>Dates</strong> go in as <code>YYYY-MM-DD</code>. Responses carry ISO&nbsp;8601 timestamps.</li>
+                </ul>
+            </div>
+
+            <h3 id="deleting-and-restoring-items">Deleting &amp; restoring items</h3>
+            <div class="step">
+                <p>Deleting an item hides it instead of removing it. Bring it back with <code>POST /api/items/restore/:serial_number</code>. Creating an item whose stock code belongs to a deleted item also restores it, with the new values.</p>
+            </div>
+
+            <h3 id="noticing-changes-made-by-others">Noticing changes made by others</h3>
+            <div class="step">
+                <p><code>GET /api/data-versions</code> returns a counter per data area, as <code>{ "versions": { ... } }</code>. A counter goes up whenever a write in that area succeeds. Poll it and re-read an area when its counter changes; the web app does this every 25 seconds.</p>
+            </div>
+        </div>
+
+        <div class="section" id="worked-examples">
+            <h2>Worked examples</h2>
+
+            <h3 id="run-a-report">Run a report</h3>
+            <div class="step">
+<pre class="code">curl -s "https://YOUR-HOST/api/reports/profit-loss?from=2026-01-01&amp;to=2026-03-31" \
+  -H "X-Session-Id: 9f2c41d0..."
+
+{
+  "from": "2026-01-01",
+  "to": "2026-03-31",
+  "income":   [ { "accountId": 14, "code": "4000", "name": "Sales", "amount": 84210.50 } ],
+  "expenses": [ { "accountId": 31, "code": "5000", "name": "Cost of Goods Sold", "amount": 51377.20 } ],
+  "totalIncome": 84210.50,
+  "totalExpenses": 51377.20,
+  "netProfit": 32833.30
+}</pre>
+                <p>The figures above are illustrative. Only posted journal entries in the period are counted.</p>
+            </div>
+
+            <h3 id="create-a-quotation">Create a quotation</h3>
+            <div class="step">
+                <p>One line, standard-rated at 15%, priced before tax. <code>taxRateId</code> is the id of the standard rate from <code>/api/tax-rates</code>.</p>
+<pre class="code">curl -s -X POST https://YOUR-HOST/api/client-orders \
+  -H "Content-Type: application/json" \
+  -H "X-Session-Id: 9f2c41d0..." \
+  -d '{
+    "clientId": 30,
+    "orderDate": "2026-10-01",
+    "requiredDate": "2026-10-31",
+    "status": "QUOTATION",
+    "currency": "ZAR",
+    "subtotal": 1000.00,
+    "tax": 150.00,
+    "total": 1150.00,
+    "notes": "Example quotation",
+    "items": [
+      {
+        "partNumber": "PSU-002",
+        "description": "24VDC regulated power supply",
+        "quantity": 1,
+        "unitPrice": 1000.00,
+        "taxRateId": 1,
+        "taxInclusive": false,
+        "taxAmount": 150.00,
+        "lineTotal": 1150.00
+      }
+    ]
+  }'</pre>
+                <p>The response is the new order, with status <code>201</code> and its assigned number (<code>QUO-2026-…</code>). A quotation reserves no stock. To turn it into a sales order, call <code>POST /api/client-orders/:id/accept</code>.</p>
+            </div>
+        </div>
+
+        <div class="section" id="endpoints-system">
+            <h2>Endpoints — sign-in, users &amp; system</h2>
+
+            <h3 id="sign-in-and-sessions">Sign-in &amp; sessions</h3>
+            <div class="table-scroll">
+                <table class="api-table">
+                    <thead><tr><th>Method</th><th>Path</th><th>What it does</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/login<span class="tag tag-public">No session</span></td><td>Sign in with <code>email</code> and <code>password</code>. Returns the user and a <code>sessionId</code>.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/session/verify<span class="tag tag-public">No session</span></td><td>Check whether a <code>sessionId</code> is still active. Returns <code>{ active, reason }</code>.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/session/logout<span class="tag tag-public">No session</span></td><td>End the session given as <code>sessionId</code>. Only its owner or an admin may end it.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/auth/forgot-password<span class="tag tag-public">No session</span></td><td>Email a password-reset link to <code>email</code>.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/auth/reset-password<span class="tag tag-public">No session</span></td><td>Set a new <code>password</code> (8+ characters) using the emailed <code>token</code>.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/auth/change-password</td><td>Change your own password (<code>currentPassword</code>, <code>newPassword</code>).</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <h3 id="users-and-roles">Users &amp; roles</h3>
+            <div class="table-scroll">
+                <table class="api-table">
+                    <thead><tr><th>Method</th><th>Path</th><th>What it does</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/users<span class="tag tag-admin">Admin</span></td><td>List user accounts.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/users<span class="tag tag-admin">Admin</span></td><td>Create a user account.</td></tr>
+                        <tr><td><span class="m m-put">PUT</span></td><td>/api/users/:id<span class="tag tag-admin">Admin</span></td><td>Update a user account.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/users/:id/reset-password<span class="tag tag-admin">Admin</span></td><td>Generate a temporary password for a user.</td></tr>
+                        <tr><td><span class="m m-delete">DELETE</span></td><td>/api/users/:id<span class="tag tag-admin">Admin</span></td><td>Delete a user account.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/users/:id/permissions</td><td>Permissions that apply to one user.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/roles</td><td>List the available roles.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <h3 id="start-up-data-settings-and-activity">Start-up data, settings &amp; activity</h3>
+            <div class="table-scroll">
+                <table class="api-table">
+                    <thead><tr><th>Method</th><th>Path</th><th>What it does</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/bootstrap</td><td>Everything the app loads at start-up, in one response (items, suppliers, projects, kits, customers, orders and more).</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/data-versions</td><td>Change counters per data area as <code>{ versions }</code>. Poll it to notice changes made by others.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/settings</td><td>Read the system settings.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/settings</td><td>Save the system settings.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/activity-logs</td><td>Activity log. Optional <code>userEmail</code>, <code>action</code>, <code>limit</code> (default 100), <code>offset</code>.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/activity-log</td><td>Write an activity-log entry (<code>userEmail</code> and <code>action</code> are required).</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <h3 id="documentation-page">Documentation page</h3>
+            <div class="table-scroll">
+                <table class="api-table">
+                    <thead><tr><th>Method</th><th>Path</th><th>What it does</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/docs</td><td>List the entries on the app’s Documentation page.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/docs/:id/file</td><td>Download the file attached to an entry.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/docs<span class="tag tag-admin">Admin</span></td><td>Add an entry (a link or an uploaded file).</td></tr>
+                        <tr><td><span class="m m-put">PUT</span></td><td>/api/docs/:id<span class="tag tag-admin">Admin</span></td><td>Update an entry.</td></tr>
+                        <tr><td><span class="m m-delete">DELETE</span></td><td>/api/docs/:id<span class="tag tag-admin">Admin</span></td><td>Remove an entry.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="section" id="endpoints-inventory">
+            <h2>Endpoints — inventory &amp; stock</h2>
+
+            <h3 id="items">Items</h3>
+            <div class="table-scroll">
+                <table class="api-table">
+                    <thead><tr><th>Method</th><th>Path</th><th>What it does</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/items</td><td>List inventory items.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/items</td><td>Create an item. If the stock code already exists the item is updated instead, and a deleted one is restored.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/items/bulk</td><td>Create or update many items in one call (used by the CSV / XLSX import).</td></tr>
+                        <tr><td><span class="m m-patch">PATCH</span></td><td>/api/items/:serial_number</td><td>Update the fields you send on one item.</td></tr>
+                        <tr><td><span class="m m-put">PUT</span></td><td>/api/items/:serial_number</td><td>Same as PATCH: update the fields you send.</td></tr>
+                        <tr><td><span class="m m-delete">DELETE</span></td><td>/api/items/:serial_number</td><td>Soft-delete an item: it is hidden, not removed, and can be restored.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/items/restore/:serial_number</td><td>Restore a soft-deleted item.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/items/:serial_number/references</td><td>Reference check used by the delete confirmation.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/items/products</td><td>Finished products from the production catalogue, in item shape.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/items/code-prefixes</td><td>Stock-code prefixes in use, each with its next free number.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/items/generate-code/:category</td><td>Suggest the next stock code for a category.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/inventory/reservations/summary</td><td>Quantity reserved by open sales orders, per part.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/inventory/mfn</td><td>Primary manufacturer part numbers for a list of stock codes (<code>?parts=A,B,C</code>).</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <h3 id="stock-movements-and-structure">Stock movements &amp; structure</h3>
+            <div class="table-scroll">
+                <table class="api-table">
+                    <thead><tr><th>Method</th><th>Path</th><th>What it does</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/transactions</td><td>Book-in / book-out transactions. Optional <code>limit</code>, <code>offset</code>.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/transactions</td><td>Record a transaction.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/stock-ledger</td><td>List stock-ledger entries (the imported movement log).</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/stock-ledger</td><td>Create a stock-ledger entry.</td></tr>
+                        <tr><td><span class="m m-put">PUT</span></td><td>/api/stock-ledger/:id</td><td>Update a stock-ledger entry.</td></tr>
+                        <tr><td><span class="m m-delete">DELETE</span></td><td>/api/stock-ledger/:id</td><td>Delete a stock-ledger entry.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/bom-structures</td><td>List parent/child part links.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/bom-structures</td><td>Create a parent/child part link.</td></tr>
+                        <tr><td><span class="m m-put">PUT</span></td><td>/api/bom-structures/:id</td><td>Update a parent/child part link.</td></tr>
+                        <tr><td><span class="m m-delete">DELETE</span></td><td>/api/bom-structures/:id</td><td>Delete a parent/child part link.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <h3 id="assemblies-and-fielded-assets">Assemblies &amp; fielded assets</h3>
+            <div class="table-scroll">
+                <table class="api-table">
+                    <thead><tr><th>Method</th><th>Path</th><th>What it does</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/sub-assemblies</td><td>List sub-assemblies.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/sub-assemblies</td><td>Create a sub-assembly.</td></tr>
+                        <tr><td><span class="m m-put">PUT</span></td><td>/api/sub-assemblies/:id</td><td>Update a sub-assembly.</td></tr>
+                        <tr><td><span class="m m-delete">DELETE</span></td><td>/api/sub-assemblies/:id</td><td>Delete a sub-assembly.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/fielded-assets</td><td>List fielded assets (units deployed at customer sites).</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/fielded-assets</td><td>Create a fielded asset.</td></tr>
+                        <tr><td><span class="m m-put">PUT</span></td><td>/api/fielded-assets/:id</td><td>Update a fielded asset.</td></tr>
+                        <tr><td><span class="m m-delete">DELETE</span></td><td>/api/fielded-assets/:id</td><td>Delete a fielded asset.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="section" id="endpoints-suppliers">
+            <h2>Endpoints — suppliers &amp; pricing</h2>
+
+            <h3 id="suppliers">Suppliers</h3>
+            <div class="table-scroll">
+                <table class="api-table">
+                    <thead><tr><th>Method</th><th>Path</th><th>What it does</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/suppliers</td><td>List suppliers.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/suppliers</td><td>Create a supplier.</td></tr>
+                        <tr><td><span class="m m-put">PUT</span></td><td>/api/suppliers/:id</td><td>Update a supplier.</td></tr>
+                        <tr><td><span class="m m-delete">DELETE</span></td><td>/api/suppliers/:id</td><td>Delete a supplier. Refused while anything still refers to it.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/suppliers/price-history/:partNumber</td><td>Price history for one part across suppliers.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/suppliers/performance</td><td>Performance metrics per supplier.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/suppliers/compare-prices</td><td>Compare prices for parts across suppliers.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <h3 id="pricing-and-exchange-rate">Pricing &amp; exchange rate</h3>
+            <div class="table-scroll">
+                <table class="api-table">
+                    <thead><tr><th>Method</th><th>Path</th><th>What it does</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/pricing/search</td><td>Live price lookup for a part. <code>partNumber</code>, optional <code>qty</code>, <code>maxAgeDays</code>.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/pricing/cache-status</td><td>Which parts already have a cached price. Optional <code>qty</code>, <code>maxAgeDays</code>.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/pricing/usage</td><td>Supplier API usage counters.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/pricing/bulk-refresh</td><td>Refresh inventory bulk prices from the supplier APIs.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/pricing/keys<span class="tag tag-admin">Admin</span></td><td>List supplier API providers and their credential fields.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/pricing/keys<span class="tag tag-admin">Admin</span></td><td>Save supplier API credentials.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/pricing/keys/test<span class="tag tag-admin">Admin</span></td><td>Test a provider’s credentials.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/pricing/oauth/start<span class="tag tag-admin">Admin</span></td><td>Start a supplier OAuth authorisation.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/pricing/lcsc/import<span class="tag tag-token">Own token</span></td><td>Import LCSC prices. Authenticates with <code>Authorization: Bearer</code> and the LCSC import token, not a session.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/exchange-rate</td><td>Current USD→ZAR rate and how old it is.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/exchange-rate/update</td><td>Refresh the exchange rate now.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <h3 id="procurement">Procurement</h3>
+            <div class="table-scroll">
+                <table class="api-table">
+                    <thead><tr><th>Method</th><th>Path</th><th>What it does</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/procurement-projects</td><td>List saved shortage-checker projects.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/procurement-projects/:id</td><td>Get one saved project.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/procurement-projects</td><td>Save a project. A project with the same name is overwritten.</td></tr>
+                        <tr><td><span class="m m-delete">DELETE</span></td><td>/api/procurement-projects/:id</td><td>Delete a saved project.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/supplier-bom/lookup</td><td>Look up supplier part data for a BOM (Supplier BOM Generator).</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/shortages/convert-to-po</td><td>Turn a list of shortages into a purchase order.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="section" id="endpoints-manufacturing">
+            <h2>Endpoints — manufacturing</h2>
+
+            <h3 id="projects-bom-and-pick-and-place">Projects, BOM &amp; pick-and-place</h3>
+            <div class="table-scroll">
+                <table class="api-table">
+                    <thead><tr><th>Method</th><th>Path</th><th>What it does</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/projects</td><td>List projects.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/projects</td><td>Create a project. A project with the same name is updated instead.</td></tr>
+                        <tr><td><span class="m m-put">PUT</span></td><td>/api/projects/:id</td><td>Update a project.</td></tr>
+                        <tr><td><span class="m m-delete">DELETE</span></td><td>/api/projects/:id</td><td>Delete a project together with its BOM, pick-and-place data and job cards.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/projects/restore/:id</td><td>Restore a deleted project record (its BOM and pick-and-place data are not restored).</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/projects/:id/bom</td><td>BOM lines of one project.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/projects/:id/bom</td><td>Add or update BOM lines of one project in bulk.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/projects/:id/pp</td><td>Add or update pick-and-place lines of one project in bulk.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/bom-items</td><td>BOM lines across all projects.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/pp-items</td><td>Pick-and-place lines across all projects.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/job-cards</td><td>List job cards.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/job-cards</td><td>Create a job card.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <h3 id="kits-and-kit-booking">Kits &amp; kit booking</h3>
+            <div class="table-scroll">
+                <table class="api-table">
+                    <thead><tr><th>Method</th><th>Path</th><th>What it does</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/kits</td><td>List saved kits (summary).</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/kits/:id</td><td>Get one kit in full.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/projects/:id/kits</td><td>Kits that belong to one project.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/kits/using/:stockCode</td><td>Kits that reference a stock code.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/kits</td><td>Save a kit. A kit with the same name is overwritten.</td></tr>
+                        <tr><td><span class="m m-delete">DELETE</span></td><td>/api/kits/:id<span class="tag tag-admin">Admin</span></td><td>Delete a kit and release what it reserved.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/kits/match/:stockCode</td><td>Alternative parts that can stand in for a stock code.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/kits/match/batch</td><td>The same match for many stock codes in one call.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/kits/reservations</td><td>Quantity currently locked per stock code across saved kits.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/kits/:id/presence</td><td>Signal that you are editing a kit.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/kits/:id/presence</td><td>Who is currently editing a kit.</td></tr>
+                        <tr><td><span class="m m-delete">DELETE</span></td><td>/api/kits/:id/presence</td><td>Signal that you stopped editing a kit.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/kit-booking/validate</td><td>Check a kit booking against stock without changing anything.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/kit-booking/execute</td><td>Book the kit out of stock. All lines succeed or none do.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/kit-booking/bom/:projectId<span class="tag tag-admin">Admin</span></td><td>Read the BOM used for kit booking.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/kit-booking/bom/:projectId<span class="tag tag-admin">Admin</span></td><td>Edit the BOM used for kit booking.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/production-kits</td><td>List production kits (older list).</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/production-kits</td><td>Save production kits (older list).</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <h3 id="production">Production</h3>
+            <div class="table-scroll">
+                <table class="api-table">
+                    <thead><tr><th>Method</th><th>Path</th><th>What it does</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/production-products</td><td>List finished products (the production catalogue).</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/production-products</td><td>Create a finished product.</td></tr>
+                        <tr><td><span class="m m-put">PUT</span></td><td>/api/production-products/:id</td><td>Update a finished product.</td></tr>
+                        <tr><td><span class="m m-delete">DELETE</span></td><td>/api/production-products/:id</td><td>Delete a finished product.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/build-jobs</td><td>List build jobs (older list).</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/build-jobs</td><td>Create a build job.</td></tr>
+                        <tr><td><span class="m m-put">PUT</span></td><td>/api/build-jobs/:id</td><td>Update a build job.</td></tr>
+                        <tr><td><span class="m m-delete">DELETE</span></td><td>/api/build-jobs/:id</td><td>Delete a build job.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/production-jobs</td><td>List production jobs.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/production-jobs</td><td>Create a production job.</td></tr>
+                        <tr><td><span class="m m-put">PUT</span></td><td>/api/production-jobs/:id</td><td>Update a production job.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/work-orders</td><td>List work orders.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/work-orders</td><td>Create a work order.</td></tr>
+                        <tr><td><span class="m m-put">PUT</span></td><td>/api/work-orders/:id</td><td>Update a work order.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/job-allocations/:jobId</td><td>Components allocated to a job.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/job-allocations</td><td>Allocate components to a job.</td></tr>
+                        <tr><td><span class="m m-put">PUT</span></td><td>/api/job-allocations/:id/consume</td><td>Mark an allocation as consumed.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/qc-checkpoints/:jobId</td><td>Quality-control checkpoints of a job.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/qc-checkpoints</td><td>Create a checkpoint.</td></tr>
+                        <tr><td><span class="m m-put">PUT</span></td><td>/api/qc-checkpoints/:id/complete</td><td>Complete a checkpoint.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/production-defects/:jobId</td><td>Defects recorded against a job.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/production-defects</td><td>Record a defect.</td></tr>
+                        <tr><td><span class="m m-put">PUT</span></td><td>/api/production-defects/:id/resolve</td><td>Resolve a defect.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/order-fulfillment</td><td>List order-fulfilment records.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/order-fulfillment</td><td>Create an order-fulfilment record.</td></tr>
+                        <tr><td><span class="m m-put">PUT</span></td><td>/api/order-fulfillment/:id</td><td>Update an order-fulfilment record.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/production-metrics</td><td>Production metrics.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/production-metrics/calculate</td><td>Recalculate production metrics.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="section" id="endpoints-sales">
+            <h2>Endpoints — sales</h2>
+
+            <h3 id="customers">Customers</h3>
+            <div class="table-scroll">
+                <table class="api-table">
+                    <thead><tr><th>Method</th><th>Path</th><th>What it does</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/clients</td><td>List customers.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/clients</td><td>Create a customer.</td></tr>
+                        <tr><td><span class="m m-put">PUT</span></td><td>/api/clients/:id</td><td>Update a customer.</td></tr>
+                        <tr><td><span class="m m-delete">DELETE</span></td><td>/api/clients/:id</td><td>Delete a customer.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <h3 id="sales-orders-and-quotations">Sales orders &amp; quotations</h3>
+            <div class="table-scroll">
+                <table class="api-table">
+                    <thead><tr><th>Method</th><th>Path</th><th>What it does</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/client-orders</td><td>List sales orders and quotations (a quotation has status <code>QUOTATION</code>).</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/client-orders</td><td>Create an order with its lines. <code>status: "QUOTATION"</code> makes a quotation (QUO number, no stock reserved); otherwise it is a sales order (SO number, stock reserved).</td></tr>
+                        <tr><td><span class="m m-put">PUT</span></td><td>/api/client-orders/:id</td><td>Update the header fields you send. Include <code>items</code> to replace all lines; that is allowed only while the order is <code>QUOTATION</code> or <code>DRAFT</code>.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/client-orders/:id/accept</td><td>Turn a quotation into a sales order: new SO number, status <code>DRAFT</code>, stock reserved.</td></tr>
+                        <tr><td><span class="m m-delete">DELETE</span></td><td>/api/client-orders/:id</td><td>Delete an order. Refused while invoices, dispatch notes or build jobs refer to it.</td></tr>
+                        <tr><td><span class="m m-put">PUT</span></td><td>/api/client-orders/:id/verify</td><td>Mark an order verified or not (<code>verified</code>).</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/client-orders/:id/document</td><td>Attach the customer’s POP / PO (base64 <code>data</code>, <code>mime</code>, <code>filename</code>).</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/client-orders/:id/document</td><td>Download the attached POP / PO.</td></tr>
+                        <tr><td><span class="m m-delete">DELETE</span></td><td>/api/client-orders/:id/document</td><td>Remove the attached POP / PO.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/client-order-items</td><td>List order lines (all orders).</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/client-order-items</td><td>Add a line to an order.</td></tr>
+                        <tr><td><span class="m m-put">PUT</span></td><td>/api/client-order-items/:id</td><td>Update a line.</td></tr>
+                        <tr><td><span class="m m-delete">DELETE</span></td><td>/api/client-order-items/:id</td><td>Delete a line.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/client-orders/:id/auto-fulfil</td><td>Run the fulfilment chain for one order (invoice, delivery note, optional payment).</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/client-orders/auto-fulfil-batch</td><td>Run it for several orders. Each order succeeds or fails on its own.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/client-order-reservations/summary</td><td>Reservation and shortage totals per order.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/client-orders/:id/reservations</td><td>Stock reservations of one order.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/client-orders/:id/reservations/refresh</td><td>Rebuild an order’s reservations from its current lines.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <h3 id="invoices-and-payments-received">Invoices &amp; payments received</h3>
+            <div class="table-scroll">
+                <table class="api-table">
+                    <thead><tr><th>Method</th><th>Path</th><th>What it does</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/invoices</td><td>List invoices.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/invoices/:id</td><td>Get one invoice with its lines.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/invoices</td><td>Create an invoice.</td></tr>
+                        <tr><td><span class="m m-put">PUT</span></td><td>/api/invoices/:id</td><td>Update an invoice.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/invoices/:id/finalize</td><td>Finalise (send) an invoice: posts it to the ledger and books stock out.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/invoices/:id/void</td><td>Void an invoice.</td></tr>
+                        <tr><td><span class="m m-delete">DELETE</span></td><td>/api/invoices/:id</td><td>Delete an invoice.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/payments-received</td><td>List payments received.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/payments-received/:id</td><td>Get one payment with its allocations.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/payments-received</td><td>Record a payment and allocate it to invoices.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/payments-received/:id/void</td><td>Void a payment.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <h3 id="credit-notes">Credit notes</h3>
+            <div class="table-scroll">
+                <table class="api-table">
+                    <thead><tr><th>Method</th><th>Path</th><th>What it does</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/credit-notes</td><td>List credit notes.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/credit-notes/:id</td><td>Get one credit note with its lines.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/credit-notes</td><td>Create a credit note.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/credit-notes/:id/issue</td><td>Issue it: posts the reversing journal, restocks returned lines and applies the credit to its source invoice.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/credit-notes/:id/apply</td><td>Apply remaining credit to another open invoice.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/credit-notes/:id/refund</td><td>Refund remaining credit as cash (<code>amount</code>, <code>bankAccountId</code>).</td></tr>
+                        <tr><td><span class="m m-delete">DELETE</span></td><td>/api/credit-notes/:id</td><td>Delete a credit note.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <h3 id="delivery-and-collection-notes">Delivery &amp; collection notes</h3>
+            <div class="table-scroll">
+                <table class="api-table">
+                    <thead><tr><th>Method</th><th>Path</th><th>What it does</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/dispatch-notes</td><td>List notes. Optional <code>type=DELIVERY</code> or <code>type=COLLECTION</code>.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/dispatch-notes/:id</td><td>Get one note with its lines.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/dispatch-notes</td><td>Create a note.</td></tr>
+                        <tr><td><span class="m m-put">PUT</span></td><td>/api/dispatch-notes/:id</td><td>Update a note.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/dispatch-notes/:id/issue</td><td>Issue a note.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/dispatch-notes/:id/complete</td><td>Complete a note.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/dispatch-notes/:id/cancel</td><td>Cancel a note.</td></tr>
+                        <tr><td><span class="m m-delete">DELETE</span></td><td>/api/dispatch-notes/:id</td><td>Delete a note.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="section" id="endpoints-purchases">
+            <h2>Endpoints — purchases</h2>
+
+            <h3 id="purchase-orders">Purchase orders</h3>
+            <div class="table-scroll">
+                <table class="api-table">
+                    <thead><tr><th>Method</th><th>Path</th><th>What it does</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/purchase-orders</td><td>List purchase orders.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/purchase-orders/:id</td><td>Get one purchase order with its lines.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/purchase-orders</td><td>Create a purchase order.</td></tr>
+                        <tr><td><span class="m m-put">PUT</span></td><td>/api/purchase-orders/:id/status</td><td>Set its <code>status</code>: <code>DRAFT</code>, <code>SENT</code>, <code>PARTIAL</code>, <code>RECEIVED</code> or <code>CANCELLED</code>.</td></tr>
+                        <tr><td><span class="m m-delete">DELETE</span></td><td>/api/purchase-orders/:id</td><td>Delete a purchase order.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <h3 id="bills-payments-made-and-expenses">Bills, payments made &amp; expenses</h3>
+            <div class="table-scroll">
+                <table class="api-table">
+                    <thead><tr><th>Method</th><th>Path</th><th>What it does</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/bills</td><td>List bills.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/bills/:id</td><td>Get one bill with its lines.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/bills</td><td>Create a bill.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/bills/:id/finalize</td><td>Finalise a bill: posts it to the ledger.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/bills/:id/void</td><td>Void a bill.</td></tr>
+                        <tr><td><span class="m m-delete">DELETE</span></td><td>/api/bills/:id</td><td>Delete a bill.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/bills/:id/receipt</td><td>Attach or replace the scanned slip / vendor invoice (a base64 image).</td></tr>
+                        <tr><td><span class="m m-delete">DELETE</span></td><td>/api/bills/:id/receipt</td><td>Remove the scanned slip.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/bookkeeping/ocr/receipt</td><td>Read a receipt image into bill fields (OCR).</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/payments-made</td><td>List payments made.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/payments-made/:id</td><td>Get one payment with its allocations.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/payments-made</td><td>Record a payment to a supplier.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/payments-made/:id/void</td><td>Void a payment.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/expenses</td><td>List expenses.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/expenses</td><td>Record an expense.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/expenses/:id/void</td><td>Void an expense.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <h3 id="landed-cost">Landed cost</h3>
+            <div class="table-scroll">
+                <table class="api-table">
+                    <thead><tr><th>Method</th><th>Path</th><th>What it does</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/landed-cost-batches</td><td>List landed-cost batches.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/landed-cost-batches/:id</td><td>Get one batch.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/landed-cost-batches</td><td>Create a batch (goods bill, add-on bills, allocation method).</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/landed-cost-batches/:id/preview</td><td>Preview the new unit cost of every affected line.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/landed-cost-batches/:id/post</td><td>Post the batch: updates item costs and the ledger.</td></tr>
+                        <tr><td><span class="m m-delete">DELETE</span></td><td>/api/landed-cost-batches/:id</td><td>Delete a batch.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="section" id="endpoints-accounting">
+            <h2>Endpoints — accounting &amp; reports</h2>
+
+            <h3 id="accounts-tax-rates-and-journal">Accounts, tax rates &amp; journal</h3>
+            <div class="table-scroll">
+                <table class="api-table">
+                    <thead><tr><th>Method</th><th>Path</th><th>What it does</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/bookkeeping/bootstrap</td><td>Everything the Bookkeeping module loads, in one response.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/accounts</td><td>List ledger accounts.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/accounts</td><td>Create a ledger account.</td></tr>
+                        <tr><td><span class="m m-put">PUT</span></td><td>/api/accounts/:id</td><td>Update a ledger account.</td></tr>
+                        <tr><td><span class="m m-delete">DELETE</span></td><td>/api/accounts/:id</td><td>Delete a ledger account.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/tax-rates</td><td>List tax rates (each has a rate and a kind: standard, zero-rated or exempt).</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/tax-rates</td><td>Create a tax rate.</td></tr>
+                        <tr><td><span class="m m-delete">DELETE</span></td><td>/api/tax-rates/:id</td><td>Delete a tax rate.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/journal-entries</td><td>List journal entries.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/journal-entries/:id</td><td>Get one journal entry with its lines.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/journal-entries</td><td>Post a manual journal entry.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/journal-entries/:id/void</td><td>Void a journal entry.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <h3 id="bank-reconciliation">Bank reconciliation</h3>
+            <div class="table-scroll">
+                <table class="api-table">
+                    <thead><tr><th>Method</th><th>Path</th><th>What it does</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/bank/statements</td><td>List imported bank statements.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/bank/statements/:id</td><td>Get one statement with its lines.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/bank/statements</td><td>Import a statement.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/bank/statements/:id/auto-match</td><td>Match unmatched lines to payments and expenses automatically.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/bank/statement-lines/:id/match</td><td>Match one line by hand.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/bank/statement-lines/:id/unmatch</td><td>Undo a match.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/bank/statements/:id/complete</td><td>Complete the reconciliation. Requires the balances to agree and every line to be matched; then locks the statement.</td></tr>
+                        <tr><td><span class="m m-delete">DELETE</span></td><td>/api/bank/statements/:id</td><td>Delete a statement.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/bank/candidates</td><td>Recent unmatched payments and expenses, for the manual-match picker.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <h3 id="reports">Reports</h3>
+            <div class="table-scroll">
+                <table class="api-table">
+                    <thead><tr><th>Method</th><th>Path</th><th>What it does</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/reports/profit-loss</td><td>Profit &amp; loss for <code>from</code>…<code>to</code>.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/reports/balance-sheet</td><td>Balance sheet at <code>asOf</code>.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/reports/trial-balance</td><td>Trial balance at <code>asOf</code>.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/reports/general-ledger</td><td>Ledger lines. <code>accountId</code>, <code>from</code>, <code>to</code>.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/reports/ar-aging</td><td>Customer balances by age at <code>asOf</code>.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/reports/ap-aging</td><td>Supplier balances by age at <code>asOf</code>.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/reports/vat201</td><td>VAT201 computation for <code>from</code>…<code>to</code>.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/reports/customer-statement</td><td>Statement for one customer. <code>clientId</code>, optional <code>asOf</code>, <code>from</code>.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="section" id="endpoints-automation">
+            <h2>Endpoints — automation &amp; quality</h2>
+
+            <h3 id="automation">Automation</h3>
+            <div class="table-scroll">
+                <table class="api-table">
+                    <thead><tr><th>Method</th><th>Path</th><th>What it does</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/automation-rules</td><td>List automation rules.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/automation-rules</td><td>Create a rule.</td></tr>
+                        <tr><td><span class="m m-put">PUT</span></td><td>/api/automation-rules/:id</td><td>Update a rule.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/scheduled-jobs</td><td>List scheduled jobs.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/scheduled-jobs</td><td>Create a scheduled job.</td></tr>
+                        <tr><td><span class="m m-put">PUT</span></td><td>/api/scheduled-jobs/:id/toggle</td><td>Switch a scheduled job on or off.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/notifications</td><td>List notifications. Optional <code>status</code>, <code>userId</code>.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/notifications</td><td>Create a notification.</td></tr>
+                        <tr><td><span class="m m-put">PUT</span></td><td>/api/notifications/:id/mark-read</td><td>Mark a notification as read.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/auto-po-config</td><td>List auto-PO settings per component.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/auto-po-config</td><td>Create an auto-PO setting.</td></tr>
+                        <tr><td><span class="m m-put">PUT</span></td><td>/api/auto-po-config/:id</td><td>Update an auto-PO setting.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/alert-subscriptions</td><td>List alert subscriptions.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/alert-subscriptions</td><td>Create an alert subscription.</td></tr>
+                        <tr><td><span class="m m-put">PUT</span></td><td>/api/alert-subscriptions/:id</td><td>Update an alert subscription.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/event-log</td><td>Automation event log. Optional <code>eventType</code>, <code>limit</code>.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/event-log</td><td>Write an event-log entry.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/automation/trigger-auto-po</td><td>Run the auto-PO check for a component now.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/automation/send-alert</td><td>Send an alert to everyone subscribed to it.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <h3 id="quality-and-compliance">Quality &amp; compliance</h3>
+            <div class="table-scroll">
+                <table class="api-table">
+                    <thead><tr><th>Method</th><th>Path</th><th>What it does</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/qa-inspections</td><td>List QA inspections.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/qa-inspections</td><td>Create an inspection.</td></tr>
+                        <tr><td><span class="m m-put">PUT</span></td><td>/api/qa-inspections/:id</td><td>Update an inspection.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/defects</td><td>List defects.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/defects</td><td>Record a defect.</td></tr>
+                        <tr><td><span class="m m-put">PUT</span></td><td>/api/defects/:id</td><td>Update a defect.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/ncr</td><td>List non-conformance reports.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/ncr</td><td>Create a non-conformance report.</td></tr>
+                        <tr><td><span class="m m-put">PUT</span></td><td>/api/ncr/:id</td><td>Update a non-conformance report.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/compliance-checkpoints</td><td>List compliance checkpoints.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/compliance-checkpoints</td><td>Create a compliance checkpoint.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/compliance-records</td><td>List compliance records.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/compliance-records</td><td>Create a compliance record.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/quality-gates</td><td>List quality gates.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/quality-gates</td><td>Create a quality gate.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/quality-metrics</td><td>Quality metrics.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <h3 id="forecasting-and-anomaly-detection">Forecasting &amp; anomaly detection</h3>
+            <div class="table-scroll">
+                <table class="api-table">
+                    <thead><tr><th>Method</th><th>Path</th><th>What it does</th></tr></thead>
+                    <tbody>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/ml-models</td><td>List forecasting models.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/ml-models</td><td>Create a model.</td></tr>
+                        <tr><td><span class="m m-put">PUT</span></td><td>/api/ml-models/:id</td><td>Update a model.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/ml-models/:id/train</td><td>Train a model against stock history and record its measured accuracy.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/demand-forecasts</td><td>List demand forecasts.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/demand-forecasts</td><td>Create a demand forecast.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/analytics/generate-forecasts</td><td>Generate demand forecasts. Parts without enough history are reported as skipped.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/predictive-orders</td><td>List predictive orders.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/predictive-orders</td><td>Create a predictive order.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/analytics/reorder-recommendations</td><td>Reorder recommendations, computed live. Optional <code>leadTimeDays</code>, <code>safetyDays</code>.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/anomaly-rules</td><td>List anomaly-detection rules.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/anomaly-rules</td><td>Create an anomaly-detection rule.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/anomalies</td><td>List detected anomalies (at most 100).</td></tr>
+                        <tr><td><span class="m m-put">PUT</span></td><td>/api/anomalies/:id</td><td>Update an anomaly (for example, to resolve it).</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/analytics/scan-anomalies</td><td>Scan for anomalies now and return the findings.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/analytics/anomaly-summary</td><td>Anomaly totals by severity.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/analytics/consumption-summary</td><td>Stock consumption summary.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/supplier-intelligence</td><td>List supplier-intelligence records.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/supplier-intelligence</td><td>Create a supplier-intelligence record.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+            <nav class="pager" id="pager" aria-label="Previous and next page"></nav>
+        </div><!-- /.main-col -->
+    </div>
+
+    <div class="footer">
+        <p>© 2026 Tracklab IM · User documentation</p>
+    </div>
+    <script src="shared.js"></script>
+</body>
+</html>
