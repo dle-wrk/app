@@ -15,6 +15,8 @@ import bcrypt from 'bcryptjs';
 import {
   registerAuthRoutes,
   attachSessionUser,
+  requireSession,
+  requireAdmin,
   BCRYPT_ROUNDS,
 } from './src/lib/authRoutes';
 import { registerUsersRoutes } from './src/lib/usersRoutes';
@@ -105,6 +107,13 @@ app.use((_req, res, next) => {
 // Populate req.user from the client's X-Session-Id header when present.
 // Scoped to /api so static asset requests don't trigger a DB lookup.
 app.use('/api', (req, res, next) => attachSessionUser(req, res, next));
+
+// Every /api route below this line needs a signed-in session, except the
+// short public list in authRoutes (sign-in, session checks, password reset,
+// supplier OAuth redirect). MUST stay ahead of every register* call and
+// every app.get/post in this file — Express runs middleware in registration
+// order, so a route registered above this line would be reachable by anyone.
+app.use('/api', requireSession);
 
 // Cross-cutting: bump the shared data-version counters on any 2xx write
 // to a matched /api/... path so other tabs / users notice changes via
@@ -690,7 +699,10 @@ app.post('/api/settings', async (req, res) => {
 
 
 
-app.get('/api/raw-table/:name', async (req, res) => {
+// Raw table dump, table list and process spawn are maintenance tools, not
+// app features (nothing in the UI calls them). Admin-only: a table dump
+// includes the users and sessions tables.
+app.get('/api/raw-table/:name', requireAdmin, async (req, res) => {
   const name = req.params.name;
   const { rows: tables } = await query<{ tablename: string }>(`SELECT tablename FROM pg_tables WHERE schemaname = 'public'`);
   const tableNames = tables.map((r: { tablename: string }) => r.tablename);
@@ -706,12 +718,12 @@ app.get('/api/raw-table/:name', async (req, res) => {
   }
 });
 
-app.get('/api/tables', async (_req, res) => {
+app.get('/api/tables', requireAdmin, async (_req, res) => {
   const { rows } = await query<{ tablename: string }>(`SELECT tablename FROM pg_tables WHERE schemaname = 'public'`);
   res.json(rows.map((r: { tablename: string }) => r.tablename));
 });
 
-app.post('/api/start', (_req, res) => {
+app.post('/api/start', requireAdmin, (_req, res) => {
   try {
     const child = spawn('node', ['--import', 'tsx/esm', 'server.ts'], {
       cwd: process.cwd(),

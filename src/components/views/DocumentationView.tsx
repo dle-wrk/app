@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { BookOpen, ExternalLink, Plus, Pencil, Trash2, Save, X, Upload, Paperclip, FileText } from 'lucide-react';
 import { optimisticListDelete } from '../../lib/optimisticUpdate';
 import { confirmDialog } from '../../lib/confirmDialog';
+import { openAuthedFile } from '../../lib/openAuthedFile';
 
 interface DocLink {
   id: number;
@@ -111,6 +112,15 @@ export const DocumentationView: React.FC<DocumentationViewProps> = ({ currentUse
                     target="_blank"
                     rel="noopener noreferrer"
                     className="block text-left w-full"
+                    // Uploaded attachments live behind /api, which needs the
+                    // session header a plain link can't send — fetch and
+                    // open those instead. Everything else stays a native link.
+                    onClick={(e) => {
+                      if (!doc.url.startsWith('/api/')) return;
+                      e.preventDefault();
+                      openAuthedFile(doc.url, doc.fileName || doc.title)
+                        .catch((err: any) => triggerToast(err?.message || 'Could not open the file', 'ERROR'));
+                    }}
                   >
                     <div className="font-bold text-on-surface text-sm group-hover:text-primary transition-colors flex items-center gap-1.5">
                       {doc.title}

@@ -4,6 +4,7 @@ import { ClientOrder } from '../../types';
 import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, apiGet, apiPost, apiPut, apiDelete, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
 import { LineItemsEditor, EditableLine, newEditableLine, lineTotals } from './LineItemsEditor';
 import { buildAndSaveDocPdf } from '../../lib/pdfDocs';
+import { openAuthedFile } from '../../lib/openAuthedFile';
 import { confirmDialog } from '../../lib/confirmDialog';
 import { renderBrandHeader, waitForBrandImage } from '../../lib/printBrand';
 
@@ -906,9 +907,18 @@ const SalesOrderViewModal: React.FC<{
               <Paperclip className="w-4 h-4 text-secondary shrink-0" />
               <span className="text-xs font-semibold flex-1 truncate">{order.verificationDocFilename || 'document'}</span>
               <span className="text-[10px] text-outline whitespace-nowrap">{order.verificationDocMime}</span>
-              <a href={`/api/client-orders/${order.id}/document`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs font-bold text-primary hover:underline">
+              {/* A button, not a link: the document endpoint needs the
+                  session header, which a plain browser navigation can't send. */}
+              <button
+                type="button"
+                onClick={() => {
+                  openAuthedFile(`/api/client-orders/${order.id}/document`, order.verificationDocFilename || 'document')
+                    .catch((err: any) => triggerToast(err?.message || 'Could not open the document', 'ERROR'));
+                }}
+                className="inline-flex items-center gap-1 text-xs font-bold text-primary hover:underline"
+              >
                 <Download className="w-3 h-3" /> Open
-              </a>
+              </button>
               <DangerButton icon={<Trash2 className="w-3 h-3" />} onClick={handleRemoveDoc} disabled={busy} className="py-1">Remove</DangerButton>
             </div>
           ) : (

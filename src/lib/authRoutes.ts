@@ -117,6 +117,35 @@ export async function attachSessionUser(req: any, _res: Response, next: NextFunc
   next();
 }
 
+// The only /api calls that work without a signed-in session: the ones that
+// by definition happen before (or outside) one. Everything else is rejected
+// by requireSession, so a newly added route is protected by default and is
+// public only if it is listed here.
+const PUBLIC_API_ROUTES = new Set([
+  'POST /api/login',
+  'POST /api/session/verify',
+  'POST /api/session/logout',
+  'POST /api/auth/forgot-password',
+  'POST /api/auth/reset-password',
+  // Supplier OAuth redirect. It arrives from the supplier's site, so it
+  // cannot carry our header; it is protected by its own one-shot state token.
+  'GET /api/pricing/oauth/callback',
+  // Machine-to-machine price import (scripts/lcsc-import-csv.mjs). The
+  // handler checks its own bearer token and rejects when none is configured.
+  'POST /api/pricing/lcsc/import',
+]);
+
+// Require a signed-in session for every /api route not on the public list.
+// Mounted once in server.ts, straight after attachSessionUser. Before this
+// existed only the requireAdmin routes checked the caller, so the rest of
+// the API answered anyone who knew the URL.
+export function requireSession(req: any, res: Response, next: NextFunction): void {
+  if (req.user) { next(); return; }
+  const fullPath = `${req.baseUrl || ''}${req.path}`.replace(/\/+$/, '');
+  if (PUBLIC_API_ROUTES.has(`${req.method} ${fullPath}`)) { next(); return; }
+  res.status(401).json({ error: 'Sign in required' });
+}
+
 // Require an active session tied to an admin role.
 export function requireAdmin(req: any, res: Response, next: NextFunction): void {
   const user = req.user;
@@ -137,7 +166,17 @@ async function mintSessionAndKickOthers(email: string, userId: number | null, re
   const ip = String(
     req.headers?.['x-forwarded-for'] ?? req.headers?.['x-real-ip'] ?? req.socket?.remoteAddress ?? ''
   ).split(',')[0].trim().slice(0, 100);
-  await query(`DELETE FROM user_sessions WHERE user_email = $1`, [email]);
+  // was_live: the displaced session had a heartbeat in the last two minutes,
+  // i.e. a tab somewhere is about to be signed out. Stale rows left behind
+  // by a closed tab are dropped silently — nobody was actually kicked.
+  const { rows: displaced } = await query<{ was_live: boolean | null }>(
+    `DELETE FROM user_sessions WHERE user_email = $1
+     RETURNING (last_seen > NOW() - INTERVAL '2 minutes') AS was_live`,
+    [email]
+  );
+  if (displaced.some((r) => r.was_live)) {
+    logAuthEvent(req, email, 'LOGOUT', 'SUCCESS', { kicked: true, reason: 'signed_in_elsewhere' });
+  }
   await query(
     `INSERT INTO user_sessions (id, user_email, user_id, user_agent, ip_address) VALUES ($1, $2, $3, $4, $5)`,
     [sessionId, email, userId, ua, ip]
@@ -196,6 +235,25 @@ async function sendPasswordResetEmail(toEmail: string, resetUrl: string): Promis
 // ---------------------------------------------------------------------------
 // Route registration.
 // ---------------------------------------------------------------------------
+// Sign-in failures and sign-outs are written to the activity log here, not
+// by the browser: they are exactly the moments the browser has no valid
+// session to call the activity-log endpoint with. Best-effort, and never
+// holds up the response.
+function logAuthEvent(
+  req: Request,
+  email: string,
+  action: 'LOGIN' | 'LOGOUT',
+  status: 'SUCCESS' | 'ERROR',
+  details: Record<string, unknown> = {},
+): void {
+  const ua = String(req.headers?.['user-agent'] ?? '').slice(0, 500);
+  void query(
+    `INSERT INTO user_activity_logs (user_email, action, details, ip_address, user_agent, status)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [email, action, JSON.stringify(details), clientIp(req), ua, status]
+  ).catch(() => {});
+}
+
 export function registerAuthRoutes(app: Express): void {
   // -------------------- POST /api/login --------------------
   app.post('/api/login', validateBody(LoginSchema), async (req, res) => {
@@ -224,6 +282,7 @@ export function registerAuthRoutes(app: Express): void {
           [normalizedEmail]
         );
         if (rows.length === 0) {
+          logAuthEvent(req, normalizedEmail, 'LOGIN', 'ERROR', { reason: 'Invalid email or password' });
           return res.status(401).json({ error: 'Invalid email or password' });
         }
 
@@ -246,6 +305,7 @@ export function registerAuthRoutes(app: Express): void {
         }
 
         if (user.status !== 'ACTIVE') {
+          logAuthEvent(req, normalizedEmail, 'LOGIN', 'ERROR', { reason: 'User account is not active' });
           return res.status(401).json({ error: 'User account is not active' });
         }
 
@@ -258,6 +318,7 @@ export function registerAuthRoutes(app: Express): void {
         }
 
         if (!passwordMatch) {
+          logAuthEvent(req, normalizedEmail, 'LOGIN', 'ERROR', { reason: 'Invalid email or password' });
           return res.status(401).json({ error: 'Invalid email or password' });
         }
 
@@ -321,6 +382,7 @@ export function registerAuthRoutes(app: Express): void {
       const lastActivityMs = row.last_activity ? new Date(row.last_activity).getTime() : Date.now();
       if (Date.now() - lastActivityMs >= SESSION_IDLE_MS) {
         await query(`DELETE FROM user_sessions WHERE id = $1`, [sessionId]).catch(() => {});
+        logAuthEvent(req, row.user_email, 'LOGOUT', 'SUCCESS', { kicked: true, reason: 'idle_timeout' });
         return res.json({ active: false, reason: 'idle_timeout' });
       }
 
@@ -344,8 +406,8 @@ export function registerAuthRoutes(app: Express): void {
 
       // Only allow logout if the caller owns that session, or is an admin.
       // Without this any 48-char hex leak could force other users out.
-      const row = await queryOne<{ user_id: number }>(
-        `SELECT user_id FROM user_sessions WHERE id = $1`,
+      const row = await queryOne<{ user_id: number; user_email: string }>(
+        `SELECT user_id, user_email FROM user_sessions WHERE id = $1`,
         [sessionId]
       );
       if (!row) return res.json({ ok: true }); // already gone
@@ -358,6 +420,7 @@ export function registerAuthRoutes(app: Express): void {
       }
 
       await query(`DELETE FROM user_sessions WHERE id = $1`, [sessionId]);
+      logAuthEvent(req, row.user_email, 'LOGOUT', 'SUCCESS', isOwner ? {} : { endedBy: caller.email });
       res.json({ ok: true });
     } catch (err: any) {
       console.error('Session logout error:', err.message);

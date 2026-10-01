@@ -98,8 +98,9 @@ export default function App() {
       });
 
       if (!response.ok) {
+        // Failed sign-ins are written to the activity log by the server
+        // (authRoutes.logFailedLogin) — there is no session here to log with.
         const error = await response.json();
-        await logActivity({ userEmail: email, action: 'LOGIN', status: 'ERROR', details: { reason: error.error } });
         throw new Error(error.error || 'Login failed');
       }
 
@@ -146,7 +147,6 @@ export default function App() {
   };
 
   const handleLogout = (opts?: { kicked?: boolean; reason?: 'idle_timeout' | 'signed_in_elsewhere' }) => {
-    const email = currentUser?.email;
     const sessionId = localStorage.getItem('sessionId');
     localStorage.removeItem('userLoggedIn');
     localStorage.removeItem('currentUser');
@@ -156,6 +156,9 @@ export default function App() {
     // Tell the server to drop the row too so it's gone from admin views.
     // Skip when kicked — the server either already deleted the row (idle
     // timeout, elsewhere-login) or the session id is invalid.
+    // The LOGOUT activity-log entry is written by the server in every case
+    // (this call, the idle reap, or the displacing sign-in): by this point
+    // the browser no longer holds a session it could log with.
     if (sessionId && !opts?.kicked) {
       fetch('/api/session/logout', {
         method: 'POST',
@@ -163,7 +166,6 @@ export default function App() {
         body: JSON.stringify({ sessionId }),
       }).catch(() => {});
     }
-    if (email) logActivity({ userEmail: email, action: 'LOGOUT', details: opts?.kicked ? { kicked: true, reason: opts.reason } : undefined });
     // Per-reason toasts so a user who was idle for 24h doesn't see a
     // confusing "signed in from another device" message they can't square
     // with what actually happened.
@@ -713,8 +715,11 @@ export default function App() {
     return () => window.removeEventListener('switch-inventory-tab', handleTabSwitch);
   }, []);
 
-  // Load initial data from API on mount
+  // Load initial data once signed in. The API requires a session, so this
+  // waits for login; on a reload with a stored session it runs immediately.
+  // Re-runs on every sign-in so the next user never sees the last one's data.
   useEffect(() => {
+    if (!isAuthenticated) return;
     const loadFromAPI = async () => {
       try {
         const bootstrapRes = await fetch('/api/bootstrap');
@@ -806,7 +811,7 @@ export default function App() {
     // call — no need to duplicate per-entity refetches for each key.
     loadFromAPIRef.current = loadFromAPI;
     loadFromAPI();
-  }, []);
+  }, [isAuthenticated]);
 
   // Live clock updates
   useEffect(() => {
@@ -856,11 +861,12 @@ export default function App() {
   const [fxRate, setFxRate] = useState<{ usdToZar: number | null; lastUpdated: string | null; ageDays: number | null; stale: boolean } | null>(null);
 
   useEffect(() => {
+    if (!isAuthenticated) return;
     fetch('/api/exchange-rate')
       .then(r => (r.ok ? r.json() : null))
       .then(d => { if (d && !d.error) setFxRate(d); })
       .catch(() => { /* card falls back to USD-only */ });
-  }, []);
+  }, [isAuthenticated]);
 
   // Add Item handler
   const handleAddItem = async (e: React.FormEvent) => {
