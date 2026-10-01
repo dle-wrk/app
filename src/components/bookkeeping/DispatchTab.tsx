@@ -33,6 +33,12 @@ interface DispatchTabExtras {
   onPrefillConsumed?: () => void;
 }
 
+// What a new note inherits when it is started from a sales order.
+interface DispatchSeed {
+  clientId?: number;
+  clientOrderId: number;
+}
+
 export const DispatchTab: React.FC<ModuleDataProps & DispatchTabExtras> = (props) => {
   // When arriving with a prefill payload (e.g. from a sales order's
   // "Create Delivery Note" button), initialise on the matching note type
@@ -64,7 +70,13 @@ const DispatchNotesPanel: React.FC<ModuleDataProps & { type: DispatchNoteType } 
   const [loading, setLoading] = useState(true);
   const [showEditor, setShowEditor] = useState(false);
   const [editing, setEditing] = useState<DispatchNote | null>(null);
+  // Starting point for a NEW note opened from a sales order's "Create
+  // Delivery / Collection Note" button. Deliberately separate from
+  // `editing`: that one means "an existing note" — the editor titles it
+  // "Edit <number>" and saves it with PUT.
+  const [seed, setSeed] = useState<DispatchSeed | null>(null);
   const [viewing, setViewing] = useState<DispatchNote | null>(null);
+  const closeEditor = () => { setShowEditor(false); setEditing(null); setSeed(null); };
   const [busy, setBusy] = useState(false);
 
   const load = async () => {
@@ -84,15 +96,17 @@ const DispatchNotesPanel: React.FC<ModuleDataProps & { type: DispatchNoteType } 
   // sales order, the parent BookkeepingView sets prefillFromOrder + switches
   // salesSub. The parent also remounts this panel via key={type}, so we know
   // this effect fires once with a fresh prefillFromOrder. Open the editor
-  // seeded with the source order's client + order ids, then tell the parent
-  // we consumed the prefill so a subsequent manual "+ New" click doesn't
-  // reopen with stale data.
+  // for a new note seeded with the source order's client + order ids (the
+  // editor pulls in the order's lines), then tell the parent we consumed
+  // the prefill so a subsequent manual "+ New" click doesn't reopen with
+  // stale data.
   useEffect(() => {
     if (!prefillFromOrder) return;
     if (prefillFromOrder.noteType !== type) return;
     const src = clientOrders.find(o => o.id === prefillFromOrder.orderId);
     if (!src) return;
-    setEditing({ clientId: src.clientId, clientOrderId: src.id } as unknown as DispatchNote);
+    setEditing(null);
+    setSeed({ clientId: src.clientId, clientOrderId: src.id });
     setShowEditor(true);
     onPrefillConsumed?.();
     // Intentionally not depending on prefillFromOrder inside the effect
@@ -114,6 +128,7 @@ const DispatchNotesPanel: React.FC<ModuleDataProps & { type: DispatchNoteType } 
   const openEdit = async (note: DispatchNote) => {
     try {
       const full = await apiGet(`/api/dispatch-notes/${note.id}`);
+      setSeed(null);
       setEditing(full);
       setShowEditor(true);
     } catch (err: any) {
@@ -164,7 +179,7 @@ const DispatchNotesPanel: React.FC<ModuleDataProps & { type: DispatchNoteType } 
       <SectionCard
         title={meta.plural}
         badge={`${rows.length}`}
-        actions={<PrimaryButton icon={<Plus className="w-3.5 h-3.5" />} onClick={() => { setEditing(null); setShowEditor(true); }}>New {meta.label}</PrimaryButton>}
+        actions={<PrimaryButton icon={<Plus className="w-3.5 h-3.5" />} onClick={() => { setEditing(null); setSeed(null); setShowEditor(true); }}>New {meta.label}</PrimaryButton>}
       >
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse text-xs">
@@ -211,8 +226,9 @@ const DispatchNotesPanel: React.FC<ModuleDataProps & { type: DispatchNoteType } 
         <DispatchEditorModal
           {...props}
           initial={editing}
-          onClose={() => { setShowEditor(false); setEditing(null); }}
-          onSaved={async () => { setShowEditor(false); setEditing(null); await load(); }}
+          seed={seed}
+          onClose={closeEditor}
+          onSaved={async () => { closeEditor(); await load(); }}
         />
       )}
 
@@ -238,10 +254,15 @@ const DispatchNotesPanel: React.FC<ModuleDataProps & { type: DispatchNoteType } 
 // EDITOR
 // ============================================================================
 
-const DispatchEditorModal: React.FC<ModuleDataProps & { type: DispatchNoteType; initial: DispatchNote | null; onClose: () => void; onSaved: () => void }> = ({ type, initial, onClose, onSaved, clients, clientOrders, items, triggerToast }) => {
+// `initial` is an existing note being edited (saved with PUT). `seed` is the
+// starting point for a new note opened from a sales order (saved with POST).
+// At most one of the two is set.
+const DispatchEditorModal: React.FC<ModuleDataProps & { type: DispatchNoteType; initial: DispatchNote | null; seed?: DispatchSeed | null; onClose: () => void; onSaved: () => void }> = ({ type, initial, seed, onClose, onSaved, clients, clientOrders, items, triggerToast }) => {
   const meta = TYPE_META[type];
-  const [clientId, setClientId] = useState<string>(initial?.clientId ? String(initial.clientId) : '');
-  const [clientOrderId, setClientOrderId] = useState<string>(initial?.clientOrderId ? String(initial.clientOrderId) : '');
+  const startClientId = initial?.clientId ?? seed?.clientId;
+  const startOrderId = initial?.clientOrderId ?? seed?.clientOrderId;
+  const [clientId, setClientId] = useState<string>(startClientId ? String(startClientId) : '');
+  const [clientOrderId, setClientOrderId] = useState<string>(startOrderId ? String(startOrderId) : '');
   const [noteDate, setNoteDate] = useState(initial?.noteDate?.slice(0, 10) || todayISO());
   const [scheduledDate, setScheduledDate] = useState(initial?.scheduledDate?.slice(0, 10) || '');
   const [contactPerson, setContactPerson] = useState(initial?.contactPerson || '');
@@ -263,20 +284,41 @@ const DispatchEditorModal: React.FC<ModuleDataProps & { type: DispatchNoteType; 
 
   const relevantOrders = useMemo(() => clientOrders.filter(o => !clientId || String(o.clientId) === clientId), [clientOrders, clientId]);
 
-  const prefillFromOrder = async (orderId: string) => {
+  // Copy an order's lines into the note. Runs when the order is picked in
+  // the dropdown, and once on open for a note started from an order.
+  const loadOrderLines = async (orderId: string) => {
     setClientOrderId(orderId);
     if (!orderId) return;
     try {
       const allItems = await apiGet('/api/client-order-items');
       const orderItems = Array.isArray(allItems) ? allItems.filter((it: any) => String(it.clientOrderId) === orderId) : [];
       if (orderItems.length) {
-        setLines(orderItems.map((it: any) => ({ key: `O${it.id}`, partNumber: it.partNumber || '', description: it.description, quantity: it.quantity, serialNumbers: '' })));
+        // The API returns quantity as text ("2.00"); the editor works in numbers.
+        setLines(orderItems.map((it: any) => ({ key: `O${it.id}`, partNumber: it.partNumber || '', description: it.description || '', quantity: Number(it.quantity) || 1, serialNumbers: '', deductStock: false })));
         triggerToast(`Prefilled ${orderItems.length} item(s) from the order.`, 'INFO');
+      } else {
+        triggerToast('That order has no line items to copy.', 'INFO');
       }
     } catch {
-      // prefill is best-effort
+      // Say so rather than leave an unexplained empty row: the note can
+      // still be filled in by hand.
+      triggerToast("Couldn't load the order's items — add them manually or pick the order again.", 'ERROR');
     }
   };
+
+  useEffect(() => {
+    if (!initial && seed?.clientOrderId) loadOrderLines(String(seed.clientOrderId));
+    // Once, on open: the seed never changes while the editor is mounted.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Part numbers the pick-list knows about. An order line can carry one it
+  // doesn't (a free-typed SKU such as a service line), which still needs to
+  // show in the select instead of silently reading as "free text".
+  const knownParts = useMemo(
+    () => new Set<string>([...productionProducts.map(p => p.modelNumber), ...items.map(i => i.partNumber)]),
+    [productionProducts, items],
+  );
 
   const updateLine = (key: string, patch: Partial<EditableItem>) => setLines(ls => ls.map(l => l.key === key ? { ...l, ...patch } : l));
   const addLine = () => setLines(ls => [...ls, newItem()]);
@@ -333,7 +375,7 @@ const DispatchEditorModal: React.FC<ModuleDataProps & { type: DispatchNoteType; 
         </div>
         <div className="md:col-span-2">
           <FieldLabel hint="Prefills line items from the order's products">Linked Sales Order</FieldLabel>
-          <select className={selectClass} value={clientOrderId} onChange={(e) => prefillFromOrder(e.target.value)}>
+          <select className={selectClass} value={clientOrderId} onChange={(e) => loadOrderLines(e.target.value)}>
             <option value="">None</option>
             {relevantOrders.map(o => <option key={o.id} value={o.id}>{o.orderNumber}</option>)}
           </select>
@@ -374,6 +416,7 @@ const DispatchEditorModal: React.FC<ModuleDataProps & { type: DispatchNoteType; 
                 <td className="py-1.5 px-2">
                   <select className={`${inputClass} !py-1`} value={l.partNumber || ''} onChange={(e) => onPickPart(l.key, e.target.value)}>
                     <option value="">— free text —</option>
+                    {l.partNumber && !knownParts.has(l.partNumber) && <option value={l.partNumber}>{l.partNumber}</option>}
                     {productionProducts.length > 0 && <optgroup label="Production Products">
                       {productionProducts.map(p => <option key={p.modelNumber} value={p.modelNumber}>{p.modelNumber}</option>)}
                     </optgroup>}
