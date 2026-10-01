@@ -5,30 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Tracklab IM — User Guide has moved</title>
     <!-- The single-page guide was split into topic pages under /docs/.
-         Old deep links keep working: each former section anchor maps to
-         the page (and heading) that now holds that content. -->
-    <script>
-        (function () {
-            var map = {
-                'whats-new-v28': 'release-notes.html#whats-new-v28',
-                'whats-new-v27': 'release-notes.html#whats-new-v27',
-                'whats-new': 'release-notes.html#whats-new',
-                'getting-started': 'getting-started.html',
-                'dashboard': 'getting-started.html#dashboard',
-                'inventory': 'inventory.html',
-                'suppliers': 'suppliers-pricing.html#suppliers',
-                'pricing': 'suppliers-pricing.html#pricing',
-                'manufacturing': 'manufacturing.html',
-                'bookkeeping': 'accounting.html',
-                'automation': 'automation-quality.html#automation',
-                'quality': 'automation-quality.html#quality',
-                'advanced': 'automation-quality.html#advanced-automation',
-                'tips': 'admin-tips.html#tips'
-            };
-            var anchor = (location.hash || '').slice(1);
-            location.replace('docs/' + (map[anchor] || 'index.html'));
-        })();
-    </script>
+         docs/redirect.js maps each former section anchor to the page
+         that now holds it; the meta refresh is the no-JS fallback. The
+         script must stay external: the server's CSP blocks inline JS. -->
+    <script src="docs/redirect.js"></script>
     <meta http-equiv="refresh" content="0; url=docs/index.html">
 </head>
 <body>
