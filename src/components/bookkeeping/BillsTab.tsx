@@ -1,14 +1,63 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { Plus, Send, Ban, Eye, Wallet, Camera, Image as ImageIcon, X, Trash2, Sparkles, Download } from 'lucide-react';
 import { Bill, PurchaseOrder } from '../../types';
-import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, addDaysISO, apiPost, apiGet, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
+import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, addDaysISO, apiPost, apiGet, apiDelete, isAdminUser, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
 import { buildAndSaveDocPdf } from '../../lib/pdfDocs';
 import { runOcr, OcrResult } from '../../lib/receiptOcr';
 import { LineItemsEditor, EditableLine, newEditableLine } from './LineItemsEditor';
 import { ErrorBoundary } from '../ErrorBoundary';
-import { confirmDialog } from '../../lib/confirmDialog';
+import { confirmDialog, ConfirmOptions } from '../../lib/confirmDialog';
 
 const STATUS_FILTERS = ['ALL', 'DRAFT', 'AWAITING_PAYMENT', 'PARTIAL', 'PAID', 'OVERDUE', 'VOID'];
+
+// What the server says deleting a bill would do (GET /api/bills/:id/delete-impact).
+interface BillDeleteImpact {
+  billNumber: string;
+  status: string;
+  currency: string;
+  hasReceipt: boolean;
+  reverseLedger: boolean;
+  payments: { paymentNumber: string; amount: number }[];
+  stockKept: { partNumber: string; quantity: number }[];
+  blockers: string[];
+}
+
+const listOf = (xs: string[]) => xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`;
+
+// The confirmation for deleting a bill. A posted bill is in the books, so
+// this names everything that goes with it rather than a bare "are you sure".
+function billDeleteConfirmation(impact: BillDeleteImpact): ConfirmOptions {
+  const { billNumber, status, currency, payments, stockKept } = impact;
+  const receipt = impact.hasReceipt ? 'Its scanned receipt is deleted with it.' : '';
+  if (status === 'DRAFT') {
+    return {
+      title: 'Delete draft bill',
+      message: [`Delete draft ${billNumber}? This cannot be undone.`, receipt].filter(Boolean).join('\n\n'),
+      confirmLabel: 'Delete',
+      destructive: true,
+    };
+  }
+  const one = payments.length === 1;
+  const parts = [`Delete ${billNumber}? It is ${status.replace(/_/g, ' ')}, and this cannot be undone.`];
+  if (impact.reverseLedger) parts.push('A reversing entry dated today cancels it out in the ledger, and it comes off the VAT201 for its period.');
+  else if (status === 'VOID') parts.push('The ledger is not affected: the bill was already reversed when it was voided.');
+  if (payments.length) {
+    parts.push(
+      `${one ? 'Payment' : 'Payments'} ${listOf(payments.map(p => `${p.paymentNumber} (${fmtMoney(p.amount, currency)})`))} ${one ? 'was' : 'were'} recorded against it. ` +
+      `${one ? 'That payment is' : 'Those payments are'} reversed and removed as well.`
+    );
+  }
+  if (stockKept.length) {
+    parts.push(`Stock it booked in stays in inventory: ${listOf(stockKept.map(s => `${s.quantity} × ${s.partNumber}`))}. Adjust it under Items & Inventory if those goods never arrived.`);
+  }
+  if (receipt) parts.push(receipt);
+  return {
+    title: 'Delete bill',
+    message: parts.join('\n\n'),
+    confirmLabel: payments.length ? `Delete bill and ${one ? 'payment' : 'payments'}` : 'Delete',
+    destructive: true,
+  };
+}
 
 // Payload the scan modal hands the editor when the user chooses "Continue to
 // bill". Any field may be null — the editor uses defaults where we couldn't
@@ -31,6 +80,10 @@ export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
   const [scanningForNewBill, setScanningForNewBill] = useState(false);
   const [scanResultForEditor, setScanResultForEditor] = useState<PrefillFromScan | null>(null);
   const [busy, setBusy] = useState(false);
+  // Anyone can delete a draft; only an admin can delete a bill that has been
+  // posted, paid or voided. The server enforces the same rule.
+  const isAdmin = isAdminUser();
+  const canDelete = (b: { status: string }) => b.status === 'DRAFT' || isAdmin;
 
   React.useEffect(() => {
     if (prefillFromPO) setShowEditor(true);
@@ -80,18 +133,26 @@ export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
     }
   };
 
-  const handleDelete = async (id: number) => {
-    if (!(await confirmDialog({ title: 'Delete bill', message: 'Delete this bill? This action cannot be undone.', confirmLabel: 'Delete', destructive: true }))) return;
-    const snap = bills;
-    setBills?.(prev => prev.filter(b => b.id !== id));
-    setViewing(null);
+  // Deleting a posted bill undoes it in the books: its ledger entry is
+  // reversed and a payment recorded against it goes too. The server works
+  // out exactly what (the same plan the delete then acts on) and the
+  // confirmation spells it out before anything is touched.
+  const handleDelete = async (b: { id: number; billNumber: string }) => {
+    setBusy(true);
     try {
-      const res = await fetch(`/api/bills/${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error((await res.json()).error || 'Failed to delete');
-      triggerToast('Bill deleted.');
-      void refresh();
+      const impact: BillDeleteImpact = await apiGet(`/api/bills/${b.id}/delete-impact`);
+      if (impact.blockers.length) {
+        await confirmDialog({ title: `${b.billNumber} cannot be deleted yet`, message: impact.blockers.join('\n\n'), confirmLabel: 'OK', hideCancel: true });
+        return;
+      }
+      if (!(await confirmDialog(billDeleteConfirmation(impact)))) return;
+      const result = await apiDelete(`/api/bills/${b.id}`);
+      const voided: string[] = (result?.voidedPayments || []).map((p: any) => p.paymentNumber);
+      setBills?.(prev => prev.filter(x => x.id !== b.id));
+      setViewing(null);
+      triggerToast(voided.length ? `${b.billNumber} deleted, along with ${listOf(voided)}.` : `${b.billNumber} deleted.`);
+      await refresh();
     } catch (err: any) {
-      setBills?.(snap);
       triggerToast(err.message || 'Failed to delete bill', 'ERROR');
     } finally {
       setBusy(false);
@@ -175,6 +236,9 @@ export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
                       <button onClick={() => openView(b)} className="p-1.5 rounded hover:bg-surface-container-high text-on-surface-variant" title="View"><Eye className="w-3.5 h-3.5" /></button>
                       {['AWAITING_PAYMENT', 'PARTIAL', 'OVERDUE'].includes(b.status) && (
                         <button onClick={() => setPayingBill(b)} className="p-1.5 rounded hover:bg-surface-container-high text-green-400" title="Pay"><Wallet className="w-3.5 h-3.5" /></button>
+                      )}
+                      {isAdmin && (
+                        <button onClick={() => handleDelete(b)} disabled={busy} className="p-1.5 rounded hover:bg-error/10 text-error disabled:opacity-40" title={`Delete ${b.billNumber}`} aria-label={`Delete ${b.billNumber}`}><Trash2 className="w-3.5 h-3.5" /></button>
                       )}
                     </div>
                   </td>
@@ -278,10 +342,7 @@ export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
               Save PDF
             </SecondaryButton>
             {viewing.status === 'DRAFT' && (
-              <>
-                <PrimaryButton icon={<Send className="w-3.5 h-3.5" />} onClick={() => handleFinalize(viewing.id)} disabled={busy}>Finalize</PrimaryButton>
-                <DangerButton icon={<Ban className="w-3.5 h-3.5" />} onClick={() => handleDelete(viewing.id)} disabled={busy}>Delete</DangerButton>
-              </>
+              <PrimaryButton icon={<Send className="w-3.5 h-3.5" />} onClick={() => handleFinalize(viewing.id)} disabled={busy}>Finalize</PrimaryButton>
             )}
             {['AWAITING_PAYMENT', 'PARTIAL', 'OVERDUE'].includes(viewing.status) && (
               <>
@@ -289,6 +350,7 @@ export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
                 <DangerButton icon={<Ban className="w-3.5 h-3.5" />} onClick={() => handleVoid(viewing.id)} disabled={busy}>Void</DangerButton>
               </>
             )}
+            {canDelete(viewing) && <DangerButton icon={<Trash2 className="w-3.5 h-3.5" />} onClick={() => handleDelete(viewing)} disabled={busy}>Delete</DangerButton>}
           </div>
         </Modal>
       )}

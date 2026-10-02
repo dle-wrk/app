@@ -642,7 +642,8 @@
                         <tr><td><span class="m m-post">POST</span></td><td>/api/bills</td><td>Create a bill.</td></tr>
                         <tr><td><span class="m m-post">POST</span></td><td>/api/bills/:id/finalize</td><td>Finalise a bill: posts it to the ledger.</td></tr>
                         <tr><td><span class="m m-post">POST</span></td><td>/api/bills/:id/void</td><td>Void a bill.</td></tr>
-                        <tr><td><span class="m m-delete">DELETE</span></td><td>/api/bills/:id</td><td>Delete a bill.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/bills/:id/delete-impact</td><td>Preview what deleting a bill would do, without doing it: <code>reverseLedger</code>, the <code>payments</code> that would be voided, <code>stockKept</code>, and <code>blockers</code> (reasons it cannot be deleted yet).</td></tr>
+                        <tr><td><span class="m m-delete">DELETE</span></td><td>/api/bills/:id</td><td>Delete a bill. Anyone may delete a <code>DRAFT</code>; any other status needs an admin (<code>403</code> otherwise). Its ledger entry is reversed unless it was already void, and payments recorded against it alone are voided and returned as <code>voidedPayments</code>. Answers <code>409</code> with <code>blockers</code>, changing nothing, if a payment also pays other bills or is matched on a bank statement, or a landed-cost batch uses the bill.</td></tr>
                         <tr><td><span class="m m-post">POST</span></td><td>/api/bills/:id/receipt</td><td>Attach or replace the scanned slip / vendor invoice (a base64 image).</td></tr>
                         <tr><td><span class="m m-delete">DELETE</span></td><td>/api/bills/:id/receipt</td><td>Remove the scanned slip.</td></tr>
                         <tr><td><span class="m m-post">POST</span></td><td>/api/bookkeeping/ocr/receipt</td><td>Read a receipt image into bill fields (OCR).</td></tr>

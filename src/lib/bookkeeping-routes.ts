@@ -1381,16 +1381,188 @@ export function registerBookkeepingRoutes(app: Express) {
     }
   });
 
-  app.delete('/api/bills/:id', async (req, res) => {
+  // Columns the delete needs. Deliberately not SELECT *: receipt_image is a
+  // base64 scan that can run to megabytes.
+  const BILL_DELETE_COLUMNS = `id, bill_number, status, total, currency, supplier_id, purchase_order_id, journal_entry_id, (receipt_image IS NOT NULL) AS has_receipt`;
+
+  // What deleting a bill would touch. The UI shows this before asking for
+  // confirmation and the delete then acts on it, both through this one
+  // function, so what the admin is told and what happens cannot drift apart.
+  //
+  //  - reverseLedger: the bill's own posting is still live. A VOID bill was
+  //    already reversed when it was voided, and a DRAFT never posted.
+  //  - payments: payments recorded against this bill alone. They are voided
+  //    with it (reversed and removed, exactly as Void Payment does).
+  //  - stockKept: stock the bill booked in. As with voiding, deleting leaves
+  //    it in inventory; it is listed so it can be adjusted by hand.
+  //  - blockers: reasons the bill cannot be deleted yet, in plain words.
+  async function planBillDelete(db: { query: (text: string, params?: any[]) => Promise<{ rows: any[] }> }, bill: any) {
+    const { rows: payments } = await db.query(
+      `SELECT p.id, p.payment_number, p.amount, p.journal_entry_id,
+              ARRAY_AGG(DISTINCT ob.bill_number) FILTER (WHERE a.bill_id <> $1) AS other_bills
+       FROM payments_made p
+       JOIN payment_made_allocations a ON a.payment_id = p.id
+       LEFT JOIN bills ob ON ob.id = a.bill_id
+       WHERE p.id IN (SELECT payment_id FROM payment_made_allocations WHERE bill_id = $1)
+       GROUP BY p.id
+       ORDER BY p.id`,
+      [bill.id]
+    );
+    const { rows: bankMatches } = payments.length
+      ? await db.query(
+          `SELECT l.matched_id AS payment_id, s.statement_number
+           FROM bank_statement_lines l JOIN bank_statements s ON s.id = l.statement_id
+           WHERE l.matched_type = 'PAYMENT_OUT' AND l.matched_id = ANY($1::int[])`,
+          [payments.map((p: any) => p.id)]
+        )
+      : { rows: [] as any[] };
+    const { rows: batches } = await db.query(
+      `SELECT batch_number, status FROM landed_cost_batches
+       WHERE id IN (SELECT batch_id FROM landed_cost_goods_bills WHERE bill_id = $1
+                    UNION SELECT batch_id FROM landed_cost_addon_bills WHERE bill_id = $1)
+       ORDER BY id`,
+      [bill.id]
+    );
+    // The stock ledger, not the bill lines, is the record of what was booked
+    // in: a line ticked "receive stock" books nothing if its part number
+    // isn't in inventory.
+    const { rows: stock } = await db.query(
+      `SELECT itemPartNumber AS part_number, SUM(qtyChange) AS quantity
+       FROM transactions WHERE reference = $1 AND type = 'BOOK-IN'
+       GROUP BY itemPartNumber HAVING SUM(qtyChange) <> 0 ORDER BY itemPartNumber`,
+      [`Bill ${bill.bill_number}`]
+    );
+
+    const blockers: string[] = [];
+    for (const p of payments) {
+      const others: string[] = p.other_bills || [];
+      if (others.length) {
+        // Voiding it would un-pay those bills as well, and leaving it would
+        // strand a credit nothing in the app can apply. Neither is ours to
+        // decide inside a bill delete.
+        blockers.push(`Payment ${p.payment_number} also pays ${others.join(', ')}, so it cannot be removed along with this bill. Void that payment under Purchases > Payments Made first, then delete the bill.`);
+      }
+      for (const m of bankMatches.filter((b: any) => b.payment_id === p.id)) {
+        blockers.push(`Payment ${p.payment_number} is matched to a line on bank statement ${m.statement_number}. Unmatch it under Accounting > Bank Reconciliation first.`);
+      }
+    }
+    for (const b of batches) {
+      blockers.push(b.status === 'POSTED'
+        ? `This bill is part of landed cost batch ${b.batch_number}, which is posted and has already repriced stock from it. A posted batch cannot be undone, so the bill has to stay.`
+        : `This bill is part of landed cost batch ${b.batch_number}. Delete that batch under Purchases > Landed Cost first.`);
+    }
+
+    return {
+      reverseLedger: !!bill.journal_entry_id && bill.status !== 'VOID',
+      payments: payments.map((p: any) => ({ id: p.id, paymentNumber: p.payment_number, amount: parseFloat(p.amount) || 0, journalEntryId: p.journal_entry_id })),
+      stockKept: stock.map((s: any) => ({ partNumber: s.part_number, quantity: Number(s.quantity) || 0 })),
+      blockers,
+    };
+  }
+
+  // Preview for the confirmation dialog: what deleting this bill would do.
+  // Read-only.
+  app.get('/api/bills/:id/delete-impact', async (req, res) => {
     const id = parseInt(req.params.id);
     try {
-      const bill = await queryOne<any>(`SELECT status FROM bills WHERE id = $1`, [id]);
+      const bill = await queryOne<any>(`SELECT ${BILL_DELETE_COLUMNS} FROM bills WHERE id = $1`, [id]);
       if (!bill) return res.status(404).json({ error: 'bill not found' });
-      if (bill.status !== 'DRAFT') return res.status(400).json({ error: 'Only DRAFT bills can be deleted. Void it instead.' });
-      await query(`DELETE FROM bills WHERE id = $1`, [id]);
-      res.json({ ok: true });
+      const plan = await planBillDelete({ query }, bill);
+      res.json({
+        billNumber: bill.bill_number,
+        status: bill.status,
+        currency: bill.currency,
+        hasReceipt: !!bill.has_receipt,
+        reverseLedger: plan.reverseLedger,
+        payments: plan.payments.map((p) => ({ paymentNumber: p.paymentNumber, amount: p.amount })),
+        stockKept: plan.stockKept,
+        blockers: plan.blockers,
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Delete a bill. Unlike a purchase order, a bill is in the books: once
+  // finalized it has posted to the ledger, and it may have been paid. So a
+  // delete has to undo it, not just drop the row.
+  //
+  // Anyone may delete a DRAFT (nothing posted). Past that only an admin may,
+  // and the delete then:
+  //   - voids each payment recorded against this bill alone;
+  //   - reverses the bill's ledger entry, unless voiding already did;
+  //   - removes the bill, its lines and its scanned receipt.
+  // The ledger keeps the original entries and gains reversals, the same
+  // append-only trail Void leaves. Stock the bill booked in is not taken
+  // back out, also as with Void.
+  //
+  // It all commits together with an activity-log entry, or not at all. If
+  // something else depends on the bill (see planBillDelete) nothing is
+  // changed and the reasons come back as a 409.
+  app.delete('/api/bills/:id', async (req: any, res) => {
+    const id = parseInt(req.params.id);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const { rows } = await client.query(`SELECT ${BILL_DELETE_COLUMNS} FROM bills WHERE id = $1 FOR UPDATE`, [id]);
+      if (rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'bill not found' });
+      }
+      const bill = rows[0];
+      if (bill.status !== 'DRAFT' && req.user?.role !== 'admin') {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ error: `Only an admin can delete a bill that is ${bill.status}.` });
+      }
+
+      const plan = await planBillDelete(client, bill);
+      if (plan.blockers.length) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: plan.blockers.join(' '), blockers: plan.blockers });
+      }
+
+      for (const p of plan.payments) {
+        if (p.journalEntryId) {
+          await reverseJournalEntry(client, p.journalEntryId, { sourceType: 'REVERSAL', sourceId: p.id, memo: `Void payment ${p.paymentNumber} (bill ${bill.bill_number} deleted)` });
+        }
+        await client.query(`DELETE FROM payment_made_allocations WHERE payment_id = $1`, [p.id]);
+        await client.query(`DELETE FROM payments_made WHERE id = $1`, [p.id]);
+      }
+      if (plan.reverseLedger) {
+        await reverseJournalEntry(client, bill.journal_entry_id, { sourceType: 'REVERSAL', sourceId: id, memo: `Delete bill ${bill.bill_number}` });
+      }
+      // Lines go with the bill (ON DELETE CASCADE).
+      await client.query(`DELETE FROM bills WHERE id = $1`, [id]);
+      await client.query(
+        `INSERT INTO user_activity_logs (user_email, action, entity_type, entity_id, details, status)
+         VALUES ($1, 'DELETE_BILL', 'Bill', $2, $3, 'SUCCESS')`,
+        [
+          req.user?.email || 'unknown',
+          bill.bill_number,
+          JSON.stringify({
+            status: bill.status,
+            total: bill.total,
+            currency: bill.currency,
+            supplierId: bill.supplier_id,
+            purchaseOrderId: bill.purchase_order_id,
+            ledgerReversed: plan.reverseLedger,
+            voidedPayments: plan.payments.map((p) => ({ paymentNumber: p.paymentNumber, amount: p.amount })),
+            stockKept: plan.stockKept,
+            hadReceipt: !!bill.has_receipt,
+          }),
+        ]
+      );
+      await client.query('COMMIT');
+      res.json({
+        ok: true,
+        ledgerReversed: plan.reverseLedger,
+        voidedPayments: plan.payments.map((p) => ({ paymentNumber: p.paymentNumber, amount: p.amount })),
+      });
+    } catch (err: any) {
+      await client.query('ROLLBACK').catch(() => {});
+      res.status(500).json({ error: err.message });
+    } finally {
+      client.release();
     }
   });
 

@@ -144,6 +144,34 @@
                 </ol>
             </div>
 
+            <h3 id="deleting-a-bill">Deleting a bill</h3>
+            <div class="step">
+                <p>A bill is in the books, so deleting one undoes it rather than just removing a row. Before you confirm, the app lists exactly what will go with it.</p>
+                <ul>
+                    <li><strong>Drafts:</strong> anyone can delete a draft, with the <strong>Delete</strong> button in the bill's viewer. A draft has not posted anything, so nothing else changes.</li>
+                    <li><strong>Posted, paid or void bills:</strong> only an admin can delete these. Admins get a bin icon on every row of the list, and the <strong>Delete</strong> button in the viewer whatever the status.</li>
+                    <li><strong>The ledger:</strong> a reversing entry is posted, dated the day you delete, which cancels the bill out. The original entry and its reversal both stay in the journal, exactly as when you void a bill. A bill that is already void was reversed when it was voided, and is not reversed again.</li>
+                    <li><strong>VAT201:</strong> the bill comes off the return for the period of its bill date. If that period has already been submitted to SARS, the report will no longer match what you filed.</li>
+                    <li><strong>Payments:</strong> a payment recorded against that bill alone is reversed and removed with it, the same as <strong>Void Payment</strong>. The confirmation names each one, and the button reads <strong>Delete bill and payment</strong>.</li>
+                    <li><strong>Stock:</strong> stock the bill booked in stays in inventory, as it does when a bill is voided. The confirmation lists it; adjust it under <strong>Items &amp; Inventory</strong> if those goods never arrived.</li>
+                    <li><strong>The scanned receipt</strong> is deleted with the bill. Save a copy first if you need one.</li>
+                    <li><strong>The purchase order</strong> the bill came from is not changed, and can be converted to a bill again.</li>
+                    <li>Every deletion is written to the activity log: who deleted it, the bill number, and the payments that were voided.</li>
+                </ul>
+            </div>
+            <div class="step">
+                <h4>When a bill cannot be deleted yet</h4>
+                <p>The app says why instead of asking you to confirm, and nothing is changed:</p>
+                <ul>
+                    <li><strong>Its payment also pays other bills.</strong> Void that payment under <strong>Payments Made</strong> first, then delete the bill.</li>
+                    <li><strong>Its payment is matched on a bank statement.</strong> Unmatch it under <strong>Accounting &gt; Bank Reconciliation</strong> first.</li>
+                    <li><strong>A landed cost batch uses it.</strong> Delete the batch first if it is still a draft. A posted batch has already repriced stock from the bill, so that bill has to stay.</li>
+                </ul>
+            </div>
+            <div class="warning">
+                ⚠ <strong>This cannot be undone.</strong> If the bill is real and only needs to stop counting, use <strong>Void</strong> instead (for a paid bill, void its payment first): it reverses the ledger entry but keeps the bill and its receipt on record.
+            </div>
+
             <h3 id="landed-cost">Landed Cost</h3>
             <div class="step">
                 <p>New tab under Bookkeeping → Purchases → <strong>Landed Cost</strong>. Bolt freight / duty / bank-charge bills onto the underlying goods bill so each unit's cost reflects its true landed price — not just what Digi-Key charged.</p>

@@ -28,6 +28,9 @@ export type ConfirmOptions = {
   confirmLabel?: string;
   cancelLabel?: string;
   destructive?: boolean;
+  // Notice mode: a single button, for something the user only needs to
+  // read (why an action isn't available), not decide.
+  hideCancel?: boolean;
 };
 
 type PendingConfirm = { opts: ConfirmOptions; resolve: (value: boolean) => void };
@@ -108,12 +111,14 @@ export const ConfirmDialogHost: React.FC = () => {
           {opts.message}
         </div>
         <div className="px-lg py-md border-t border-outline-variant flex justify-end gap-sm">
-          <button
-            onClick={() => close(false)}
-            className="px-md py-1.5 rounded-lg text-xs font-bold border border-outline-variant text-on-surface hover:bg-surface-variant/40 transition-all"
-          >
-            {cancelLabel}
-          </button>
+          {!opts.hideCancel && (
+            <button
+              onClick={() => close(false)}
+              className="px-md py-1.5 rounded-lg text-xs font-bold border border-outline-variant text-on-surface hover:bg-surface-variant/40 transition-all"
+            >
+              {cancelLabel}
+            </button>
+          )}
           <button
             onClick={() => close(true)}
             autoFocus
