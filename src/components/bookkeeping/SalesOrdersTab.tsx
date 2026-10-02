@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, Eye, Trash2, Upload, Download, Paperclip, CheckCircle2, XCircle, Printer, Truck, AlertTriangle, Zap, Pencil } from 'lucide-react';
 import { ClientOrder } from '../../types';
-import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, apiGet, apiPost, apiPut, apiDelete, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
+import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, apiGet, apiPost, apiPut, apiDelete, isAdminUser, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
 import { LineItemsEditor, EditableLine, newEditableLine, lineTotals } from './LineItemsEditor';
 import { buildAndSaveDocPdf } from '../../lib/pdfDocs';
 import { openAuthedFile } from '../../lib/openAuthedFile';
@@ -17,20 +17,6 @@ const DOC_MAX_BYTES = 10 * 1024 * 1024;
 
 interface SalesOrdersTabExtras {
   onCreateDispatch?: (orderId: number, noteType: 'DELIVERY' | 'COLLECTION') => void;
-}
-
-// The bookkeeping props chain doesn't include the logged-in user, and
-// threading a currentUser prop from App through BookkeepingView just for
-// this one gate would be a lot of plumbing. localStorage['currentUser']
-// is the same source App itself uses (see App.tsx line 85), so reading
-// it directly here keeps the check in step without new props.
-function isAdminUser(): boolean {
-  try {
-    const raw = localStorage.getItem('currentUser');
-    if (!raw) return false;
-    const u = JSON.parse(raw);
-    return String(u?.role || '').toLowerCase() === 'admin';
-  } catch { return false; }
 }
 
 export const SalesOrdersTab: React.FC<ModuleDataProps & SalesOrdersTabExtras> = (props) => {

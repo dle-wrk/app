@@ -1162,21 +1162,62 @@ export function registerBookkeepingRoutes(app: Express) {
     }
   });
 
-  app.delete('/api/purchase-orders/:id', async (req, res) => {
+  // Delete a purchase order. A PO is a document only: its status never moves
+  // stock or posts to the ledger (bills do that), so removing one cannot
+  // corrupt either. Anyone may delete a DRAFT. Once it has been sent,
+  // received or cancelled it is part of the purchasing record, and only an
+  // admin may remove it.
+  //
+  // Bills raised from the PO are kept — they stand on their own in the
+  // books — and just lose their link to it. They are returned so the UI can
+  // say which. The delete and its activity-log entry commit together, so an
+  // admin delete always leaves a record of who removed what.
+  app.delete('/api/purchase-orders/:id', async (req: any, res) => {
     const id = parseInt(req.params.id);
+    const client = await pool.connect();
     try {
-      // Only DRAFTs can be deleted — a PO that's been SENT/RECEIVED has
-      // downstream effects (stock adjustments, bills) that a hard delete
-      // would silently corrupt. Client should void or cancel instead.
-      const row = await queryOne<{ status: string }>(`SELECT status FROM purchase_orders WHERE id = $1`, [id]);
-      if (!row) return res.status(404).json({ error: 'purchase order not found' });
-      if (row.status !== 'DRAFT') {
-        return res.status(400).json({ error: `Only DRAFT purchase orders can be deleted (this one is ${row.status})` });
+      await client.query('BEGIN');
+      const { rows } = await client.query(
+        `SELECT id, po_number, status, total FROM purchase_orders WHERE id = $1 FOR UPDATE`,
+        [id]
+      );
+      if (rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'purchase order not found' });
       }
-      await query(`DELETE FROM purchase_orders WHERE id = $1`, [id]);
-      res.json({ ok: true });
+      const po = rows[0];
+      if (po.status !== 'DRAFT' && req.user?.role !== 'admin') {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ error: `Only an admin can delete a purchase order that is ${po.status}.` });
+      }
+
+      // The FK is ON DELETE SET NULL, but unlinking explicitly gives us the
+      // list of affected bills to report and to log.
+      const { rows: linked } = await client.query(
+        `UPDATE bills SET purchase_order_id = NULL WHERE purchase_order_id = $1 RETURNING bill_number, status`,
+        [id]
+      );
+      // Lines go with the order (ON DELETE CASCADE).
+      await client.query(`DELETE FROM purchase_orders WHERE id = $1`, [id]);
+      await client.query(
+        `INSERT INTO user_activity_logs (user_email, action, entity_type, entity_id, details, status)
+         VALUES ($1, 'DELETE_PURCHASE_ORDER', 'PurchaseOrder', $2, $3, 'SUCCESS')`,
+        [
+          req.user?.email || 'unknown',
+          po.po_number,
+          JSON.stringify({ status: po.status, total: po.total, unlinkedBills: linked.map((b: any) => b.bill_number) }),
+        ]
+      );
+      await client.query('COMMIT');
+      res.json({
+        ok: true,
+        unlinkedBills: linked.map((b: any) => ({ billNumber: b.bill_number, status: b.status })),
+      });
     } catch (err: any) {
+      await client.query('ROLLBACK').catch(() => {});
       res.status(500).json({ error: err.message });
+    } finally {
+      client.release();
     }
   });
 

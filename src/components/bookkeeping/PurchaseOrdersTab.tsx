@@ -1,16 +1,20 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Plus, Eye, FileText, Trash2 } from 'lucide-react';
 import { PurchaseOrder, Item } from '../../types';
-import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, apiPost, apiPut, apiGet, apiDelete, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
+import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, apiPost, apiPut, apiGet, apiDelete, isAdminUser, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
 import { LineItemsEditor, EditableLine, newEditableLine } from './LineItemsEditor';
 import { confirmDialog } from '../../lib/confirmDialog';
 import { ErrorBoundary } from '../ErrorBoundary';
 
 export const PurchaseOrdersTab: React.FC<ModuleDataProps & { onConvertToBill?: (po: PurchaseOrder) => void }> = (props) => {
-  const { purchaseOrders, triggerToast, refresh, onConvertToBill } = props;
+  const { purchaseOrders, bills, triggerToast, refresh, onConvertToBill } = props;
   const [showCreate, setShowCreate] = useState(false);
   const [viewing, setViewing] = useState<any>(null);
   const [busy, setBusy] = useState(false);
+  // Anyone can delete a draft; only an admin can delete an order that has
+  // been sent, received or cancelled. The server enforces the same rule.
+  const isAdmin = isAdminUser();
+  const canDelete = (po: { status: string }) => po.status === 'DRAFT' || isAdmin;
 
   const openView = async (po: PurchaseOrder) => {
     try {
@@ -35,12 +39,28 @@ export const PurchaseOrdersTab: React.FC<ModuleDataProps & { onConvertToBill?: (
     }
   };
 
-  const handleDelete = async (id: number) => {
-    if (!(await confirmDialog({ title: 'Delete draft PO', message: 'Delete this draft purchase order? This cannot be undone.', confirmLabel: 'Delete', destructive: true }))) return;
+  const handleDelete = async (po: { id: number; poNumber: string; status: string }) => {
+    const isDraft = po.status === 'DRAFT';
+    // Bills raised from this order survive the delete but lose their link
+    // to it — say so up front, by number, rather than after the fact.
+    const linked = bills.filter(b => b.purchaseOrderId === po.id);
+    const one = linked.length === 1;
+    const parts = [
+      isDraft
+        ? `Delete draft ${po.poNumber}? This cannot be undone.`
+        : `Delete ${po.poNumber}? It is ${po.status}, and this cannot be undone. The order and its lines are removed; stock and the ledger are not affected.`,
+    ];
+    if (linked.length) {
+      parts.push(
+        `${one ? 'One bill was' : `${linked.length} bills were`} raised from this order: ${linked.map(b => `${b.billNumber} (${b.status})`).join(', ')}. ` +
+        `${one ? 'It stays' : 'They stay'} in the books, but will no longer show which purchase order ${one ? 'it' : 'they'} came from.`
+      );
+    }
+    if (!(await confirmDialog({ title: isDraft ? 'Delete draft PO' : 'Delete purchase order', message: parts.join('\n\n'), confirmLabel: 'Delete', destructive: true }))) return;
     setBusy(true);
     try {
-      await apiDelete(`/api/purchase-orders/${id}`);
-      triggerToast('Purchase order deleted.');
+      await apiDelete(`/api/purchase-orders/${po.id}`);
+      triggerToast(`${po.poNumber} deleted.`);
       await refresh();
       setViewing(null);
     } catch (err: any) {
@@ -79,8 +99,11 @@ export const PurchaseOrdersTab: React.FC<ModuleDataProps & { onConvertToBill?: (
                   <td className="px-lg py-sm text-on-surface-variant">{fmtDate(po.expectedDate)}</td>
                   <td className="px-lg py-sm text-right font-mono">{fmtMoney(po.total, po.currency)}</td>
                   <td className="px-lg py-sm"><StatusPill status={po.status} /></td>
-                  <td className="px-lg py-sm text-right">
+                  <td className="px-lg py-sm text-right whitespace-nowrap">
                     <button onClick={() => openView(po)} className="p-1.5 rounded hover:bg-surface-container-high text-on-surface-variant" title="View"><Eye className="w-3.5 h-3.5" /></button>
+                    {isAdmin && (
+                      <button onClick={() => handleDelete(po)} disabled={busy} className="p-1.5 rounded hover:bg-error/10 text-error disabled:opacity-40" title={`Delete ${po.poNumber}`} aria-label={`Delete ${po.poNumber}`}><Trash2 className="w-3.5 h-3.5" /></button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -128,7 +151,7 @@ export const PurchaseOrdersTab: React.FC<ModuleDataProps & { onConvertToBill?: (
             {viewing.status === 'DRAFT' && <SecondaryButton onClick={() => updateStatus(viewing.id, 'SENT')} disabled={busy}>Mark Sent</SecondaryButton>}
             {['SENT', 'PARTIAL'].includes(viewing.status) && <SecondaryButton onClick={() => updateStatus(viewing.id, 'RECEIVED')} disabled={busy}>Mark Received</SecondaryButton>}
             {viewing.status !== 'CANCELLED' && viewing.status !== 'RECEIVED' && <SecondaryButton onClick={() => updateStatus(viewing.id, 'CANCELLED')} disabled={busy}>Cancel</SecondaryButton>}
-            {viewing.status === 'DRAFT' && <DangerButton icon={<Trash2 className="w-3.5 h-3.5" />} onClick={() => handleDelete(viewing.id)} disabled={busy}>Delete</DangerButton>}
+            {canDelete(viewing) && <DangerButton icon={<Trash2 className="w-3.5 h-3.5" />} onClick={() => handleDelete(viewing)} disabled={busy}>Delete</DangerButton>}
             {onConvertToBill && <PrimaryButton icon={<FileText className="w-3.5 h-3.5" />} onClick={() => { onConvertToBill(viewing); setViewing(null); }}>Convert to Bill</PrimaryButton>}
           </div>
         </Modal>

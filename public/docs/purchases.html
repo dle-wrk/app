@@ -112,6 +112,20 @@
             <div class="step">
                 <p>The SKU / Part# input on purchase-side line editors now accepts <em>free-typed</em> values, not only rows that exist in inventory. A supplier's own SKU that isn't yet in your catalogue no longer forces you to bail out and add the item first.</p>
             </div>
+
+            <h3 id="deleting-a-purchase-order">Deleting a purchase order</h3>
+            <div class="step">
+                <ul>
+                    <li><strong>Drafts:</strong> anyone can delete a draft, with the <strong>Delete</strong> button in the order's viewer.</li>
+                    <li><strong>Sent, received or cancelled orders:</strong> only an admin can delete these. Admins get a bin icon on every row of the list, and the <strong>Delete</strong> button in the viewer whatever the status.</li>
+                    <li><strong>What is removed:</strong> the order and its lines. Stock and the ledger are not affected, because a purchase order never moves either; bills do.</li>
+                    <li><strong>Bills raised from the order</strong> stay in the books. They only lose the link back to the order, and the confirmation lists them by number before you agree.</li>
+                    <li>Every deletion is written to the activity log: who deleted it, the order number, and any bills that were unlinked.</li>
+                </ul>
+            </div>
+            <div class="warning">
+                ⚠ <strong>This cannot be undone.</strong> If the order might still matter, use <strong>Cancel</strong> instead: it keeps the record and marks it as not going ahead.
+            </div>
         </div>
 
         <div class="section" id="bills-landed-cost">

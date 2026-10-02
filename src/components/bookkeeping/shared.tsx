@@ -92,6 +92,20 @@ export function addDaysISO(days: number, from?: string): string {
 // the bookkeeping surface should import from './lib/api' directly.
 export { ApiError, apiGet, apiPost, apiPut, apiPatch, apiDelete } from '../../lib/api';
 
+// Whether the signed-in user is an admin, for showing admin-only controls.
+// The bookkeeping props chain doesn't carry the logged-in user, and
+// threading a currentUser prop from App through BookkeepingView for these
+// gates would be a lot of plumbing; localStorage['currentUser'] is the same
+// source App itself uses. This only decides what to SHOW — the server
+// checks the session's role again on anything that matters.
+export function isAdminUser(): boolean {
+  try {
+    const raw = localStorage.getItem('currentUser');
+    if (!raw) return false;
+    return String(JSON.parse(raw)?.role || '').toLowerCase() === 'admin';
+  } catch { return false; }
+}
+
 // ============================================================================
 // UI PRIMITIVES (match the existing Tracklab design system)
 // ============================================================================

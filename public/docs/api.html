@@ -627,7 +627,7 @@
                         <tr><td><span class="m m-get">GET</span></td><td>/api/purchase-orders/:id</td><td>Get one purchase order with its lines.</td></tr>
                         <tr><td><span class="m m-post">POST</span></td><td>/api/purchase-orders</td><td>Create a purchase order.</td></tr>
                         <tr><td><span class="m m-put">PUT</span></td><td>/api/purchase-orders/:id/status</td><td>Set its <code>status</code>: <code>DRAFT</code>, <code>SENT</code>, <code>PARTIAL</code>, <code>RECEIVED</code> or <code>CANCELLED</code>.</td></tr>
-                        <tr><td><span class="m m-delete">DELETE</span></td><td>/api/purchase-orders/:id</td><td>Delete a purchase order.</td></tr>
+                        <tr><td><span class="m m-delete">DELETE</span></td><td>/api/purchase-orders/:id</td><td>Delete a purchase order. Anyone may delete a <code>DRAFT</code>; any other status needs an admin (<code>403</code> otherwise). Bills raised from it are kept and unlinked, and are listed in the response as <code>unlinkedBills</code>.</td></tr>
                     </tbody>
                 </table>
             </div>
