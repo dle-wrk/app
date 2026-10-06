@@ -10,6 +10,7 @@ import {
   X,
   Upload,
   FileSpreadsheet,
+  AlertTriangle,
 } from 'lucide-react';
 import { Item, Transaction, Supplier, ProductionKit, SystemConfig, ViewType, Project, BOMItem, PickPlaceItem, UserProfile, JobCard, Client, ClientOrder, ClientOrderItem, BuildJob, BomStructure, SubAssembly, FieldedAsset, StockLedgerEntry } from './types';
 import { INITIAL_TRANSACTIONS, INITIAL_PRODUCTION_KITS, INITIAL_SYSTEM_CONFIG, INITIAL_BOM_ITEMS, INITIAL_PP_BOM_ITEMS, CSV_HEADER, itemToCsvRow } from './mockData';
@@ -29,6 +30,7 @@ import PickPlaceManager from './components/PickPlaceManager';
 import AlternatesManager from './components/AlternatesManager';
 import BulkPricingWizard from './components/BulkPricingWizard';
 import { fmtUSD, fmtNumber } from './lib/formatMoney';
+import { ImportPlan, parseDelimited, planFromSheets, planFromTable, planToCsv } from './lib/inventoryImport';
 import ItemDetailModal, { deriveMetric, deriveImperial } from './components/ItemDetailModal';
 import ProductionKitsManager from './components/ProductionKitsManager';
 import Login from './components/Login';
@@ -596,7 +598,21 @@ export default function App() {
     // opens without needing its own poller.
   }, [showAddModal, items.length]);
   const [showImportModal, setShowImportModal] = useState<boolean>(false);
-  const [csvParsedPreview, setCsvParsedPreview] = useState<Item[]>([]);
+  // What the chosen import file would write (see src/lib/inventoryImport.ts).
+  const [importPlan, setImportPlan] = useState<ImportPlan | null>(null);
+  const [importing, setImporting] = useState(false);
+  // How the plan meets the inventory on file: new parts, parts already
+  // here, and stock figures it would overwrite. Shown before Apply, because
+  // an older spreadsheet quietly rolls back newer stock counts.
+  const importSummary = React.useMemo(() => {
+    if (!importPlan) return null;
+    const onFile = new Map(items.map(i => [i.partNumber, i]));
+    const fresh = importPlan.rows.filter(r => !onFile.has(r.serial_number)).length;
+    const stockChanges = importPlan.rows
+      .filter(r => typeof r.stock === 'number' && onFile.has(r.serial_number) && onFile.get(r.serial_number)!.stockLevel !== r.stock)
+      .map(r => ({ part: r.serial_number, from: onFile.get(r.serial_number)!.stockLevel, to: r.stock as number }));
+    return { fresh, existing: importPlan.rows.length - fresh, stockChanges, onFile };
+  }, [importPlan, items]);
   const [isDraggingCsv, setIsDraggingCsv] = useState<boolean>(false);
   const [selectedTableTab, setSelectedTableTab] = useState<'Production_Kits' | 'users' | 'Item_Pricing'>('Production_Kits');
 
@@ -610,7 +626,7 @@ export default function App() {
   // binds a window listener while its own modal is open, so an Escape
   // press dismisses whatever is on top and nothing else.
   useEscapeKey(() => setShowAddModal(false), showAddModal);
-  useEscapeKey(() => { setShowImportModal(false); setCsvParsedPreview([]); }, showImportModal);
+  useEscapeKey(() => { setShowImportModal(false); setImportPlan(null); }, showImportModal);
   useEscapeKey(() => setShowBookInModal(false), showBookInModal);
   useEscapeKey(() => setShowSupplierModal(false), showSupplierModal);
   useEscapeKey(() => { setIsKitModalOpen(false); setEditingKit(null); }, isKitModalOpen);
@@ -1364,111 +1380,10 @@ export default function App() {
     }
   };
 
-  // Robust client-side CSV parser
-  const parseCSVData = (text: string) => {
-    const lines = text.trim().split('\n');
-    if (lines.length === 0) return [];
-
-    // Autodetect delimiter: semicolon or comma
-    const headerLine = lines[0];
-    const delimiter = headerLine.includes(';') ? ';' : ',';
-
-    const parsed: Item[] = [];
-    const seenParts = new Set<string>();
-
-    for (let i = 1; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (!line) continue;
-
-      const cols = line.split(delimiter).map(col => col.trim().replace(/^["']|["']$/g, ''));
-      if (cols.length < 2) continue;
-
-      const partNumber = cols[0] || '';
-      if (!partNumber || seenParts.has(partNumber)) continue;
-      seenParts.add(partNumber);
-
-      const name = cols[1] || 'Unnamed Item';
-      const description = cols[2] || '';
-      const value = cols[3] || '';
-      const size = cols[4] || '';
-      const packageName = cols[5] || '';
-      const tolerance = cols[6] || '';
-      const itemType = cols[7] || '';
-      const footprint = cols[8] || '';
-      const comment = cols[9] || '';
-      const datasheet = cols[10] || '';
-      const project = cols[11] || '';
-      const packaging = cols[12] || '';
-
-      const stockLevel = parseInt(cols[13]) || 0;
-      const lowStockLvl = parseInt(cols[15]) || 50;
-
-      let price = parseFloat(cols[16]) || parseFloat(cols[17]) || 0.0;
-      if (!price && cols[18]) {
-        price = (parseFloat(cols[18]) || 0.0) / 18.0;
-      }
-      // No phantom default — an item with no recorded cost contributes $0 to
-      // asset valuation, not a made-up $0.50 that inflates the total.
-
-      // CSV_HEADER order: ... last_order_date(20); status(21); man_pn_1(22); man_pn_2(23) ...
-      // cols[21] is the status column, not a manufacturer part number — reading it
-      // here stamped every imported item's manufacturer as "ACTIVE".
-      const manufacturer = cols[22] || cols[23] || 'Generic';
-
-      // Category classifier - prioritize CSV type column, fallback to SKU prefix
-      let category = itemType;
-      if (!category || category === 'Components' || category === 'Unknown') {
-        if (partNumber.startsWith('ANT-')) category = 'Antennas';
-        else if (partNumber.startsWith('CAP-')) category = 'Capacitors';
-        else if (partNumber.startsWith('RES-')) category = 'Resistors';
-        else if (partNumber.startsWith('CHP-')) category = 'ICs';
-        else if (partNumber.startsWith('CON-')) category = 'Connectors';
-        else if (partNumber.startsWith('LED')) category = 'LEDs';
-        else if (partNumber.startsWith('TRA-')) category = 'Transistors';
-        else if (partNumber.startsWith('ZEN-')) category = 'Zeners';
-        else if (partNumber.startsWith('DIO-')) category = 'Diodes';
-        else if (partNumber.startsWith('TUL-')) category = 'Tools';
-        else if (partNumber.startsWith('ASS-')) category = 'Sub-Assemblies';
-        else if (partNumber.startsWith('BAT-')) category = 'Batteries';
-        else category = category || 'Components';
-      }
-
-      // Take status from the CSV's own status column (index 21) rather than
-      // deriving it from stock — see the note in src/lib/mapDbItem.ts.
-      const rawCsvStatus = (cols[21] || '').trim().toUpperCase();
-      const status: 'ACTIVE' | 'INACTIVE' | 'BOOKED OUT' | 'DISCONTINUED' =
-        rawCsvStatus === 'ACTIVE' || rawCsvStatus === 'INACTIVE' || rawCsvStatus === 'BOOKED OUT' || rawCsvStatus === 'DISCONTINUED'
-          ? rawCsvStatus
-          : 'ACTIVE';
-
-      parsed.push({
-        partNumber,
-        name,
-        description,
-        manufacturer,
-        stockLevel,
-        price,
-        category,
-        status,
-        value,
-        size,
-        packageName,
-        tolerance,
-        itemType,
-        footprint,
-        comment,
-        datasheet,
-        project,
-        packaging,
-        lowStockLvl
-      });
-    }
-
-    return parsed;
-  };
-
   const handleApplyImport = async () => {
-    if (csvParsedPreview.length === 0) return;
+    const plan = importPlan;
+    if (!plan || importing) return;
+    setImporting(true);
 
     // Snapshot the current inventory to a local CSV BEFORE we touch the
     // database, AND separately snapshot exactly what's about to be
@@ -1477,10 +1392,8 @@ export default function App() {
     //                                 (re-import to restore).
     //   inventory_import_<ts>.csv  — exactly the batch we're applying
     //                                 (audit trail of what changed).
-    // Same delimiter/columns as Import/Export CSV so both round-trip.
     const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const downloadCsv = (rows: Item[], suffix: string) => {
-      const csv = CSV_HEADER + '\n' + rows.map(itemToCsvRow).join('\n') + '\n';
+    const downloadCsv = (csv: string, suffix: string) => {
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -1492,31 +1405,24 @@ export default function App() {
       URL.revokeObjectURL(url);
     };
     try {
-      if (items.length > 0) downloadCsv(items, 'backup');
-      // The import snapshot is always safe to write — even a first-time
-      // import still has the incoming rows worth keeping.
-      if (csvParsedPreview.length > 0) downloadCsv(csvParsedPreview, 'import');
-      triggerToast(`Saved 2 local files: pre-import backup + applied batch (${csvParsedPreview.length} rows).`, 'INFO');
+      if (items.length > 0) downloadCsv(CSV_HEADER + '\n' + items.map(itemToCsvRow).join('\n') + '\n', 'backup');
+      downloadCsv(planToCsv(plan), 'import');
+      triggerToast(`Saved 2 local files: pre-import backup + applied batch (${plan.rows.length} rows).`, 'INFO');
     } catch (err) {
       console.warn('Pre-import snapshot failed:', err);
       triggerToast('Could not save pre-import backup CSV — proceeding anyway.', 'ERROR');
     }
 
-    const mergedMap = new Map<string, Item>();
-    items.forEach(item => mergedMap.set(item.partNumber, item));
-    csvParsedPreview.forEach(item => mergedMap.set(item.partNumber, item));
-    const combined = Array.from(mergedMap.values());
-
     const now = new Date();
-    const newTransactions: Transaction[] = csvParsedPreview
-      .filter(item => item.stockLevel > 0)
+    const newTransactions: Transaction[] = plan.rows
+      .filter(row => typeof row.stock === 'number' && row.stock > 0)
       .slice(0, 10)
-      .map((item, idx) => ({
-        id: `TRX-IMP-${item.partNumber}-${now.getTime()}-${idx}`,
-        itemPartNumber: item.partNumber,
-        itemName: item.name,
+      .map((row, idx) => ({
+        id: `TRX-IMP-${row.serial_number}-${now.getTime()}-${idx}`,
+        itemPartNumber: row.serial_number,
+        itemName: String(row.name ?? importSummary?.onFile.get(row.serial_number)?.name ?? row.serial_number),
         type: 'BOOK-IN' as any,
-        qtyChange: item.stockLevel,
+        qtyChange: row.stock as number,
         reference: 'CSV Bulk Import',
         performedBy: profile.name,
         performedByAvatar: profile.avatarUrl,
@@ -1524,17 +1430,17 @@ export default function App() {
       }));
 
     try {
-      // Bulk update items
-      const payloads = csvParsedPreview.map(i => mapItemToPayload(i));
+      // Each row carries only the columns the file has, and the bulk
+      // endpoint only writes the columns it is sent.
       const res = await fetch(`${API_BASE}/api/items/bulk`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payloads),
+        body: JSON.stringify(plan.rows),
       });
       if (!res.ok) {
         const text = await res.text().catch(() => 'unknown error');
         console.error('Failed to persist imported items to DB:', res.status, text);
-        triggerToast("Failed to sync imported items to database.");
+        triggerToast("Failed to sync imported items to database.", 'ERROR');
         return;
       }
 
@@ -1546,18 +1452,21 @@ export default function App() {
           body: JSON.stringify({ ...trx, trxId: trx.id }),
         });
       }
-
-      setItems(combined);
       if (newTransactions.length > 0) {
         setTransactions(prev => [...newTransactions, ...prev]);
       }
-      triggerToast(`Successfully imported ${csvParsedPreview.length} inventory items!`);
+      // Reload rather than merge locally: the import wrote only some
+      // columns, so the server's rows are the whole picture.
+      await loadFromAPIRef.current?.();
+      triggerToast(`Successfully imported ${plan.rows.length} inventory items!`);
     } catch (err) {
       console.error('Error saving imported items to DB:', err);
-      triggerToast("Network error during import synchronization.");
+      triggerToast("Network error during import synchronization.", 'ERROR');
+    } finally {
+      setImporting(false);
     }
     setShowImportModal(false);
-    setCsvParsedPreview([]);
+    setImportPlan(null);
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -1569,54 +1478,59 @@ export default function App() {
     setIsDraggingCsv(false);
   };
 
-  // File → CSV text pipeline. .xlsx / .xls goes through SheetJS which
-  // reads the ArrayBuffer, picks the first sheet and emits semicolon-
-  // delimited CSV (the same shape parseCSVData expects). Everything
-  // else is read as text and handed straight through. Kept as one
-  // helper so drag-and-drop, file-picker and any future entry point
-  // stay in step.
-  const readSpreadsheetOrCsv = async (file: File): Promise<string> => {
+  // File → import plan (see src/lib/inventoryImport.ts). A workbook's
+  // sheets are tried in order and the first that reads as an inventory
+  // list is used: MainInventory.xlsx opens on a "Serial Numbers" sheet,
+  // which the old first-sheet reader imported as if it were the inventory.
+  // Kept as one helper so drag-and-drop, the file picker and any future
+  // entry point stay in step.
+  const readImportFile = async (file: File): Promise<ImportPlan> => {
     const name = file.name.toLowerCase();
-    const isXlsx = name.endsWith('.xlsx') || name.endsWith('.xls');
-    if (isXlsx) {
+    let plan: ImportPlan | { error: string };
+    if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
       const XLSX = await import('xlsx');
-      const buf = await file.arrayBuffer();
-      const wb = XLSX.read(buf, { type: 'array' });
-      const firstSheet = wb.Sheets[wb.SheetNames[0]];
-      // FS ';' matches CSV_HEADER's delimiter so the same parser handles
-      // both formats. blankrows:false keeps stray empty rows out of the
-      // preview count.
-      return XLSX.utils.sheet_to_csv(firstSheet, { FS: ';', blankrows: false });
+      const wb = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true });
+      plan = planFromSheets(wb.SheetNames.map(sheetName => ({
+        name: sheetName,
+        rows: XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[sheetName], { header: 1, raw: true, defval: '', blankrows: false }),
+      })));
+    } else {
+      plan = planFromTable(parseDelimited(await file.text()));
     }
-    return await file.text();
+    if ('error' in plan) throw new Error(plan.error);
+    if (plan.rows.length === 0) throw new Error('it has no rows to import.');
+    return plan;
+  };
+
+  const openImportFile = (file: File) => {
+    readImportFile(file)
+      .then(setImportPlan)
+      .catch(err => {
+        console.error('Failed to read file:', err);
+        triggerToast(`Could not import ${file.name}: ${err?.message || 'unsupported format.'}`, 'ERROR');
+      });
   };
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDraggingCsv(false);
     const file = e.dataTransfer.files[0];
-    if (!file) return;
-    readSpreadsheetOrCsv(file)
-      .then(text => setCsvParsedPreview(parseCSVData(text)))
-      .catch(err => {
-        console.error('Failed to read file:', err);
-        triggerToast(`Could not read ${file.name} — ${err?.message || 'unsupported format'}.`, 'ERROR');
-      });
+    if (file) openImportFile(file);
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
-    readSpreadsheetOrCsv(file)
-      .then(text => setCsvParsedPreview(parseCSVData(text)))
-      .catch(err => {
-        console.error('Failed to read file:', err);
-        triggerToast(`Could not read ${file.name} — ${err?.message || 'unsupported format'}.`, 'ERROR');
-      });
+    if (file) openImportFile(file);
+    e.target.value = '';
   };
 
   const loadDefaultCSV = () => {
-    setCsvParsedPreview(parseCSVData(CSV_HEADER));
+    const plan = planFromTable(parseDelimited(CSV_HEADER));
+    if ('error' in plan || plan.rows.length === 0) {
+      triggerToast('There is no stand-in data to load: the default file has column names only.', 'INFO');
+      return;
+    }
+    setImportPlan(plan);
   };
 
   // Blank starter file with just the header row, so users have a correctly
@@ -2781,7 +2695,7 @@ if (currentView === 'alternates') {
               <button
                 onClick={() => {
                   setShowImportModal(false);
-                  setCsvParsedPreview([]);
+                  setImportPlan(null);
                 }}
                 className="absolute top-sm right-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high p-1.5 rounded-lg transition-colors cursor-pointer"
               >
@@ -2796,7 +2710,7 @@ if (currentView === 'alternates') {
                 Bulk Import SKU Inventory CSV File
               </h4>
 
-              {csvParsedPreview.length === 0 ? (
+              {!importPlan || !importSummary ? (
                 <div className="space-y-md text-xs">
                   {/* Drag-and-drop region */}
                   <div
@@ -2868,10 +2782,30 @@ if (currentView === 'alternates') {
                   <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-sm flex items-center gap-sm text-xs">
                     <Check className="w-5 h-5 text-green-400 shrink-0" />
                     <div>
-                      <span className="font-semibold text-xs text-green-400 block leading-tight">Successfully Parsed CSV Elements</span>
-                      <span className="text-[10px] text-outline">Detected {csvParsedPreview.length} unique component SKU item entries ready for ingest.</span>
+                      <span className="font-semibold text-xs text-green-400 block leading-tight">
+                        Read {importPlan.rows.length} parts{importPlan.sheetName ? ` from the sheet "${importPlan.sheetName}"` : ''}
+                      </span>
+                      <span className="text-[10px] text-outline">
+                        {importSummary.fresh} new, {importSummary.existing} already in inventory. Only the file's columns are written, and an empty cell leaves the value on file as it is.
+                      </span>
                     </div>
                   </div>
+
+                  {(importSummary.stockChanges.length > 0 || importPlan.notes.length > 0 || importPlan.ignoredHeaders.length > 0) && (
+                    <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-sm text-[10px] text-on-surface space-y-1">
+                      {importSummary.stockChanges.length > 0 && (
+                        <p>
+                          <AlertTriangle className="w-3.5 h-3.5 text-amber-400 inline mr-1 -mt-0.5" />
+                          <b>Stock would change on {importSummary.stockChanges.length} part{importSummary.stockChanges.length === 1 ? '' : 's'} already in inventory:</b>{' '}
+                          {importSummary.stockChanges.slice(0, 8).map(c => `${c.part} ${fmtNumber(c.from)} → ${fmtNumber(c.to)}`).join(', ')}
+                          {importSummary.stockChanges.length > 8 ? `, and ${importSummary.stockChanges.length - 8} more` : ''}.
+                          {' '}If the file is older than what's on file, these counts go backwards.
+                        </p>
+                      )}
+                      {importPlan.notes.map(note => <p key={note}>{note}</p>)}
+                      {importPlan.ignoredHeaders.length > 0 && <p>Columns not imported: {importPlan.ignoredHeaders.join(', ')}.</p>}
+                    </div>
+                  )}
 
                   {/* Preview sub-table */}
                   <div className="border border-outline-variant rounded-lg overflow-hidden bg-surface-container-high text-xs">
@@ -2889,20 +2823,24 @@ if (currentView === 'alternates') {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-outline-variant/30">
-                          {csvParsedPreview.slice(0, 5).map(item => (
-                            <tr key={item.partNumber}>
-                              <td className="px-2 py-1 font-bold text-primary">{item.partNumber}</td>
-                              <td className="px-2 py-1 truncate max-w-[150px]">{item.name}</td>
-                              <td className="px-2 py-1 text-right">{fmtNumber(item.stockLevel ?? 0)}</td>
-                              <td className="px-2 py-1 text-right">{fmtUSD(item.price, 4)}</td>
-                            </tr>
-                          ))}
+                          {importPlan.rows.slice(0, 5).map(row => {
+                            const onFile = importSummary.onFile.get(row.serial_number);
+                            const cost = row.current_cost_dollar ?? row.bulk_price_usd;
+                            return (
+                              <tr key={row.serial_number}>
+                                <td className="px-2 py-1 font-bold text-primary">{row.serial_number}{!onFile && <span className="ml-1 text-[8px] text-green-400">NEW</span>}</td>
+                                <td className="px-2 py-1 truncate max-w-[150px]">{String(row.name ?? onFile?.name ?? '')}</td>
+                                <td className="px-2 py-1 text-right">{typeof row.stock === 'number' ? fmtNumber(row.stock) : '—'}</td>
+                                <td className="px-2 py-1 text-right">{typeof cost === 'number' ? fmtUSD(cost, 4) : '—'}</td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
-                    {csvParsedPreview.length > 5 && (
+                    {importPlan.rows.length > 5 && (
                       <div className="px-sm py-1 bg-surface-container border-t border-outline-variant text-center font-mono text-[9px] text-outline">
-                        &bull; &bull; &bull; and {csvParsedPreview.length - 5} more elements parsed &bull; &bull; &bull;
+                        &bull; &bull; &bull; and {importPlan.rows.length - 5} more elements parsed &bull; &bull; &bull;
                       </div>
                     )}
                   </div>
@@ -2912,7 +2850,7 @@ if (currentView === 'alternates') {
                     <button
                       type="button"
                       onClick={() => {
-                        setCsvParsedPreview([]);
+                        setImportPlan(null);
                       }}
                       className="border border-outline-variant hover:bg-surface-container-high py-2 rounded font-bold transition-all text-center text-xs cursor-pointer text-on-surface"
                     >
@@ -2921,9 +2859,10 @@ if (currentView === 'alternates') {
                     <button
                       type="button"
                       onClick={handleApplyImport}
-                      className="bg-primary text-on-primary py-2 rounded font-extrabold shadow shadow-primary/25 hover:brightness-110 active:scale-95 transition-all text-center flex items-center justify-center gap-1.5 text-xs cursor-pointer uppercase tracking-wider"
+                      disabled={importing}
+                      className="bg-primary text-on-primary py-2 rounded font-extrabold shadow shadow-primary/25 hover:brightness-110 active:scale-95 transition-all text-center flex items-center justify-center gap-1.5 text-xs cursor-pointer uppercase tracking-wider disabled:opacity-60 disabled:cursor-wait"
                     >
-                      <Check className="w-4 h-4" /> Apply SKU ledger
+                      <Check className="w-4 h-4" /> {importing ? 'Applying…' : 'Apply SKU ledger'}
                     </button>
                   </div>
                 </div>
