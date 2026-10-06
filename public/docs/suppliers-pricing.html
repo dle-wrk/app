@@ -110,21 +110,82 @@
                 <strong>✅ Fuzzy-match trap avoided:</strong> Sending an LCSC stock code like <code>C105882</code> to Mouser or Element14 used to return unrelated $200+ parts. Live Price Lookup now recognises those codes and only asks LCSC. If you need cross-supplier quotes for the same part, search by the real manufacturer part number instead.
             </div>
 
-            <h3 id="bulk-pricing-wizard">Bulk Pricing Wizard</h3>
+            <h3 id="bulk-pricing">Bulk pricing</h3>
             <div class="step">
-                <h4>Update Prices for Multiple Items</h4>
+                <p>An item's <strong>bulk price</strong> is what a supplier charges per unit at the bulk quantity (1&nbsp;000 by default). Bulk pricing asks DigiKey, Mouser, LCSC, Nexar, element14 and TME for each item, converts the answers to rand and dollars at the stored exchange rate, and keeps the cheapest.</p>
+                <p><strong>A run writes only the bulk price (R and $).</strong> It never changes stock, part numbers, links or the item's cost. (The old "Apply live rates" button sent whole items back from the copy the page had loaded, which could undo stock movements made in the meantime and overwrite the cost. It is gone.)</p>
+            </div>
+            <div class="step">
+                <h4>Run bulk pricing</h4>
                 <ol>
-                    <li>Click the <strong>Bulk Pricing</strong> tab (Settings icon)</li>
-                    <li>Enter calibration parameters:
-                        <ul>
-                            <li>Wholesale volume breakpoints</li>
-                            <li>Percentage markups for different volumes</li>
-                        </ul>
-                    </li>
-                    <li>Select items to update</li>
-                    <li>Review calculated prices</li>
-                    <li>Click Apply to update database</li>
+                    <li>Open the <strong>Bulk Pricing</strong> tab under <span class="menu-path">Pricing Directory</span>.</li>
+                    <li>Under <strong>Price</strong>, choose the items: <em>Items due for re-pricing</em>, <em>Items with no bulk price</em>, <em>Every item with a part number</em>, or <em>Ticked items</em> (tick rows in the list below; ticking switches to this choice).</li>
+                    <li>Click <strong>Preview</strong> to see what would change without saving anything, or <strong>Update prices</strong> to save. Updating always asks first; a preview asks when it covers more than 50 items, because every lookup counts towards the daily supplier API limits.</li>
+                    <li>The run happens on the server, one item at a time. The progress card shows how far it has got; you can leave the page and come back. <strong>Stop</strong> finishes the item in hand and stops.</li>
+                    <li>When it finishes, the card shows how many items were updated, unchanged, held back, without a price, skipped or failed, and <strong>Why items were not updated</strong>, grouped by reason. <strong>Show items</strong> lists every item with its old and new price.</li>
                 </ol>
+                <p>Only one run happens at a time. If one is in progress (yours, someone else's or the automatic one), the buttons wait until it finishes.</p>
+            </div>
+            <div class="step">
+                <h4>What each result means</h4>
+                <table>
+                    <tr><th>Result</th><th>Meaning</th></tr>
+                    <tr><td><strong>Updated</strong></td><td>The new bulk price was saved.</td></tr>
+                    <tr><td><strong>Unchanged</strong></td><td>The suppliers' price matches the one on file. Nothing was written.</td></tr>
+                    <tr><td><strong>Held back</strong></td><td>The cheapest price was above the hold-back limit ($50 a unit by default), which almost always means the supplier matched the wrong part. It was not saved; check the part number.</td></tr>
+                    <tr><td><strong>No price</strong></td><td>No supplier had a price for the part number. Tried again after 7 days.</td></tr>
+                    <tr><td><strong>Skipped</strong></td><td>The item has no part number, or the daily supplier API limit ran out. A skipped item stays due, so the next run picks it up.</td></tr>
+                    <tr><td><strong>Failed</strong></td><td>The supplier lookup or the save still failed after three tries. Tried again after 7 days.</td></tr>
+                </table>
+                <p>The part number looked up is the item's first real manufacturer part number (ManPN 1–5), or failing that its first supplier part number (SupPN 1–5). DigiKey stock codes (<code>…-ND</code>) are resolved to the manufacturer part number first, and LCSC codes (<code>C</code> + digits) are only sent to LCSC, as in Live Price Lookup.</p>
+            </div>
+
+            <h3 id="automatic-bulk-pricing">Automatic re-pricing</h3>
+            <div class="step">
+                <ul>
+                    <li>Every day at 04:30 (02:30 UTC) the server re-prices the items whose last successful bulk price is more than <strong>35 days</strong> old, and items never bulk priced, oldest first, up to <strong>100</strong> per run.</li>
+                    <li>An item that got no price, or failed, waits 7 days before it is tried again, rather than using up API calls every day.</li>
+                    <li>If a run is already in progress at 04:30, the automatic run is skipped for that day. If the server was down at 04:30, it catches up 10 minutes after it starts, unless an automatic run happened in the last 20 hours.</li>
+                    <li>Automatic runs appear under <strong>Recent runs</strong> as <em>Automatic</em>, with the same summary as a manual run. The same daily job removes expired price history.</li>
+                </ul>
+            </div>
+
+            <h3 id="bulk-pricing-log">The "Last bulk priced" list</h3>
+            <div class="step">
+                <p>Every item, with its bulk price, when it was last bulk priced and how (automatic or manual), its last result and the reason, the last change (old → new) and when it is next due for automatic re-pricing.</p>
+                <ul>
+                    <li><strong>Show:</strong> All, Due, Problems (held back, no price or failed last time), Never priced, No bulk price, No part number. Each shows how many items it covers.</li>
+                    <li><strong>Sort:</strong> oldest update first, problems first, most recently updated, or stock code.</li>
+                    <li><strong>Search</strong> by stock code, name or part number.</li>
+                    <li><strong>History</strong> on a row shows that item's bulk pricing over the history period: when, which run, the result, the old and new price, and the supplier.</li>
+                </ul>
+            </div>
+
+            <h3 id="bulk-price-history">Price history and how long it is kept</h3>
+            <div class="step">
+                <p>Each run records, for every item it checks, the old and new price, the supplier, the result and any error, with the time and whether the run was manual or automatic. Previews are recorded against their run, so you can see what they found, but are not part of an item's history.</p>
+                <p>History is kept for <strong>40 days</strong> by default (never less than 30), then removed. Each item's latest result, as shown in the list, is kept however old it is.</p>
+            </div>
+            <div class="tip">
+                <strong>💡 Why 40 days, not 30:</strong> items are re-priced 35 days after their last price. With 30 days of history, the record of an item's previous change would be gone before it was re-priced, so you could never compare two runs. 40 days covers a full cycle. If someone sets history shorter than the re-price interval, the page shows a warning.
+            </div>
+
+            <h3 id="bulk-pricing-settings">Bulk pricing settings</h3>
+            <div class="step">
+                <p>Click <strong>Settings</strong> at the top of the Bulk Pricing tab. Everyone can see the settings; only an admin can change them.</p>
+                <table>
+                    <tr><th>Setting</th><th>Default</th><th>What it does</th></tr>
+                    <tr><td><strong>Re-price due items automatically every day</strong></td><td>On</td><td>Turns the daily run on or off. Manual runs work either way.</td></tr>
+                    <tr><td><strong>Re-price after (days)</strong></td><td>35</td><td>An item is due once its last successful bulk price is this old.</td></tr>
+                    <tr><td><strong>Items per automatic run</strong></td><td>100</td><td>The most items one automatic run prices, to stay inside the supplier API limits.</td></tr>
+                    <tr><td><strong>Retry unpriced items after (days)</strong></td><td>7</td><td>How long an item that got no price, or failed, waits before it is tried again.</td></tr>
+                    <tr><td><strong>Keep history for (days)</strong></td><td>40</td><td>How long each run's per-item results are kept. At least 30.</td></tr>
+                    <tr><td><strong>Quote quantity</strong></td><td>1&nbsp;000</td><td>The quantity prices are quoted at.</td></tr>
+                    <tr><td><strong>Hold back above (USD)</strong></td><td>50</td><td>A unit price above this is held back for review instead of saved.</td></tr>
+                </table>
+            </div>
+            <div class="tip">
+                <strong>💡 For administrators:</strong> the automatic run only happens on the live server. A copy of the app started on a computer for development never starts it, even though it uses the same database. Setting <code>BULK_PRICING_AUTO=off</code> on the server stops the daily run without changing the setting; <code>BULK_PRICING_AUTO=on</code> enables it elsewhere.
             </div>
 
             <h3 id="price-directory-browser">Price Directory Browser</h3>

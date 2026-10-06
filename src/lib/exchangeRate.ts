@@ -1,6 +1,6 @@
 // Exchange-rate surface extracted from server.ts. Owns storage, refresh, and
-// two read-only endpoints. The stored ZAR-per-currency map is consumed by the
-// pricing bulk-refresh (element14 quotes GBP, TME quotes PLN, EU stores quote
+// two read-only endpoints. The stored ZAR-per-currency map is consumed by
+// bulk pricing (element14 quotes GBP, TME quotes PLN, EU stores quote
 // EUR) — kept small and self-contained here so pricing can import it without
 // pulling in unrelated server-boot concerns.
 //
@@ -13,8 +13,8 @@ import { query, queryOne } from './db';
 
 const RATE_KEY = 'usd_to_zar_rate';
 const RATE_UPDATED_KEY = 'usd_to_zar_rate_updated';
-// Extra currencies harvested from the same exchangerate-api response so the
-// pricing bulk-refresh can convert element14 (GBP), TME (PLN), and EU-store
+// Extra currencies harvested from the same exchangerate-api response so bulk
+// pricing can convert element14 (GBP), TME (PLN), and EU-store
 // (EUR) results without needing separate FX calls. USD is stored separately
 // under RATE_KEY, so this list omits it.
 const EXTRA_CURRENCIES = ['GBP', 'EUR', 'PLN', 'CAD', 'AUD', 'SGD'] as const;

@@ -7,7 +7,8 @@ import { detectLedSwatch, ledSwatchBackground } from '../../lib/ledColor';
 
 interface PricingViewProps {
   items: Item[];
-  handleUpdateBulkPrices: (prices: { partNumber: string; price: number }[]) => void;
+  /** Called when a bulk pricing run has changed prices, so the app reloads its inventory. */
+  onPricesUpdated?: () => void;
   triggerToast: (msg: string, type?: any) => void;
   pricingFilter: string;
   setPricingFilter: (filter: string) => void;
@@ -142,7 +143,7 @@ function ProviderResultCard({ name, result }: { name: string; result?: ProviderR
 
 export const PricingView: React.FC<PricingViewProps> = ({
   items,
-  handleUpdateBulkPrices,
+  onPricesUpdated,
   triggerToast,
   pricingFilter,
   setPricingFilter,
@@ -486,15 +487,9 @@ export const PricingView: React.FC<PricingViewProps> = ({
       </div>
       )}
 
-      {/* Bulk Pricing Wizard tab */}
+      {/* Bulk pricing tab: runs on the server, see src/lib/bulkPricing.ts */}
       {activeTab === 'wizard' && (
-      <div>
-      <BulkPricingWizard
-        items={items}
-        onUpdatePrices={handleUpdateBulkPrices}
-        onShowNotification={triggerToast}
-      />
-      </div>
+        <BulkPricingWizard onShowNotification={triggerToast} onPricesUpdated={onPricesUpdated} />
       )}
 
       {/* Price Directory tab */}

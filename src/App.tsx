@@ -1333,52 +1333,14 @@ export default function App() {
     setSelectedDetailPartNumber(item.partNumber);
   };
 
-  // Wholesale 1000-unit bulk pricing state updater
-  // Optimistic bulk price update — snapshot the whole items list, apply
-  // the new prices locally so the UI reflects the change instantly, then
-  // POST /api/items/bulk in the background. Rolls the entire list back on
-  // failure and surfaces the specific server error. Previously blocked the
-  // UI until the round-trip completed, which for a large price batch
-  // (hundreds of items) felt like the app had frozen.
-  const handleUpdateBulkPrices = async (updatedPrices: { partNumber: string; price: number }[]) => {
-    const priceMap = new Map(updatedPrices.map(u => [u.partNumber, u.price]));
-    const affectedItems: Item[] = [];
-
-    const newItems = items.map(item => {
-      if (priceMap.has(item.partNumber)) {
-        const updated = { ...item, price: priceMap.get(item.partNumber)! };
-        affectedItems.push(updated);
-        return updated;
-      }
-      return item;
-    });
-
-    if (affectedItems.length === 0) return;
-
-    const snap = items;
-    setItems(newItems);
-
-    try {
-      const payloads = affectedItems.map(i => mapItemToPayload(i));
-      const res = await fetch(`${API_BASE}/api/items/bulk`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payloads),
-      });
-      if (!res.ok) {
-        const text = await res.text().catch(() => 'unknown error');
-        console.error('Failed to persist bulk prices to DB:', res.status, text);
-        setItems(snap);
-        triggerToast(`Failed to save price updates: ${text.slice(0, 120)}`, 'ERROR');
-        return;
-      }
-      triggerToast(`Bulk prices synchronized — ${affectedItems.length} item${affectedItems.length === 1 ? '' : 's'} updated.`);
-    } catch (err) {
-      console.error('Error saving bulk prices to DB:', err);
-      setItems(snap);
-      triggerToast('Network error: bulk price update failed. Changes reverted.', 'ERROR');
-    }
-  };
+  // Bulk pricing runs on the server and writes only bulk_price_zar/usd
+  // (src/lib/bulkPricing.ts). When a run has changed prices, reload the
+  // inventory so every view shows them. (This used to post whole items back
+  // from this tab's copy, which could undo stock movements made since the
+  // page loaded and overwrite the item's cost.)
+  const reloadAfterBulkPricing = useCallback(() => {
+    void loadFromAPIRef.current?.();
+  }, []);
 
   const handleApplyImport = async () => {
     const plan = importPlan;
@@ -2101,7 +2063,7 @@ export default function App() {
                   pricingFilter={pricingFilter}
                   setPricingFilter={setPricingFilter}
                   items={items}
-                  handleUpdateBulkPrices={handleUpdateBulkPrices}
+                  onPricesUpdated={reloadAfterBulkPricing}
                   triggerToast={triggerToast}
                   setSelectedDetailPartNumber={setSelectedDetailPartNumber}
                   setView={setView}
@@ -2141,12 +2103,9 @@ export default function App() {
 
             if (currentView === 'bulk_pricing') {
               return (
-                <BulkPricingWizard
-                  items={items}
-                  onUpdatePrices={handleUpdateBulkPrices}
-                  onShowNotification={triggerToast}
-                  onClose={() => setView('pricing')}
-                />
+                <div className="p-container-margin max-w-7xl mx-auto w-full">
+                  <BulkPricingWizard onShowNotification={triggerToast} onPricesUpdated={reloadAfterBulkPricing} />
+                </div>
               );
             }
 

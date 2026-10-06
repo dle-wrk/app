@@ -23,6 +23,8 @@ import { registerUsersRoutes } from './src/lib/usersRoutes';
 import { registerDocsRoutes } from './src/lib/docsRoutes';
 import { registerSuppliersRoutes } from './src/lib/suppliersRoutes';
 import { registerPricingRoutes } from './src/lib/pricingRoutes';
+import { registerBulkPricingRoutes } from './src/lib/bulkPricingRoutes';
+import { AUTO_RUN_CRON, ensureBulkPricingSchema, runAutoBulkPricing } from './src/lib/bulkPricing';
 import { registerExchangeRateRoutes, updateExchangeRate } from './src/lib/exchangeRate';
 import { registerItemsRoutes } from './src/lib/itemsRoutes';
 import { ensureDataVersionsTable, attachDataVersionMiddleware } from './src/lib/dataVersion';
@@ -151,11 +153,16 @@ registerSuppliersRoutes(app);
 
 // Pricing (/api/pricing/* + /api/suppliers/compare-prices). Live lookups
 // against DigiKey/Mouser/LCSC/Nexar/element14/TME, cache, daily-limit counter,
-// encrypted key vault, and bulk-refresh writer.
+// and the encrypted key vault.
 registerPricingRoutes(app);
 
+// Bulk pricing (/api/pricing/bulk-runs, /bulk-status, /bulk-settings): runs
+// that refresh items' bulk prices, the "last bulk priced" log, and settings.
+// The daily automatic run is scheduled in bootstrap() below.
+registerBulkPricingRoutes(app);
+
 // Exchange rate (/api/exchange-rate, /api/exchange-rate/update). Consumed by
-// the pricing bulk-refresh; also refreshed on boot and daily at 06:00 UTC.
+// bulk pricing; also refreshed on boot and daily at 06:00 UTC.
 registerExchangeRateRoutes(app);
 
 // Items (/api/items/*). Inventory CRUD, bulk upsert, status-repair helpers,
@@ -1110,6 +1117,7 @@ async function runSchemaBootstrap() {
     await ensureProductionCostsSchema().catch((e) => console.error('Failed to bootstrap production costs schema:', e));
     await ensureKitsSchema().catch((e) => console.error('Failed to bootstrap kits schema:', e));
     await ensureProcurementSchema().catch((e) => console.error('Failed to bootstrap procurement schema:', e));
+    await ensureBulkPricingSchema().catch((e) => console.error('Failed to bootstrap bulk pricing schema:', e));
     await ensureDataVersionsTable().catch((e) => console.error('Failed to bootstrap data_versions table:', e));
 
     // Legacy fix: every db_bom_project_<N> table was created with
@@ -1194,6 +1202,31 @@ async function bootstrap() {
         await new Promise(r => setTimeout(r, delayMs));
       }
     }
+  }
+
+  // Bulk pricing's daily automatic run: re-prices items whose last bulk price
+  // is older than the threshold (35 days by default) and removes expired price
+  // history. Only on the deployed server: a local `npm run dev` points at the
+  // same database and must not start supplier lookups of its own.
+  // BULK_PRICING_AUTO=on|off overrides. Overlapping runs (several machines, or
+  // a manual run in progress) are refused by the engine's one-run-at-a-time
+  // guard, and the run is skipped with a log line.
+  const autoBulkPricing = process.env.BULK_PRICING_AUTO
+    ? process.env.BULK_PRICING_AUTO === 'on'
+    : Boolean(process.env.FLY_APP_NAME);
+  if (autoBulkPricing) {
+    const runAuto = (label: string, options: { onlyIfNoneSinceHours?: number } = {}) =>
+      runAutoBulkPricing(options)
+        .then((outcome) => {
+          if (!outcome.ran) console.log(`[BULK PRICING] ${label} skipped: ${outcome.reason}${outcome.purged ? ` (${outcome.purged} expired history rows removed)` : ''}`);
+        })
+        .catch((err) => console.error(`[BULK PRICING] ${label} failed:`, err?.message || err));
+    cron.schedule(AUTO_RUN_CRON, () => { void runAuto('daily run'); }, { timezone: 'UTC' });
+    // The machine may have been stopped or redeployed at the scheduled time,
+    // so catch up 10 minutes after start-up, unless an automatic run already
+    // happened in the last 20 hours.
+    setTimeout(() => { void runAuto('start-up catch-up', { onlyIfNoneSinceHours: 20 }); }, 10 * 60_000).unref();
+    console.log(`[BULK PRICING] automatic runs scheduled daily (cron "${AUTO_RUN_CRON}", UTC).`);
   }
 
   return server;

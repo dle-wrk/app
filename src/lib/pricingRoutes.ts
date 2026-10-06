@@ -9,12 +9,11 @@
 //     token as fallback, stored encrypted so a Vite dev restart can't wipe it)
 //   - encrypted API-key storage in pricing_api_keys, managed from the UI via
 //     admin-gated /api/pricing/keys endpoints
-//   - a bulk refresh that walks the inventory table and writes bulk_price_zar
-//     using the exchange-rate map from ./exchangeRate
+//   - quotePart, the one-part quote across every provider, shared with the
+//     bulk pricing engine (./bulkPricing.ts, routes in ./bulkPricingRoutes.ts)
 //
 // Dependencies deliberately kept narrow: db + serverUtils for the crypto
-// primitives, authRoutes only for the admin gate on key management, and
-// exchangeRate for the FX conversion in bulk-refresh.
+// primitives, and authRoutes only for the admin gate on key management.
 
 import type { Express } from 'express';
 import { z } from 'zod';
@@ -28,7 +27,6 @@ import {
   type CipherEnvelope,
 } from './serverUtils';
 import { requireAdmin } from './authRoutes';
-import { readExchangeRate } from './exchangeRate';
 
 // ---------------------------------------------------------------------------
 // At-rest encryption for provider API keys. AES-256-GCM keyed on PRICING_CRED_KEY.
@@ -611,7 +609,7 @@ async function searchNexar(partNumber: string, qty = 1) {
 // string ("$0.47", "R12.50"), DigiKey follows the locale header, element14 the
 // store, and Nexar puts an ISO code on each price break. Normalise to ISO so
 // downstream conversion never has to guess from a glyph.
-function normaliseCurrency(raw: string | null | undefined): string {
+export function normaliseCurrency(raw: string | null | undefined): string {
   const v = String(raw ?? '').trim().toUpperCase();
   if (!v) return 'USD';
   if (v.includes('ZAR') || v === 'R') return 'ZAR';
@@ -839,10 +837,9 @@ async function searchTme(partNumber: string, qty = 1) {
   };
 }
 
-// Cache lifetimes. Interactive lookups want something close to live; the bulk
-// refresh deliberately reuses much older entries so a re-run costs no API calls.
+// Cache lifetime for interactive lookups, which want something close to live.
+// (Bulk pricing passes its own, longer window: see bulkPricing.ts.)
 const PRICING_CACHE_DEFAULT_MS = 24 * 60 * 60 * 1000;
-const PRICING_CACHE_BULK_MS = 30 * 24 * 60 * 60 * 1000;
 
 async function cachedProviderLookup(
   provider: 'digikey' | 'mouser' | 'nexar' | 'element14' | 'tme',
@@ -906,6 +903,159 @@ function maskValue(val: string | undefined): string {
   return val.slice(0, 4) + '••••' + val.slice(-4);
 }
 
+// ---------------------------------------------------------------------------
+// Quoting one part across every provider
+//
+// Shared by the live search (/api/pricing/search) and the bulk pricing engine
+// (./bulkPricing.ts), so both read a part number the same way:
+//  - an internal SKU (e.g. "ANT-001") is translated to its manufacturer part
+//    number first (live search only);
+//  - a DigiKey stock code ("…-ND") is resolved to the real manufacturer part
+//    number by DigiKey before anyone else is asked;
+//  - an LCSC code ("C123456") goes to LCSC only, because other distributors
+//    keyword-match it to unrelated parts (how a 100nF capacitor got priced at
+//    $241 via Pasternack).
+// Each answer is cached (pricing_cache; LCSC in lcsc_price_cache) and the
+// per-provider daily API limit is respected.
+// ---------------------------------------------------------------------------
+export type QuoteProvider = 'digikey' | 'mouser' | 'nexar' | 'element14' | 'tme';
+export const QUOTE_PROVIDERS: QuoteProvider[] = ['digikey', 'mouser', 'nexar', 'element14', 'tme'];
+
+export interface PartQuote {
+  partNumber: string;
+  qty: number;
+  codeFormat: 'digikey' | 'lcsc' | 'mfn';
+  searchedFor?: string;
+  resolvedFromSku?: { sku: string; name: string };
+  resolvedFromDigikeyCode?: { code: string; mpn: string };
+  /** One entry per provider (digikey, mouser, lcsc, nexar, element14, tme), plus `<provider>Cached` flags. */
+  [provider: string]: any;
+}
+
+export interface QuoteDeps {
+  isConfigured: (provider: string) => Promise<boolean>;
+  digikeyAuthorized: () => Promise<boolean>;
+  lookup: typeof cachedProviderLookup;
+  lcsc: (partNumber: string, qty: number) => Promise<any>;
+  skuToPartNumber: (sku: string) => Promise<{ sku: string; name: string; partNumber: string } | null>;
+}
+
+// LCSC: the scrape cache first, then a live lookup via their public search,
+// which needs no API key.
+async function lookupLcsc(partNumber: string, qty: number): Promise<any> {
+  const lcscRow = await queryOne<any>(
+    `SELECT * FROM lcsc_price_cache WHERE part_number = $1 OR mpn = $1 ORDER BY updated_at DESC LIMIT 1`,
+    [partNumber]
+  );
+  if (lcscRow) {
+    return {
+      partNumber: lcscRow.part_number,
+      manufacturer: lcscRow.mpn,
+      unitPrice: lcscRow.price !== null ? Number(lcscRow.price) : null,
+      currency: lcscRow.currency,
+      stock: lcscRow.stock,
+      productUrl: lcscRow.url,
+      updatedAt: lcscRow.updated_at,
+    };
+  }
+  try {
+    if ((await getPricingUsage('lcsc')) >= PRICING_DAILY_LIMIT) return { error: 'Daily limit reached' };
+    const lcscResult = await searchLcscLive(partNumber, qty);
+    if (!lcscResult) return { error: 'No match found' };
+    await incrementPricingUsage('lcsc');
+    await query(
+      `INSERT INTO lcsc_price_cache (part_number, mpn, price, currency, stock, url, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, now())
+       ON CONFLICT (part_number) DO UPDATE SET
+         mpn = EXCLUDED.mpn, price = EXCLUDED.price, currency = EXCLUDED.currency,
+         stock = EXCLUDED.stock, url = EXCLUDED.url, updated_at = now()`,
+      [lcscResult.partNumber ?? partNumber, lcscResult.manufacturer ?? null,
+       lcscResult.unitPrice ?? null, lcscResult.currency ?? 'USD',
+       lcscResult.stock ?? null, lcscResult.productUrl ?? null]
+    );
+    return lcscResult;
+  } catch (err: any) {
+    return { error: err.message };
+  }
+}
+
+const defaultQuoteDeps: QuoteDeps = {
+  isConfigured: isProviderConfigured,
+  digikeyAuthorized: async () => Boolean(await getDigikeyRefreshToken()),
+  lookup: cachedProviderLookup,
+  lcsc: lookupLcsc,
+  skuToPartNumber: async (sku) => {
+    const row = await queryOne<{ serial_number: string; man_pn_1: string; name: string }>(
+      `SELECT serial_number, man_pn_1, name FROM inventory
+       WHERE deleted != true AND UPPER(TRIM(serial_number)) = UPPER($1) LIMIT 1`,
+      [sku]
+    );
+    const mpn = row?.man_pn_1 ? String(row.man_pn_1).trim() : '';
+    return row && mpn && mpn.toUpperCase() !== 'N/A' ? { sku: row.serial_number, name: row.name, partNumber: mpn } : null;
+  },
+};
+
+export async function quotePart(
+  requested: string,
+  qty: number,
+  maxAgeMs: number,
+  options: { resolveSku?: boolean } = {},
+  deps: QuoteDeps = defaultQuoteDeps,
+): Promise<PartQuote> {
+  let partNumber = requested.trim();
+  let resolvedFromSku: { sku: string; name: string } | null = null;
+  if (options.resolveSku) {
+    const sku = await deps.skuToPartNumber(partNumber);
+    if (sku) {
+      partNumber = sku.partNumber;
+      resolvedFromSku = { sku: sku.sku, name: sku.name };
+    }
+  }
+
+  const upper = partNumber.toUpperCase();
+  const codeFormat: PartQuote['codeFormat'] = /-ND$/.test(upper) ? 'digikey' : /^C\d+$/.test(upper) ? 'lcsc' : 'mfn';
+
+  // A DigiKey stock code: ask DigiKey for the real manufacturer part number
+  // first, so every other provider is asked about that instead. DigiKey's own
+  // answer is reused below rather than paid for twice.
+  let digikeyPreLookup: any = null;
+  let resolvedFromDigikeyCode: string | null = null;
+  if (codeFormat === 'digikey' && (await deps.isConfigured('digikey')) && (await deps.digikeyAuthorized())) {
+    try {
+      const lookup = await deps.lookup('digikey', partNumber, qty, maxAgeMs);
+      digikeyPreLookup = lookup.result;
+      const mpn = lookup.result?.partNumber;
+      if (typeof mpn === 'string' && mpn && mpn.toUpperCase() !== upper) {
+        resolvedFromDigikeyCode = mpn;
+        partNumber = mpn;
+      }
+    } catch { /* fall through: the original code goes to every provider */ }
+  }
+
+  const quote: PartQuote = { partNumber, qty, codeFormat };
+  if (resolvedFromSku) {
+    quote.searchedFor = requested;
+    quote.resolvedFromSku = resolvedFromSku;
+  }
+  if (resolvedFromDigikeyCode) quote.resolvedFromDigikeyCode = { code: upper, mpn: resolvedFromDigikeyCode };
+
+  const skip = codeFormat === 'lcsc' ? { error: 'Skipped: LCSC-format code — this distributor does not recognise it' } : null;
+  for (const provider of QUOTE_PROVIDERS) {
+    if (skip) { quote[provider] = skip; continue; }
+    if (provider === 'digikey' && digikeyPreLookup) { quote.digikey = digikeyPreLookup; continue; }
+    if (!(await deps.isConfigured(provider))) { quote[provider] = { error: 'Not configured' }; continue; }
+    if (provider === 'digikey' && !(await deps.digikeyAuthorized())) {
+      quote.digikey = { error: 'Not authorized — run "npm run digikey:authorize"' };
+      continue;
+    }
+    const lookup = await deps.lookup(provider, partNumber, qty, maxAgeMs);
+    quote[provider] = lookup.result;
+    if (lookup.fromCache) quote[`${provider}Cached`] = true;
+  }
+  quote.lcsc = await deps.lcsc(partNumber, qty);
+  return quote;
+}
+
 export function registerPricingRoutes(app: Express): void {
   app.get('/api/pricing/usage', async (_req, res) => {
     try {
@@ -947,278 +1097,14 @@ export function registerPricingRoutes(app: Express): void {
       ? maxAgeDays * 24 * 60 * 60 * 1000
       : PRICING_CACHE_DEFAULT_MS;
 
-    // Translate an internal SKU to the item's manufacturer part number before
-    // sending it to the suppliers. Users routinely type their own stock codes
-    // (e.g. "ANT-001") expecting the lookup to know what they mean; without this
-    // it went straight to DigiKey/Mouser as if it were an MFN and returned
-    // nothing. Match is case-insensitive; the query is unaffected if the input
-    // is not a known SKU.
-    let partNumber = requested;
-    let resolvedFromSku: { sku: string; name: string } | null = null;
-    const skuMatch = await queryOne<{ serial_number: string; man_pn_1: string; name: string }>(
-      `SELECT serial_number, man_pn_1, name FROM inventory
-       WHERE deleted != true AND UPPER(TRIM(serial_number)) = UPPER($1) LIMIT 1`,
-      [requested]
-    );
-    if (skuMatch && skuMatch.man_pn_1 && String(skuMatch.man_pn_1).trim() && String(skuMatch.man_pn_1).trim().toUpperCase() !== 'N/A') {
-      partNumber = String(skuMatch.man_pn_1).trim();
-      resolvedFromSku = { sku: skuMatch.serial_number, name: skuMatch.name };
+    // Users routinely type their own stock codes (e.g. "ANT-001") expecting
+    // the lookup to know what they mean, so an internal SKU is translated to
+    // the item's manufacturer part number before the suppliers are asked.
+    try {
+      res.json(await quotePart(requested, qty, maxAgeMs, { resolveSku: true }));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
     }
-
-    // Distinguish a distributor stock code from a real manufacturer part number.
-    // DigiKey codes always end in "-ND"; LCSC codes are "C" followed by digits.
-    // Sending a distributor code to another distributor is what produces the
-    // Pasternack RF-part-for-a-100nF-capacitor keyword-mismatch trap.
-    const upper = partNumber.toUpperCase();
-    const codeFormat: 'digikey' | 'lcsc' | 'mfn' =
-      /-ND$/.test(upper) ? 'digikey'
-        : /^C\d+$/.test(upper) ? 'lcsc'
-          : 'mfn';
-
-    // For DigiKey-coded parts, ask DigiKey what the real manufacturer part number
-    // is BEFORE we hit anyone else. That upgrades the lookup for every other
-    // provider — they get a real MFN, not an -ND stock code that means nothing
-    // to them. Cheap: one extra DigiKey call, cached like any other lookup.
-    let resolvedFromDigikeyCode: string | null = null;
-    let digikeyPreLookupResult: any = null;
-    if (codeFormat === 'digikey' && (await isProviderConfigured('digikey')) && (await getDigikeyRefreshToken())) {
-      try {
-        const lookup = await cachedProviderLookup('digikey', partNumber, qty, maxAgeMs);
-        digikeyPreLookupResult = lookup.result;
-        const mpn = lookup.result?.partNumber;
-        if (typeof mpn === 'string' && mpn && mpn.toUpperCase() !== partNumber.toUpperCase()) {
-          resolvedFromDigikeyCode = mpn;
-          // Fan-out below sees the real MPN. DigiKey's own slot is filled from the
-          // pre-lookup we already paid for — no second DigiKey call for -ND codes.
-          partNumber = mpn;
-        }
-      } catch { /* fall through: original code goes to all providers */ }
-    }
-
-    const results: any = { partNumber, qty, codeFormat };
-    if (resolvedFromSku) {
-      results.searchedFor = requested;
-      results.resolvedFromSku = resolvedFromSku;
-    }
-    if (resolvedFromDigikeyCode) {
-      results.resolvedFromDigikeyCode = { code: upper, mpn: resolvedFromDigikeyCode };
-    }
-    // LCSC codes only mean something to LCSC and (sometimes) Nexar's aggregator.
-    // Skip the other providers rather than let them fuzzy-match to unrelated
-    // parts — the same trap that priced a 100nF capacitor at $241 via Pasternack.
-    const skipForOtherDistributor = codeFormat === 'lcsc'
-      ? { error: 'Skipped: LCSC-format code — this distributor does not recognise it' }
-      : null;
-
-    if (skipForOtherDistributor) {
-      results.digikey = skipForOtherDistributor;
-    } else if (digikeyPreLookupResult) {
-      // Already paid for this call during -ND code resolution. Don't hit it twice.
-      results.digikey = digikeyPreLookupResult;
-    } else if (!(await isProviderConfigured('digikey'))) {
-      results.digikey = { error: 'Not configured' };
-    } else if (!(await getDigikeyRefreshToken())) {
-      results.digikey = { error: 'Not authorized — run "npm run digikey:authorize"' };
-    } else {
-      try {
-        const cached = await queryOne<any>(
-          `SELECT * FROM pricing_cache WHERE provider = 'digikey' AND part_number = $1 AND qty = $2 ORDER BY created_at DESC LIMIT 1`,
-          [partNumber, qty]
-        );
-        if (cached && new Date().getTime() - new Date(cached.created_at).getTime() < maxAgeMs) {
-          results.digikey = JSON.parse(cached.data);
-          results.digikeyCached = true;
-        } else if ((await getPricingUsage('digikey')) >= PRICING_DAILY_LIMIT) {
-          results.digikey = { error: 'Daily limit reached' };
-        } else {
-          const result = await searchDigikey(partNumber, qty);
-          results.digikey = result ?? { error: 'No match found' };
-          await incrementPricingUsage('digikey');
-          await query(
-            `INSERT INTO pricing_cache (provider, part_number, qty, data, created_at)
-             VALUES ($1, $2, $3, $4, now())
-             ON CONFLICT (provider, part_number, qty) DO UPDATE SET data = EXCLUDED.data, created_at = now()`,
-            ['digikey', partNumber, qty, JSON.stringify(results.digikey)]
-          );
-        }
-      } catch (err: any) {
-        results.digikey = { error: err.message };
-      }
-    }
-
-    if (skipForOtherDistributor) {
-      results.mouser = skipForOtherDistributor;
-    } else if (!(await isProviderConfigured('mouser'))) {
-      results.mouser = { error: 'Not configured' };
-    } else {
-      try {
-        const cached = await queryOne<any>(
-          `SELECT * FROM pricing_cache WHERE provider = 'mouser' AND part_number = $1 AND qty = $2 ORDER BY created_at DESC LIMIT 1`,
-          [partNumber, qty]
-        );
-        if (cached && new Date().getTime() - new Date(cached.created_at).getTime() < maxAgeMs) {
-          results.mouser = JSON.parse(cached.data);
-          results.mouserCached = true;
-        } else if ((await getPricingUsage('mouser')) >= PRICING_DAILY_LIMIT) {
-          results.mouser = { error: 'Daily limit reached' };
-        } else {
-          const result = await searchMouser(partNumber, qty);
-          results.mouser = result ?? { error: 'No match found' };
-          await incrementPricingUsage('mouser');
-          await query(
-            `INSERT INTO pricing_cache (provider, part_number, qty, data, created_at)
-             VALUES ($1, $2, $3, $4, now())
-             ON CONFLICT (provider, part_number, qty) DO UPDATE SET data = EXCLUDED.data, created_at = now()`,
-            ['mouser', partNumber, qty, JSON.stringify(results.mouser)]
-          );
-        }
-      } catch (err: any) {
-        results.mouser = { error: err.message };
-      }
-    }
-
-    // LCSC: check the scrape cache first, then fall back to a live lookup via
-    // their public search endpoint. Upgrades LCSC from cache-only to live
-    // without needing an API key.
-    const lcscRow = await queryOne<any>(
-      `SELECT * FROM lcsc_price_cache WHERE part_number = $1 OR mpn = $1 ORDER BY updated_at DESC LIMIT 1`,
-      [partNumber]
-    );
-    if (lcscRow) {
-      results.lcsc = {
-        partNumber: lcscRow.part_number,
-        manufacturer: lcscRow.mpn,
-        unitPrice: lcscRow.price !== null ? Number(lcscRow.price) : null,
-        currency: lcscRow.currency,
-        stock: lcscRow.stock,
-        productUrl: lcscRow.url,
-        updatedAt: lcscRow.updated_at,
-      };
-    } else {
-      try {
-        if ((await getPricingUsage('lcsc')) >= PRICING_DAILY_LIMIT) {
-          results.lcsc = { error: 'Daily limit reached' };
-        } else {
-          const lcscResult = await searchLcscLive(partNumber, qty);
-          if (lcscResult) {
-            results.lcsc = lcscResult;
-            await incrementPricingUsage('lcsc');
-            await query(
-              `INSERT INTO lcsc_price_cache (part_number, mpn, price, currency, stock, url, updated_at)
-               VALUES ($1, $2, $3, $4, $5, $6, now())
-               ON CONFLICT (part_number) DO UPDATE SET
-                 mpn = EXCLUDED.mpn, price = EXCLUDED.price, currency = EXCLUDED.currency,
-                 stock = EXCLUDED.stock, url = EXCLUDED.url, updated_at = now()`,
-              [lcscResult.partNumber ?? partNumber, lcscResult.manufacturer ?? null,
-               lcscResult.unitPrice ?? null, lcscResult.currency ?? 'USD',
-               lcscResult.stock ?? null, lcscResult.productUrl ?? null]
-            );
-          } else {
-            results.lcsc = { error: 'No match found' };
-          }
-        }
-      } catch (err: any) {
-        results.lcsc = { error: err.message };
-      }
-    }
-
-    // Nexar (Octopart aggregator) — covers Arrow, Heilind, Avnet, and many others.
-    if (skipForOtherDistributor) {
-      results.nexar = skipForOtherDistributor;
-    } else if (!(await isProviderConfigured('nexar'))) {
-      results.nexar = { error: 'Not configured' };
-    } else {
-      try {
-        const cached = await queryOne<any>(
-          `SELECT * FROM pricing_cache WHERE provider = 'nexar' AND part_number = $1 AND qty = $2 ORDER BY created_at DESC LIMIT 1`,
-          [partNumber, qty]
-        );
-        if (cached && new Date().getTime() - new Date(cached.created_at).getTime() < maxAgeMs) {
-          results.nexar = JSON.parse(cached.data);
-          results.nexarCached = true;
-        } else if ((await getPricingUsage('nexar')) >= PRICING_DAILY_LIMIT) {
-          results.nexar = { error: 'Daily limit reached' };
-        } else {
-          const result = await searchNexar(partNumber, qty);
-          results.nexar = result ?? { error: 'No match found' };
-          await incrementPricingUsage('nexar');
-          await query(
-            `INSERT INTO pricing_cache (provider, part_number, qty, data, created_at)
-             VALUES ($1, $2, $3, $4, now())
-             ON CONFLICT (provider, part_number, qty) DO UPDATE SET data = EXCLUDED.data, created_at = now()`,
-            ['nexar', partNumber, qty, JSON.stringify(results.nexar)]
-          );
-        }
-      } catch (err: any) {
-        results.nexar = { error: err.message };
-      }
-    }
-
-    // Element14 / Farnell / Newark (Avnet)
-    if (skipForOtherDistributor) {
-      results.element14 = skipForOtherDistributor;
-    } else if (!(await isProviderConfigured('element14'))) {
-      results.element14 = { error: 'Not configured' };
-    } else {
-      try {
-        const cached = await queryOne<any>(
-          `SELECT * FROM pricing_cache WHERE provider = 'element14' AND part_number = $1 AND qty = $2 ORDER BY created_at DESC LIMIT 1`,
-          [partNumber, qty]
-        );
-        if (cached && new Date().getTime() - new Date(cached.created_at).getTime() < maxAgeMs) {
-          results.element14 = JSON.parse(cached.data);
-          results.element14Cached = true;
-        } else if ((await getPricingUsage('element14')) >= PRICING_DAILY_LIMIT) {
-          results.element14 = { error: 'Daily limit reached' };
-        } else {
-          const result = await searchElement14(partNumber, qty);
-          results.element14 = result ?? { error: 'No match found' };
-          await incrementPricingUsage('element14');
-          await query(
-            `INSERT INTO pricing_cache (provider, part_number, qty, data, created_at)
-             VALUES ($1, $2, $3, $4, now())
-             ON CONFLICT (provider, part_number, qty) DO UPDATE SET data = EXCLUDED.data, created_at = now()`,
-            ['element14', partNumber, qty, JSON.stringify(results.element14)]
-          );
-        }
-      } catch (err: any) {
-        results.element14 = { error: err.message };
-      }
-    }
-
-    // TME (Transfer Multisort Elektronik)
-    if (skipForOtherDistributor) {
-      results.tme = skipForOtherDistributor;
-    } else if (!(await isProviderConfigured('tme'))) {
-      results.tme = { error: 'Not configured' };
-    } else {
-      try {
-        const cached = await queryOne<any>(
-          `SELECT * FROM pricing_cache WHERE provider = 'tme' AND part_number = $1 AND qty = $2 ORDER BY created_at DESC LIMIT 1`,
-          [partNumber, qty]
-        );
-        if (cached && new Date().getTime() - new Date(cached.created_at).getTime() < maxAgeMs) {
-          results.tme = JSON.parse(cached.data);
-          results.tmeCached = true;
-        } else if ((await getPricingUsage('tme')) >= PRICING_DAILY_LIMIT) {
-          results.tme = { error: 'Daily limit reached' };
-        } else {
-          const result = await searchTme(partNumber, qty);
-          results.tme = result ?? { error: 'No match found' };
-          await incrementPricingUsage('tme');
-          await query(
-            `INSERT INTO pricing_cache (provider, part_number, qty, data, created_at)
-             VALUES ($1, $2, $3, $4, now())
-             ON CONFLICT (provider, part_number, qty) DO UPDATE SET data = EXCLUDED.data, created_at = now()`,
-            ['tme', partNumber, qty, JSON.stringify(results.tme)]
-          );
-        }
-      } catch (err: any) {
-        results.tme = { error: err.message };
-      }
-    }
-
-    res.json(results);
   });
 
   // Which manufacturer part numbers already have a cached price at a given
@@ -1516,170 +1402,6 @@ export function registerPricingRoutes(app: Express): void {
     } catch (err: any) {
       console.error('[pricing:oauth:callback] failed:', err.message);
       respond('Authorization failed', err.message || 'Unknown error during token exchange.', false);
-    }
-  });
-
-  // ---------------------------------------------------------------------------
-  // Bulk price refresh
-  //
-  // Populates inventory.bulk_price_zar from the supplier APIs. Results are cached
-  // for 30 days (PRICING_CACHE_BULK_MS), so re-running costs no API calls for
-  // parts already looked up — the cache is the point, not an optimisation.
-  //
-  // Only parts carrying a manufacturer/distributor part number can be searched;
-  // the rest are reported as skipped rather than silently ignored. Defaults to a
-  // dry run so a caller must opt in to writing to the inventory table.
-  // ---------------------------------------------------------------------------
-  app.post('/api/pricing/bulk-refresh', async (req, res) => {
-    const body = req.body || {};
-    const qty = Math.max(1, Math.min(1_000_000, parseInt(String(body.qty ?? 1000), 10) || 1000));
-    const limit = Math.max(1, Math.min(1000, parseInt(String(body.limit ?? 250), 10) || 250));
-    const dryRun = body.dryRun !== false; // write only when explicitly dryRun:false
-    const onlyMissing = body.onlyMissing !== false;
-    const maxAgeMs = PRICING_CACHE_BULK_MS;
-    // Above this USD unit price a result is held back for review rather than
-    // written. Most of this catalogue is passives costing well under a dollar.
-    const suspiciousAboveUsd = Number.isFinite(Number(body.suspiciousAboveUsd))
-      ? Number(body.suspiciousAboveUsd)
-      : 50;
-
-    try {
-      const fx = await readExchangeRate();
-      if (!fx.usdToZar) {
-        return res.status(400).json({ error: 'No USD→ZAR rate stored; refresh the exchange rate before running a bulk price check.' });
-      }
-
-      const hasMpn = `(COALESCE(NULLIF(TRIM(man_pn_1),''),'') <> '' AND UPPER(TRIM(man_pn_1)) <> 'N/A')`;
-      const noZar = `COALESCE(NULLIF(bulk_price_zar::text,'')::numeric,0) = 0`;
-      const { rows: candidates } = await query(
-        `SELECT serial_number, man_pn_1, stock FROM inventory
-         WHERE deleted != true AND stock > 0 ${onlyMissing ? `AND ${noZar}` : ''} AND ${hasMpn}
-         ORDER BY stock DESC LIMIT $1`,
-        [limit]
-      );
-
-      const { rows: skippedRows } = await query(
-        `SELECT COUNT(*)::int AS c FROM inventory
-         WHERE deleted != true AND stock > 0 ${onlyMissing ? `AND ${noZar}` : ''} AND NOT ${hasMpn}`
-      );
-
-      const updated: any[] = [];
-      const noPrice: any[] = [];
-      const flagged: any[] = [];
-      let apiCalls = 0;
-      let cacheHits = 0;
-
-      for (const item of candidates as any[]) {
-        const mpn = String(item.man_pn_1).trim();
-        const [dk, mo, nx, e14, tme] = [
-          await cachedProviderLookup('digikey', mpn, qty, maxAgeMs),
-          await cachedProviderLookup('mouser', mpn, qty, maxAgeMs),
-          await cachedProviderLookup('nexar', mpn, qty, maxAgeMs),
-          await cachedProviderLookup('element14', mpn, qty, maxAgeMs),
-          await cachedProviderLookup('tme', mpn, qty, maxAgeMs),
-        ];
-        apiCalls += (dk.calledApi ? 1 : 0) + (mo.calledApi ? 1 : 0) + (nx.calledApi ? 1 : 0) + (e14.calledApi ? 1 : 0) + (tme.calledApi ? 1 : 0);
-        cacheHits += (dk.fromCache ? 1 : 0) + (mo.fromCache ? 1 : 0) + (nx.fromCache ? 1 : 0) + (e14.fromCache ? 1 : 0) + (tme.fromCache ? 1 : 0);
-
-        // These suppliers do a KEYWORD search and return the first hit, which is
-        // not guaranteed to be the part asked for. String-matching the result
-        // against the stored code does not work either: the stored values are
-        // mangled distributor hybrids (e.g. '311-100KLRDKR-ND' carries Mouser's
-        // 311- prefix and DigiKey's -ND suffix) that legitimately resolve to a
-        // different manufacturer MPN. So always report what was matched, and flag
-        // implausible prices for review rather than trusting the string.
-        const toZar = (raw: any, provider: string) => {
-          const price = Number(raw?.unitPrice);
-          if (!Number.isFinite(price) || price <= 0) return null;
-          // The price string carries its own currency symbol; a ZAR-denominated
-          // account gets 'R' back, and converting that again would inflate it ~17x.
-          const sym = String(raw?.currency ?? '').toUpperCase();
-          const code = normaliseCurrency(sym);
-          // Look up ZAR per <native currency> from the stored rate map. Element14
-          // quotes GBP, TME quotes PLN, the EU stores quote EUR — all convertible
-          // now that updateExchangeRate harvests them. A currency the map does
-          // not carry still gets rejected rather than silently mispriced.
-          const rateToZar = fx.ratesToZar?.[code];
-          if (!Number.isFinite(rateToZar) || rateToZar <= 0) {
-            return { rejected: `${provider} quoted ${code}, which has no stored conversion rate — refresh the exchange rate` };
-          }
-          const zarValue = code === 'ZAR' ? price : price * rateToZar;
-          const usdEquivalent = fx.usdToZar ? zarValue / fx.usdToZar : NaN;
-          return {
-            provider,
-            native: price,
-            currency: code,
-            usdEquivalent: Number.isFinite(usdEquivalent) ? Number(usdEquivalent.toFixed(4)) : null,
-            zar: Number(zarValue.toFixed(4)),
-            matchedPart: raw?.partNumber ?? null,
-            matchedManufacturer: raw?.manufacturer ?? null,
-          };
-        };
-
-        const offers = [
-          toZar(dk.result, 'digikey'), toZar(mo.result, 'mouser'),
-          toZar(nx.result, 'nexar'), toZar(e14.result, 'element14'), toZar(tme.result, 'tme'),
-        ].filter(Boolean) as any[];
-
-        if (!offers.length) {
-          noPrice.push({
-            partNumber: item.serial_number,
-            mpn,
-            reason: dk.result?.error || mo.result?.error || 'No price returned',
-          });
-          continue;
-        }
-
-        const best = offers.reduce((a, b) => (b.zar < a.zar ? b : a));
-        // A passive component priced above this is almost certainly a bad keyword
-        // match rather than a real cost — surface it instead of writing silently.
-        const suspicious = best.usdEquivalent > suspiciousAboveUsd;
-
-        if (suspicious) {
-          flagged.push({
-            partNumber: item.serial_number, mpn,
-            matchedPart: best.matchedPart, matchedManufacturer: best.matchedManufacturer,
-            provider: best.provider, native: best.native, currency: best.currency,
-            usdEquivalent: best.usdEquivalent, zar: best.zar,
-            reason: `Unit price ${best.usdEquivalent} USD exceeds the ${suspiciousAboveUsd} USD review threshold — likely a keyword mismatch.`,
-          });
-          continue;
-        }
-
-        if (!dryRun) {
-          await query(`UPDATE inventory SET bulk_price_zar = $1 WHERE serial_number = $2`, [best.zar, item.serial_number]);
-        }
-        updated.push({
-          partNumber: item.serial_number, mpn, provider: best.provider,
-          matchedPart: best.matchedPart, matchedManufacturer: best.matchedManufacturer,
-          native: best.native, currency: best.currency, zar: best.zar,
-        });
-      }
-
-      res.json({
-        dryRun,
-        qty,
-        rateUsed: fx.usdToZar,
-        rateDate: fx.lastUpdated,
-        cacheDays: Math.round(maxAgeMs / 86400000),
-        candidates: candidates.length,
-        priced: updated.length,
-        flaggedForReview: flagged.length,
-        noPriceFound: noPrice.length,
-        skippedNoPartNumber: skippedRows[0]?.c ?? 0,
-        suspiciousAboveUsd,
-        apiCalls,
-        cacheHits,
-        updated: updated.slice(0, 100),
-        flagged: flagged.slice(0, 50),
-        noPrice: noPrice.slice(0, 50),
-        note: dryRun
-          ? 'Dry run — nothing written. Re-send with {"dryRun": false} to apply.'
-          : `Wrote bulk_price_zar for ${updated.length} item(s).`,
-      });
-    } catch (err: any) {
-      console.error('[BULK PRICING] failed:', err.message);
-      res.status(500).json({ error: err.message });
     }
   });
 
