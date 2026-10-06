@@ -23,7 +23,81 @@
 // Dependencies deliberately narrow: only the shared db helpers.
 
 import type { Express } from 'express';
-import { query, queryOne, exec } from './db';
+import { pool, query, queryOne, exec } from './db';
+
+// One BOM Manager line: a part and everything the BOM says about it.
+export interface BomLine {
+  stockCode: string;
+  quantity: number;
+  designator: string;
+  description: string;
+  comment: string;
+  footprint: string;
+  libref: string;
+}
+
+// Folds a per-project BOM table's rows into one line per stock code, in
+// row order. A part can have several rows (a kit import writes one per
+// designator): quantities add up, designators are joined, and distinct
+// comments are kept. A row with no quantity counts as 1, as it always has
+// in the BOM Manager.
+export function foldBomRows(rows: any[]): BomLine[] {
+  const lines = new Map<string, BomLine & { comments: string[] }>();
+  for (const r of rows) {
+    const stockCode = String(r.internal_stock_number ?? '').trim();
+    if (!stockCode) continue;
+    const quantity = parseInt(String(r.qty_per_unit ?? '0'), 10) || 1;
+    const designator = String(r.ref_des ?? '').trim();
+    const comment = String(r.comment ?? '').trim();
+    const line = lines.get(stockCode);
+    if (!line) {
+      lines.set(stockCode, {
+        stockCode, quantity, designator,
+        description: String(r.description ?? '').trim(),
+        comment: '', comments: comment ? [comment] : [],
+        footprint: String(r.footprint ?? '').trim(),
+        libref: String(r.libref ?? '').trim(),
+      });
+      continue;
+    }
+    line.quantity += quantity;
+    if (designator) line.designator = line.designator ? `${line.designator}, ${designator}` : designator;
+    if (comment && !line.comments.includes(comment)) line.comments.push(comment);
+    if (!line.description) line.description = String(r.description ?? '').trim();
+    if (!line.footprint) line.footprint = String(r.footprint ?? '').trim();
+    if (!line.libref) line.libref = String(r.libref ?? '').trim();
+  }
+  return [...lines.values()].map(({ comments, ...line }) => ({ ...line, comment: comments.join('; ') }));
+}
+
+// Validates the lines the BOM Manager sends. Every line needs a stock code,
+// used once, and a whole-number quantity.
+export function parseBomLines(items: unknown): { lines: BomLine[] } | { error: string } {
+  if (!Array.isArray(items)) return { error: 'items must be a list' };
+  const lines: BomLine[] = [];
+  const seen = new Set<string>();
+  const text = (v: unknown) => (typeof v === 'string' ? v.trim() : v == null ? '' : String(v).trim());
+  for (const item of items as any[]) {
+    const stockCode = text(item?.stockCode);
+    if (!stockCode) return { error: 'every line needs a stock code' };
+    if (stockCode.length > 200) return { error: `stock code too long: ${stockCode.slice(0, 40)}…` };
+    if (seen.has(stockCode)) return { error: `${stockCode} is listed more than once` };
+    seen.add(stockCode);
+    const quantity = Number(item?.quantity);
+    if (!Number.isInteger(quantity) || quantity < 0 || quantity > 1_000_000) {
+      return { error: `${stockCode}: quantity must be a whole number` };
+    }
+    lines.push({
+      stockCode, quantity,
+      designator: text(item?.designator),
+      description: text(item?.description),
+      comment: text(item?.comment),
+      footprint: text(item?.footprint),
+      libref: text(item?.libref),
+    });
+  }
+  return { lines };
+}
 
 export function registerProjectsRoutes(app: Express): void {
   // ---------------------------------------------------------------------------
@@ -227,22 +301,18 @@ export function registerProjectsRoutes(app: Express): void {
   });
 
   // ---------------------------------------------------------------------------
-  // Per-project BOM  (db_bom_project_<id>)
+  // Per-project BOM  (db_bom_project_<id>) — the BOM Manager's data
   // ---------------------------------------------------------------------------
+  // The BOM Manager shows one line per stock code. These tables have no
+  // unique key on the stock code (server boot drops it on purpose, see
+  // server.ts: a kit import keeps one row per designator), so the rows for
+  // a part are folded into one line here, and the save below compares
+  // against the same fold to tell an unchanged line from an edited one.
   app.get('/api/projects/:id/bom', async (req, res) => {
     const projectId = parseInt(req.params.id);
     try {
-      const { rows } = await query(`SELECT * FROM "db_bom_project_${projectId}"`);
-      const mapped = rows.map((r: any) => ({
-        stockCode: String(r.internal_stock_number || ''),
-        quantity: parseInt(r.qty_per_unit || '0') || 1,
-        designator: String(r.ref_des || ''),
-        description: String(r.description || ''),
-        comment: String(r.comment || ''),
-        footprint: String(r.footprint || ''),
-        libref: String(r.libref || ''),
-      }));
-      res.json(mapped);
+      const { rows } = await query(`SELECT * FROM "db_bom_project_${projectId}" ORDER BY ctid`);
+      res.json(foldBomRows(rows));
     } catch (err: any) {
       // 42P01 = undefined_table: project simply has no BOM yet.
       if (err.code === '42P01') {
@@ -252,113 +322,151 @@ export function registerProjectsRoutes(app: Express): void {
     }
   });
 
-  // Bulk upsert into this project's BOM. Creates the per-project table on
-  // the fly (with ADD COLUMN IF NOT EXISTS for legacy schemas missing the
-  // description/comment/footprint/libref columns) then upserts every item.
-  // Also resets any downstream production_kits back to STAGING so the
-  // manufacturing side has to re-review after a CAD-side change.
+  // Save the BOM Manager's lines. With `replace: true` (what the BOM
+  // Manager sends) the project's BOM becomes exactly these lines: new parts
+  // are added, edited ones rewritten and parts no longer listed removed.
+  // A part whose line is unchanged keeps its rows exactly as they were,
+  // so a kit import's per-designator rows survive a save that didn't
+  // touch them.
+  //
+  // This used to upsert with ON CONFLICT (internal_stock_number), which
+  // needs a unique key these tables no longer have, so every save failed
+  // and nothing was written. Plain deletes and inserts in one transaction
+  // need no key.
+  //
+  // Anything that changed also resets the project's production kits to
+  // STAGING, so the manufacturing side re-reviews after a BOM change.
   app.post('/api/projects/:id/bom', async (req, res) => {
     const projectId = parseInt(req.params.id);
-    const { items } = req.body; // items: [{ stockCode, quantity, designator, ... }]
-    console.log(`[POST BOM] req received for project ${projectId}, items count: ${items ? items.length : 0}`);
+    const parsed = parseBomLines(req.body?.items);
+    if ('error' in parsed) return res.status(400).json({ error: parsed.error });
+    const replace = req.body?.replace === true;
 
+    const client = await pool.connect();
     try {
-      const tableName = `db_bom_project_${projectId}`;
-      console.log(`[POST BOM] creating table if not exists "${tableName}"...`);
-      await query(`CREATE TABLE IF NOT EXISTS "${tableName}" (
-        project_name INTEGER,
-        internal_stock_number TEXT PRIMARY KEY,
-        qty_per_unit INTEGER,
-        ref_des TEXT
-      )`);
-      console.log(`[POST BOM] table "${tableName}" created/checked successfully.`);
-
-      const extraColumns = [
-        { name: 'description', type: 'TEXT DEFAULT \'\'' },
-        { name: 'comment', type: 'TEXT DEFAULT \'\'' },
-        { name: 'footprint', type: 'TEXT DEFAULT \'\'' },
-        { name: 'libref', type: 'TEXT DEFAULT \'\'' },
-      ];
-
-      for (const col of extraColumns) {
-        console.log(`[POST BOM] ensuring column "${col.name}" exists on "${tableName}"...`);
-        await query(`ALTER TABLE "${tableName}" ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`);
+      await client.query('BEGIN');
+      const project = await client.query(`SELECT id FROM projects WHERE id::int = $1`, [projectId]);
+      if (project.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'project not found' });
       }
-      console.log(`[POST BOM] all extra columns checked.`);
 
-      for (const item of items) {
-        console.log(`[POST BOM] inserting/updating item ${item.stockCode} in "${tableName}"...`);
-        await query(
-          `INSERT INTO "${tableName}" (project_name, internal_stock_number, qty_per_unit, ref_des, description, comment, footprint, libref) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-             ON CONFLICT(internal_stock_number) DO UPDATE SET
-               qty_per_unit = EXCLUDED.qty_per_unit,
-               ref_des = EXCLUDED.ref_des,
-               description = EXCLUDED.description,
-               comment = EXCLUDED.comment,
-               footprint = EXCLUDED.footprint,
-               libref = EXCLUDED.libref`,
-          [projectId, item.stockCode, item.quantity, item.designator || '', item.description || '', item.comment || '', item.footprint || '', item.libref || '']
+      const table = `db_bom_project_${projectId}`;
+      await client.query(`CREATE TABLE IF NOT EXISTS "${table}" (
+        project_name text,
+        internal_stock_number text,
+        qty_per_unit integer,
+        ref_des text,
+        description text,
+        comment text,
+        footprint text,
+        libref text
+      )`);
+      for (const col of ['description', 'comment', 'footprint', 'libref']) {
+        await client.query(`ALTER TABLE "${table}" ADD COLUMN IF NOT EXISTS ${col} TEXT DEFAULT ''`);
+      }
+
+      const { rows } = await client.query(`SELECT * FROM "${table}" ORDER BY ctid`);
+      const current = new Map(foldBomRows(rows).map((l) => [l.stockCode, l]));
+      const wanted = new Set(parsed.lines.map((l) => l.stockCode));
+      let added = 0, updated = 0, removed = 0, unchanged = 0;
+
+      for (const line of parsed.lines) {
+        const before = current.get(line.stockCode);
+        if (before && before.quantity === line.quantity && before.designator === line.designator && before.comment === line.comment) {
+          unchanged += 1;
+          continue;
+        }
+        if (before) {
+          await client.query(`DELETE FROM "${table}" WHERE TRIM(internal_stock_number) = $1`, [line.stockCode]);
+          updated += 1;
+        } else {
+          added += 1;
+        }
+        await client.query(
+          `INSERT INTO "${table}" (project_name, internal_stock_number, qty_per_unit, ref_des, description, comment, footprint, libref)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [projectId, line.stockCode, line.quantity, line.designator, line.description || before?.description || '', line.comment,
+            line.footprint || before?.footprint || '', line.libref || before?.libref || '']
         );
       }
-      console.log(`[POST BOM] items upsert complete.`);
+      if (replace) {
+        for (const code of current.keys()) {
+          if (wanted.has(code)) continue;
+          await client.query(`DELETE FROM "${table}" WHERE TRIM(internal_stock_number) = $1`, [code]);
+          removed += 1;
+        }
+      }
 
-      console.log(`[POST BOM] updating production_kits...`);
-      await query(
-        `UPDATE production_kits SET status = 'STAGING', lastUpdated = $1 WHERE projectId = $2`,
-        [new Date().toISOString().split('T')[0], projectId]
-      );
-      console.log(`[POST BOM] production_kits updated successfully.`);
-
-      res.json({ ok: true });
+      if (added + updated + removed > 0) {
+        await client.query(
+          `UPDATE production_kits SET status = 'STAGING', lastUpdated = $1 WHERE projectId = $2`,
+          [new Date().toISOString().split('T')[0], projectId]
+        );
+        await client.query(`UPDATE projects SET updated_at = now() WHERE id::int = $1`, [projectId]);
+      }
+      await client.query('COMMIT');
+      res.json({ ok: true, added, updated, removed, unchanged });
     } catch (err: any) {
+      await client.query('ROLLBACK').catch(() => {});
       console.error('ERROR IN POST /api/projects/:id/bom:', err.message);
       res.status(500).json({ error: err.message });
+    } finally {
+      client.release();
     }
   });
 
   // ---------------------------------------------------------------------------
   // Per-project Pick & Place  (pp_bom_project_<id>)
   // ---------------------------------------------------------------------------
+  // Written by the BOM Manager alongside the BOM, one row per stock code.
+  // With `replace: true` the list becomes exactly the lines sent, so a part
+  // removed from the BOM leaves Pick & Place too. Deletes and inserts in
+  // one transaction rather than ON CONFLICT, for the same reason as above.
   app.post('/api/projects/:id/pp', async (req, res) => {
     const projectId = parseInt(req.params.id);
-    const { items } = req.body;
+    const parsed = parseBomLines(req.body?.items);
+    if ('error' in parsed) return res.status(400).json({ error: parsed.error });
+    const replace = req.body?.replace === true;
 
+    const client = await pool.connect();
     try {
-      const tableName = `pp_bom_project_${projectId}`;
-      await query(`CREATE TABLE IF NOT EXISTS "${tableName}" (
+      await client.query('BEGIN');
+      const project = await client.query(`SELECT id FROM projects WHERE id::int = $1`, [projectId]);
+      if (project.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'project not found' });
+      }
+
+      const table = `pp_bom_project_${projectId}`;
+      await client.query(`CREATE TABLE IF NOT EXISTS "${table}" (
         project_name INTEGER,
         stock_code TEXT PRIMARY KEY,
         quantity INTEGER
-      )`).catch(() => {});
-
-      const ppExtraColumns = [
-        { name: 'comment', type: 'TEXT DEFAULT \'\'' },
-        { name: 'description', type: 'TEXT DEFAULT \'\'' },
-        { name: 'designator', type: 'TEXT DEFAULT \'\'' },
-        { name: 'footprint', type: 'TEXT DEFAULT \'\'' },
-        { name: 'libref', type: 'TEXT DEFAULT \'\'' },
-      ];
-
-      for (const col of ppExtraColumns) {
-        await query(`ALTER TABLE "${tableName}" ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`).catch(() => {});
+      )`);
+      for (const col of ['comment', 'description', 'designator', 'footprint', 'libref']) {
+        await client.query(`ALTER TABLE "${table}" ADD COLUMN IF NOT EXISTS ${col} TEXT DEFAULT ''`);
       }
 
-      for (const item of items) {
-        await query(
-          `INSERT INTO "${tableName}" (project_name, stock_code, comment, description, designator, footprint, libref, quantity) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-             ON CONFLICT(stock_code) DO UPDATE SET
-               comment = EXCLUDED.comment,
-               description = EXCLUDED.description,
-               designator = EXCLUDED.designator,
-               footprint = EXCLUDED.footprint,
-               libref = EXCLUDED.libref,
-               quantity = EXCLUDED.quantity`,
-          [projectId, item.stockCode, item.comment || '', item.description || '', item.designator || '', item.footprint || '', item.libref || '', item.quantity]
+      if (replace) {
+        await client.query(`DELETE FROM "${table}"`);
+      } else if (parsed.lines.length) {
+        await client.query(`DELETE FROM "${table}" WHERE stock_code = ANY($1::text[])`, [parsed.lines.map((l) => l.stockCode)]);
+      }
+      for (const line of parsed.lines) {
+        await client.query(
+          `INSERT INTO "${table}" (project_name, stock_code, comment, description, designator, footprint, libref, quantity)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [projectId, line.stockCode, line.comment, line.description, line.designator, line.footprint, line.libref, line.quantity]
         );
       }
-      res.json({ ok: true });
+      await client.query('COMMIT');
+      res.json({ ok: true, count: parsed.lines.length });
     } catch (err: any) {
+      await client.query('ROLLBACK').catch(() => {});
       res.status(500).json({ error: err.message });
+    } finally {
+      client.release();
     }
   });
 

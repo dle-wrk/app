@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Plus, Folder, X, Link as LinkIcon, Trash2, Edit, Search, Calendar, Users, FileText, CheckCircle2, AlertTriangle, Activity, Package, ShoppingCart } from 'lucide-react';
 import ProcurementShortageCheckerView from './ProcurementShortageCheckerView';
 import { Item, Project, JobCard } from '../../types';
@@ -85,6 +85,10 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
   });
 
   const [selectedComponents, setSelectedComponents] = useState<Record<string, LinkedComponent>>({});
+  const [saving, setSaving] = useState(false);
+  // Projects given a job card in this session, so a second Sync before
+  // the job-card list reloads doesn't add another.
+  const jobCardMade = useRef(new Set<number>());
 
   // Saved-kit index, keyed by projectId. Fetched once when the view
   // mounts so each project card can show its kit count and the most
@@ -186,8 +190,16 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
     }
   };
 
+  // Sync saves the BOM exactly as listed: added, edited and removed parts
+  // all stick, and Pick & Place is kept in step. Each save is checked: the
+  // old version ignored the replies, so when the BOM save failed it still
+  // reported success and nothing was kept.
+  //
+  // It no longer writes the project name onto each inventory item either.
+  // An item has one "project" field, so tagging it for this project took it
+  // away from every other project that uses the part.
   const handleLinkComponents = async () => {
-    if (!selectedProject) return;
+    if (!selectedProject || saving) return;
 
     const componentsArray = Object.entries(selectedComponents).map(([stockCode, data]) => ({
       stockCode,
@@ -198,101 +210,80 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
       footprint: items.find(i => i.partNumber === stockCode)?.footprint || '',
       libref: ''
     }));
+    const post = async (url: string, body: unknown) => {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      if (!res.ok) {
+        const reply = await res.json().catch(() => ({}));
+        throw new Error(reply.error || `request failed (${res.status})`);
+      }
+      return res;
+    };
 
+    setSaving(true);
     try {
-      // Update inventory items with project reference
-      for (const [stockCode] of Object.entries(selectedComponents)) {
-        await fetch(`/api/items/${encodeURIComponent(stockCode)}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ project: selectedProject.projectName })
-        });
+      try {
+        await post(`/api/projects/${selectedProject.id}/bom`, { items: componentsArray, replace: true });
+      } catch (err: any) {
+        triggerToast(`The BOM was not saved: ${err.message}`, 'ERROR');
+        return;
+      }
+      let warning = '';
+      try {
+        await post(`/api/projects/${selectedProject.id}/pp`, { items: componentsArray, replace: true });
+      } catch (err: any) {
+        warning = `The BOM was saved, but Pick & Place was not updated: ${err.message}`;
+      }
+      // One job card per project, made the first time its BOM is saved.
+      // This used to add another on every Sync.
+      if (!jobCards.some(j => j.projectId === selectedProject.id) && !jobCardMade.current.has(selectedProject.id)) {
+        jobCardMade.current.add(selectedProject.id);
+        await post('/api/job-cards', { projectId: selectedProject.id, buildQty: 0, status: 'Pending' }).catch(() => {});
       }
 
-      // Create BOM entries
-      await fetch(`/api/projects/${selectedProject.id}/bom`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: componentsArray })
-      });
-
-      // Create P&P entries
-      await fetch(`/api/projects/${selectedProject.id}/pp`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: componentsArray })
-      });
-
-      // Create initial job card
-      await fetch('/api/job-cards', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          projectId: selectedProject.id,
-          buildQty: 0,
-          status: 'Pending'
-        })
-      });
-
-      triggerToast(`${Object.keys(selectedComponents).length} components linked to project "${selectedProject.projectName}"`);
+      if (warning) triggerToast(warning, 'ERROR');
+      else triggerToast(`${componentsArray.length} components linked to project "${selectedProject.projectName}"`);
       setSelectedComponents({});
       setShowLinkModal(false);
-    } catch (err: any) {
-      console.error('Error linking components:', err);
-      triggerToast('Failed to link components');
+    } finally {
+      setSaving(false);
     }
   };
 
+  // Opens the BOM Manager on exactly what the project's BOM holds. Parts
+  // whose inventory "project" field names this project are no longer added
+  // on top: that field was only ever filled in by Sync as a stand-in for a
+  // BOM save that wasn't working, so it brought back parts you had removed,
+  // at quantity 1 with no designators. If the BOM can't be loaded the
+  // modal stays closed, because syncing an empty list would clear the BOM.
   const handleOpenLinkModal = async (project: Project) => {
-    setSelectedProject(project);
     setSearchQuery('');
-
-    // Fetch existing BOM items for this project and include inventory items with project assigned
     try {
       const res = await fetch(`/api/projects/${project.id}/bom`);
-      if (res.ok) {
-        const existingItems = await res.json();
-        const existingComponents: Record<string, LinkedComponent> = {};
-        existingItems.forEach((item: any) => {
-          existingComponents[item.stockCode] = {
-            stockCode: item.stockCode,
-            quantity: item.quantity,
-            designator: item.designator,
-            comment: item.comment || ''
-          };
-        });
-        // Also include inventory items that already have this project name assigned
-        items.forEach((invItem) => {
-          if (invItem.project === project.projectName && !existingComponents[invItem.partNumber]) {
-            existingComponents[invItem.partNumber] = {
-              stockCode: invItem.partNumber,
-              quantity: 1,
-              designator: '',
-              comment: ''
-            };
-          }
-        });
-        setSelectedComponents(existingComponents);
-      } else {
-        // Even if no BOM exists, check inventory for items with this project
-        const inventoryComponents: Record<string, LinkedComponent> = {};
-        items.forEach((invItem) => {
-          if (invItem.project === project.projectName) {
-            inventoryComponents[invItem.partNumber] = {
-              stockCode: invItem.partNumber,
-              quantity: 1,
-              designator: ''
-            };
-          }
-        });
-        setSelectedComponents(inventoryComponents);
+      if (!res.ok) {
+        const reply = await res.json().catch(() => ({}));
+        throw new Error(reply.error || `request failed (${res.status})`);
       }
+      const existingItems = await res.json();
+      const existingComponents: Record<string, LinkedComponent> = {};
+      existingItems.forEach((item: any) => {
+        existingComponents[item.stockCode] = {
+          stockCode: item.stockCode,
+          quantity: item.quantity,
+          designator: item.designator,
+          comment: item.comment || ''
+        };
+      });
+      setSelectedProject(project);
+      setSelectedComponents(existingComponents);
+      setShowLinkModal(true);
     } catch (err: any) {
       console.error('Error fetching project BOM:', err);
-      setSelectedComponents({});
+      triggerToast(`Could not load the BOM for ${project.projectName}: ${err.message}`, 'ERROR');
     }
-
-    setShowLinkModal(true);
   };
 
   // Sub-tab strip — sits above the header so the current section is
@@ -875,9 +866,10 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
               <button
                 id="sync-btn-raw"
                 onClick={handleLinkComponents}
-                className="flex-1 bg-primary text-on-primary py-2.5 rounded text-xs font-bold uppercase tracking-wider cursor-pointer"
+                disabled={saving}
+                className="flex-1 bg-primary text-on-primary py-2.5 rounded text-xs font-bold uppercase tracking-wider cursor-pointer disabled:opacity-60 disabled:cursor-wait"
               >
-                Sync
+                {saving ? 'Saving…' : 'Sync'}
               </button>
             </div>
           </div>
