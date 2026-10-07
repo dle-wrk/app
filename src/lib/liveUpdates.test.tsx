@@ -13,6 +13,7 @@ describe('which data changed', () => {
 
   it("reloads everything unless only a section's own data changed", () => {
     expect(needsFullReload(['bulk_pricing'])).toBe(false);
+    expect(needsFullReload(['project_progress', 'bulk_pricing'])).toBe(false);
     expect(needsFullReload(['bulk_pricing', 'inventory'])).toBe(true);
     expect(needsFullReload(['clients'])).toBe(true);
   });

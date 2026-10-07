@@ -12,6 +12,7 @@ export type Permission =
   | 'inventory.create' | 'inventory.read' | 'inventory.update' | 'inventory.delete'
   | 'suppliers.create' | 'suppliers.read' | 'suppliers.update' | 'suppliers.delete'
   | 'orders.create' | 'orders.read' | 'orders.update' | 'orders.delete'
+  | 'projects.update'
   | 'reports.read' | 'settings.update' | 'automation.create' | 'automation.delete';
 
 export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
@@ -20,6 +21,7 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     'inventory.create', 'inventory.read', 'inventory.update', 'inventory.delete',
     'suppliers.create', 'suppliers.read', 'suppliers.update', 'suppliers.delete',
     'orders.create', 'orders.read', 'orders.update', 'orders.delete',
+    'projects.update',
     'reports.read', 'settings.update', 'automation.create', 'automation.delete',
   ],
   manager: [
@@ -27,11 +29,13 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     'inventory.create', 'inventory.read', 'inventory.update',
     'suppliers.read', 'suppliers.update',
     'orders.create', 'orders.read', 'orders.update',
+    'projects.update',
     'reports.read', 'automation.create',
   ],
-  // Engineers keep part data (part numbers, BOMs) up to date.
+  // Engineers keep part data (part numbers, BOMs) and project progress up to date.
   engineer: [
     'inventory.read', 'inventory.update',
+    'projects.update',
     'suppliers.read', 'orders.read', 'reports.read',
   ],
   viewer: [
@@ -45,6 +49,8 @@ const PLURAL: Record<string, string> = { admin: 'admins', manager: 'managers', e
 /** What a permission lets someone do, for messages. */
 const DOES: Partial<Record<Permission, string>> = {
   'inventory.update': 'change inventory, prices and part numbers',
+  'projects.update': 'move projects between stages, put them on hold or add updates',
+  'settings.update': 'change settings',
 };
 
 export function roleCan(role: string | null | undefined, permission: Permission): boolean {

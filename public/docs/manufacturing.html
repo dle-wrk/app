@@ -146,8 +146,26 @@
                         </ul>
                     </li>
                     <li>Link BOMs and production kits to projects</li>
-                    <li>Track project progress and resource allocation</li>
+                    <li>Track project progress on the <a href="#project-progress">Project Progress</a> board</li>
                 </ol>
+            </div>
+
+            <h3 id="project-progress">Project Progress</h3>
+            <div class="step">
+                <p><span class="menu-path">PROJECTS → Project Progress</span> shows every project in the stage it has reached, so when several projects run at the same time you can see where each one is at. The stages start as <strong>Planning → Design &amp; BOM → Sourcing → Kitting → Assembly → Testing → Complete</strong>; the last stage means finished.</p>
+                <ul>
+                    <li><strong>Board or list:</strong> the board has a column per stage; the list shows the same projects as a table. The page remembers which one you used.</li>
+                    <li><strong>On each project:</strong> how long it has been in its stage (in amber after 30 days without a move), its due date from Project Manager (red when overdue), its BOM against stock for one build, saved kits, builds in progress, and the latest note someone wrote.</li>
+                    <li><strong>Moving a project:</strong> use the arrows on its card, drag the card to another column, pick a stage under <em>Move to</em> in the list, or click a stage in the project's details. Add a note to say why, for example "PCBs arrived".</li>
+                    <li><strong>A new project</strong> shows in the first stage, marked "Stage not set yet", until someone gives it a stage: open it and click the stage it's at.</li>
+                    <li><strong>On hold:</strong> in a project's details, <em>Put on hold</em> and say why, for example "Waiting for PCBs". The card shows it until someone clicks <em>Resume</em>.</li>
+                    <li><strong>Updates:</strong> add a short update to a project at any time; the latest one shows on its card.</li>
+                    <li><strong>History:</strong> a project's details list every move, hold, resume and update with who and when. Each is also written to the Activity Logs.</li>
+                    <li><strong>Counts and search:</strong> click a count at the top (in progress, on hold, overdue, finished) to show only those projects; search finds projects by name, team, stage or note. Projects whose Project Manager status is Inactive or Completed are hidden unless you tick <em>Show inactive and completed projects</em>.</li>
+                    <li><strong>Who can do what:</strong> admins, managers and engineers can move projects, put them on hold and add updates; viewers can see the board. Only admins can <em>Edit stages</em>: rename, reorder, add or remove them. A stage with projects in it can't be removed, and the history keeps stage names as they were.</li>
+                    <li>Everyone's board updates by itself within about 25 seconds of a change.</li>
+                    <li>Deleting a project in Project Manager deletes its progress and history too.</li>
+                </ul>
             </div>
         </div>
 

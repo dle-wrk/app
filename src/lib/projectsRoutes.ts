@@ -219,9 +219,10 @@ export function registerProjectsRoutes(app: Express): void {
     }
   });
 
-  // Delete cascade: drop this project's BOM/P&P tables and its job cards.
-  // Ids are allocated as MAX(id)+1, so a freed id gets reused — orphaned
-  // data would silently attach itself to the next project with the same id.
+  // Delete cascade: drop this project's BOM/P&P tables, its job cards and its
+  // progress (Project Progress board). Ids are allocated as MAX(id)+1, so a
+  // freed id gets reused — orphaned data would silently attach itself to the
+  // next project with the same id.
   app.delete('/api/projects/:id', async (req, res) => {
     const id = parseInt(req.params.id);
     try {
@@ -230,6 +231,8 @@ export function registerProjectsRoutes(app: Express): void {
       await exec(`DROP TABLE IF EXISTS "db_bom_project_${id}"`).catch(() => {});
       await exec(`DROP TABLE IF EXISTS "pp_bom_project_${id}"`).catch(() => {});
       await query(`DELETE FROM job_cards WHERE project_id = $1`, [id]).catch(() => {});
+      await query(`DELETE FROM project_progress WHERE project_id = $1`, [id]).catch(() => {});
+      await query(`DELETE FROM project_progress_log WHERE project_id = $1`, [id]).catch(() => {});
       res.json({ ok: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

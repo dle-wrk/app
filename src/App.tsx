@@ -50,6 +50,7 @@ import { SearchView } from './components/views/SearchView';
 import { ActivityLogsView } from './components/views/ActivityLogsView';
 import KitBookingView from './components/views/KitBookingView';
 import { ProjectsView } from './components/views/ProjectsView';
+import ProjectProgressView from './components/views/ProjectProgressView';
 import { BookkeepingView } from './components/views/BookkeepingView';
 import { ProductionCostsView } from './components/views/ProductionCostsView';
 import AutomationDashboard from './components/views/AutomationDashboard';
@@ -2252,6 +2253,16 @@ if (currentView === 'alternates') {
                        }).catch(err => console.error('Failed to log project update:', err));
                      }
                    }}
+                 />
+               );
+             }
+
+             if (currentView === 'project_progress') {
+               return (
+                 <ProjectProgressView
+                   projectReadiness={projectReadiness}
+                   triggerToast={triggerToast}
+                   onOpenProjectManager={() => setView('projects')}
                  />
                );
              }

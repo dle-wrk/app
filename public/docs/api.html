@@ -43,10 +43,11 @@
 
             <h3 id="reading-the-endpoint-tables">Reading the endpoint tables</h3>
             <div class="step">
-                <p>The tables further down list every endpoint by area. Four labels can appear next to a path:</p>
+                <p>The tables further down list every endpoint by area. Five labels can appear next to a path:</p>
                 <ul>
                     <li><span class="tag tag-admin">Admin</span> the signed-in account must have the admin role.</li>
                     <li><span class="tag tag-admin">Changes inventory</span> the account's role must be allowed to change inventory: admin, manager or engineer (not viewer).</li>
+                    <li><span class="tag tag-admin">Updates projects</span> the account's role must be allowed to update projects: admin, manager or engineer (not viewer).</li>
                     <li><span class="tag tag-public">No session</span> works without signing in (sign-in itself and password recovery).</li>
                     <li><span class="tag tag-token">Own token</span> authenticates with its own token instead of a session.</li>
                 </ul>
@@ -102,6 +103,7 @@
             <div class="step">
                 <p>Endpoints labelled <span class="tag tag-admin">Admin</span> answer <code>403</code> with <code>{"error":"Admin access required"}</code> to any other role. They cover user accounts, changes to the Documentation page's entries, supplier API credentials, deleting a kit, and the kit-booking BOM.</p>
                 <p>Endpoints labelled <span class="tag tag-admin">Changes inventory</span> need a role that may change inventory: admin, manager or engineer. A viewer gets <code>403</code> with <code>{"error":"Only admins, managers and engineers can change inventory, prices and part numbers."}</code>. They cover starting and stopping bulk pricing runs, bulk pricing review decisions, and part-number fixes.</p>
+                <p>Endpoints labelled <span class="tag tag-admin">Updates projects</span> need a role that may update projects: admin, manager or engineer. A viewer gets <code>403</code> with <code>{"error":"Only admins, managers and engineers can move projects between stages, put them on hold or add updates."}</code>. They cover moving projects on the Project Progress board, holds and progress updates. Changing the list of stages is admin-only and answers other roles with <code>{"error":"Only admins can change settings."}</code>.</p>
             </div>
 
             <h3 id="limits-on-sign-in-attempts">Limits on sign-in attempts</h3>
@@ -457,7 +459,7 @@
                         <tr><td><span class="m m-get">GET</span></td><td>/api/projects</td><td>List projects.</td></tr>
                         <tr><td><span class="m m-post">POST</span></td><td>/api/projects</td><td>Create a project. A project with the same name is updated instead.</td></tr>
                         <tr><td><span class="m m-put">PUT</span></td><td>/api/projects/:id</td><td>Update a project.</td></tr>
-                        <tr><td><span class="m m-delete">DELETE</span></td><td>/api/projects/:id</td><td>Delete a project together with its BOM, pick-and-place data and job cards.</td></tr>
+                        <tr><td><span class="m m-delete">DELETE</span></td><td>/api/projects/:id</td><td>Delete a project together with its BOM, pick-and-place data, job cards and progress.</td></tr>
                         <tr><td><span class="m m-post">POST</span></td><td>/api/projects/restore/:id</td><td>Restore a deleted project record (its BOM and pick-and-place data are not restored).</td></tr>
                         <tr><td><span class="m m-get">GET</span></td><td>/api/projects/:id/bom</td><td>BOM lines of one project.</td></tr>
                         <tr><td><span class="m m-post">POST</span></td><td>/api/projects/:id/bom</td><td>Add or update BOM lines of one project in bulk.</td></tr>
@@ -466,6 +468,12 @@
                         <tr><td><span class="m m-get">GET</span></td><td>/api/pp-items</td><td>Pick-and-place lines across all projects.</td></tr>
                         <tr><td><span class="m m-get">GET</span></td><td>/api/job-cards</td><td>List job cards.</td></tr>
                         <tr><td><span class="m m-post">POST</span></td><td>/api/job-cards</td><td>Create a job card.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/project-progress</td><td>The Project Progress board: the stages in order, and every project with its stage (<code>stageSet</code> is false when it was never given one; it then shows in the first stage), hold, latest note, saved kits and builds, plus <code>can</code> for what the caller's role may do.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/project-progress/:id/history</td><td>Everything recorded for one project, newest first: moves, holds, resumes and updates, with who and when.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/project-progress/:id/stage<span class="tag tag-admin">Updates projects</span></td><td>Move a project to a stage: <code>{"stageId","note"?}</code>. <code>409</code> when it is already in that stage or the stage has been removed.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/project-progress/:id/hold<span class="tag tag-admin">Updates projects</span></td><td>Put a project on hold (<code>{"onHold":true,"reason"?}</code>) or resume it (<code>{"onHold":false}</code>). <code>409</code> when it already is.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/project-progress/:id/update<span class="tag tag-admin">Updates projects</span></td><td>Add a progress update: <code>{"note"}</code>.</td></tr>
+                        <tr><td><span class="m m-put">PUT</span></td><td>/api/project-progress/stages<span class="tag tag-admin">Admin</span></td><td>Change the stages, in their new order: <code>{"stages":[{"id"?,"name"}]}</code>. An entry without an <code>id</code> adds a stage; a stage left out is removed, which is refused (<code>409</code>) while projects are in it. The last stage means finished.</td></tr>
                     </tbody>
                 </table>
             </div>

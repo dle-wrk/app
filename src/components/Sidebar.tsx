@@ -21,7 +21,8 @@ import {
   Activity,
   BookOpen,
   PanelLeftClose,
-  PanelLeftOpen
+  PanelLeftOpen,
+  SquareKanban
 } from 'lucide-react';
 import { ViewType, UserProfile } from '../types';
 
@@ -108,6 +109,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const projectItems = [
     { id: 'projects', label: 'Project Manager', icon: ClipboardList },
+    { id: 'project_progress', label: 'Project Progress', icon: SquareKanban },
   ] as const;
 
   const automationItems = [

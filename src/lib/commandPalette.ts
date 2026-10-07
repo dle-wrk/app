@@ -44,6 +44,7 @@ export const ROUTES: CommandRoute[] = [
   { id: 'pick_place', label: 'Pick & Place', path: 'Manufacturing', keywords: 'p&p smt pnp coordinates placement', group: 'Pages', icon: 'Database', target: { view: 'pick_place' } },
   { id: 'alternates', label: 'Component Alternates', path: 'Manufacturing', keywords: 'substitutes alternates equivalents crosses', group: 'Pages', icon: 'ArrowLeftRight', target: { view: 'alternates' } },
   { id: 'projects', label: 'Project Manager', path: 'Projects', keywords: 'projects jobs builds', group: 'Pages', icon: 'ClipboardList', target: { view: 'projects' } },
+  { id: 'project_progress', label: 'Project Progress', path: 'Projects › Progress', keywords: 'progress stages status board kanban pipeline where are projects on hold overdue tracking', group: 'Pages', icon: 'SquareKanban', target: { view: 'project_progress' } },
   { id: 'automation', label: 'Automation Dashboard', path: 'Automation', keywords: 'workflows rules triggers scheduled jobs alerts', group: 'Pages', icon: 'Zap', target: { view: 'automation' } },
   { id: 'auto_po_config', label: 'Auto-PO Config', path: 'Automation', keywords: 'auto po purchase order reorder threshold', group: 'Pages', icon: 'Settings', target: { view: 'auto_po_config' } },
   { id: 'quality_compliance', label: 'Quality & Compliance', path: 'Quality', keywords: 'qa qc inspections defects ncr non conformance audits', group: 'Pages', icon: 'Shield', target: { view: 'quality_compliance' } },

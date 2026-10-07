@@ -3,7 +3,8 @@
 // 1. Data. App polls GET /api/data-versions every 25 seconds (and as soon as
 //    the tab comes back into view). When a counter moved, it announces the
 //    changed keys with announceDataChanged; App reloads its shared data, and
-//    a section with its own lists (Bulk Pricing, Part Numbers) reloads them
+//    a section with its own lists (Bulk Pricing, Part Numbers, Project
+//    Progress) reloads them
 //    through useDataChanged. Keys that only such sections show (VIEW_ONLY_KEYS)
 //    don't make App reload everything.
 //
@@ -20,7 +21,7 @@ import { useEffect, useRef, useState } from 'react';
 export const DATA_CHANGED_EVENT = 'tracklab:data-changed';
 
 /** Data-version keys that only sections with their own lists show. */
-export const VIEW_ONLY_KEYS = ['bulk_pricing'];
+export const VIEW_ONLY_KEYS = ['bulk_pricing', 'project_progress'];
 
 /** Whether changed keys need App's full reload, or only the sections listening for them. */
 export function needsFullReload(changedKeys: string[]): boolean {

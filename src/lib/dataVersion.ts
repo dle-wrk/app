@@ -32,6 +32,7 @@ export const DATA_KEYS = [
   'bom',             // BOM lines
   'pick_place',      // PP items
   'bulk_pricing',    // bulk pricing runs, results and review decisions (pages reload their own lists)
+  'project_progress', // project stages, holds and updates (the Project Progress board reloads its own)
 ] as const;
 
 export type DataKey = typeof DATA_KEYS[number] | string;
@@ -84,6 +85,7 @@ const RULES: Array<{ test: RegExp; key: DataKey }> = [
   { test: /^\/api\/suppliers(\/|$)/, key: 'suppliers' },
   { test: /^\/api\/(invoices|bills|purchase-orders|payments-received|payments-made|dispatch-notes|expenses|accounts|tax-rates|journal-entries)(\/|$)/, key: 'bookkeeping' },
   { test: /^\/api\/projects(\/|$)/, key: 'projects' },
+  { test: /^\/api\/project-progress(\/|$)/, key: 'project_progress' },
   { test: /^\/api\/(production-kits|production-products|kits)(\/|$)/, key: 'production_kits' },
   { test: /^\/api\/bom(\/|$)/, key: 'bom' },
   { test: /^\/api\/bom-items(\/|$)/, key: 'bom' },

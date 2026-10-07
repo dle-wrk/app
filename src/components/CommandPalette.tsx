@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Boxes, TableProperties, Tag, Factory, Receipt, Calculator, Database,
   ArrowLeftRight, ClipboardList, Zap, Settings, Shield, Brain, Activity, User,
   Users, FileText, Wallet, Truck, CreditCard, Landmark, Wrench, BarChart3,
-  Search, ArrowUp, ArrowDown, CornerDownLeft, X, Package,
+  Search, ArrowUp, ArrowDown, CornerDownLeft, X, Package, SquareKanban,
 } from 'lucide-react';
 import { Item, Client, Supplier } from '../types';
 import {
@@ -15,7 +15,7 @@ import { apiGet } from './bookkeeping/shared';
 const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   LayoutDashboard, Boxes, TableProperties, Tag, Factory, Receipt, Calculator, Database,
   ArrowLeftRight, ClipboardList, Zap, Settings, Shield, Brain, Activity, User,
-  Users, FileText, Wallet, Truck, CreditCard, Landmark, Wrench, BarChart3, Package,
+  Users, FileText, Wallet, Truck, CreditCard, Landmark, Wrench, BarChart3, Package, SquareKanban,
 };
 
 // A doc-number search result. The palette resolves each of these to a

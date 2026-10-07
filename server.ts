@@ -35,6 +35,7 @@ import { registerKitsRoutes, ensureKitsSchema } from './src/lib/kitsRoutes';
 import { registerProcurementRoutes, ensureProcurementSchema } from './src/lib/procurementRoutes';
 import { registerAutomationRoutes } from './src/lib/automationRoutes';
 import { registerProjectsRoutes } from './src/lib/projectsRoutes';
+import { registerProjectProgressRoutes, ensureProjectProgressSchema } from './src/lib/projectProgress';
 import { registerClientsRoutes } from './src/lib/clientsRoutes';
 import { registerAssetsRoutes } from './src/lib/assetsRoutes';
 import { registerInventoryMetadataRoutes } from './src/lib/inventoryMetadataRoutes';
@@ -202,6 +203,10 @@ registerAutomationRoutes(app);
 // /api/pp-items feeds that walk pg_class. No schema bootstrap moved —
 // per-project tables are created lazily on first BOM write.
 registerProjectsRoutes(app);
+// Project progress (/api/project-progress): the stage each project is at,
+// holds and updates, for the Project Progress board. Schema in the boot
+// bootstrap below (ensureProjectProgressSchema).
+registerProjectProgressRoutes(app);
 
 // Clients surface: /api/clients, /api/client-orders, /api/client-order-items.
 // Reads and writes both target the `clients` table (not the legacy
@@ -1128,6 +1133,7 @@ async function runSchemaBootstrap() {
     await ensureKitsSchema().catch((e) => console.error('Failed to bootstrap kits schema:', e));
     await ensureProcurementSchema().catch((e) => console.error('Failed to bootstrap procurement schema:', e));
     await ensureBulkPricingSchema().catch((e) => console.error('Failed to bootstrap bulk pricing schema:', e));
+    await ensureProjectProgressSchema().catch((e) => console.error('Failed to bootstrap project progress schema:', e));
     await ensureDataVersionsTable().catch((e) => console.error('Failed to bootstrap data_versions table:', e));
 
     // Legacy fix: every db_bom_project_<N> table was created with
