@@ -9,6 +9,7 @@ import { AlertTriangle, ChevronDown, ChevronRight, Download, Loader2, RefreshCw,
 import { confirmDialog } from '../lib/confirmDialog';
 import { fmtNumber } from '../lib/formatMoney';
 import { currentUserCan, notAllowedMessage } from '../lib/permissions';
+import { useDataChanged } from '../lib/liveUpdates';
 import { PrimaryButton, SecondaryButton } from './bookkeeping/shared';
 
 type IssueKind = 'supplier_name' | 'placeholder' | 'lcsc_extra_text' | 'not_a_part_number' | 'held_back' | 'swapped' | 'no_part_number';
@@ -101,6 +102,8 @@ export default function PartNumberReview({ onShowNotification, onOpenItem, onCha
     }
   }, []);
   useEffect(() => { void load(); }, [load]);
+  // Someone else changed items: reload the list.
+  useDataChanged(['inventory'], () => { void load(); });
 
   const byKind = useMemo(() => {
     const map = new Map<IssueKind, PartNumberIssue[]>();

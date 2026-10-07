@@ -142,6 +142,26 @@
                 <p><strong>LCSC</strong> is asked by the item's LCSC part number (<code>C</code> + digits, from any part-number field), which pins down the exact part. LCSC can't be searched by manufacturer part number, so an item without an LCSC number isn't priced at LCSC. An item whose only part number is an LCSC number is priced by LCSC alone, as other suppliers would match the number to unrelated parts. The list below shows an item's LCSC number under its part number.</p>
             </div>
 
+            <h3 id="bulk-pricing-problems">Problems to review</h3>
+            <div class="step">
+                <p>Items whose last result was <strong>held back</strong>, got <strong>no price</strong>, or <strong>failed</strong> are listed under <strong>Problems to review</strong> on the Bulk Pricing tab, held-back ones first. Pick one (or step through them with the arrows) to see:</p>
+                <ul>
+                    <li><strong>What each supplier said</strong>, side by side: the part it matched, its price as quoted and in rand, how that compares with the current bulk price, stock, and a link to the listing. The cheapest is marked, and so is the price that was held back. Suppliers without a price show why (no match, not authorised, no exchange rate…).</li>
+                    <li>The current bulk price, and what happened on the last run.</li>
+                </ul>
+                <p>Then:</p>
+                <table>
+                    <tr><th>Action</th><th>What it does</th></tr>
+                    <tr><td><strong>Use this price</strong> (on a supplier's row)</td><td>Approves that supplier's price as the bulk price, after asking. Works for the held-back price too, when it's right.</td></tr>
+                    <tr><td><strong>Keep current price</strong></td><td>Rejects the suppliers' answers; the price stays. Add a reason if you like.</td></tr>
+                    <tr><td><strong>Set price by hand</strong></td><td>Enter the bulk price in rand (comma or point); dollars are worked out at the stored rate.</td></tr>
+                    <tr><td><strong>Re-check now</strong></td><td>Asks the suppliers again straight away and shows their answers. Changes no price. Use it after correcting a part number, or for a result from before suppliers' answers were kept.</td></tr>
+                    <tr><td><strong>Leave out of bulk pricing</strong></td><td>For items no supplier sells, such as your own PCBs. Runs and the daily automatic run skip it (unless you tick it), and it leaves the problem and due lists. Its current price stays. Put it back from the <strong>Left out</strong> filter in the list below.</td></tr>
+                    <tr><td><strong>Open item / edit part numbers</strong></td><td>Opens the item, to correct a part number that matched the wrong part. Then <strong>Re-check now</strong>.</td></tr>
+                </table>
+                <p>Each decision is kept in the item's bulk pricing history with who made it, and counts as the item's latest bulk pricing: it leaves the list, and is next due when the re-price interval has passed. Admins, managers and engineers can decide; viewers can compare.</p>
+            </div>
+
             <h3 id="automatic-bulk-pricing">Automatic re-pricing</h3>
             <div class="step">
                 <ul>
@@ -156,7 +176,8 @@
             <div class="step">
                 <p>Every item, with its bulk price, when it was last bulk priced and how (automatic or manual), its last result and the reason, the last change (old → new) and when it is next due for automatic re-pricing.</p>
                 <ul>
-                    <li><strong>Show:</strong> All, Due, Problems (held back, no price or failed last time), Never priced, No bulk price, No part number. Each shows how many items it covers.</li>
+                    <li><strong>Show:</strong> All, Due, Problems (held back, no price or failed last time), Never priced, No bulk price, No part number, Left out (excluded from bulk pricing, with <strong>Put back</strong>). Each shows how many items it covers.</li>
+                    <li>The list, the runs and the problems refresh by themselves when a run (yours, someone else's or the automatic one) or a decision changes them.</li>
                     <li><strong>Sort:</strong> oldest update first, problems first, most recently updated, or stock code.</li>
                     <li><strong>Search</strong> by stock code, name or part number.</li>
                     <li><strong>History</strong> on a row shows that item's bulk pricing over the history period: when, which run, the result, the old and new price, and the supplier.</li>

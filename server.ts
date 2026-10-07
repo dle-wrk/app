@@ -25,6 +25,7 @@ import { registerSuppliersRoutes } from './src/lib/suppliersRoutes';
 import { registerPricingRoutes } from './src/lib/pricingRoutes';
 import { registerBulkPricingRoutes } from './src/lib/bulkPricingRoutes';
 import { registerPartNumberReviewRoutes } from './src/lib/partNumberReview';
+import { registerBulkPricingReviewRoutes } from './src/lib/bulkPricingReview';
 import { AUTO_RUN_CRON, ensureBulkPricingSchema, runAutoBulkPricing } from './src/lib/bulkPricing';
 import { registerExchangeRateRoutes, updateExchangeRate } from './src/lib/exchangeRate';
 import { registerItemsRoutes } from './src/lib/itemsRoutes';
@@ -161,6 +162,9 @@ registerPricingRoutes(app);
 // that refresh items' bulk prices, the "last bulk priced" log, and settings.
 // The daily automatic run is scheduled in bootstrap() below.
 registerBulkPricingRoutes(app);
+// The review of bulk pricing problems (/api/pricing/bulk-review): compare the
+// suppliers' answers, approve, keep, set by hand, re-check, exclude.
+registerBulkPricingReviewRoutes(app);
 
 // Part-number review (/api/inventory/part-number-review): placeholders and
 // supplier names in part-number fields, with fixes for roles that may change

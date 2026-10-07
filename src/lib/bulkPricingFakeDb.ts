@@ -9,10 +9,26 @@
 // `canned` (and the real SQL is checked against Postgres separately).
 // Timestamps are numbers (ms) on a clock the test controls: `state.now`.
 
+import { PART_NUMBER_FIELDS, pickPartNumbers } from './partNumbers';
+
 export const DAY = 24 * 60 * 60 * 1000;
 export const NOW = new Date('2026-10-06T08:00:00Z').getTime();
 
 export type Row = Record<string, any>;
+
+// One value of an INSERT's VALUES list: a parameter (with or without a cast),
+// a literal, or now().
+function sqlValue(expr: string, params: any[], now: number): any {
+  const param = expr.match(/^\$(\d+)(::\w+)?$/);
+  if (param) return params[Number(param[1]) - 1];
+  if (expr === 'NULL') return null;
+  if (expr === 'TRUE') return true;
+  if (expr === 'FALSE') return false;
+  if (expr === 'now()') return now;
+  const text = expr.match(/^'(.*)'$/);
+  if (text) return text[1];
+  throw new Error(`unexpected value in insert: ${expr}`);
+}
 
 const STALE_MS = 10 * 60_000;
 
@@ -33,6 +49,9 @@ export function fakeDb(now: number = NOW) {
     snapshot: null as null | { inventory: Map<string, Row>; history: Row[]; status: Map<string, Row> },
   };
   const copyMap = (m: Map<string, Row>) => new Map([...m].map(([k, v]) => [k, { ...v }]));
+  const latestHistory = (serial: string) => state.history.filter((h) => h.serial_number === serial)
+    .sort((a, b) => b.created_at - a.created_at || b.id - a.id).slice(0, 1);
+  const partsOf = (r: Row) => pickPartNumbers(PART_NUMBER_FIELDS.map((f) => r[f]));
   const result = (rows: Row[] = [], rowCount = rows.length) => ({ rows, rowCount });
   const runRow = (r: Row) => ({ ...r, stale: r.status === 'running' && r.heartbeat_at < state.now - STALE_MS });
   const newestFirst = (a: Row, b: Row) => b.started_at - a.started_at || b.id - a.id;
@@ -116,10 +135,19 @@ export function fakeDb(now: number = NOW) {
       return result([], n);
     }
     if (sql.startsWith('INSERT INTO bulk_price_history')) {
-      const cols = ['run_id', 'serial_number', 'part_number', 'source', 'dry_run', 'status', 'old_price_zar', 'new_price_zar', 'old_price_usd', 'new_price_usd',
-        'provider', 'matched_part', 'native_price', 'native_currency', 'qty', 'error'];
-      state.history.push({ id: state.nextHistoryId++, ...Object.fromEntries(cols.map((c, i) => [c, p[i]])), created_at: now });
+      // Columns and values by name, so every insert shape is understood.
+      const m = sql.match(/^INSERT INTO bulk_price_history \(([^)]*)\) VALUES \((.*)\)$/);
+      if (!m) throw new Error(`unexpected history insert: ${sql}`);
+      const cols = m[1].split(',').map((c) => c.trim());
+      const vals = m[2].split(',').map((v) => v.trim());
+      const row: Row = { id: state.nextHistoryId++, created_at: now, offers: null, decided_by: null };
+      cols.forEach((c, i) => { row[c] = sqlValue(vals[i], p, now); });
+      if (typeof row.offers === 'string') row.offers = JSON.parse(row.offers);
+      state.history.push(row);
       return result([], 1);
+    }
+    if (sql === 'SELECT id, offers FROM bulk_price_history WHERE serial_number = $1 ORDER BY created_at DESC, id DESC LIMIT 1') {
+      return result(latestHistory(p[0]).map((h) => ({ id: h.id, offers: h.offers })));
     }
     if (sql.startsWith('SELECT h.id, h.run_id, h.serial_number, i.name,') && sql.endsWith('WHERE h.run_id = $1 ORDER BY h.id')) {
       return result(state.history.filter((h) => h.run_id === p[0]).sort((a, b) => a.id - b.id)
@@ -131,13 +159,73 @@ export function fakeDb(now: number = NOW) {
     }
 
     // --- items and their status -------------------------------------------
-    if (sql === 'SELECT bulk_price_zar, bulk_price_usd FROM inventory WHERE serial_number = $1 FOR UPDATE') {
+    if (sql === 'SELECT bulk_price_zar, bulk_price_usd FROM inventory WHERE serial_number = $1 FOR UPDATE'
+      || sql === 'SELECT bulk_price_zar, bulk_price_usd FROM inventory WHERE serial_number = $1 AND deleted IS NOT TRUE FOR UPDATE') {
       const r = state.inventory.get(p[0]);
-      return result(r ? [{ bulk_price_zar: r.bulk_price_zar, bulk_price_usd: r.bulk_price_usd }] : []);
+      return result(r && !r.deleted ? [{ bulk_price_zar: r.bulk_price_zar, bulk_price_usd: r.bulk_price_usd }] : []);
+    }
+    if (/^SELECT COALESCE\(.+\) AS part_number FROM inventory i WHERE i\.serial_number = \$1$/.test(sql)) {
+      const r = state.inventory.get(p[0]);
+      return result(r ? [{ part_number: partsOf(r).partNumber }] : []);
+    }
+    if (/^SELECT i\.bulk_price_zar, i\.bulk_price_usd, COALESCE\(.+\) AS part_number FROM inventory i WHERE i\.serial_number = \$1 AND i\.deleted IS NOT TRUE$/.test(sql)) {
+      const r = state.inventory.get(p[0]);
+      return result(r && !r.deleted ? [{ bulk_price_zar: r.bulk_price_zar, bulk_price_usd: r.bulk_price_usd, part_number: partsOf(r).partNumber }] : []);
     }
     if (sql === 'UPDATE inventory SET bulk_price_zar = $1, bulk_price_usd = $2 WHERE serial_number = $3') {
       const r = state.inventory.get(p[2])!;
       Object.assign(r, { bulk_price_zar: p[0], bulk_price_usd: p[1] });
+      return result([], 1);
+    }
+    // The review's problem list: items, their status, and their latest result.
+    if (sql.includes('FROM inventory i JOIN bulk_price_status s ON s.serial_number = i.serial_number LEFT JOIN LATERAL')) {
+      const byKind = sql.includes('AND s.last_status = $1') ? p[0] : null;
+      const bySerial = sql.includes('AND i.serial_number = $1') ? p[0] : null;
+      const order: Record<string, number> = { flagged: 0, no_price: 1, failed: 2 };
+      const rows = [...state.inventory.entries()]
+        .filter(([sn, r]) => {
+          const s = state.status.get(sn);
+          return !r.deleted && s && !s.excluded && s.last_status in order && (!byKind || s.last_status === byKind) && (!bySerial || sn === bySerial);
+        })
+        .sort(([a], [b]) => order[state.status.get(a)!.last_status] - order[state.status.get(b)!.last_status] || a.localeCompare(b))
+        .map(([sn, r]) => {
+          const s = state.status.get(sn)!;
+          const h = latestHistory(sn)[0];
+          const { partNumber, lcscCode } = partsOf(r);
+          return {
+            serial_number: sn, name: r.name ?? null, part_number: partNumber, lcsc_code: lcscCode, bulk_price_zar: r.bulk_price_zar, bulk_price_usd: r.bulk_price_usd,
+            last_status: s.last_status, last_error: s.last_error ?? null, last_attempt_at: s.last_attempt_at ?? null,
+            history_id: h?.id ?? null, result_status: h?.status ?? null, result_at: h?.created_at ?? null, run_id: h?.run_id ?? null, dry_run: h?.dry_run ?? null,
+            decided_by: h?.decided_by ?? null, provider: h?.provider ?? null, matched_part: h?.matched_part ?? null,
+            new_price_zar: h?.new_price_zar ?? null, new_price_usd: h?.new_price_usd ?? null, result_error: h?.error ?? null, offers: h?.offers ?? null,
+          };
+        });
+      return result(rows);
+    }
+    if (sql.startsWith('SELECT s.last_status, COUNT(*)::int AS n FROM bulk_price_status s JOIN inventory i')) {
+      const counts = new Map<string, number>();
+      for (const [sn, s] of state.status) {
+        const r = state.inventory.get(sn);
+        if (r && !r.deleted && !s.excluded && ['flagged', 'no_price', 'failed'].includes(s.last_status)) counts.set(s.last_status, (counts.get(s.last_status) ?? 0) + 1);
+      }
+      return result([...counts].map(([last_status, n]) => ({ last_status, n })));
+    }
+    if (sql.startsWith('INSERT INTO bulk_price_status (serial_number, last_attempt_at, last_success_at, last_run_id, last_source, last_status, last_old_price_zar, last_new_price_zar, last_error) VALUES ($1, now(), now(), NULL, \'manual\', $2, $3, $4, NULL)')) {
+      // A review decision.
+      const [sn, status, oldZar, newZar, changed] = p;
+      const prev = state.status.get(sn);
+      state.status.set(sn, {
+        ...prev,
+        last_attempt_at: now, last_success_at: now, last_run_id: null, last_source: 'manual', last_status: status,
+        last_old_price_zar: !prev || changed ? oldZar : prev.last_old_price_zar,
+        last_new_price_zar: !prev || changed ? newZar : prev.last_new_price_zar,
+        last_error: null,
+      });
+      return result([], 1);
+    }
+    if (sql.startsWith('INSERT INTO bulk_price_status (serial_number, excluded, excluded_by, excluded_at)')) {
+      const [sn, excluded, by] = p;
+      state.status.set(sn, { ...(state.status.get(sn) ?? {}), excluded, excluded_by: by, excluded_at: now });
       return result([], 1);
     }
     if (sql.startsWith('INSERT INTO bulk_price_status')) {

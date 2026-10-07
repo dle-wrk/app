@@ -199,6 +199,16 @@ export async function ensureBulkPricingSchema(run: (sql: string) => Promise<unkn
     last_new_price_zar NUMERIC(18,4),
     last_error TEXT
   )`);
+
+  // Added for the problem review (2026-10-07):
+  //  - offers: every supplier's answer for the result (QuoteAnswer[]), to compare;
+  //  - decided_by: who approved, rejected or set a price by hand;
+  //  - excluded: an item left out of bulk pricing on purpose (e.g. made in-house).
+  await run(`ALTER TABLE bulk_price_history ADD COLUMN IF NOT EXISTS offers JSONB`);
+  await run(`ALTER TABLE bulk_price_history ADD COLUMN IF NOT EXISTS decided_by TEXT`);
+  await run(`ALTER TABLE bulk_price_status ADD COLUMN IF NOT EXISTS excluded BOOLEAN NOT NULL DEFAULT FALSE`);
+  await run(`ALTER TABLE bulk_price_status ADD COLUMN IF NOT EXISTS excluded_by TEXT`);
+  await run(`ALTER TABLE bulk_price_status ADD COLUMN IF NOT EXISTS excluded_at TIMESTAMPTZ`);
 }
 
 // ---------------------------------------------------------------------------
@@ -304,18 +314,19 @@ export async function selectItems(
       params = [options.serialNumbers ?? []];
       order = 'i.serial_number';
       break;
+    // Items excluded from bulk pricing are left out of every scope but 'selected'.
     case 'due':
-      where = `${PART_NUMBER_SQL} IS NOT NULL AND ${DUE_SQL}`;
+      where = `${PART_NUMBER_SQL} IS NOT NULL AND s.excluded IS NOT TRUE AND ${DUE_SQL}`;
       params = [settings.autoThresholdDays, settings.retryFailedAfterDays];
       order = 's.last_success_at ASC NULLS FIRST, i.serial_number';
       break;
     case 'missing':
-      where = `${PART_NUMBER_SQL} IS NOT NULL AND ${missingPriceSql('i.bulk_price_zar')}`;
+      where = `${PART_NUMBER_SQL} IS NOT NULL AND s.excluded IS NOT TRUE AND ${missingPriceSql('i.bulk_price_zar')}`;
       params = [];
       order = 'i.serial_number';
       break;
     case 'all':
-      where = `${PART_NUMBER_SQL} IS NOT NULL`;
+      where = `${PART_NUMBER_SQL} IS NOT NULL AND s.excluded IS NOT TRUE`;
       params = [];
       order = 'i.serial_number';
       break;
@@ -360,6 +371,55 @@ export type OfferChoice =
   | { kind: 'offer'; offer: Offer }
   | { kind: 'flagged'; offer: Offer; reason: string }
   | { kind: 'no_price'; reason: string; transient: boolean; quotaExhausted: boolean };
+
+/** One supplier's answer, as kept with each result so a person can compare them. */
+export interface QuoteAnswer {
+  provider: string;
+  matchedPart: string | null;
+  manufacturer: string | null;
+  /** The price as quoted, in `currency`; null when the supplier gave none. */
+  nativePrice: number | null;
+  currency: string | null;
+  /** The price converted at the stored rates; null when it can't be. */
+  zar: number | null;
+  usd: number | null;
+  stock: number | null;
+  breakQty: number | null;
+  url: string | null;
+  /** Why there is no usable price, if there isn't. */
+  error: string | null;
+}
+
+const numberOrNull = (v: unknown): number | null => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
+
+/** Every supplier's answer in a quote, converted like chooseOffer converts them. */
+export function summariseQuote(quote: PartQuote, fx: Fx): QuoteAnswer[] {
+  const answers: QuoteAnswer[] = [];
+  for (const provider of OFFER_PROVIDERS) {
+    const raw = quote?.[provider];
+    if (!raw) continue;
+    const price = Number(raw.unitPrice);
+    const priced = Number.isFinite(price) && price > 0;
+    const currency = priced ? normaliseCurrency(raw.currency) : null;
+    const rate = currency === 'ZAR' ? 1 : currency ? fx.ratesToZar[currency] : NaN;
+    const convertible = priced && Number.isFinite(rate) && rate > 0 && !!fx.usdToZar;
+    const zar = convertible ? price * rate : null;
+    answers.push({
+      provider,
+      matchedPart: raw.partNumber ?? null,
+      manufacturer: raw.manufacturer ?? null,
+      nativePrice: priced ? price : null,
+      currency,
+      zar: zar === null ? null : Number(zar.toFixed(4)),
+      usd: zar === null ? null : Number((zar / (fx.usdToZar as number)).toFixed(4)),
+      stock: numberOrNull(raw.stock),
+      breakQty: numberOrNull(raw.breakQuantity),
+      url: raw.productUrl ?? null,
+      error: priced ? (convertible ? null : `Quoted in ${currency}, which has no stored exchange rate`) : String(raw.error ?? 'No price given'),
+    });
+  }
+  return answers;
+}
 
 const OFFER_PROVIDERS = ['digikey', 'mouser', 'lcsc', 'nexar', 'element14', 'tme'];
 const TRANSIENT_ERROR = /fetch failed|timed? ?out|timeout|ETIMEDOUT|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|socket hang up|network|\b5\d\d\b|Service Unavailable|Bad Gateway|Too Many Requests|\b429\b/i;
@@ -461,7 +521,7 @@ const samePrice = (a: number | null, b: number | null) => a !== null && b !== nu
 export async function applyItemResult(
   client: Pick<PoolClient, 'query'>,
   item: PricingItem,
-  choice: OfferChoice | { kind: 'skipped' | 'failed'; reason: string },
+  choice: (OfferChoice | { kind: 'skipped' | 'failed'; reason: string }) & { answers?: QuoteAnswer[] },
   ctx: RunContext,
 ): Promise<ItemResult> {
   await client.query('BEGIN');
@@ -513,13 +573,15 @@ export async function applyItemResult(
       }
     }
 
+    // Every supplier's answer goes with the result, for the review to compare.
+    const answers = 'answers' in choice && choice.answers ? JSON.stringify(choice.answers) : null;
     await client.query(
       `INSERT INTO bulk_price_history (run_id, serial_number, part_number, source, dry_run, status,
-         old_price_zar, new_price_zar, old_price_usd, new_price_usd, provider, matched_part, native_price, native_currency, qty, error)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+         old_price_zar, new_price_zar, old_price_usd, new_price_usd, provider, matched_part, native_price, native_currency, qty, error, offers)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17::jsonb)`,
       [ctx.runId, item.serialNumber, item.partNumber, ctx.source, ctx.dryRun, result.status,
         result.oldPriceZar, result.newPriceZar, result.oldPriceUsd, result.newPriceUsd,
-        result.provider, offer?.matchedPart ?? null, offer?.nativePrice ?? null, offer?.currency ?? null, ctx.qty, result.reason]
+        result.provider, offer?.matchedPart ?? null, offer?.nativePrice ?? null, offer?.currency ?? null, ctx.qty, result.reason, answers]
     );
 
     // A dry run changes nothing that matters later. A skip (no part number,
@@ -608,8 +670,11 @@ export interface EngineDeps {
   connect: () => Promise<Pick<PoolClient, 'query' | 'release'>>;
   query: (text: string, params?: any[]) => Promise<{ rows: any[]; rowCount: number }>;
   sleep: (ms: number) => Promise<void>;
-  /** Tells open browser tabs that inventory changed, so they reload it. */
-  notifyChanged: () => Promise<void>;
+  /**
+   * Tells open browser tabs what changed, so they reload it: 'inventory' when
+   * prices changed, 'bulk_pricing' when runs, results or decisions did.
+   */
+  notifyChanged: (keys: Array<'inventory' | 'bulk_pricing'>) => Promise<void>;
 }
 
 export const defaultEngineDeps: EngineDeps = {
@@ -620,7 +685,7 @@ export const defaultEngineDeps: EngineDeps = {
   connect: () => pool.connect(),
   query: (text, params) => query(text, params),
   sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
-  notifyChanged: () => bumpDataVersion('inventory'),
+  notifyChanged: async (keys) => { for (const key of keys) await bumpDataVersion(key); },
 };
 
 /** How long a run may go without a heartbeat before it counts as abandoned. */
@@ -694,15 +759,17 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
 }
 
 /** Quotes one item, retrying when every supplier failed for a transient reason. */
-async function quoteItem(item: PricingItem, qty: number, settings: BulkPricingSettings, fx: Fx, deps: EngineDeps): Promise<OfferChoice | { kind: 'failed'; reason: string }> {
+type QuotedChoice = (OfferChoice | { kind: 'failed'; reason: string }) & { answers?: QuoteAnswer[] };
+
+async function quoteItem(item: PricingItem, qty: number, settings: BulkPricingSettings, fx: Fx, deps: EngineDeps,
   // Supplier answers are cached for 30 days; an item due for re-pricing
   // (default 35 days) is older than that, so it is asked afresh.
-  const maxAgeMs = 30 * 24 * 60 * 60 * 1000;
-  let last: OfferChoice | { kind: 'failed'; reason: string } = { kind: 'failed', reason: 'Not attempted' };
+  maxAgeMs = 30 * 24 * 60 * 60 * 1000): Promise<QuotedChoice> {
+  let last: QuotedChoice = { kind: 'failed', reason: 'Not attempted' };
   for (let attempt = 1; attempt <= QUOTE_ATTEMPTS; attempt++) {
     try {
       const quote = await withTimeout(deps.quote(item.partNumber as string, qty, maxAgeMs, item.lcscCode ?? null), QUOTE_TIMEOUT_MS, 'the suppliers did not answer within 2 minutes');
-      last = chooseOffer(quote, fx, settings.suspiciousAboveUsd);
+      last = { ...chooseOffer(quote, fx, settings.suspiciousAboveUsd), answers: summariseQuote(quote, fx) };
       if (last.kind !== 'no_price' || !last.transient) return last;
     } catch (err: any) {
       last = { kind: 'failed', reason: `Supplier lookup failed: ${err?.message || err}` };
@@ -780,7 +847,7 @@ export async function processRun(runId: number, options: RunOptions, deps: Engin
          unchanged = $6, flagged = $7, no_price = $8, skipped = $9, failed = $10, error = $11, note = $12 WHERE id = $1`,
       [runId, status, counts.total, counts.checked, counts.updated, counts.unchanged, counts.flagged, counts.noPrice, counts.skipped, counts.failed, error, note]
     ).catch((err) => console.error(`[BULK PRICING] run #${runId}: could not record the result:`, err.message));
-    if (counts.updated > 0 && !dryRun) await deps.notifyChanged().catch(() => {});
+    await deps.notifyChanged(counts.updated > 0 && !dryRun ? ['bulk_pricing', 'inventory'] : ['bulk_pricing']).catch(() => {});
     return { runId, trigger: options.trigger, scope: options.scope, dryRun, qty, status, error, note, ...counts, reasons: groupReasons(items), items };
   };
 
@@ -790,6 +857,8 @@ export async function processRun(runId: number, options: RunOptions, deps: Engin
     deps.query(`UPDATE bulk_pricing_runs SET heartbeat_at = now() WHERE id = $1 AND status = 'running'`, [runId]).catch(() => {});
   }, HEARTBEAT_MS);
   (heartbeat as any)?.unref?.();
+  // So other people's Bulk Pricing pages show the run as it starts.
+  void deps.notifyChanged(['bulk_pricing']).catch(() => {});
 
   try {
     settings = await deps.readSettings();

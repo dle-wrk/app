@@ -77,6 +77,8 @@ function mapHistory(r: any) {
     nativeCurrency: r.native_currency ?? null,
     qty: r.qty === null || r.qty === undefined ? null : int(r.qty),
     reason: r.error ?? null,
+    /** Who approved, rejected, set or re-checked it (review decisions only). */
+    decidedBy: r.decided_by ?? null,
     at: iso(r.created_at),
   };
 }
@@ -86,11 +88,13 @@ function mapHistory(r: any) {
 const PROBLEM_STATUSES = `('failed', 'no_price', 'flagged')`;
 export const STATUS_FILTERS: Record<string, string> = {
   all: 'TRUE',
-  due: `s.part_number IS NOT NULL AND ${DUE_SQL}`,
-  problems: `s.last_status IN ${PROBLEM_STATUSES}`,
-  never: `s.part_number IS NOT NULL AND s.last_success_at IS NULL`,
-  missing: `s.part_number IS NOT NULL AND ${missingPriceSql('s.bulk_price_zar')}`,
+  // An excluded item is left out of bulk pricing on purpose: not due, not a problem.
+  due: `s.part_number IS NOT NULL AND s.excluded IS NOT TRUE AND ${DUE_SQL}`,
+  problems: `s.excluded IS NOT TRUE AND s.last_status IN ${PROBLEM_STATUSES}`,
+  never: `s.part_number IS NOT NULL AND s.excluded IS NOT TRUE AND s.last_success_at IS NULL`,
+  missing: `s.part_number IS NOT NULL AND s.excluded IS NOT TRUE AND ${missingPriceSql('s.bulk_price_zar')}`,
   no_part_number: `s.part_number IS NULL`,
+  excluded: `s.excluded IS TRUE`,
 };
 export const STATUS_SORTS: Record<string, string> = {
   oldest: 's.last_success_at ASC NULLS FIRST, s.serial_number',
@@ -103,7 +107,7 @@ export const STATUS_SORTS: Record<string, string> = {
 const STATUS_BASE = `WITH s AS (
   SELECT i.serial_number, i.name, ${PART_NUMBER_SQL} AS part_number, ${LCSC_CODE_SQL} AS lcsc_code, i.bulk_price_zar, i.bulk_price_usd,
          st.last_attempt_at, st.last_success_at, st.last_run_id, st.last_source, st.last_status,
-         st.last_old_price_zar, st.last_new_price_zar, st.last_error
+         st.last_old_price_zar, st.last_new_price_zar, st.last_error, st.excluded, st.excluded_by
     FROM inventory i LEFT JOIN bulk_price_status st ON st.serial_number = i.serial_number
    WHERE i.deleted IS NOT TRUE
 )`;
@@ -233,7 +237,8 @@ export function registerBulkPricingRoutes(app: Express, deps: EngineDeps = defau
                 COUNT(*) FILTER (WHERE ${STATUS_FILTERS.problems}) AS problems,
                 COUNT(*) FILTER (WHERE ${STATUS_FILTERS.never}) AS never,
                 COUNT(*) FILTER (WHERE ${STATUS_FILTERS.missing}) AS missing,
-                COUNT(*) FILTER (WHERE ${STATUS_FILTERS.no_part_number}) AS no_part_number
+                COUNT(*) FILTER (WHERE ${STATUS_FILTERS.no_part_number}) AS no_part_number,
+                COUNT(*) FILTER (WHERE ${STATUS_FILTERS.excluded}) AS excluded
            FROM s`,
         dueParams
       );
@@ -262,9 +267,11 @@ export function registerBulkPricingRoutes(app: Express, deps: EngineDeps = defau
           lastOldPriceZar: priceOrNull(r.last_old_price_zar),
           lastNewPriceZar: priceOrNull(r.last_new_price_zar),
           lastError: r.last_error ?? null,
+          excluded: r.excluded === true,
+          excludedBy: r.excluded_by ?? null,
           due,
           /** When a priceable item that isn't due yet becomes due. */
-          nextDueAt: r.part_number && !due ? iso(nextDueAt(status, now, settings)) : null,
+          nextDueAt: r.part_number && !due && r.excluded !== true ? iso(nextDueAt(status, now, settings)) : null,
         };
       });
       const c = countRows[0] ?? {};
@@ -274,7 +281,7 @@ export function registerBulkPricingRoutes(app: Express, deps: EngineDeps = defau
         total: rows.length ? int(rows[0].total_count) : 0,
         limit,
         offset,
-        counts: { all: int(c.all_items), due: int(c.due), problems: int(c.problems), never: int(c.never), missing: int(c.missing), noPartNumber: int(c.no_part_number) },
+        counts: { all: int(c.all_items), due: int(c.due), problems: int(c.problems), never: int(c.never), missing: int(c.missing), noPartNumber: int(c.no_part_number), excluded: int(c.excluded) },
         settings,
         warnings: (() => { const p = parseSettings(settings); return 'warnings' in p ? p.warnings : []; })(),
         nextAutoRunAt: settings.autoEnabled ? nextAutoRunAt(now).toISOString() : null,
@@ -294,7 +301,7 @@ export function registerBulkPricingRoutes(app: Express, deps: EngineDeps = defau
       const { rows } = await deps.query(
         `SELECT h.id, h.run_id, h.serial_number, h.part_number, h.source, h.dry_run, h.status,
                 h.old_price_zar, h.new_price_zar, h.old_price_usd, h.new_price_usd, h.provider, h.matched_part,
-                h.native_price, h.native_currency, h.qty, h.error, h.created_at
+                h.native_price, h.native_currency, h.qty, h.error, h.decided_by, h.created_at
            FROM bulk_price_history h
           WHERE h.serial_number = $1 AND h.dry_run = FALSE
           ORDER BY h.created_at DESC, h.id DESC

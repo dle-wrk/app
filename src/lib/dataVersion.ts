@@ -31,6 +31,7 @@ export const DATA_KEYS = [
   'production_kits', // kit-booking saved kits
   'bom',             // BOM lines
   'pick_place',      // PP items
+  'bulk_pricing',    // bulk pricing runs, results and review decisions (pages reload their own lists)
 ] as const;
 
 export type DataKey = typeof DATA_KEYS[number] | string;

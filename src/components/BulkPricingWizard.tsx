@@ -16,9 +16,13 @@ import { confirmDialog } from '../lib/confirmDialog';
 import { fmtCurrency, fmtNumber } from '../lib/formatMoney';
 import { DangerButton, FieldLabel, PrimaryButton, SecondaryButton, inputClass, isAdminUser, selectClass } from './bookkeeping/shared';
 import { currentUserCan, notAllowedMessage } from '../lib/permissions';
+import { useDataChanged } from '../lib/liveUpdates';
+import BulkPricingReview from './BulkPricingReview';
 
 type Scope = 'due' | 'missing' | 'all' | 'selected';
-type ItemStatus = 'updated' | 'unchanged' | 'flagged' | 'no_price' | 'skipped' | 'failed';
+type ItemStatus = 'updated' | 'unchanged' | 'flagged' | 'no_price' | 'skipped' | 'failed'
+  // decisions taken in the problem review
+  | 'approved' | 'manual' | 'rejected' | 'excluded' | 'included';
 type ToastType = 'SUCCESS' | 'ERROR' | 'INFO';
 
 export interface BulkPricingSettings {
@@ -73,6 +77,8 @@ interface RunItem {
   nativePrice: number | null;
   nativeCurrency: string | null;
   reason: string | null;
+  /** Who decided it, for review decisions. */
+  decidedBy?: string | null;
   at: string | null;
 }
 
@@ -95,11 +101,14 @@ interface StatusItem {
   lastOldPriceZar: number | null;
   lastNewPriceZar: number | null;
   lastError: string | null;
+  /** Left out of bulk pricing on purpose. */
+  excluded?: boolean;
+  excludedBy?: string | null;
   due: boolean;
   nextDueAt: string | null;
 }
 
-interface StatusCounts { all: number; due: number; problems: number; never: number; missing: number; noPartNumber: number }
+interface StatusCounts { all: number; due: number; problems: number; never: number; missing: number; noPartNumber: number; excluded?: number }
 
 interface StatusResponse {
   items: StatusItem[];
@@ -122,6 +131,8 @@ interface BulkPricingWizardProps {
   pollIntervalMs?: number;
   /** Opens the part-number review. */
   onReviewPartNumbers?: () => void;
+  /** Opens an item's detail (from the problem review). */
+  onOpenItem?: (serialNumber: string) => void;
 }
 
 const PAGE_SIZE = 100;
@@ -142,6 +153,7 @@ const FILTERS: Array<{ value: string; label: string; count: (c: StatusCounts) =>
   { value: 'never', label: 'Never priced', count: (c) => c.never },
   { value: 'missing', label: 'No bulk price', count: (c) => c.missing },
   { value: 'no_part_number', label: 'No part number', count: (c) => c.noPartNumber },
+  { value: 'excluded', label: 'Left out', count: (c) => c.excluded ?? 0 },
 ];
 
 const SORTS = [
@@ -163,6 +175,11 @@ const ITEM_STATUS: Record<ItemStatus, { label: string; className: string }> = {
   no_price: { label: 'No price', className: AMBER },
   skipped: { label: 'Skipped', className: NEUTRAL },
   failed: { label: 'Failed', className: RED },
+  approved: { label: 'Approved', className: GREEN },
+  manual: { label: 'Set by hand', className: GREEN },
+  rejected: { label: 'Kept current price', className: NEUTRAL },
+  excluded: { label: 'Left out', className: NEUTRAL },
+  included: { label: 'Put back', className: NEUTRAL },
 };
 
 const RUN_STATUS: Record<string, { label: string; className: string }> = {
@@ -206,6 +223,7 @@ function ago(iso: string): string {
 }
 
 function dueText(item: StatusItem): string {
+  if (item.excluded) return 'Left out of bulk pricing';
   if (!item.partNumber) return 'No part number';
   if (item.due || !item.nextDueAt) return 'Due now';
   const days = Math.ceil((Date.parse(item.nextDueAt) - Date.now()) / DAY_MS);
@@ -247,7 +265,7 @@ function toDraft(s: BulkPricingSettings) {
 
 // ---------------------------------------------------------------------------
 
-export default function BulkPricingWizard({ onShowNotification, onPricesUpdated, pollIntervalMs = 2000, onReviewPartNumbers }: BulkPricingWizardProps) {
+export default function BulkPricingWizard({ onShowNotification, onPricesUpdated, pollIntervalMs = 2000, onReviewPartNumbers, onOpenItem }: BulkPricingWizardProps) {
   const isAdmin = isAdminUser();
   // Starting and stopping runs changes prices; the server checks this too.
   const canRun = currentUserCan('inventory.update');
@@ -278,6 +296,8 @@ export default function BulkPricingWizard({ onShowNotification, onPricesUpdated,
   const [pollNonce, setPollNonce] = useState(0);
   // The run whose end this page reports (one it started, or found running).
   const watched = useRef<number | null>(null);
+  // Bumped to make the problem review reload.
+  const [reviewKey, setReviewKey] = useState(0);
 
   // Settings
   const [showSettings, setShowSettings] = useState(false);
@@ -328,6 +348,13 @@ export default function BulkPricingWizard({ onShowNotification, onPricesUpdated,
     setRunError(null);
   }, []);
 
+  // Someone else (or the automatic run) changed bulk pricing or prices: reload.
+  useDataChanged(['bulk_pricing', 'inventory'], () => {
+    void loadStatus();
+    void loadRuns();
+    setReviewKey((k) => k + 1);
+  });
+
   // A run already in progress (started elsewhere, or before a reload).
   const runningId = status?.running?.id ?? null;
   useEffect(() => {
@@ -350,6 +377,7 @@ export default function BulkPricingWizard({ onShowNotification, onPricesUpdated,
     const r = d.run;
     void loadStatus();
     void loadRuns();
+    setReviewKey((k) => k + 1);
     if (!r.dryRun && r.updated > 0) onPricesUpdated?.();
     const what = r.dryRun ? `Preview #${r.id}` : `Run #${r.id}`;
     if (r.status === 'failed') {
@@ -455,6 +483,17 @@ export default function BulkPricingWizard({ onShowNotification, onPricesUpdated,
       onShowNotification(`Could not stop the run: ${err?.message || err}`, 'ERROR');
     }
     setPollNonce((n) => n + 1);
+  };
+
+  // An item left out of bulk pricing goes back in (the problem review leaves items out).
+  const putBack = async (serial: string) => {
+    try {
+      const { ok, data } = await sendJson<{ excluded: boolean }>('POST', `/api/pricing/bulk-review/${encodeURIComponent(serial)}/exclude`, { excluded: false });
+      onShowNotification(ok ? `${serial} is back in bulk pricing.` : data.error || 'Could not put it back.', ok ? 'SUCCESS' : 'ERROR');
+      if (ok) { void loadStatus(); setReviewKey((k) => k + 1); }
+    } catch (err: any) {
+      onShowNotification(`Could not put it back: ${err?.message || err}`, 'ERROR');
+    }
   };
 
   const openRun = (run: Run) => {
@@ -716,6 +755,17 @@ export default function BulkPricingWizard({ onShowNotification, onPricesUpdated,
         </div>
       )}
 
+      {/* Items whose last result needs a person: compare, approve, keep, set, exclude */}
+      <BulkPricingReview
+        onShowNotification={onShowNotification}
+        onOpenItem={onOpenItem}
+        refreshKey={reviewKey}
+        onDecided={(priceChanged) => {
+          void loadStatus();
+          if (priceChanged) onPricesUpdated?.();
+        }}
+      />
+
       {/* The log: when each item was last bulk priced */}
       <div className="bg-surface-container rounded-xl border border-outline-variant overflow-hidden">
         <div className="px-lg py-sm border-b border-outline-variant bg-surface-container-high/30 flex flex-wrap items-center justify-between gap-sm">
@@ -840,10 +890,13 @@ export default function BulkPricingWizard({ onShowNotification, onPricesUpdated,
                         : <span className="text-outline">—</span>}
                     </td>
                     <td className="px-md py-sm whitespace-nowrap">
-                      <span className={item.partNumber && (item.due || !item.nextDueAt) ? 'text-primary font-bold' : 'text-on-surface-variant'}
-                        title={item.nextDueAt ? fmtWhen(item.nextDueAt) : undefined}>
+                      <span className={item.partNumber && !item.excluded && (item.due || !item.nextDueAt) ? 'text-primary font-bold' : 'text-on-surface-variant'}
+                        title={item.excluded ? (item.excludedBy ? `Left out by ${item.excludedBy}` : undefined) : item.nextDueAt ? fmtWhen(item.nextDueAt) : undefined}>
                         {dueText(item)}
                       </span>
+                      {item.excluded && canRun && (
+                        <button type="button" onClick={() => void putBack(item.serialNumber)} className="block text-[10px] text-primary hover:underline">Put back</button>
+                      )}
                     </td>
                     <td className="px-md py-sm text-right">
                       <button type="button" onClick={() => toggleHistory(item.serialNumber)} aria-expanded={historyFor === item.serialNumber}
@@ -1067,7 +1120,9 @@ const ItemHistory: React.FC<{
             {history.rows.map((h) => (
               <tr key={h.id}>
                 <td className="py-1 pr-md whitespace-nowrap">{fmtWhen(h.at)}</td>
-                <td className="py-1 pr-md whitespace-nowrap text-on-surface-variant">{h.runId ? `#${h.runId}` : '—'} · {h.source === 'auto' ? 'automatic' : 'manual'}</td>
+                <td className="py-1 pr-md whitespace-nowrap text-on-surface-variant">
+                  {h.runId ? `#${h.runId} · ${h.source === 'auto' ? 'automatic' : 'manual'}` : h.decidedBy ? `review · ${h.decidedBy}` : h.source === 'auto' ? 'automatic' : 'manual'}
+                </td>
                 <td className="py-1 pr-md"><ItemPill status={h.status} /></td>
                 <td className="py-1 pr-md text-right font-mono whitespace-nowrap">{fmtZar(h.oldPriceZar)}</td>
                 <td className="py-1 pr-md text-right font-mono whitespace-nowrap">{h.newPriceZar !== null ? fmtZar(h.newPriceZar) : '—'}</td>

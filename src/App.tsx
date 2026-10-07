@@ -25,6 +25,7 @@ import { ITEM_CATEGORIES } from './lib/itemCategories';
 import { CategoryCombobox } from './components/CategoryCombobox';
 import { SupplierBOMGeneratorView } from './components/views/SupplierBOMGeneratorView';
 import { mapDbRowsToItems, mapItemToPayload } from './lib/mapDbItem';
+import { announceDataChanged, changedKeys, needsFullReload, useNewVersion } from './lib/liveUpdates';
 import { mapDbRowsToTransactions, formatTrxDateTime } from './lib/mapDbTransaction';
 import PickPlaceManager from './components/PickPlaceManager';
 import AlternatesManager from './components/AlternatesManager';
@@ -438,6 +439,11 @@ export default function App() {
   //
   // First tick just captures the baseline — otherwise the initial
   // mount would immediately trigger a duplicate bootstrap.
+  //
+  // The changed keys are also announced (src/lib/liveUpdates.ts) so sections
+  // with their own lists, such as Bulk Pricing, reload them; keys only those
+  // sections show don't trigger the full reload. The tab also checks as soon
+  // as it comes back into view, rather than up to 25s later.
   const lastDataVersions = useRef<Record<string, number> | null>(null);
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -452,11 +458,11 @@ export default function App() {
           lastDataVersions.current = next;
           return;
         }
-        const prev = lastDataVersions.current;
-        const moved = Object.keys(next).some(k => (next[k] ?? 0) !== (prev[k] ?? 0));
-        if (moved) {
+        const moved = changedKeys(lastDataVersions.current, next);
+        if (moved.length) {
           lastDataVersions.current = next;
-          if (typeof loadFromAPIRef.current === 'function') {
+          announceDataChanged(moved);
+          if (needsFullReload(moved) && typeof loadFromAPIRef.current === 'function') {
             await loadFromAPIRef.current();
           }
         }
@@ -464,8 +470,18 @@ export default function App() {
     };
     check();
     const id = window.setInterval(check, 25_000);
-    return () => { cancelled = true; window.clearInterval(id); };
+    const onVisible = () => { if (document.visibilityState === 'visible') void check(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { cancelled = true; window.clearInterval(id); document.removeEventListener('visibilitychange', onVisible); };
   }, [isAuthenticated]);
+
+  // A newer version deployed while this tab was open: reload by itself when
+  // the tab is hidden, offer "Reload now" meanwhile, and on the sign-in
+  // screen just reload (nothing to lose there).
+  const newVersion = useNewVersion();
+  useEffect(() => {
+    if (newVersion.ready && !isAuthenticated) newVersion.reload();
+  }, [newVersion.ready, isAuthenticated]);
   // Hoisted ref so the poller effect can call the bootstrap loader
   // without needing loadFromAPI to be declared above it. Filled in
   // by the mount-time effect below.
@@ -1741,6 +1757,13 @@ export default function App() {
         colorScheme: systemConfig.visualTheme
       }}
     >
+      {newVersion.ready && (
+        <div role="status" data-testid="new-version-banner"
+          className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[60] flex flex-wrap items-center gap-3 rounded-lg border border-primary/40 bg-surface-container-high px-4 py-2 text-xs text-on-surface shadow-lg max-w-[92vw]">
+          <span>A new version of Tracklab is available. It loads by itself when you switch away from this tab.</span>
+          <button type="button" onClick={newVersion.reload} className="rounded bg-primary px-2 py-1 font-bold text-white hover:opacity-90">Reload now</button>
+        </div>
+      )}
       <CommandPalette
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}

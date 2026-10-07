@@ -511,7 +511,8 @@ export const PricingView: React.FC<PricingViewProps> = ({
 
       {/* Bulk pricing tab: runs on the server, see src/lib/bulkPricing.ts */}
       {activeTab === 'wizard' && (
-        <BulkPricingWizard onShowNotification={triggerToast} onPricesUpdated={onPricesUpdated} onReviewPartNumbers={() => setActiveTab('partnumbers')} />
+        <BulkPricingWizard onShowNotification={triggerToast} onPricesUpdated={onPricesUpdated} onReviewPartNumbers={() => setActiveTab('partnumbers')}
+          onOpenItem={setSelectedDetailPartNumber} />
       )}
 
       {/* Part-number review: src/lib/partNumberReview.ts */}

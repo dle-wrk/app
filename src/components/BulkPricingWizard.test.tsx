@@ -3,6 +3,7 @@ import { createRoot, Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import BulkPricingWizard from './BulkPricingWizard';
 import { ConfirmOptions, setConfirmHandler } from '../lib/confirmDialog';
+import { announceDataChanged } from '../lib/liveUpdates';
 
 // Drives the real Bulk pricing screen against a scripted API. A run's
 // progress is a sequence of answers to GET /api/pricing/bulk-runs/:id, so a
@@ -87,6 +88,8 @@ beforeEach(() => {
     const route = `${method} ${url.pathname}`;
     let m: RegExpMatchArray | null;
     if (route === 'GET /api/pricing/bulk-status') return reply(server.status);
+    if (route === 'GET /api/pricing/bulk-review') return reply({ entries: [], counts: { all: 0, flagged: 0, no_price: 0, failed: 0 } });
+    if (method === 'POST' && /^\/api\/pricing\/bulk-review\/[^/]+\/exclude$/.test(url.pathname)) return reply({ serialNumber: decodeURIComponent(url.pathname.split('/')[4]), excluded: false });
     if (route === 'GET /api/pricing/bulk-runs') return reply({ runs: server.runs });
     if (route === 'POST /api/pricing/bulk-runs') return reply(server.start.body, server.start.status);
     if (route === 'PUT /api/pricing/bulk-settings') return reply(server.put.body, server.put.status);
@@ -214,6 +217,32 @@ describe('the log', () => {
     const rows = Array.from(history.querySelector('table')!.tBodies[0].rows).map((r) => text(r));
     expect(rows[0]).toMatch(/#3 · automatic.*Updated.*R0\.0700.*R0\.0693.*lcsc/);
     expect(rows[1]).toMatch(/#1 · manual.*No price.*R0\.0700.*—.*No price found/);
+  });
+
+  it('reloads in the background when bulk pricing changes elsewhere', async () => {
+    await render();
+    const before = statusCalls().length;
+
+    await act(async () => { announceDataChanged(['bulk_pricing']); });
+    await settle();
+
+    expect(statusCalls().length).toBe(before + 1);
+    expect(calls.filter((c) => c.path === '/api/pricing/bulk-review').length).toBeGreaterThanOrEqual(2);
+    await act(async () => { announceDataChanged(['clients']); });
+    await settle();
+    expect(statusCalls().length).toBe(before + 1);
+  });
+
+  it('shows an item left out of bulk pricing, and puts it back', async () => {
+    server.status = statusReply({ items: [{ ...ITEMS[0], excluded: true, excludedBy: 'admin@example.com', due: false, nextDueAt: null }] });
+    await render();
+
+    expect(text(row('CAP-001'))).toContain('Left out of bulk pricing');
+    expect(button(/^Left out \(/)).toBeTruthy();
+    await click(button('Put back')!);
+
+    expect(calls.some((c) => c.method === 'POST' && c.path === '/api/pricing/bulk-review/CAP-001/exclude' && c.body?.excluded === false)).toBe(true);
+    expect(toast).toHaveBeenCalledWith('CAP-001 is back in bulk pricing.', 'SUCCESS');
   });
 
   it('warns when history would not cover a re-price cycle', async () => {

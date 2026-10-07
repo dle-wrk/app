@@ -48,7 +48,7 @@ const deps: EngineDeps = {
   connect: async () => ({ query: (t: string, p?: any[]) => db.run(t, p), release: () => {} }) as any,
   query: (t, p) => db.run(t, p),
   sleep: async () => {},
-  notifyChanged: async () => { notified += 1; },
+  notifyChanged: async (keys) => { if (keys.includes('inventory')) notified += 1; },
 };
 
 let server: Server;
@@ -300,7 +300,7 @@ describe('GET /api/pricing/bulk-status', () => {
 
   it('refuses an unknown filter or sort', async () => {
     expect(await call('GET', '/api/pricing/bulk-status?filter=late'))
-      .toEqual({ status: 400, body: { error: 'filter must be one of: all, due, problems, never, missing, no_part_number.' } });
+      .toEqual({ status: 400, body: { error: 'filter must be one of: all, due, problems, never, missing, no_part_number, excluded.' } });
     expect(await call('GET', '/api/pricing/bulk-status?sort=price'))
       .toEqual({ status: 400, body: { error: 'sort must be one of: oldest, recent, failed, code.' } });
   });

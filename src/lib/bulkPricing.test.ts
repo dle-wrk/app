@@ -15,7 +15,7 @@ vi.mock('./db', () => ({
 
 import {
   DEFAULT_SETTINGS, RunInProgressError, beginRun, chooseOffer, groupReasons, isDue, nextAutoRunAt, nextDueAt, parseSettings,
-  processRun, purgeHistory, requestStop, runAutoBulkPricing, runBulkPricing,
+  processRun, purgeHistory, requestStop, runAutoBulkPricing, runBulkPricing, summariseQuote,
   type BulkPricingSettings, type EngineDeps, type PricingItem, type RunScope, type SelectOptions,
 } from './bulkPricing';
 import { DAY, NOW, fakeDb } from './bulkPricingFakeDb';
@@ -69,7 +69,8 @@ function deps(): EngineDeps {
     connect: async () => ({ query: db.run as any, release: () => {} }),
     query: db.run as any,
     sleep: async (ms) => { sleeps.push(ms); },
-    notifyChanged: async () => { notified += 1; },
+    // Counts inventory notices (prices changed); every run also sends 'bulk_pricing'.
+    notifyChanged: async (keys) => { if (keys.includes('inventory')) notified += 1; },
   };
 }
 
@@ -130,6 +131,24 @@ describe('chooseOffer', () => {
   it('recognises a used-up daily API quota', () => {
     expect(chooseOffer(quote({ mouser: { error: 'Daily limit reached' }, digikey: { error: 'Not configured' } }) as any, FX, 50))
       .toMatchObject({ kind: 'no_price', quotaExhausted: true });
+  });
+});
+
+describe('summariseQuote', () => {
+  it("keeps every supplier's answer, converted, with why there is no price where there isn't", () => {
+    const answers = summariseQuote(quote({
+      mouser: { unitPrice: 241, currency: 'USD', partNumber: 'PASTERNACK-RF', manufacturer: 'Pasternack', stock: 12, breakQuantity: 1000, productUrl: 'https://mouser/x' },
+      lcsc: { unitPrice: 0.0064, currency: 'USD', partNumber: 'C1591', stock: '1175100' },
+      tme: { unitPrice: 1, currency: 'PLN' },
+      digikey: { error: 'DigiKey token refresh failed (401)' },
+    }) as any, FX);
+
+    expect(answers).toEqual([
+      { provider: 'digikey', matchedPart: null, manufacturer: null, nativePrice: null, currency: null, zar: null, usd: null, stock: null, breakQty: null, url: null, error: 'DigiKey token refresh failed (401)' },
+      { provider: 'mouser', matchedPart: 'PASTERNACK-RF', manufacturer: 'Pasternack', nativePrice: 241, currency: 'USD', zar: 3976.5, usd: 241, stock: 12, breakQty: 1000, url: 'https://mouser/x', error: null },
+      { provider: 'lcsc', matchedPart: 'C1591', manufacturer: null, nativePrice: 0.0064, currency: 'USD', zar: 0.1056, usd: 0.0064, stock: 1175100, breakQty: null, url: null, error: null },
+      { provider: 'tme', matchedPart: null, manufacturer: null, nativePrice: 1, currency: 'PLN', zar: null, usd: null, stock: null, breakQty: null, url: null, error: 'Quoted in PLN, which has no stored exchange rate' },
+    ]);
   });
 });
 
@@ -329,15 +348,19 @@ describe('a manual run', () => {
     expect(notified).toBe(0);
   });
 
-  it('holds back a suspicious price without writing it', async () => {
+  it('holds back a suspicious price without writing it, keeping every answer for the review', async () => {
     addItem('A', 'PN-A', '5');
-    quotes['PN-A'] = quote({ mouser: usd(241) });
+    quotes['PN-A'] = quote({ mouser: usd(241), digikey: { error: 'No match found' } });
 
     const summary = await runBulkPricing({ trigger: 'manual', scope: 'all' }, deps());
 
     expect(summary).toMatchObject({ flagged: 1, updated: 0 });
     expect(db.state.inventory.get('A')).toMatchObject({ bulk_price_zar: '5' });
     expect(db.state.status.get('A')).toMatchObject({ last_status: 'flagged', last_success_at: null });
+    expect(db.state.history[0].offers).toEqual([
+      expect.objectContaining({ provider: 'digikey', zar: null, error: 'No match found' }),
+      expect.objectContaining({ provider: 'mouser', nativePrice: 241, zar: 3976.5, usd: 241, matchedPart: 'MATCHED', error: null }),
+    ]);
   });
 
   it('skips an item with no part number, and one the API quota could not reach, leaving both due', async () => {
