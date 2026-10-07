@@ -82,6 +82,8 @@ interface StatusItem {
   serialNumber: string;
   name: string | null;
   partNumber: string | null;
+  /** The item's LCSC number, which LCSC is asked by. */
+  lcscCode?: string | null;
   bulkPriceZar: number | null;
   bulkPriceUsd: number | null;
   lastAttemptAt: string | null;
@@ -736,7 +738,7 @@ export default function BulkPricingWizard({ onShowNotification, onPricesUpdated,
               <input
                 type="search"
                 aria-label="Search items"
-                placeholder="Search stock code, name or part number"
+                placeholder="Search stock code, name, part number or LCSC number"
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 className={`${inputClass} pl-8 py-1.5 text-xs`}
@@ -796,7 +798,12 @@ export default function BulkPricingWizard({ onShowNotification, onPricesUpdated,
                       <span className="font-mono font-bold block">{item.serialNumber}</span>
                       {item.name && <span className="text-[11px] text-on-surface-variant">{item.name}</span>}
                     </td>
-                    <td className="px-md py-sm font-mono text-[11px] text-on-surface-variant">{item.partNumber ?? <span className="italic text-outline">none</span>}</td>
+                    <td className="px-md py-sm font-mono text-[11px] text-on-surface-variant">
+                      {item.partNumber ?? <span className="italic text-outline font-sans">none</span>}
+                      {item.lcscCode && item.lcscCode !== item.partNumber && (
+                        <span className="block text-[10px] text-outline" title="LCSC is asked by the item's LCSC part number">LCSC {item.lcscCode}</span>
+                      )}
+                    </td>
                     <td className="px-md py-sm text-right font-mono whitespace-nowrap">
                       <span className="block">{fmtZar(item.bulkPriceZar)}</span>
                       {item.bulkPriceUsd !== null && <span className="text-[10px] text-outline">{fmtUsdPrice(item.bulkPriceUsd)}</span>}

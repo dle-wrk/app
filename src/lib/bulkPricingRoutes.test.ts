@@ -39,7 +39,7 @@ const deps: EngineDeps = {
   readFx: async () => FX,
   selectItems: async (scope, options) => [...db.state.inventory.entries()]
     .filter(([sn]) => scope !== 'selected' || (options.serialNumbers ?? []).includes(sn))
-    .map(([sn, r]) => ({ serialNumber: sn, name: r.name, partNumber: r.man_pn_1 ?? null, bulkPriceZar: priceOrNull(r.bulk_price_zar), bulkPriceUsd: priceOrNull(r.bulk_price_usd) })),
+    .map(([sn, r]) => ({ serialNumber: sn, name: r.name, partNumber: r.man_pn_1 ?? null, lcscCode: r.lcsc_code ?? null, bulkPriceZar: priceOrNull(r.bulk_price_zar), bulkPriceUsd: priceOrNull(r.bulk_price_usd) })),
   quote: async (partNumber) => {
     quoteCalls.push(partNumber);
     if (hold) await hold;
@@ -226,7 +226,7 @@ describe('GET /api/pricing/bulk-status', () => {
   beforeEach(() => {
     db.state.canned.push(
       { test: /COUNT\(\*\) OVER \(\)/, rows: [
-        statusRow({ serial_number: 'CAP-001', name: '100nF', part_number: 'CL10B104KB8NNNC', bulk_price_zar: '0.0693', bulk_price_usd: '0.0042',
+        statusRow({ serial_number: 'CAP-001', name: '100nF', part_number: 'CL10B104KB8NNNC', lcsc_code: 'C1591', bulk_price_zar: '0.0693', bulk_price_usd: '0.0042',
           last_attempt_at: new Date(now - 40 * DAY), last_success_at: new Date(now - 40 * DAY), last_run_id: 3, last_source: 'auto', last_status: 'updated',
           last_old_price_zar: '0.0700', last_new_price_zar: '0.0693', due: true }),
         statusRow({ serial_number: 'CON-002', part_number: 'HX20007-5AWB', bulk_price_zar: '1.65',
@@ -248,7 +248,7 @@ describe('GET /api/pricing/bulk-status', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.items).toEqual([
-      expect.objectContaining({ serialNumber: 'CAP-001', name: '100nF', partNumber: 'CL10B104KB8NNNC', bulkPriceZar: 0.0693, bulkPriceUsd: 0.0042,
+      expect.objectContaining({ serialNumber: 'CAP-001', name: '100nF', partNumber: 'CL10B104KB8NNNC', lcscCode: 'C1591', bulkPriceZar: 0.0693, bulkPriceUsd: 0.0042,
         lastSuccessAt: new Date(now - 40 * DAY).toISOString(), lastStatus: 'updated', lastSource: 'auto', lastRunId: 3,
         lastOldPriceZar: 0.07, lastNewPriceZar: 0.0693, due: true, nextDueAt: null }),
       // Priced 10 days ago, last attempt failed 2 days ago: due when 35 days have passed.
@@ -276,7 +276,7 @@ describe('GET /api/pricing/bulk-status', () => {
     const i = db.state.statements.findIndex((s) => /COUNT\(\*\) OVER \(\)/.test(s));
     const sql = db.state.statements[i];
     expect(sql).toContain(`SELECT s.*, (${norm(STATUS_FILTERS.due)}) AS due,`);
-    expect(sql).toContain(`WHERE ${norm(STATUS_FILTERS.due)} AND (s.serial_number ILIKE $3 OR s.name ILIKE $3 OR s.part_number ILIKE $3)`);
+    expect(sql).toContain(`WHERE ${norm(STATUS_FILTERS.due)} AND (s.serial_number ILIKE $3 OR s.name ILIKE $3 OR s.part_number ILIKE $3 OR s.lcsc_code ILIKE $3)`);
     expect(sql).toContain(`ORDER BY ${norm(STATUS_SORTS.failed)} LIMIT $4 OFFSET $5`);
     expect(db.state.params[i]).toEqual([35, 7, '%50\\%\\_off\\\\%', 500, 40]);
   });

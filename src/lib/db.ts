@@ -226,6 +226,10 @@ async function ensurePricingTables() {
   )`);
   await exec(`ALTER TABLE lcsc_price_cache ADD COLUMN IF NOT EXISTS mpn TEXT`).catch(() => {});
   await exec(`CREATE INDEX IF NOT EXISTS lcsc_price_cache_mpn_idx ON lcsc_price_cache (mpn)`).catch(() => {});
+  // Live LCSC lookups keep the whole price ladder ({qty, price}[]), so any
+  // quantity is priced from one lookup; imported rows carry just `price`.
+  await exec(`ALTER TABLE lcsc_price_cache ADD COLUMN IF NOT EXISTS manufacturer TEXT`).catch(() => {});
+  await exec(`ALTER TABLE lcsc_price_cache ADD COLUMN IF NOT EXISTS price_breaks JSONB`).catch(() => {});
   // Rotating OAuth refresh tokens (e.g. DigiKey, which rotates on every use) live here instead
   // of .env, so a token rotation never rewrites a file the Vite dev server watches (writing to
   // .env mid-request triggers Vite's full dev-server restart, killing the in-flight response).

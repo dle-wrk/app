@@ -29,7 +29,8 @@ let sleeps: number[];
 let notified: number;
 let settings: BulkPricingSettings;
 let fx: typeof FX | { usdToZar: null; ratesToZar: Record<string, number> };
-let items: Record<string, { partNumber: string | null; name?: string }>;
+let items: Record<string, { partNumber: string | null; lcscCode?: string | null; name?: string }>;
+let lcscAsked: Array<string | null>;
 
 const usd = (unitPrice: number, partNumber = 'MATCHED') => ({ unitPrice, currency: 'USD', partNumber });
 const quote = (prices: Record<string, any>) => ({ partNumber: 'X', qty: 1000, codeFormat: 'mfn', ...prices });
@@ -46,7 +47,7 @@ async function selectFake(scope: RunScope, options: SelectOptions): Promise<Pric
   }
   if (scope === 'missing') chosen = chosen.filter((x) => !Number(x.r.bulk_price_zar));
   return chosen.slice(0, options.limit ?? 5000).map((x) => ({
-    serialNumber: x.sn, name: items[x.sn]?.name ?? null, partNumber: items[x.sn]?.partNumber ?? null,
+    serialNumber: x.sn, name: items[x.sn]?.name ?? null, partNumber: items[x.sn]?.partNumber ?? null, lcscCode: items[x.sn]?.lcscCode ?? null,
     bulkPriceZar: x.r.bulk_price_zar === null ? null : Number(x.r.bulk_price_zar),
     bulkPriceUsd: x.r.bulk_price_usd === null ? null : Number(x.r.bulk_price_usd),
   }));
@@ -57,8 +58,9 @@ function deps(): EngineDeps {
     readSettings: async () => settings,
     readFx: async () => fx as any,
     selectItems: selectFake,
-    quote: async (partNumber) => {
+    quote: async (partNumber, _qty, _maxAge, lcscCode) => {
       quoteCalls.push(partNumber);
+      lcscAsked.push(lcscCode);
       const q = quotes[partNumber];
       const value = typeof q === 'function' ? q(quoteCalls.filter((c) => c === partNumber).length) : q;
       if (value instanceof Error) throw value;
@@ -84,6 +86,7 @@ beforeEach(() => {
   db = fakeDb();
   quotes = {};
   quoteCalls = [];
+  lcscAsked = [];
   sleeps = [];
   notified = 0;
   settings = { ...DEFAULT_SETTINGS };
@@ -228,6 +231,20 @@ describe('a manual run', () => {
     expect(notified).toBe(1); // the first run only
   });
 
+  it("asks LCSC by the item's LCSC number, and takes LCSC's price when it is cheapest", async () => {
+    addItem('CAP-009', 'CL10B104KB8NNNC', '0.5');
+    items['CAP-009'].lcscCode = 'C1591';
+    addItem('CON-002', 'HX20007-5AWB');
+    quotes['CL10B104KB8NNNC'] = quote({ mouser: usd(0.01), lcsc: { unitPrice: 0.0064, currency: 'USD', partNumber: 'C1591', breakQuantity: 1000 } });
+    quotes['HX20007-5AWB'] = quote({ mouser: usd(0.1) });
+
+    await runBulkPricing({ trigger: 'manual', scope: 'all' }, deps());
+
+    expect(quoteCalls).toEqual(['CL10B104KB8NNNC', 'HX20007-5AWB']);
+    expect(lcscAsked).toEqual(['C1591', null]);
+    expect(db.state.history.find((h) => h.serial_number === 'CAP-009')).toMatchObject({ provider: 'lcsc', matched_part: 'C1591', new_price_usd: 0.0064, new_price_zar: 0.1056 });
+  });
+
   it('gives up on a supplier lookup that never answers, after three tries', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
     addItem('A', 'PN-A', '5');
@@ -332,7 +349,7 @@ describe('a manual run', () => {
 
     expect(summary).toMatchObject({ skipped: 2, failed: 0, noPrice: 0 });
     expect(summary.reasons.map((r) => r.reason)).toEqual(expect.arrayContaining([
-      'No manufacturer or supplier part number to look up.',
+      'No part number to look up: the part-number fields are empty, or hold placeholders or supplier names.',
       'Daily supplier API limit reached; it will be tried again on the next run.',
     ]));
     expect(db.state.status.size).toBe(0);

@@ -17,7 +17,7 @@
 import type { Express } from 'express';
 import { requireAdmin } from './authRoutes';
 import {
-  DEFAULT_SETTINGS, DUE_SQL, PART_NUMBER_SQL, RUN_SCOPES, STALE_RUN_MINUTES, RunInProgressError,
+  DEFAULT_SETTINGS, DUE_SQL, LCSC_CODE_SQL, PART_NUMBER_SQL, RUN_SCOPES, STALE_RUN_MINUTES, RunInProgressError,
   beginRun, defaultEngineDeps, groupReasons, missingPriceSql, nextAutoRunAt, nextDueAt, parseSettings, priceOrNull,
   processRun, requestStop, saveSettings,
   type EngineDeps, type ItemStatus, type RunOptions, type RunScope,
@@ -101,7 +101,7 @@ export const STATUS_SORTS: Record<string, string> = {
 
 // $1 and $2 are the due rule's threshold and retry days (see DUE_SQL).
 const STATUS_BASE = `WITH s AS (
-  SELECT i.serial_number, i.name, ${PART_NUMBER_SQL} AS part_number, i.bulk_price_zar, i.bulk_price_usd,
+  SELECT i.serial_number, i.name, ${PART_NUMBER_SQL} AS part_number, ${LCSC_CODE_SQL} AS lcsc_code, i.bulk_price_zar, i.bulk_price_usd,
          st.last_attempt_at, st.last_success_at, st.last_run_id, st.last_source, st.last_status,
          st.last_old_price_zar, st.last_new_price_zar, st.last_error
     FROM inventory i LEFT JOIN bulk_price_status st ON st.serial_number = i.serial_number
@@ -212,7 +212,7 @@ export function registerBulkPricingRoutes(app: Express, deps: EngineDeps = defau
       if (search) {
         params.push(`%${search.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
         const p = `$${params.length}`;
-        where += ` AND (s.serial_number ILIKE ${p} OR s.name ILIKE ${p} OR s.part_number ILIKE ${p})`;
+        where += ` AND (s.serial_number ILIKE ${p} OR s.name ILIKE ${p} OR s.part_number ILIKE ${p} OR s.lcsc_code ILIKE ${p})`;
       }
       params.push(limit, offset);
       // `due` is computed by the same SQL as the Due filter, so the flag on
@@ -250,6 +250,7 @@ export function registerBulkPricingRoutes(app: Express, deps: EngineDeps = defau
           serialNumber: r.serial_number,
           name: r.name ?? null,
           partNumber: r.part_number ?? null,
+          lcscCode: r.lcsc_code ?? null,
           bulkPriceZar: priceOrNull(r.bulk_price_zar),
           bulkPriceUsd: priceOrNull(r.bulk_price_usd),
           lastAttemptAt: iso(r.last_attempt_at),

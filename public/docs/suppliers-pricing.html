@@ -90,7 +90,7 @@
                         <ul>
                             <li><strong>DigiKey</strong> (OAuth2 client_credentials or refresh token)</li>
                             <li><strong>Mouser Electronics</strong></li>
-                            <li><strong>LCSC</strong> (live lookup + cached import)</li>
+                            <li><strong>LCSC</strong>, by its own part numbers (<code>C</code> + digits): typed in, or the LCSC number of the item you searched for</li>
                             <li><strong>Nexar / Octopart</strong> — aggregator covering Arrow, Heilind, Avnet and dozens more</li>
                             <li><strong>Element14 / Farnell / Newark</strong> (Avnet)</li>
                             <li><strong>TME</strong> (Transfer Multisort Elektronik)</li>
@@ -137,7 +137,8 @@
                     <tr><td><strong>Skipped</strong></td><td>The item has no part number, or the daily supplier API limit ran out. A skipped item stays due, so the next run picks it up.</td></tr>
                     <tr><td><strong>Failed</strong></td><td>The supplier lookup or the save still failed after three tries. Tried again after 7 days.</td></tr>
                 </table>
-                <p>The part number looked up is the item's first real manufacturer part number (ManPN 1–5), or failing that its first supplier part number (SupPN 1–5). DigiKey stock codes (<code>…-ND</code>) are resolved to the manufacturer part number first, and LCSC codes (<code>C</code> + digits) are only sent to LCSC, as in Live Price Lookup.</p>
+                <p><strong>Which part number is looked up:</strong> the item's first real part number, manufacturer fields first (ManPN 1–5), then supplier fields (SupPN 1–5). A value with no digit in it is never used, because it isn't a part number: that rules out placeholders such as <em>N/A</em>, <em>Generic</em> or <em>NOT ASSIGNED</em>, and supplier names typed into a part-number field, such as <em>Digikey</em>, <em>LCSC</em> or <em>COMMUNICA</em>, which made the suppliers return unrelated parts. DigiKey stock codes (<code>…-ND</code>) are resolved to the manufacturer part number first.</p>
+                <p><strong>LCSC</strong> is asked by the item's LCSC part number (<code>C</code> + digits, from any part-number field), which pins down the exact part. LCSC can't be searched by manufacturer part number, so an item without an LCSC number isn't priced at LCSC. An item whose only part number is an LCSC number is priced by LCSC alone, as other suppliers would match the number to unrelated parts. The list below shows an item's LCSC number under its part number.</p>
             </div>
 
             <h3 id="automatic-bulk-pricing">Automatic re-pricing</h3>
@@ -212,7 +213,8 @@
             <div class="step">
                 <p>The Pricing Directory now recognises what kind of code you typed and routes the query intelligently instead of blindly asking every supplier.</p>
                 <ul>
-                    <li><strong>Internal SKU → MFN:</strong> if you type one of your own stock codes, the system looks up its stored manufacturer part number and searches suppliers by that instead.</li>
+                    <li><strong>Internal SKU → part number:</strong> if you type one of your own stock codes, the system looks up the item's part number (by the same rules as bulk pricing) and searches suppliers by that instead.</li>
+                    <li><strong>LCSC by LCSC number:</strong> LCSC's search is closed to outside systems, so LCSC is only asked about LCSC part numbers. When the part you search for belongs to an item with an LCSC number, LCSC is asked by that, and a note above the results says so. Answers are kept for a day here (30 days in bulk pricing), with LCSC's full price ladder, so every quantity is priced correctly.</li>
                     <li><strong>DigiKey stock codes</strong> (anything ending in <code>-ND</code>): DigiKey is asked first to resolve the code to the real manufacturer part number, and every other supplier is then queried for that real MPN. Comparable quotes, no double DigiKey call.</li>
                     <li><strong>LCSC stock codes</strong> (<code>C</code> followed by digits, e.g. <code>C105882</code>): only LCSC is queried. Other distributors would fuzzy-match to unrelated parts (a 100 nF capacitor was once priced at $241 via Pasternack this way).</li>
                     <li><strong>Full supplier fan-out</strong> now covers DigiKey, Mouser, LCSC, Nexar (Octopart aggregator: Arrow, Heilind, Avnet, …), Element14/Farnell/Newark and TME.</li>

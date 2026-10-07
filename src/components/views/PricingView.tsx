@@ -18,6 +18,8 @@ interface PricingViewProps {
 
 interface ProviderResult {
   partNumber?: string;
+  /** LCSC: the manufacturer part number of the LCSC part. */
+  mpn?: string | null;
   manufacturer?: string;
   unitPrice?: number | null;
   currency?: string | null;
@@ -37,6 +39,8 @@ interface SearchResponse {
   codeFormat?: 'digikey' | 'lcsc' | 'mfn';
   /** DigiKey resolved the `-ND` stock code to the real manufacturer part number. */
   resolvedFromDigikeyCode?: { code: string; mpn: string };
+  /** The item's LCSC part number, which LCSC was asked by. */
+  lcscCode?: string;
   digikey?: ProviderResult;
   mouser?: ProviderResult;
   lcsc?: ProviderResult;
@@ -126,8 +130,8 @@ function ProviderResultCard({ name, result }: { name: string; result?: ProviderR
       {result.distributor && (
         <div className="text-[10px] text-secondary mt-1">via {result.distributor}</div>
       )}
-      {result.manufacturer && (
-        <div className="text-[10px] text-outline mt-1">{result.manufacturer}</div>
+      {(result.manufacturer || result.mpn) && (
+        <div className="text-[10px] text-outline mt-1">{[result.mpn, result.manufacturer].filter(Boolean).join(' · ')}</div>
       )}
       {result.productUrl && (
         <a href={result.productUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-secondary underline block mt-1">
@@ -135,7 +139,7 @@ function ProviderResultCard({ name, result }: { name: string; result?: ProviderR
         </a>
       )}
       {result.updatedAt && (
-        <div className="text-[9px] text-outline mt-1">Scraped {new Date(result.updatedAt).toLocaleString()}</div>
+        <div className="text-[9px] text-outline mt-1">Price as of {new Date(result.updatedAt).toLocaleString()}</div>
       )}
     </div>
   );
@@ -428,8 +432,14 @@ export const PricingView: React.FC<PricingViewProps> = ({
           <div className="mt-md text-[11px] rounded-lg px-3 py-2 border bg-primary/10 text-primary border-primary/20">
             You searched <span className="font-mono font-bold">{searchResult.searchedFor}</span>{' '}
             ({searchResult.resolvedFromSku.name}). Suppliers do not know your internal SKU, so we
-            looked up its manufacturer part number{' '}
+            looked up its part number{' '}
             <span className="font-mono font-bold">{searchResult.partNumber}</span> instead.
+          </div>
+        )}
+        {searchResult && searchResult.lcscCode && (
+          <div className="mt-md text-[11px] rounded-lg px-3 py-2 border bg-primary/10 text-primary border-primary/20">
+            LCSC was asked by <span className="font-mono font-bold">{searchResult.lcscCode}</span>, the item's
+            LCSC part number: LCSC can only be looked up by its own part numbers.
           </div>
         )}
         {searchResult && searchResult.resolvedFromDigikeyCode && (
@@ -451,7 +461,7 @@ export const PricingView: React.FC<PricingViewProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-sm mt-md">
             <ProviderResultCard name="DigiKey" result={searchResult.digikey} />
             <ProviderResultCard name="Mouser" result={searchResult.mouser} />
-            <ProviderResultCard name="LCSC (live + cache)" result={searchResult.lcsc} />
+            <ProviderResultCard name="LCSC" result={searchResult.lcsc} />
             <ProviderResultCard name="Nexar / Octopart" result={searchResult.nexar} />
             <ProviderResultCard name="Element14 / Farnell" result={searchResult.element14} />
             <ProviderResultCard name="TME" result={searchResult.tme} />

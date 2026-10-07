@@ -16,7 +16,7 @@ const ago = (ms: number) => new Date(now - ms).toISOString();
 
 const SETTINGS = { autoEnabled: true, autoThresholdDays: 35, historyRetentionDays: 40, autoBatchSize: 100, retryFailedAfterDays: 7, qty: 1000, suspiciousAboveUsd: 50 };
 const ITEMS = [
-  { serialNumber: 'CAP-001', name: '100nF', partNumber: 'CL10B104KB8NNNC', bulkPriceZar: 0.0693, bulkPriceUsd: 0.0042,
+  { serialNumber: 'CAP-001', name: '100nF', partNumber: 'CL10B104KB8NNNC', lcscCode: 'C1591', bulkPriceZar: 0.0693, bulkPriceUsd: 0.0042,
     lastAttemptAt: ago(40 * DAY), lastSuccessAt: ago(40 * DAY), lastRunId: 3, lastSource: 'auto', lastStatus: 'updated',
     lastOldPriceZar: 0.07, lastNewPriceZar: 0.0693, lastError: null, due: true, nextDueAt: null },
   { serialNumber: 'CON-002', name: 'Header', partNumber: 'HX20007-5AWB', bulkPriceZar: 1.65, bulkPriceUsd: 0.1,
@@ -162,6 +162,8 @@ describe('the log', () => {
     expect(text(row('CAP-001'))).toContain('40 days ago · automatic');
     expect(text(row('CAP-001'))).toContain('Due now');
     expect(text(row('CAP-001'))).toMatch(/R0\.0700 → R0\.0693/);
+    expect(text(row('CAP-001'))).toContain('CL10B104KB8NNNCLCSC C1591');
+    expect(text(row('CON-002'))).not.toContain('LCSC');
     expect(text(row('CON-002'))).toContain('No price');
     expect(text(row('CON-002'))).toContain('No price found (mouser: No match found)');
     expect(text(row('CON-002'))).toContain('Due in 25 days');

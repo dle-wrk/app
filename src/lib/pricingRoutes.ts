@@ -27,6 +27,7 @@ import {
   type CipherEnvelope,
 } from './serverUtils';
 import { requireAdmin } from './authRoutes';
+import { LCSC_CODE_RE, lcscCodeSql, partNumberSql } from './partNumbers';
 
 // ---------------------------------------------------------------------------
 // At-rest encryption for provider API keys. AES-256-GCM keyed on PRICING_CRED_KEY.
@@ -420,64 +421,69 @@ async function searchMouser(partNumber: string, qty = 1) {
 }
 
 // ---------------------------------------------------------------------------
-// LCSC live lookup — no official API, but their public search endpoint returns
-// JSON. Used as a fallback when the scrape cache doesn't have the part.
+// LCSC, looked up by its own part number ("C" + digits). LCSC has no public
+// API, and its product search is closed to servers (it answers "Access
+// Denied"), but the product-detail endpoint its own site uses answers JSON
+// for an LCSC part number, with the full price ladder. (The search endpoint
+// this used to call only ever returned the storefront page.) So LCSC can
+// only price parts whose LCSC number we know: see ./partNumbers.ts.
 // ---------------------------------------------------------------------------
-async function searchLcscLive(partNumber: string, _qty = 1) {
-  const res = await fetch(
-    `https://www.lcsc.com/api/products/search?q=${encodeURIComponent(partNumber)}&current_page=1&per_page=5`,
-    {
-      headers: {
-        'Accept': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      },
-    }
-  );
-  if (!res.ok) throw new Error(`LCSC search failed: ${res.status}`);
-  // LCSC answers 200 with the storefront HTML when the JSON API is unavailable
-  // to unauthenticated callers, which previously surfaced as a raw
-  // "Unexpected token '<'" parse error. Detect it and say what to do instead:
-  // the lcsc_price_cache table is fed by POST /api/pricing/lcsc/import.
-  const contentType = res.headers.get('content-type') || '';
-  if (!contentType.includes('json')) {
-    throw new Error('LCSC live lookup unavailable (returned HTML, not JSON) — feed prices via the LCSC import endpoint instead');
-  }
-  const data: any = await res.json();
-  // Response shape varies — try several known structures defensively.
-  const products: any[] = data?.result?.productList ?? data?.productList ?? data?.data?.productList ?? data?.result?.list ?? [];
-  const product = products[0];
-  if (!product) return null;
+export interface LcscProduct {
+  /** The LCSC part number, e.g. C1591. */
+  partNumber: string;
+  /** The manufacturer part number, e.g. CL10B104KB8NNNC. */
+  mpn: string | null;
+  manufacturer: string | null;
+  currency: string;
+  /** Unit price per break quantity, ascending. */
+  priceBreaks: Array<{ qty: number; price: number }>;
+  stock: number | null;
+  productUrl: string;
+}
 
-  // Price can be a string ("0.1234"), a number, or nested in a priceList array.
-  let unitPrice: number | null = null;
-  if (typeof product.price === 'string' || typeof product.price === 'number') {
-    unitPrice = Number(product.price);
-  } else if (Array.isArray(product.priceList) && product.priceList.length > 0) {
-    // priceList is typically [{l: 1, p: "0.50"}, {l: 10, p: "0.40"}, ...]
-    const breaks = product.priceList;
-    const chosen = pickBreakForQty(breaks, _qty, (b: any) => Number(b.l) || 1);
-    unitPrice = chosen ? Number(chosen.p) : Number(breaks[0]?.p);
-  } else if (product.productPrice != null) {
-    unitPrice = Number(product.productPrice);
-  }
-
-  const stockRaw = product.stock ?? product.inStock ?? product.quantity;
-  const stockNum = stockRaw != null ? Number(String(stockRaw).replace(/[^0-9]/g, '')) : null;
-
-  const lcscPart = product.lcsc_part ?? product.productCode ?? product.lcscPartNumber;
-  const mpn = product.mfr_part ?? product.manufacturer_part ?? product.mfrPartNumber ?? product.mpn;
-  const manufacturer = product.mfr ?? product.manufacturer_name ?? product.manufacturerName;
-  const productUrl = product.product_url ?? product.url ?? (lcscPart ? `https://www.lcsc.com/product-detail/${lcscPart}.html` : null);
-
+/** Reads LCSC's product-detail answer. Null when LCSC doesn't know the part number. */
+export function parseLcscProduct(data: any): LcscProduct | null {
+  const p = data?.result;
+  if (!p || !p.productCode) return null;
+  const list: any[] = Array.isArray(p.productPriceList) ? p.productPriceList : [];
+  // usdPrice is given whatever currency the site is showing; fall back to the shown price.
+  const useUsd = list.length > 0 && list.every((b) => Number(b?.usdPrice) > 0);
+  const priceBreaks = list
+    .map((b) => ({ qty: Number(b?.ladder), price: Number(useUsd ? b.usdPrice : (b?.currencyPrice ?? b?.productPrice)) }))
+    .filter((b) => Number.isFinite(b.qty) && b.qty > 0 && Number.isFinite(b.price) && b.price > 0)
+    .sort((a, b) => a.qty - b.qty);
+  const code = String(p.productCode).trim().toUpperCase();
+  const stock = Number(p.stockNumber);
   return {
-    partNumber: lcscPart ?? mpn,
-    manufacturer: manufacturer ?? null,
-    unitPrice: Number.isFinite(unitPrice) ? unitPrice : null,
-    breakQuantity: null,
-    currency: 'USD',
-    stock: Number.isFinite(stockNum) ? stockNum : null,
-    productUrl,
+    partNumber: code,
+    mpn: p.productModel ? String(p.productModel) : null,
+    manufacturer: p.brandNameEn ? String(p.brandNameEn) : null,
+    currency: useUsd ? 'USD' : normaliseCurrency(p.currencyType ?? p.currencySymbol),
+    priceBreaks,
+    stock: p.stockNumber === null || p.stockNumber === undefined || !Number.isFinite(stock) ? null : stock,
+    productUrl: `https://www.lcsc.com/product-detail/${encodeURIComponent(code)}.html`,
   };
+}
+
+/** The unit price at an order quantity, from a price ladder. */
+export function lcscPriceAt(breaks: Array<{ qty: number; price: number }>, qty: number): { price: number; breakQty: number } | null {
+  const b = pickBreakForQty(breaks, qty, (x) => x.qty);
+  return b ? { price: b.price, breakQty: b.qty } : null;
+}
+
+export async function fetchLcscProduct(code: string): Promise<LcscProduct | null> {
+  const res = await fetch(`https://wmsc.lcsc.com/ftps/wm/product/detail?productCode=${encodeURIComponent(code)}`, {
+    headers: {
+      'Accept': 'application/json',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    },
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!res.ok) throw new Error(`LCSC lookup failed: ${res.status}`);
+  if (!(res.headers.get('content-type') || '').includes('json')) {
+    throw new Error('LCSC lookup unavailable (it answered with a web page, not data)');
+  }
+  return parseLcscProduct(await res.json());
 }
 
 // ---------------------------------------------------------------------------
@@ -928,6 +934,8 @@ export interface PartQuote {
   searchedFor?: string;
   resolvedFromSku?: { sku: string; name: string };
   resolvedFromDigikeyCode?: { code: string; mpn: string };
+  /** The LCSC number LCSC was asked by, when the part number quoted is something else. */
+  lcscCode?: string;
   /** One entry per provider (digikey, mouser, lcsc, nexar, element14, tme), plus `<provider>Cached` flags. */
   [provider: string]: any;
 }
@@ -936,62 +944,128 @@ export interface QuoteDeps {
   isConfigured: (provider: string) => Promise<boolean>;
   digikeyAuthorized: () => Promise<boolean>;
   lookup: typeof cachedProviderLookup;
-  lcsc: (partNumber: string, qty: number) => Promise<any>;
-  skuToPartNumber: (sku: string) => Promise<{ sku: string; name: string; partNumber: string } | null>;
+  lcsc: (partNumber: string, qty: number, maxAgeMs: number) => Promise<any>;
+  /** An internal stock code → the part number and LCSC number it is priced by. */
+  skuToPartNumber: (sku: string) => Promise<{ sku: string; name: string; partNumber: string; lcscCode: string | null } | null>;
+  /** The LCSC number of an inventory item carrying this part number, if any. */
+  findLcscCode: (partNumber: string) => Promise<string | null>;
 }
 
-// LCSC: the scrape cache first, then a live lookup via their public search,
-// which needs no API key.
-async function lookupLcsc(partNumber: string, qty: number): Promise<any> {
-  const lcscRow = await queryOne<any>(
-    `SELECT * FROM lcsc_price_cache WHERE part_number = $1 OR mpn = $1 ORDER BY updated_at DESC LIMIT 1`,
-    [partNumber]
+// LCSC answers are cached in lcsc_price_cache with their whole price ladder,
+// so every quantity is priced from one lookup, and refreshed once older than
+// the caller's maxAge. A row without a ladder came from the LCSC import
+// (POST /api/pricing/lcsc/import) and carries one price; for a manufacturer
+// part number it is the only LCSC price there is, so it is used at any age.
+export interface LcscDeps {
+  cached: (partNumber: string) => Promise<any | null>;
+  save: (product: LcscProduct) => Promise<void>;
+  fetchProduct: (code: string) => Promise<LcscProduct | null>;
+  usage: () => Promise<number>;
+  countUsage: () => Promise<unknown>;
+  now: () => number;
+}
+
+/** Caches an LCSC answer. `price` keeps the smallest break, for readers that take one price. */
+export async function saveLcscProduct(p: LcscProduct, db: { query: (text: string, params?: any[]) => Promise<unknown> } = { query }): Promise<void> {
+  await db.query(
+    `INSERT INTO lcsc_price_cache (part_number, mpn, manufacturer, price, currency, stock, url, price_breaks, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, now())
+     ON CONFLICT (part_number) DO UPDATE SET
+       mpn = EXCLUDED.mpn, manufacturer = EXCLUDED.manufacturer, price = EXCLUDED.price, currency = EXCLUDED.currency,
+       stock = EXCLUDED.stock, url = EXCLUDED.url, price_breaks = EXCLUDED.price_breaks, updated_at = now()`,
+    [p.partNumber, p.mpn, p.manufacturer, p.priceBreaks[0]?.price ?? null, p.currency, p.stock, p.productUrl, JSON.stringify(p.priceBreaks)]
   );
-  if (lcscRow) {
-    return {
-      partNumber: lcscRow.part_number,
-      manufacturer: lcscRow.mpn,
-      unitPrice: lcscRow.price !== null ? Number(lcscRow.price) : null,
-      currency: lcscRow.currency,
-      stock: lcscRow.stock,
-      productUrl: lcscRow.url,
-      updatedAt: lcscRow.updated_at,
-    };
-  }
+}
+
+export const LCSC_CACHE_SQL = `SELECT * FROM lcsc_price_cache WHERE part_number = $1 OR mpn = $1 ORDER BY updated_at DESC LIMIT 1`;
+
+const defaultLcscDeps: LcscDeps = {
+  cached: (partNumber) => queryOne<any>(LCSC_CACHE_SQL, [partNumber]),
+  save: (p) => saveLcscProduct(p),
+  fetchProduct: fetchLcscProduct,
+  usage: () => getPricingUsage('lcsc'),
+  countUsage: () => incrementPricingUsage('lcsc'),
+  now: () => Date.now(),
+};
+
+function lcscFromRow(row: any, qty: number) {
+  const breaks = Array.isArray(row.price_breaks) && row.price_breaks.length ? row.price_breaks : null;
+  const at = breaks ? lcscPriceAt(breaks, qty) : null;
+  const unitPrice = at ? at.price : row.price !== null && row.price !== undefined ? Number(row.price) : null;
+  return {
+    partNumber: row.part_number,
+    mpn: row.mpn ?? null,
+    manufacturer: row.manufacturer ?? null,
+    unitPrice: unitPrice !== null && Number.isFinite(unitPrice) ? unitPrice : null,
+    breakQuantity: at?.breakQty ?? null,
+    currency: row.currency || 'USD',
+    stock: row.stock ?? null,
+    productUrl: row.url ?? null,
+    updatedAt: row.updated_at,
+  };
+}
+
+function lcscFromProduct(p: LcscProduct, qty: number) {
+  const at = lcscPriceAt(p.priceBreaks, qty);
+  return {
+    partNumber: p.partNumber,
+    mpn: p.mpn,
+    manufacturer: p.manufacturer,
+    unitPrice: at?.price ?? null,
+    breakQuantity: at?.breakQty ?? null,
+    currency: p.currency,
+    stock: p.stock,
+    productUrl: p.productUrl,
+    ...(at ? {} : { error: 'Listed, but LCSC shows no price' }),
+  };
+}
+
+export async function lookupLcsc(partNumber: string, qty: number, maxAgeMs: number, deps: LcscDeps = defaultLcscDeps): Promise<any> {
+  const trimmed = partNumber.trim();
+  const isCode = LCSC_CODE_RE.test(trimmed);
+  const key = isCode ? trimmed.toUpperCase() : trimmed;
+  const row = await deps.cached(key);
+  const fresh = !!row && deps.now() - new Date(row.updated_at).getTime() < maxAgeMs;
+  if (row && (fresh || !isCode)) return lcscFromRow(row, qty);
+  if (!isCode) return { error: 'Skipped: LCSC is only looked up by its own part number (C…)' };
   try {
-    if ((await getPricingUsage('lcsc')) >= PRICING_DAILY_LIMIT) return { error: 'Daily limit reached' };
-    const lcscResult = await searchLcscLive(partNumber, qty);
-    if (!lcscResult) return { error: 'No match found' };
-    await incrementPricingUsage('lcsc');
-    await query(
-      `INSERT INTO lcsc_price_cache (part_number, mpn, price, currency, stock, url, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, now())
-       ON CONFLICT (part_number) DO UPDATE SET
-         mpn = EXCLUDED.mpn, price = EXCLUDED.price, currency = EXCLUDED.currency,
-         stock = EXCLUDED.stock, url = EXCLUDED.url, updated_at = now()`,
-      [lcscResult.partNumber ?? partNumber, lcscResult.manufacturer ?? null,
-       lcscResult.unitPrice ?? null, lcscResult.currency ?? 'USD',
-       lcscResult.stock ?? null, lcscResult.productUrl ?? null]
-    );
-    return lcscResult;
+    if ((await deps.usage()) >= PRICING_DAILY_LIMIT) return row ? lcscFromRow(row, qty) : { error: 'Daily limit reached' };
+    const product = await deps.fetchProduct(key);
+    await deps.countUsage();
+    if (!product) return { error: 'No match found' };
+    await deps.save(product);
+    return lcscFromProduct(product, qty);
   } catch (err: any) {
-    return { error: err.message };
+    // An older price beats none when LCSC can't be reached.
+    return row ? lcscFromRow(row, qty) : { error: err?.message || String(err) };
   }
 }
 
-const defaultQuoteDeps: QuoteDeps = {
+const PN_FIELDS = ['man_pn_1', 'man_pn_2', 'man_pn_3', 'man_pn_4', 'man_pn_5', 'sup_pn_1', 'sup_pn_2', 'sup_pn_3', 'sup_pn_4', 'sup_pn_5'];
+
+export const defaultQuoteDeps: QuoteDeps = {
   isConfigured: isProviderConfigured,
   digikeyAuthorized: async () => Boolean(await getDigikeyRefreshToken()),
   lookup: cachedProviderLookup,
-  lcsc: lookupLcsc,
+  lcsc: (partNumber, qty, maxAgeMs) => lookupLcsc(partNumber, qty, maxAgeMs),
   skuToPartNumber: async (sku) => {
-    const row = await queryOne<{ serial_number: string; man_pn_1: string; name: string }>(
-      `SELECT serial_number, man_pn_1, name FROM inventory
-       WHERE deleted != true AND UPPER(TRIM(serial_number)) = UPPER($1) LIMIT 1`,
+    const row = await queryOne<{ serial_number: string; name: string; part_number: string | null; lcsc_code: string | null }>(
+      `SELECT i.serial_number, i.name, ${partNumberSql('i')} AS part_number, ${lcscCodeSql('i')} AS lcsc_code
+         FROM inventory i
+        WHERE i.deleted IS NOT TRUE AND UPPER(TRIM(i.serial_number)) = UPPER($1) LIMIT 1`,
       [sku]
     );
-    const mpn = row?.man_pn_1 ? String(row.man_pn_1).trim() : '';
-    return row && mpn && mpn.toUpperCase() !== 'N/A' ? { sku: row.serial_number, name: row.name, partNumber: mpn } : null;
+    return row?.part_number ? { sku: row.serial_number, name: row.name, partNumber: row.part_number, lcscCode: row.lcsc_code } : null;
+  },
+  findLcscCode: async (partNumber) => {
+    const row = await queryOne<{ lcsc_code: string | null }>(
+      `SELECT ${lcscCodeSql('i')} AS lcsc_code FROM inventory i
+        WHERE i.deleted IS NOT TRUE AND UPPER(TRIM($1)) IN (${PN_FIELDS.map((f) => `UPPER(TRIM(i.${f}))`).join(', ')})
+          AND ${lcscCodeSql('i')} IS NOT NULL
+        LIMIT 1`,
+      [partNumber]
+    );
+    return row?.lcsc_code ?? null;
   },
 };
 
@@ -999,21 +1073,28 @@ export async function quotePart(
   requested: string,
   qty: number,
   maxAgeMs: number,
-  options: { resolveSku?: boolean } = {},
+  /** lcscCode: the LCSC number to ask LCSC by (null: none). Left out, it is looked up from inventory. */
+  options: { resolveSku?: boolean; lcscCode?: string | null } = {},
   deps: QuoteDeps = defaultQuoteDeps,
 ): Promise<PartQuote> {
   let partNumber = requested.trim();
+  let lcscCode = options.lcscCode;
   let resolvedFromSku: { sku: string; name: string } | null = null;
   if (options.resolveSku) {
     const sku = await deps.skuToPartNumber(partNumber);
     if (sku) {
       partNumber = sku.partNumber;
       resolvedFromSku = { sku: sku.sku, name: sku.name };
+      if (lcscCode === undefined) lcscCode = sku.lcscCode;
     }
   }
 
   const upper = partNumber.toUpperCase();
-  const codeFormat: PartQuote['codeFormat'] = /-ND$/.test(upper) ? 'digikey' : /^C\d+$/.test(upper) ? 'lcsc' : 'mfn';
+  const codeFormat: PartQuote['codeFormat'] = /-ND$/.test(upper) ? 'digikey' : LCSC_CODE_RE.test(upper) ? 'lcsc' : 'mfn';
+
+  // LCSC is asked by an LCSC number: the one being quoted, else the item's.
+  if (codeFormat === 'lcsc') lcscCode = upper;
+  else if (lcscCode === undefined) lcscCode = await deps.findLcscCode(partNumber).catch(() => null);
 
   // A DigiKey stock code: ask DigiKey for the real manufacturer part number
   // first, so every other provider is asked about that instead. DigiKey's own
@@ -1052,7 +1133,8 @@ export async function quotePart(
     quote[provider] = lookup.result;
     if (lookup.fromCache) quote[`${provider}Cached`] = true;
   }
-  quote.lcsc = await deps.lcsc(partNumber, qty);
+  quote.lcsc = await deps.lcsc(lcscCode ?? partNumber, qty, maxAgeMs);
+  if (lcscCode && codeFormat !== 'lcsc') quote.lcscCode = lcscCode;
   return quote;
 }
 

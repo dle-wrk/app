@@ -37,6 +37,7 @@ import { pool, query, queryOne, exec } from './db';
 import { quotePart, normaliseCurrency, type PartQuote } from './pricingRoutes';
 import { readExchangeRate } from './exchangeRate';
 import { bumpDataVersion } from './dataVersion';
+import { lcscCodeSql, partNumberSql } from './partNumbers';
 
 // ---------------------------------------------------------------------------
 // Settings
@@ -211,20 +212,20 @@ export interface PricingItem {
   serialNumber: string;
   name: string | null;
   /**
-   * The part number sent to the suppliers: the first real manufacturer part
-   * number (man_pn_1..5), else the first supplier part number (sup_pn_1..5:
-   * Mouser, DigiKey, LCSC, ...). Null if the item has none.
+   * The part number sent to the suppliers (see ./partNumbers.ts): the first
+   * real part number that isn't an LCSC number, else the LCSC number. Null
+   * if the item has neither.
    */
   partNumber: string | null;
+  /** The item's LCSC part number (C + digits), which LCSC is asked by. */
+  lcscCode: string | null;
   bulkPriceZar: number | null;
   bulkPriceUsd: number | null;
 }
 
-// The part number an item is priced by (see PricingItem.partNumber), skipping
-// placeholders such as "N/A".
-export const PART_NUMBER_SQL = `(SELECT TRIM(v) FROM unnest(ARRAY[i.man_pn_1, i.man_pn_2, i.man_pn_3, i.man_pn_4, i.man_pn_5,
-    i.sup_pn_1, i.sup_pn_2, i.sup_pn_3, i.sup_pn_4, i.sup_pn_5]) WITH ORDINALITY AS t(v, n)
-  WHERE COALESCE(TRIM(v), '') <> '' AND UPPER(TRIM(v)) NOT IN ('N/A', 'NA', 'N', 'GENERIC', '-') ORDER BY n LIMIT 1)`;
+// The part number an item is priced by, and its LCSC number (see ./partNumbers.ts).
+export const PART_NUMBER_SQL = partNumberSql('i');
+export const LCSC_CODE_SQL = lcscCodeSql('i');
 
 // Due: not priced successfully within the threshold, and not a recent
 // failure still inside its retry wait.
@@ -320,7 +321,7 @@ export async function selectItems(
       break;
   }
   const { rows } = await db.query(
-    `SELECT i.serial_number, i.name, ${PART_NUMBER_SQL} AS part_number, i.bulk_price_zar, i.bulk_price_usd
+    `SELECT i.serial_number, i.name, ${PART_NUMBER_SQL} AS part_number, ${LCSC_CODE_SQL} AS lcsc_code, i.bulk_price_zar, i.bulk_price_usd
        FROM inventory i LEFT JOIN bulk_price_status s ON s.serial_number = i.serial_number
       WHERE i.deleted IS NOT TRUE AND ${where}
       ORDER BY ${order}
@@ -331,6 +332,7 @@ export async function selectItems(
     serialNumber: r.serial_number,
     name: r.name ?? null,
     partNumber: r.part_number ?? null,
+    lcscCode: r.lcsc_code ?? null,
     bulkPriceZar: priceOrNull(r.bulk_price_zar),
     bulkPriceUsd: priceOrNull(r.bulk_price_usd),
   }));
@@ -601,7 +603,8 @@ export interface EngineDeps {
   readSettings: () => Promise<BulkPricingSettings>;
   readFx: () => Promise<Fx>;
   selectItems: (scope: RunScope, options: SelectOptions) => Promise<PricingItem[]>;
-  quote: (partNumber: string, qty: number, maxAgeMs: number) => Promise<PartQuote>;
+  /** Quotes a part; `lcscCode` (the item's LCSC number, or null for none) is what LCSC is asked by. */
+  quote: (partNumber: string, qty: number, maxAgeMs: number, lcscCode: string | null) => Promise<PartQuote>;
   connect: () => Promise<Pick<PoolClient, 'query' | 'release'>>;
   query: (text: string, params?: any[]) => Promise<{ rows: any[]; rowCount: number }>;
   sleep: (ms: number) => Promise<void>;
@@ -613,7 +616,7 @@ export const defaultEngineDeps: EngineDeps = {
   readSettings,
   readFx: readExchangeRate,
   selectItems: (scope, options) => selectItems(scope, options),
-  quote: (partNumber, qty, maxAgeMs) => quotePart(partNumber, qty, maxAgeMs),
+  quote: (partNumber, qty, maxAgeMs, lcscCode) => quotePart(partNumber, qty, maxAgeMs, { lcscCode }),
   connect: () => pool.connect(),
   query: (text, params) => query(text, params),
   sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
@@ -698,7 +701,7 @@ async function quoteItem(item: PricingItem, qty: number, settings: BulkPricingSe
   let last: OfferChoice | { kind: 'failed'; reason: string } = { kind: 'failed', reason: 'Not attempted' };
   for (let attempt = 1; attempt <= QUOTE_ATTEMPTS; attempt++) {
     try {
-      const quote = await withTimeout(deps.quote(item.partNumber as string, qty, maxAgeMs), QUOTE_TIMEOUT_MS, 'the suppliers did not answer within 2 minutes');
+      const quote = await withTimeout(deps.quote(item.partNumber as string, qty, maxAgeMs, item.lcscCode ?? null), QUOTE_TIMEOUT_MS, 'the suppliers did not answer within 2 minutes');
       last = chooseOffer(quote, fx, settings.suspiciousAboveUsd);
       if (last.kind !== 'no_price' || !last.transient) return last;
     } catch (err: any) {
@@ -714,7 +717,7 @@ async function quoteItem(item: PricingItem, qty: number, settings: BulkPricingSe
 async function priceItem(item: PricingItem, ctx: RunContext, settings: BulkPricingSettings, fx: Fx, deps: EngineDeps): Promise<ItemResult> {
   const choice = item.partNumber
     ? await quoteItem(item, ctx.qty, settings, fx, deps)
-    : { kind: 'skipped' as const, reason: 'No manufacturer or supplier part number to look up.' };
+    : { kind: 'skipped' as const, reason: 'No part number to look up: the part-number fields are empty, or hold placeholders or supplier names.' };
 
   let lastError: any = null;
   for (let attempt = 1; attempt <= SAVE_ATTEMPTS; attempt++) {
