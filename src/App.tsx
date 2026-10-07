@@ -24,7 +24,7 @@ import { StockCodePrefixPicker } from './components/StockCodePrefixPicker';
 import { ITEM_CATEGORIES } from './lib/itemCategories';
 import { CategoryCombobox } from './components/CategoryCombobox';
 import { SupplierBOMGeneratorView } from './components/views/SupplierBOMGeneratorView';
-import { mapDbRowsToItems } from './lib/mapDbItem';
+import { mapDbRowsToItems, mapItemToPayload } from './lib/mapDbItem';
 import { mapDbRowsToTransactions, formatTrxDateTime } from './lib/mapDbTransaction';
 import PickPlaceManager from './components/PickPlaceManager';
 import AlternatesManager from './components/AlternatesManager';
@@ -1148,49 +1148,6 @@ export default function App() {
 
   const API_BASE = '';
 
-  const mapItemToPayload = (item: Item) => {
-    const payload: Record<string, any> = {
-      serial_number: item.partNumber,
-      name: item.name,
-      description: item.description,
-      value: item.value,
-      size: item.size,
-      package: item.packageName,
-      tolerance: item.tolerance,
-      type: item.itemType || item.category,
-      footprint: item.footprint,
-      comment: item.comment,
-      datasheet: item.datasheet,
-      project: item.project,
-      packaging: item.packaging,
-      color: item.color || '',
-      stock: item.stockLevel,
-      low_stock_lvl: item.lowStockLvl,
-      current_cost_dollar: item.price,
-      bulk_price_usd: item.bulkPriceUsd,
-      bulk_price_zar: item.bulkPriceZar,
-      last_order_qty: item.lastOrderQty,
-      last_order_date: item.lastOrderDate,
-      status: item.status,
-      man_pn_1: item.manPns?.[0] || item.manufacturer,
-      man_pn_2: item.manPns?.[1] || '',
-      man_pn_3: item.manPns?.[2] || '',
-      man_pn_4: item.manPns?.[3] || '',
-      man_pn_5: item.manPns?.[4] || '',
-      sup_pn_1: item.supPns?.[0] || item.supplier,
-      sup_pn_2: item.supPns?.[1] || '',
-      sup_pn_3: item.supPns?.[2] || '',
-      sup_pn_4: item.supPns?.[3] || '',
-      sup_pn_5: item.supPns?.[4] || '',
-      weblink_1: item.weblinks?.[0] || '',
-      weblink_2: item.weblinks?.[1] || '',
-      weblink_3: item.weblinks?.[2] || '',
-      weblink_4: item.weblinks?.[3] || '',
-      weblink_5: item.weblinks?.[4] || '',
-    };
-    Object.keys(payload).forEach(k => (payload[k] === undefined || payload[k] === null) && delete payload[k]);
-    return payload;
-  };
 
   const handleSaveSupplier = async (supplier: Supplier) => {
     const isNew = !suppliers.find(s => s.id === supplier.id);

@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Item, ViewType } from '../../types';
-import { ChevronLeft, ChevronRight, Search, Settings, Database } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Search, Settings, Database, Wrench } from 'lucide-react';
 import BulkPricingWizard from '../BulkPricingWizard';
+import PartNumberReview from '../PartNumberReview';
 import { fmtCurrency, fmtUSD, fmtNumber } from '../../lib/formatMoney';
 import { detectLedSwatch, ledSwatchBackground } from '../../lib/ledColor';
 
@@ -154,7 +155,7 @@ export const PricingView: React.FC<PricingViewProps> = ({
   setSelectedDetailPartNumber,
   setView
 }) => {
-  const [activeTab, setActiveTab] = useState<'lookup' | 'wizard' | 'directory' | 'keys'>('lookup');
+  const [activeTab, setActiveTab] = useState<'lookup' | 'wizard' | 'partnumbers' | 'directory' | 'keys'>('lookup');
   // Provider credential management. The backend already exposed GET/POST
   // /api/pricing/keys and a live /test, but nothing in the UI called them —
   // keys could only be set by editing .env by hand.
@@ -381,6 +382,17 @@ export const PricingView: React.FC<PricingViewProps> = ({
           Bulk Pricing
         </button>
         <button
+          onClick={() => setActiveTab('partnumbers')}
+          className={`px-md py-2 text-sm font-bold flex items-center gap-2 whitespace-nowrap transition ${
+            activeTab === 'partnumbers'
+              ? 'text-primary border-b-2 border-primary'
+              : 'text-on-surface-variant hover:text-on-surface'
+          }`}
+        >
+          <Wrench className="w-4 h-4" />
+          Part Numbers
+        </button>
+        <button
           onClick={() => setActiveTab('directory')}
           className={`px-md py-2 text-sm font-bold flex items-center gap-2 whitespace-nowrap transition ${
             activeTab === 'directory'
@@ -499,7 +511,12 @@ export const PricingView: React.FC<PricingViewProps> = ({
 
       {/* Bulk pricing tab: runs on the server, see src/lib/bulkPricing.ts */}
       {activeTab === 'wizard' && (
-        <BulkPricingWizard onShowNotification={triggerToast} onPricesUpdated={onPricesUpdated} />
+        <BulkPricingWizard onShowNotification={triggerToast} onPricesUpdated={onPricesUpdated} onReviewPartNumbers={() => setActiveTab('partnumbers')} />
+      )}
+
+      {/* Part-number review: src/lib/partNumberReview.ts */}
+      {activeTab === 'partnumbers' && (
+        <PartNumberReview onShowNotification={triggerToast} onOpenItem={setSelectedDetailPartNumber} onChanged={onPricesUpdated} />
       )}
 
       {/* Price Directory tab */}

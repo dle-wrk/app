@@ -613,6 +613,12 @@ export async function ensureSchema() {
     // ALTER path in ensureInventoryTable is only reached on a fresh
     // provision, so an ALTER added there alone silently skips prod.
     await exec(`ALTER TABLE inventory ADD COLUMN IF NOT EXISTS color TEXT`).catch(() => {});
+    // The item's preferred supplier (a name). Until 2026-10 the item form
+    // saved it into the first supplier part-number field, where suppliers
+    // were then asked for a part called "Digikey"; the part-number review
+    // moves those names here. Declared in ensureInventoryTable too, but that
+    // only runs on a fresh database (see above), so production never got it.
+    await exec(`ALTER TABLE inventory ADD COLUMN IF NOT EXISTS supplier TEXT`).catch(() => {});
     // Belt-and-braces: make sure sibling tables exist too, in case of a partially-provisioned
     // database. CREATE TABLE IF NOT EXISTS is a no-op (and never touches data) when they're
     // already there, so this is safe to run on every boot against a live database.

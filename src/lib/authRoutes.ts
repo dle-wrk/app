@@ -12,6 +12,7 @@ import { z } from 'zod';
 import bcrypt from 'bcryptjs';
 import { randomBytes, createHmac } from 'node:crypto';
 import { query, queryOne } from './db';
+import { notAllowedMessage, roleCan, type Permission } from './permissions';
 import {
   checkRateLimit as _checkRateLimit,
   clientIp,
@@ -152,6 +153,16 @@ export function requireAdmin(req: any, res: Response, next: NextFunction): void 
   if (!user) { res.status(401).json({ error: 'Sign in required' }); return; }
   if (user.role !== 'admin') { res.status(403).json({ error: 'Admin access required' }); return; }
   next();
+}
+
+// Require a signed-in user whose role has `permission` (see ./permissions).
+export function requirePermission(permission: Permission) {
+  return (req: any, res: Response, next: NextFunction): void => {
+    const user = req.user;
+    if (!user) { res.status(401).json({ error: 'Sign in required' }); return; }
+    if (!roleCan(user.role, permission)) { res.status(403).json({ error: notAllowedMessage(permission) }); return; }
+    next();
+  };
 }
 
 // ---------------------------------------------------------------------------

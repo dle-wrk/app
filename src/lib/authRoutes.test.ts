@@ -1,4 +1,14 @@
 import { describe, it, expect, vi } from 'vitest';
+
+// The middleware under test never touches the database, but authRoutes
+// imports ./db, which refuses to load without DATABASE_URL (CI has none).
+vi.mock('./db', () => ({
+  pool: { connect: async () => { throw new Error('the real pool must not be used in tests'); } },
+  query: async () => { throw new Error('the real query must not be used in tests'); },
+  queryOne: async () => null,
+  exec: async () => {},
+}));
+
 import { requireSession } from './authRoutes';
 
 // Mirrors how Express presents a request to middleware mounted at '/api':

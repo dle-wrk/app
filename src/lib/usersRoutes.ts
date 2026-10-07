@@ -12,6 +12,7 @@ import { randomBytes } from 'node:crypto';
 import { query, queryOne } from './db';
 import { CreateUserSchema, UpdateUserSchema, validateBody } from './serverUtils';
 import { requireAdmin, BCRYPT_ROUNDS } from './authRoutes';
+import { ROLE_PERMISSIONS } from './permissions';
 
 // Random human-typable temp password. Avoids ambiguous chars (0/O, 1/l/I)
 // because these get read out over Slack / chat and dictated over the
@@ -25,28 +26,8 @@ function generateTempPassword(): string {
   return out;
 }
 
-// Default role→permission grants used by the one-shot seeder. Kept alongside
-// the seeder route rather than in a config file — this is boot-time data, not
-// runtime config, and the values only change when we add a new capability.
-const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
-  admin: [
-    'users.create', 'users.read', 'users.update', 'users.delete',
-    'inventory.create', 'inventory.read', 'inventory.update', 'inventory.delete',
-    'suppliers.create', 'suppliers.read', 'suppliers.update', 'suppliers.delete',
-    'orders.create', 'orders.read', 'orders.update', 'orders.delete',
-    'reports.read', 'settings.update', 'automation.create', 'automation.delete',
-  ],
-  manager: [
-    'users.read',
-    'inventory.create', 'inventory.read', 'inventory.update',
-    'suppliers.read', 'suppliers.update',
-    'orders.create', 'orders.read', 'orders.update',
-    'reports.read', 'automation.create',
-  ],
-  viewer: [
-    'inventory.read', 'suppliers.read', 'orders.read', 'reports.read',
-  ],
-};
+// Role→permission grants: the same list the server enforces (./permissions).
+const DEFAULT_ROLE_PERMISSIONS = ROLE_PERMISSIONS;
 
 export function registerUsersRoutes(app: Express): void {
   // Seed role_permissions with our defaults. Idempotent via ON CONFLICT.

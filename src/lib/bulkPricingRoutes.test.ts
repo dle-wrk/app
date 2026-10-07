@@ -78,7 +78,8 @@ beforeEach(() => {
   notified = 0;
 });
 
-const call = async (method: string, path: string, body?: unknown, role = 'user') => {
+// An engineer may change inventory (and so run bulk pricing); see ./permissions.
+const call = async (method: string, path: string, body?: unknown, role = 'engineer') => {
   const res = await fetch(`${base}${path}`, {
     method,
     headers: { 'Content-Type': 'application/json', ...(role ? { 'x-test-role': role } : {}) },
@@ -107,6 +108,22 @@ async function waitForRun(id: number) {
 const norm = (sql: string) => sql.replace(/\s+/g, ' ').trim();
 
 describe('POST /api/pricing/bulk-runs', () => {
+  it('lets only roles that may change inventory start or stop a run', async () => {
+    addItem('A', 'PN-A');
+    const refused = { error: 'Only admins, managers and engineers can change inventory, prices and part numbers.' };
+
+    expect(await call('POST', '/api/pricing/bulk-runs', { scope: 'all' }, 'viewer')).toEqual({ status: 403, body: refused });
+    expect(await call('POST', '/api/pricing/bulk-runs', { scope: 'all' }, '')).toEqual({ status: 401, body: { error: 'Sign in required' } });
+    expect(await call('POST', '/api/pricing/bulk-runs/1/stop', undefined, 'viewer')).toEqual({ status: 403, body: refused });
+    expect(db.state.runs).toEqual([]);
+    // Viewers can still see everything.
+    expect((await call('GET', '/api/pricing/bulk-runs', undefined, 'viewer')).status).toBe(200);
+
+    const res = await call('POST', '/api/pricing/bulk-runs', { scope: 'all' }, 'admin');
+    expect(res.status).toBe(202);
+    await waitForRun(res.body.runId);
+  });
+
   it('refuses a request it cannot run', async () => {
     expect(await call('POST', '/api/pricing/bulk-runs', { scope: 'everything' }))
       .toEqual({ status: 400, body: { error: 'scope must be one of: due, missing, all, selected.' } });
@@ -124,12 +141,12 @@ describe('POST /api/pricing/bulk-runs', () => {
     addItem('CON-002', 'HX20007-5AWB');
     quotes['HX20007-5AWB'] = { mouser: { error: 'No match found' } };
 
-    const res = await call('POST', '/api/pricing/bulk-runs', { scope: 'all' }, 'buyer');
+    const res = await call('POST', '/api/pricing/bulk-runs', { scope: 'all' }, 'manager');
 
     expect(res).toEqual({ status: 202, body: { runId: 1 } });
     const detail = await waitForRun(1);
     expect(detail.run).toMatchObject({
-      id: 1, trigger: 'manual', scope: 'all', dryRun: false, qty: 1000, status: 'completed', requestedBy: 'buyer@example.com',
+      id: 1, trigger: 'manual', scope: 'all', dryRun: false, qty: 1000, status: 'completed', requestedBy: 'manager@example.com',
       total: 2, checked: 2, updated: 1, noPrice: 1, failed: 0, stale: false,
     });
     expect(detail.reasons).toEqual([{ status: 'no_price', reason: 'No price found', count: 1 }]);

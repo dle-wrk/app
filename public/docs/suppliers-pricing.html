@@ -125,6 +125,7 @@
                     <li>When it finishes, the card shows how many items were updated, unchanged, held back, without a price, skipped or failed, and <strong>Why items were not updated</strong>, grouped by reason. <strong>Show items</strong> lists every item with its old and new price.</li>
                 </ol>
                 <p>Only one run happens at a time. If one is in progress (yours, someone else's or the automatic one), the buttons wait until it finishes.</p>
+                <p><strong>Who can run it:</strong> admins, managers and engineers can start and stop runs. Viewers see the list, the runs and the history, but the buttons are off for them.</p>
             </div>
             <div class="step">
                 <h4>What each result means</h4>
@@ -187,6 +188,28 @@
             </div>
             <div class="tip">
                 <strong>💡 For administrators:</strong> the automatic run only happens on the live server. A copy of the app started on a computer for development never starts it, even though it uses the same database. Setting <code>BULK_PRICING_AUTO=off</code> on the server stops the daily run without changing the setting; <code>BULK_PRICING_AUTO=on</code> enables it elsewhere.
+            </div>
+
+            <h3 id="part-number-review">Part numbers: review and fix</h3>
+            <div class="step">
+                <p>The <strong>Part Numbers</strong> tab under <span class="menu-path">Pricing Directory</span> (or <strong>Review part numbers</strong> on the Bulk Pricing tab) lists what in the part-number fields stops items being priced or makes suppliers return the wrong part, grouped by problem, each with what to do.</p>
+                <table>
+                    <tr><th>Problem</th><th>Fix in the app</th></tr>
+                    <tr><td><strong>Supplier names in part-number fields</strong>, such as <em>Digikey</em> or <em>MICRO ROBOTICS</em> in SupPN1</td><td><strong>Move to Supplier</strong>: the name goes to the item's Supplier field and the part-number field is cleared. When an item has several, the first becomes the supplier and the others are cleared.</td></tr>
+                    <tr><td><strong>LCSC numbers with extra text</strong>, such as <em>C2943749 BD</em></td><td><strong>Use C2943749</strong>: keeps just the number, so LCSC can be asked by it.</td></tr>
+                    <tr><td><strong>Placeholders</strong>, such as <em>NOT ASSIGNED</em></td><td><strong>Clear</strong>. (The app's own <em>N/A</em> and <em>Generic</em> are left alone.)</td></tr>
+                    <tr><td><strong>Prices held back</strong> because the part number matched the wrong part</td><td>Needs a person: click the stock code to open the item and correct its part number.</td></tr>
+                    <tr><td><strong>Manufacturer fields without digits</strong>, such as <em>MP-C</em></td><td>Needs a person: leave a real model code, or replace a description with the manufacturer part number.</td></tr>
+                    <tr><td><strong>Stock code and name look swapped</strong></td><td>Shown only: renaming a stock code isn't possible in the app yet.</td></tr>
+                    <tr><td><strong>No part number</strong></td><td>Shown folded away: add one to items that are bought in.</td></tr>
+                </table>
+                <ul>
+                    <li><strong>Fix all</strong> applies every fix in a group, after asking. Each fix changes one field exactly as listed. If someone changed the value since you opened the list, that fix is skipped and the toast says so.</li>
+                    <li>Every change is recorded in the activity log with who made it and the old and new value. Other open tabs reload automatically.</li>
+                    <li><strong>Who can fix:</strong> admins, managers and engineers. Viewers can see the list.</li>
+                    <li><strong>Download list</strong> saves the list as a spreadsheet (CSV).</li>
+                </ul>
+                <p><strong>The Supplier field:</strong> an item's preferred supplier now has its own field. The item form used to save it into the first supplier part-number field, which is where the supplier names above came from. Saving an item no longer does that, and the item shows its Supplier field, or a supplier name still in a part-number field, but never a part number, as its supplier.</p>
             </div>
 
             <h3 id="price-directory-browser">Price Directory Browser</h3>

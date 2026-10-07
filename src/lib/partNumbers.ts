@@ -49,10 +49,48 @@ export function partNumberSql(alias = 'i'): string {
     ${lcscCodeSql(alias)})`;
 }
 
+/**
+ * The "none" markers the app itself writes: "N/A" when an item is saved
+ * without a supplier, "Generic" without a manufacturer. Harmless, and left
+ * alone by the part-number review.
+ */
+export const NONE_MARKERS = ['N/A', 'NA', 'N', 'GENERIC', '-'];
+
+/** The ten part-number fields, in the order they are read. */
+export const PART_NUMBER_FIELDS = ['man_pn_1', 'man_pn_2', 'man_pn_3', 'man_pn_4', 'man_pn_5', 'sup_pn_1', 'sup_pn_2', 'sup_pn_3', 'sup_pn_4', 'sup_pn_5'] as const;
+export type PartNumberField = typeof PART_NUMBER_FIELDS[number];
+
+/** Whether a value can be sent to a supplier as a part number. */
+export function isUsablePartNumber(value: string | null | undefined): boolean {
+  const v = (value ?? '').trim();
+  return v !== '' && !PLACEHOLDER_PART_NUMBERS.includes(v.toUpperCase()) && /[0-9]/.test(v);
+}
+
+/**
+ * A name rather than a part number: no digit, and not a placeholder. In a
+ * supplier part-number field that is almost always the supplier, which the
+ * item form used to save there ("Digikey", "MICRO ROBOTICS").
+ */
+export function looksLikeName(value: string | null | undefined): boolean {
+  const v = (value ?? '').trim();
+  return v !== '' && !/[0-9]/.test(v) && !PLACEHOLDER_PART_NUMBERS.includes(v.toUpperCase());
+}
+
+/**
+ * The item's preferred supplier, for display: the supplier field, else a
+ * supplier name still kept in a supplier part-number field. Never a part
+ * number. Null when there is none.
+ */
+export function preferredSupplier(supplierField: string | null | undefined, supplierPartNumbers: Array<string | null | undefined>): string | null {
+  const field = (supplierField ?? '').trim();
+  if (field && !NONE_MARKERS.includes(field.toUpperCase())) return field;
+  return supplierPartNumbers.map((v) => (v ?? '').trim()).find((v) => looksLikeName(v)) ?? null;
+}
+
 /** The same rules in TypeScript, over the ten fields in order (man_pn_1..5, sup_pn_1..5). */
 export function pickPartNumbers(values: Array<string | null | undefined>): { partNumber: string | null; lcscCode: string | null } {
   const trimmed = values.map((v) => (v ?? '').trim());
   const lcscCode = trimmed.find((v) => LCSC_CODE_RE.test(v))?.toUpperCase() ?? null;
-  const real = trimmed.find((v) => v !== '' && !PLACEHOLDER_PART_NUMBERS.includes(v.toUpperCase()) && /[0-9]/.test(v) && !LCSC_CODE_RE.test(v));
+  const real = trimmed.find((v) => isUsablePartNumber(v) && !LCSC_CODE_RE.test(v));
   return { partNumber: real ?? lcscCode, lcscCode };
 }

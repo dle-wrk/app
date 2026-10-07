@@ -43,9 +43,10 @@
 
             <h3 id="reading-the-endpoint-tables">Reading the endpoint tables</h3>
             <div class="step">
-                <p>The tables further down list every endpoint by area. Three labels can appear next to a path:</p>
+                <p>The tables further down list every endpoint by area. Four labels can appear next to a path:</p>
                 <ul>
                     <li><span class="tag tag-admin">Admin</span> the signed-in account must have the admin role.</li>
+                    <li><span class="tag tag-admin">Changes inventory</span> the account's role must be allowed to change inventory: admin, manager or engineer (not viewer).</li>
                     <li><span class="tag tag-public">No session</span> works without signing in (sign-in itself and password recovery).</li>
                     <li><span class="tag tag-token">Own token</span> authenticates with its own token instead of a session.</li>
                 </ul>
@@ -100,6 +101,7 @@
             <h3 id="admin-only-endpoints">Admin-only endpoints</h3>
             <div class="step">
                 <p>Endpoints labelled <span class="tag tag-admin">Admin</span> answer <code>403</code> with <code>{"error":"Admin access required"}</code> to any other role. They cover user accounts, changes to the Documentation page's entries, supplier API credentials, deleting a kit, and the kit-booking BOM.</p>
+                <p>Endpoints labelled <span class="tag tag-admin">Changes inventory</span> need a role that may change inventory: admin, manager or engineer. A viewer gets <code>403</code> with <code>{"error":"Only admins, managers and engineers can change inventory, prices and part numbers."}</code>. They cover starting and stopping bulk pricing runs and part-number fixes.</p>
             </div>
 
             <h3 id="limits-on-sign-in-attempts">Limits on sign-in attempts</h3>
@@ -333,6 +335,8 @@
                         <tr><td><span class="m m-get">GET</span></td><td>/api/items/generate-code/:category</td><td>Suggest the next stock code for a category.</td></tr>
                         <tr><td><span class="m m-get">GET</span></td><td>/api/inventory/reservations/summary</td><td>Quantity reserved by open sales orders, per part.</td></tr>
                         <tr><td><span class="m m-get">GET</span></td><td>/api/inventory/mfn</td><td>Primary manufacturer part numbers for a list of stock codes (<code>?parts=A,B,C</code>).</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/inventory/part-number-review</td><td>Problems in items' part-number fields (supplier names, placeholders, LCSC numbers with extra text, held-back prices, no part number), each with the fix the app offers, plus <code>canFix</code> for the caller's role.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/inventory/part-number-review/fix<span class="tag tag-admin">Changes inventory</span></td><td>Apply fixes: <code>{"fixes":[{"serialNumber","field","action","expected","value"?}]}</code>. Only fixes the review currently offers are applied (the server works the review out again); others come back under <code>skipped</code>. Each change is written to the activity log.</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -401,10 +405,10 @@
                         <tr><td><span class="m m-get">GET</span></td><td>/api/pricing/search</td><td>Live price lookup for a part. <code>partNumber</code>, optional <code>qty</code>, <code>maxAgeDays</code>.</td></tr>
                         <tr><td><span class="m m-get">GET</span></td><td>/api/pricing/cache-status</td><td>Which parts already have a cached price. Optional <code>qty</code>, <code>maxAgeDays</code>.</td></tr>
                         <tr><td><span class="m m-get">GET</span></td><td>/api/pricing/usage</td><td>Supplier API usage counters.</td></tr>
-                        <tr><td><span class="m m-post">POST</span></td><td>/api/pricing/bulk-runs</td><td>Start a bulk pricing run. Body: <code>scope</code> (<code>due</code>, <code>missing</code>, <code>all</code> or <code>selected</code>), optional <code>dryRun</code>, and <code>serialNumbers</code> for <code>selected</code>. Answers <code>202 {runId}</code> straight away; the run carries on on the server. <code>409</code> with the other run's <code>runId</code> while a run is in progress.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/pricing/bulk-runs<span class="tag tag-admin">Changes inventory</span></td><td>Start a bulk pricing run. Body: <code>scope</code> (<code>due</code>, <code>missing</code>, <code>all</code> or <code>selected</code>), optional <code>dryRun</code>, and <code>serialNumbers</code> for <code>selected</code>. Answers <code>202 {runId}</code> straight away; the run carries on on the server. <code>409</code> with the other run's <code>runId</code> while a run is in progress.</td></tr>
                         <tr><td><span class="m m-get">GET</span></td><td>/api/pricing/bulk-runs</td><td>Recent bulk pricing runs, newest first, with their counts. Optional <code>limit</code> (up to 100).</td></tr>
                         <tr><td><span class="m m-get">GET</span></td><td>/api/pricing/bulk-runs/:id</td><td>One run: status, counts, the reasons items were not updated (grouped), and each item's result while its history is kept.</td></tr>
-                        <tr><td><span class="m m-post">POST</span></td><td>/api/pricing/bulk-runs/:id/stop</td><td>Ask a running run to stop after the item in hand. <code>409</code> when it is not running.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/pricing/bulk-runs/:id/stop<span class="tag tag-admin">Changes inventory</span></td><td>Ask a running run to stop after the item in hand. <code>409</code> when it is not running.</td></tr>
                         <tr><td><span class="m m-get">GET</span></td><td>/api/pricing/bulk-status</td><td>Each item's last bulk pricing and next due date, with counts per filter, the settings and the next automatic run. Optional <code>filter</code> (<code>all</code>, <code>due</code>, <code>problems</code>, <code>never</code>, <code>missing</code>, <code>no_part_number</code>), <code>sort</code> (<code>oldest</code>, <code>recent</code>, <code>failed</code>, <code>code</code>), <code>search</code> (stock code, name, part number or LCSC number), <code>limit</code> (up to 500), <code>offset</code>. Each item carries the <code>partNumber</code> it is priced by and its <code>lcscCode</code>.</td></tr>
                         <tr><td><span class="m m-get">GET</span></td><td>/api/pricing/bulk-status/:serial/history</td><td>One item's bulk pricing history within the retention period, newest first. Previews are left out.</td></tr>
                         <tr><td><span class="m m-get">GET</span></td><td>/api/pricing/bulk-settings</td><td>Bulk pricing settings, any warnings, and the defaults.</td></tr>

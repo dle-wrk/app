@@ -179,9 +179,9 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete, reser
         arr[index] = value;
 
         const next = { ...prev, [fieldKey]: arr };
-        // Sync with primary fields if it's the first element
+        // Sync with primary fields if it's the first element. (Not the
+        // supplier: it has its own field, and a part number isn't a supplier.)
         if (field === 'manPns' && index === 0) next.manufacturer = value;
-        if (field === 'supPns' && index === 0) next.supplier = value;
         return next;
       });
       return;

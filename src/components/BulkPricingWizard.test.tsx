@@ -79,7 +79,7 @@ beforeEach(() => {
   toast.mockClear();
   pricesUpdated.mockClear();
   setConfirmHandler(async (opts) => { confirms.push(opts); return confirmAnswer; });
-  localStorage.setItem('currentUser', JSON.stringify({ email: 'user@example.com', role: 'user' }));
+  localStorage.setItem('currentUser', JSON.stringify({ email: 'engineer@example.com', role: 'engineer' }));
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), 'http://app.test');
     const method = (init?.method || 'GET').toUpperCase();
@@ -358,6 +358,20 @@ describe('running bulk pricing', () => {
     // Free to start again, even before the log catches up with the run's end.
     expect(server.status.running).toMatchObject({ id: 9 });
     expect(button('Update prices').disabled).toBe(false);
+  });
+
+  it('shows a viewer everything but lets them start or stop nothing', async () => {
+    localStorage.setItem('currentUser', JSON.stringify({ email: 'viewer@example.com', role: 'viewer' }));
+    server.status = statusReply({ running: run({ id: 9, checked: 1 }) });
+    server.details[9] = [{ run: run({ id: 9, checked: 1 }), reasons: [], items: [] }];
+    await render();
+    await waitFor(() => !!runCard(), 'the run in progress');
+
+    expect(button('Update prices').disabled).toBe(true);
+    expect(button('Preview').disabled).toBe(true);
+    expect(button('Stop')).toBeUndefined();
+    expect(text(host)).toContain('Only admins, managers and engineers can change inventory, prices and part numbers. You can see the list, the runs and the history.');
+    expect(text(runCard())).toContain('1 of 3 items checked');
   });
 
   it('opens a past run from the recent runs list', async () => {

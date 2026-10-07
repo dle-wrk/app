@@ -53,6 +53,8 @@ const ItemSchema = z.object({
   sup_pn_3: z.string().optional(),
   sup_pn_4: z.string().optional(),
   sup_pn_5: z.string().optional(),
+  // The preferred supplier's name (not a part number).
+  supplier: z.string().max(200).optional(),
   weblink_1: z.string().optional(),
   weblink_2: z.string().optional(),
   weblink_3: z.string().optional(),

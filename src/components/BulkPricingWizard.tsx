@@ -15,6 +15,7 @@ import { AlertTriangle, ChevronLeft, ChevronRight, Clock, Eye, History, Loader2,
 import { confirmDialog } from '../lib/confirmDialog';
 import { fmtCurrency, fmtNumber } from '../lib/formatMoney';
 import { DangerButton, FieldLabel, PrimaryButton, SecondaryButton, inputClass, isAdminUser, selectClass } from './bookkeeping/shared';
+import { currentUserCan, notAllowedMessage } from '../lib/permissions';
 
 type Scope = 'due' | 'missing' | 'all' | 'selected';
 type ItemStatus = 'updated' | 'unchanged' | 'flagged' | 'no_price' | 'skipped' | 'failed';
@@ -119,6 +120,8 @@ interface BulkPricingWizardProps {
   onPricesUpdated?: () => void;
   /** How often the run in progress is checked, in ms. */
   pollIntervalMs?: number;
+  /** Opens the part-number review. */
+  onReviewPartNumbers?: () => void;
 }
 
 const PAGE_SIZE = 100;
@@ -244,8 +247,10 @@ function toDraft(s: BulkPricingSettings) {
 
 // ---------------------------------------------------------------------------
 
-export default function BulkPricingWizard({ onShowNotification, onPricesUpdated, pollIntervalMs = 2000 }: BulkPricingWizardProps) {
+export default function BulkPricingWizard({ onShowNotification, onPricesUpdated, pollIntervalMs = 2000, onReviewPartNumbers }: BulkPricingWizardProps) {
   const isAdmin = isAdminUser();
+  // Starting and stopping runs changes prices; the server checks this too.
+  const canRun = currentUserCan('inventory.update');
 
   // The log
   const [status, setStatus] = useState<StatusResponse | null>(null);
@@ -554,9 +559,14 @@ export default function BulkPricingWizard({ onShowNotification, onPricesUpdated,
               </p>
             )}
           </div>
-          <SecondaryButton type="button" onClick={() => setShowSettings((v) => !v)} icon={<Settings2 className="w-3.5 h-3.5" />} aria-expanded={showSettings}>
-            Settings
-          </SecondaryButton>
+          <div className="flex gap-sm shrink-0">
+            {onReviewPartNumbers && (
+              <SecondaryButton type="button" onClick={onReviewPartNumbers}>Review part numbers</SecondaryButton>
+            )}
+            <SecondaryButton type="button" onClick={() => setShowSettings((v) => !v)} icon={<Settings2 className="w-3.5 h-3.5" />} aria-expanded={showSettings}>
+              Settings
+            </SecondaryButton>
+          </div>
         </div>
 
         {status?.warnings?.map((w) => (
@@ -628,19 +638,21 @@ export default function BulkPricingWizard({ onShowNotification, onPricesUpdated,
             </select>
           </div>
           <div className="flex gap-sm flex-wrap">
-            <SecondaryButton type="button" disabled={!status || starting || !!running} onClick={() => startRun(true)} icon={<Eye className="w-3.5 h-3.5" />}>
+            <SecondaryButton type="button" disabled={!canRun || !status || starting || !!running} onClick={() => startRun(true)} icon={<Eye className="w-3.5 h-3.5" />}>
               Preview
             </SecondaryButton>
-            <PrimaryButton type="button" disabled={!status || starting || !!running} onClick={() => startRun(false)}
+            <PrimaryButton type="button" disabled={!canRun || !status || starting || !!running} onClick={() => startRun(false)}
               icon={starting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}>
               Update prices
             </PrimaryButton>
           </div>
         </div>
         <p className="text-[11px] text-outline mt-sm">
-          {running
-            ? `Run #${running.id} is in progress; a new run can start when it finishes.`
-            : 'Preview asks the suppliers and shows what would change, without saving anything. Supplier answers are cached for 30 days, so repeating a run costs no extra API calls.'}
+          {!canRun
+            ? `${notAllowedMessage('inventory.update')} You can see the list, the runs and the history.`
+            : running
+              ? `Run #${running.id} is in progress; a new run can start when it finishes.`
+              : 'Preview asks the suppliers and shows what would change, without saving anything. Supplier answers are cached for 30 days, so repeating a run costs no extra API calls.'}
         </p>
       </div>
 
@@ -659,7 +671,7 @@ export default function BulkPricingWizard({ onShowNotification, onPricesUpdated,
           itemFilter={itemFilter}
           setItemFilter={setItemFilter}
           shownItems={shownRunItems}
-          onStop={() => stopRun(detail.run.id)}
+          onStop={canRun ? () => stopRun(detail.run.id) : undefined}
           onClose={closeRun}
         />
       )}
@@ -878,7 +890,8 @@ const RunCard: React.FC<{
   itemFilter: 'all' | 'changed' | 'problems';
   setItemFilter: (v: 'all' | 'changed' | 'problems') => void;
   shownItems: RunItem[];
-  onStop: () => void;
+  /** Absent when the user's role may not stop runs. */
+  onStop?: () => void;
   onClose: () => void;
 }> = ({ detail, showItems, setShowItems, itemFilter, setItemFilter, shownItems, onStop, onClose }) => {
   const { run, reasons, items } = detail;
@@ -904,7 +917,7 @@ const RunCard: React.FC<{
           </span>
         </div>
         <div className="flex items-center gap-sm">
-          {isRunning && !run.stopRequested && (
+          {isRunning && !run.stopRequested && onStop && (
             <DangerButton type="button" onClick={onStop} icon={<Square className="w-3 h-3" />}>Stop</DangerButton>
           )}
           {isRunning && run.stopRequested && <span className="text-[11px] text-on-surface-variant">Stopping after the current item…</span>}

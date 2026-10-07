@@ -1,4 +1,5 @@
 import { Item } from '../types';
+import { preferredSupplier } from './partNumbers';
 
 // Maps a raw inventory row from the API (serial_number, stock, man_pn_1, ...)
 // onto the frontend Item shape (partNumber, stockLevel, manufacturer, ...).
@@ -47,7 +48,9 @@ export function mapDbRowToItem(record: any): Item {
     name: record['name'] || 'Unnamed Item',
     description: record['description'] || '',
     manufacturer: manPns[0] || record['manufacturer'] || 'Generic',
-    supplier: supPns[0] || record['supplier'] || 'N/A',
+    // The supplier field, else a supplier name the item form used to keep in
+    // the supplier part-number fields; never a part number (see ./partNumbers).
+    supplier: preferredSupplier(record['supplier'], supPns) || 'N/A',
     stockLevel,
     price,
     category,
@@ -72,6 +75,56 @@ export function mapDbRowToItem(record: any): Item {
     weblinks: weblinks.length ? weblinks : undefined,
     color: record['color'] || '',
   };
+}
+
+// The reverse: an Item as the inventory columns the item routes accept
+// (create, PUT, bulk upsert). Undefined and null fields are left out.
+export function mapItemToPayload(item: Item): Record<string, any> {
+  const payload: Record<string, any> = {
+    serial_number: item.partNumber,
+    name: item.name,
+    description: item.description,
+    value: item.value,
+    size: item.size,
+    package: item.packageName,
+    tolerance: item.tolerance,
+    type: item.itemType || item.category,
+    footprint: item.footprint,
+    comment: item.comment,
+    datasheet: item.datasheet,
+    project: item.project,
+    packaging: item.packaging,
+    color: item.color || '',
+    stock: item.stockLevel,
+    low_stock_lvl: item.lowStockLvl,
+    current_cost_dollar: item.price,
+    bulk_price_usd: item.bulkPriceUsd,
+    bulk_price_zar: item.bulkPriceZar,
+    last_order_qty: item.lastOrderQty,
+    last_order_date: item.lastOrderDate,
+    status: item.status,
+    man_pn_1: item.manPns?.[0] || item.manufacturer,
+    man_pn_2: item.manPns?.[1] || '',
+    man_pn_3: item.manPns?.[2] || '',
+    man_pn_4: item.manPns?.[3] || '',
+    man_pn_5: item.manPns?.[4] || '',
+    // The supplier has its own field. (It used to fill sup_pn_1 when there
+    // was no supplier part number, so suppliers were asked for a part called
+    // "Digi-Key Corp".)
+    supplier: item.supplier && item.supplier.trim().toUpperCase() !== 'N/A' ? item.supplier.trim() : '',
+    sup_pn_1: item.supPns?.[0] || '',
+    sup_pn_2: item.supPns?.[1] || '',
+    sup_pn_3: item.supPns?.[2] || '',
+    sup_pn_4: item.supPns?.[3] || '',
+    sup_pn_5: item.supPns?.[4] || '',
+    weblink_1: item.weblinks?.[0] || '',
+    weblink_2: item.weblinks?.[1] || '',
+    weblink_3: item.weblinks?.[2] || '',
+    weblink_4: item.weblinks?.[3] || '',
+    weblink_5: item.weblinks?.[4] || '',
+  };
+  Object.keys(payload).forEach((k) => (payload[k] === undefined || payload[k] === null) && delete payload[k]);
+  return payload;
 }
 
 // Rows can arrive as a plain array (GET /api/items) or wrapped ({ data: [...] }

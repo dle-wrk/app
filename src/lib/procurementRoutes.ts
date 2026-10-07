@@ -9,6 +9,7 @@
 import type { Express } from 'express';
 import { z } from 'zod';
 import { query, queryOne, exec } from './db';
+import { isUsablePartNumber } from './partNumbers';
 
 export async function ensureProcurementSchema(): Promise<void> {
   await exec(`CREATE TABLE IF NOT EXISTS procurement_projects (
@@ -166,8 +167,10 @@ export function registerProcurementRoutes(app: Express): void {
   // (name, footprint) — same rule as the Python `_find_pn_in_reels`
   // helper — so an equivalent reel labelled with a different SKU can
   // still supply the number.
-  const JUNK_VALUES = new Set(['', 'n/a', 'na', 'nan', 'none', '-', 'null', 'not available']);
-  const isJunk = (v: string | null | undefined) => JUNK_VALUES.has((v || '').trim().toLowerCase());
+  // Not a part number: empty, a placeholder, or a value without a digit, such
+  // as a supplier name the item form saved in the supplier part-number field
+  // (see ./partNumbers). Without this, "Digikey" was exported as a Mouser PN.
+  const isJunk = (v: string | null | undefined) => !isUsablePartNumber(v);
   const clean = (v: string | null | undefined) => (v || '').trim();
 
   app.post('/api/supplier-bom/lookup', async (req, res) => {

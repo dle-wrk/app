@@ -1,10 +1,10 @@
 // Bulk pricing API. The engine (runs, pricing, history, the daily job) is
 // ./bulkPricing.ts; this file is the HTTP surface and the read side of the log.
 //
-//   POST /api/pricing/bulk-runs                     start a run: 202 {runId}, 409 while one is running
+//   POST /api/pricing/bulk-runs                     start a run: 202 {runId}, 409 while one is running (inventory.update)
 //   GET  /api/pricing/bulk-runs                     recent runs, newest first
 //   GET  /api/pricing/bulk-runs/:id                 one run: counts, grouped reasons, per-item results
-//   POST /api/pricing/bulk-runs/:id/stop            ask a running run to stop after the item in hand
+//   POST /api/pricing/bulk-runs/:id/stop            ask a running run to stop after the item in hand (inventory.update)
 //   GET  /api/pricing/bulk-status                   the log: every item's last bulk pricing and next due date
 //   GET  /api/pricing/bulk-status/:serial/history   one item's price history (within the retention period)
 //   GET  /api/pricing/bulk-settings                 settings, with any warnings
@@ -15,7 +15,7 @@
 // routes can be tested against a stand-in database.
 
 import type { Express } from 'express';
-import { requireAdmin } from './authRoutes';
+import { requireAdmin, requirePermission } from './authRoutes';
 import {
   DEFAULT_SETTINGS, DUE_SQL, LCSC_CODE_SQL, PART_NUMBER_SQL, RUN_SCOPES, STALE_RUN_MINUTES, RunInProgressError,
   beginRun, defaultEngineDeps, groupReasons, missingPriceSql, nextAutoRunAt, nextDueAt, parseSettings, priceOrNull,
@@ -109,7 +109,8 @@ const STATUS_BASE = `WITH s AS (
 )`;
 
 export function registerBulkPricingRoutes(app: Express, deps: EngineDeps = defaultEngineDeps): void {
-  app.post('/api/pricing/bulk-runs', async (req: any, res) => {
+  // Starting and stopping runs changes prices: roles that may change inventory.
+  app.post('/api/pricing/bulk-runs', requirePermission('inventory.update'), async (req: any, res) => {
     const body = req.body ?? {};
     const scope = body.scope as RunScope;
     if (!RUN_SCOPES.includes(scope)) {
@@ -184,7 +185,7 @@ export function registerBulkPricingRoutes(app: Express, deps: EngineDeps = defau
     }
   });
 
-  app.post('/api/pricing/bulk-runs/:id/stop', async (req, res) => {
+  app.post('/api/pricing/bulk-runs/:id/stop', requirePermission('inventory.update'), async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid run id.' });
     try {
