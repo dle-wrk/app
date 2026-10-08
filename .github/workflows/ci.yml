@@ -74,7 +74,17 @@ jobs:
           E2E_DATABASE_URL: postgres://postgres:postgres@localhost:5432/tracklab_e2e
           TEST_ADMIN_EMAIL: e2e-admin@tracklab.test
           TEST_ADMIN_PASSWORD: e2e-only-password-1
-        run: npm run test:e2e
+        run: |
+          set -o pipefail
+          npm run test:e2e 2>&1 | tee e2e.log
+      # The full log needs a GitHub sign-in to read; annotations don't. Turn
+      # the server's errors into annotations so a failure explains itself.
+      - name: Server errors as annotations
+        if: failure()
+        run: |
+          grep -E '\[WebServer\].*([Ee]rror|[Ff]ailed|ERROR|relation .* does not exist)' e2e.log | head -20 | while IFS= read -r line; do
+            echo "::error title=E2E server::${line//%/%25}"
+          done || true
       # Upload the HTML report on failure so we can inspect screenshots +
       # video + trace without re-running the flaky path locally.
       - name: Upload Playwright report

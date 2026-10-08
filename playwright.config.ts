@@ -82,6 +82,9 @@ export default defineConfig({
     url: 'http://localhost:3000',
     reuseExistingServer: false,
     timeout: 180_000,
+    // The server's own output, so CI can show why it failed (see ci.yml).
+    stdout: 'pipe',
+    stderr: 'pipe',
     env: {
       ...(process.env as Record<string, string>),
       DATABASE_URL: e2eDatabase!,
