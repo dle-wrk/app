@@ -1,8 +1,15 @@
 
-import { test, expect } from '@playwright/test';
+import { test as base, expect } from '@playwright/test';
+import { sessionHeaders } from './env';
+
+// Every API call needs a session: the saved one (auth.setup.ts), read when a
+// test starts (the file doesn't exist yet when the tests are listed).
+const test = base.extend({
+  extraHTTPHeaders: async ({}, use) => { await use(sessionHeaders()); },
+});
 
 test.describe('API Optimization and Validation Tests', () => {
-  const API_URL = 'http://127.0.0.1:3001/api';
+  const API_URL = '/api';
 
   test('GET /api/items should support pagination', async ({ request }) => {
     const response = await request.get(`${API_URL}/items?limit=5&offset=0`, {

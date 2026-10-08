@@ -35,10 +35,24 @@ jobs:
   e2e:
     name: Playwright E2E
     runs-on: ubuntu-latest
-    # E2E hits the real Neon DB and the seed admin, so it needs env secrets.
-    # Skip on PRs from forks — they can't see repo secrets and the run would
-    # just fail with an unhelpful "user not active" message.
-    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push'
+    # The tests create and change data, so they run on an empty Postgres that
+    # lives only for this job, never the real database. The server creates
+    # its tables, sample items and projects, and the test admin on start-up.
+    # Needs no secrets, so pull requests from forks can run it too.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tracklab_e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -57,12 +71,9 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: E2E tests
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          SEED_ADMIN_EMAIL: ${{ secrets.SEED_ADMIN_EMAIL }}
-          SEED_ADMIN_PASSWORD: ${{ secrets.SEED_ADMIN_PASSWORD }}
-          TEST_ADMIN_EMAIL: ${{ secrets.SEED_ADMIN_EMAIL }}
-          TEST_ADMIN_PASSWORD: ${{ secrets.SEED_ADMIN_PASSWORD }}
-          PRICING_CRED_KEY: ${{ secrets.PRICING_CRED_KEY }}
+          E2E_DATABASE_URL: postgres://postgres:postgres@localhost:5432/tracklab_e2e
+          TEST_ADMIN_EMAIL: e2e-admin@tracklab.test
+          TEST_ADMIN_PASSWORD: e2e-only-password-1
         run: npm run test:e2e
       # Upload the HTML report on failure so we can inspect screenshots +
       # video + trace without re-running the flaky path locally.

@@ -1,17 +1,8 @@
 import { test, expect } from '@playwright/test';
+import { openSignedIn } from './env';
 
-const EMAIL = process.env.TEST_ADMIN_EMAIL || 'dedw13@gmail.com';
-const PASSWORD = process.env.TEST_ADMIN_PASSWORD || 'tracklabadm1n';
-
-// Shared setup: log in and land on the dashboard. Every test gets a fresh
-// browser context so this runs per-test rather than once for the whole suite.
-async function loginAndReachDashboard(page: import('@playwright/test').Page) {
-  await page.goto('/');
-  await page.getByPlaceholder(/name@example\.com/i).fill(EMAIL);
-  await page.locator('input[type="password"]').fill(PASSWORD);
-  await page.getByRole('button', { name: /sign in/i }).click();
-  await expect(page.getByRole('heading', { name: /inventory insights/i })).toBeVisible({ timeout: 15_000 });
-}
+// Starts signed in (auth.setup.ts) on the dashboard.
+const loginAndReachDashboard = (page: import('@playwright/test').Page) => openSignedIn(page);
 
 test.describe('command palette', () => {
   test('Ctrl+K opens the palette and lists pages', async ({ page }) => {

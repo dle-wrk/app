@@ -1,8 +1,8 @@
 import { test, expect } from '@playwright/test';
+import { openSignedIn } from './env';
 
 test('verify production kits management', async ({ page }) => {
-  await page.goto('http://127.0.0.1:3000');
-  await page.waitForTimeout(3000);
+  await openSignedIn(page);
 
   // Navigate to Stock Tables
   await page.click('button:has-text("Stock Tables")');
@@ -25,7 +25,7 @@ test('verify production kits management', async ({ page }) => {
   const projectSelect = page.locator('select[aria-label="Project Selection"]');
   await projectSelect.selectOption({ index: 1 });
 
-  await page.screenshot({ path: 'screenshots/kit_creation_form.png' });
+  await page.screenshot({ path: test.info().outputPath('kit_creation_form.png') });
 
   // Instantiate Kit
   await page.click('button:has-text("Instantiate Production Kit")');
@@ -33,7 +33,7 @@ test('verify production kits management', async ({ page }) => {
 
   // Verify kit is in the table
   await expect(page.locator('table').locator('text=KIT-VERIFY-1')).toBeVisible();
-  await page.screenshot({ path: 'screenshots/kits_table_updated.png' });
+  await page.screenshot({ path: test.info().outputPath('kits_table_updated.png') });
 
   // Click Edit button for the new kit
   const row = page.locator('tr', { hasText: 'KIT-VERIFY-1' }).first();
@@ -51,5 +51,5 @@ test('verify production kits management', async ({ page }) => {
 
   // Verify update
   await expect(page.locator('text=Line Beta')).toBeVisible();
-  await page.screenshot({ path: 'screenshots/kits_table_after_edit.png' });
+  await page.screenshot({ path: test.info().outputPath('kits_table_after_edit.png') });
 });

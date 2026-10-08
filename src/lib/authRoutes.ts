@@ -305,9 +305,12 @@ export function registerAuthRoutes(app: Express): void {
         // NOT overwrite the stored bcrypt hash: the seed password is the
         // *break-glass* key, not the daily one; the user's real password keeps
         // working after they log in with the seed password and fix things up.
-        const seedPw = process.env.SEED_ADMIN_PASSWORD || 'tracklabadm1n';
+        // Only when the secret is set: there used to be a fallback password
+        // here, in this public repository, that let anyone in as the admin on
+        // a server started without the secret.
+        const seedPw = process.env.SEED_ADMIN_PASSWORD;
         const seedEmail = (process.env.SEED_ADMIN_EMAIL || 'dedw13@gmail.com').toLowerCase().trim();
-        const isSeedRecovery = normalizedEmail === seedEmail && String(password) === seedPw;
+        const isSeedRecovery = !!seedPw && normalizedEmail === seedEmail && String(password) === seedPw;
 
         if (isSeedRecovery && user.status !== 'ACTIVE') {
           await query(`UPDATE users SET status = 'ACTIVE', updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [user.id]);

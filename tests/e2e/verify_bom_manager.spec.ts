@@ -1,5 +1,6 @@
 
 import { test, expect } from '@playwright/test';
+import { openSignedIn } from './env';
 
 test('verify enhanced BOM management in ProjectsView', async ({ page }) => {
   test.setTimeout(60000);
@@ -27,12 +28,10 @@ test('verify enhanced BOM management in ProjectsView', async ({ page }) => {
       console.log(`PAGE NETWORK ERROR: ${response.request().method()} ${response.url()} -> ${response.status()}`);
     }
   });
-  await page.goto('http://127.0.0.1:3000/?test=true&v=' + Date.now());
+  await openSignedIn(page, '/?test=true&v=' + Date.now());
 
-  // Wait for initial load
-  await page.waitForSelector('span:has-text("Project Manager")');
-
-  // Navigate to Project Manager via Sidebar
+  // Navigate to Project Manager via the sidebar (the PROJECTS section is closed at first)
+  await page.click('button:has-text("PROJECTS")');
   await page.click('span:has-text("Project Manager")');
 
   // Create a new project to have a clean state

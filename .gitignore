@@ -19,3 +19,8 @@ assets/
 # artifacts, not source code. Keep out of git; hold onto them on disk
 # for as long as the corresponding change window is still live.
 backups/
+
+# Playwright: the saved test session and run output.
+playwright/.auth/
+playwright-report/
+test-results/

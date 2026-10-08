@@ -1,9 +1,10 @@
 import { test, expect } from '@playwright/test';
+import { ADMIN } from './env';
 
-// Credentials come from env so CI can inject the seed password without
-// baking it into the repo. Locally the defaults match the seed admin.
-const EMAIL = process.env.TEST_ADMIN_EMAIL || 'dedw13@gmail.com';
-const PASSWORD = process.env.TEST_ADMIN_PASSWORD || 'tracklabadm1n';
+// The test admin playwright.config.ts has the server create on the
+// throwaway database. These run last (signing in ends the saved session).
+const EMAIL = ADMIN.email;
+const PASSWORD = ADMIN.password;
 
 test.describe('login flow', () => {
   test('unauth visit lands on the sign-in card', async ({ page }) => {
