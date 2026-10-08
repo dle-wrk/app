@@ -148,7 +148,7 @@ export default function BOMManager({
       const getPriority = (item: Item) => {
         const str = (
           (item.partNumber || '') + ' ' + 
-          (item.weblinks?.[0] || '') + ' ' + 
+          (item.weblinks?.find(Boolean) || '') + ' ' +
           (item.supplier || '') + ' ' + 
           (item.description || '')
         ).toLowerCase();

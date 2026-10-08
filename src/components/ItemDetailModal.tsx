@@ -201,12 +201,6 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete, reser
         updated.manPns = arr;
       }
 
-      if (name === 'supplier') {
-        const arr = [...(prev.supPns || [])];
-        if (arr.length === 0) arr.push(value);
-        else arr[0] = value;
-        updated.supPns = arr;
-      }
       
       if (name === 'size') {
         const derived = deriveMetric(value);

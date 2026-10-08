@@ -1,6 +1,14 @@
 import { Item } from '../types';
 import { preferredSupplier } from './partNumbers';
 
+const SLOTS = [1, 2, 3, 4, 5];
+function slots(record: any, prefix: string): string[] {
+  return SLOTS.map((n) => {
+    const v = record[`${prefix}${n}`];
+    return v !== null && v !== undefined && String(v).trim() !== '' ? String(v) : '';
+  });
+}
+
 // Maps a raw inventory row from the API (serial_number, stock, man_pn_1, ...)
 // onto the frontend Item shape (partNumber, stockLevel, manufacturer, ...).
 // Every place that refetches /api/items MUST run rows through this — putting
@@ -39,15 +47,19 @@ export function mapDbRowToItem(record: any): Item {
       ? rawStatus
       : 'ACTIVE';
 
-  const manPns = [record['man_pn_1'], record['man_pn_2'], record['man_pn_3'], record['man_pn_4'], record['man_pn_5']].filter(v => !!v && String(v).trim() !== '');
-  const supPns = [record['sup_pn_1'], record['sup_pn_2'], record['sup_pn_3'], record['sup_pn_4'], record['sup_pn_5']].filter(v => !!v && String(v).trim() !== '');
-  const weblinks = [record['weblink_1'], record['weblink_2'], record['weblink_3'], record['weblink_4'], record['weblink_5']].filter(v => !!v && String(v).trim() !== '');
+  // The five slots of each, in place: an empty slot stays an empty string, so
+  // saving the item writes every value back to the slot it came from. These
+  // used to be compacted, and a save then moved part numbers up into earlier
+  // slots (an LCSC code in Sup PN 3 landed in Sup PN 1).
+  const manPns = slots(record, 'man_pn_');
+  const supPns = slots(record, 'sup_pn_');
+  const weblinks = slots(record, 'weblink_');
 
   return {
     partNumber,
     name: record['name'] || 'Unnamed Item',
     description: record['description'] || '',
-    manufacturer: manPns[0] || record['manufacturer'] || 'Generic',
+    manufacturer: manPns.find(Boolean) || record['manufacturer'] || 'Generic',
     // The supplier field, else a supplier name the item form used to keep in
     // the supplier part-number fields; never a part number (see ./partNumbers).
     supplier: preferredSupplier(record['supplier'], supPns) || 'N/A',
@@ -70,9 +82,9 @@ export function mapDbRowToItem(record: any): Item {
     bulkPriceZar: parseFloat(record['bulk_price_zar'] || '0') || undefined,
     lastOrderQty: parseInt(record['last_order_qty'] || '0', 10) || undefined,
     lastOrderDate: record['last_order_date'] || '',
-    manPns: manPns.length ? manPns : undefined,
-    supPns: supPns.length ? supPns : undefined,
-    weblinks: weblinks.length ? weblinks : undefined,
+    manPns: manPns.some(Boolean) ? manPns : undefined,
+    supPns: supPns.some(Boolean) ? supPns : undefined,
+    weblinks: weblinks.some(Boolean) ? weblinks : undefined,
     color: record['color'] || '',
   };
 }
@@ -103,7 +115,9 @@ export function mapItemToPayload(item: Item): Record<string, any> {
     last_order_qty: item.lastOrderQty,
     last_order_date: item.lastOrderDate,
     status: item.status,
-    man_pn_1: item.manPns?.[0] || item.manufacturer,
+    // With part numbers, slot 1 is slot 1 even when empty; without any, the
+    // manufacturer field (which the form keeps in step with slot 1).
+    man_pn_1: item.manPns?.some(Boolean) ? item.manPns[0] || '' : item.manufacturer,
     man_pn_2: item.manPns?.[1] || '',
     man_pn_3: item.manPns?.[2] || '',
     man_pn_4: item.manPns?.[3] || '',
