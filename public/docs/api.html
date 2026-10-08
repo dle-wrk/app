@@ -51,6 +51,7 @@
                     <li><span class="tag tag-public">No session</span> works without signing in (sign-in itself and password recovery).</li>
                     <li><span class="tag tag-token">Own token</span> authenticates with its own token instead of a session.</li>
                 </ul>
+                <p>Besides these labels, every call that changes something (POST, PUT, PATCH, DELETE) needs the account's role to allow changes in that area: stock and BOMs (admin, manager, engineer; deleting: admin, manager), bookkeeping and suppliers (admin, manager), projects and quality (admin, manager, engineer; deleting projects: admin, manager), automation (admin, manager). Otherwise it answers <code>403</code> with the reason, for example <code>{"error":"Only admins and managers can change bookkeeping (customers, quotes, orders, invoices, bills, payments)."}</code>. Reading is open to every signed-in account.</p>
                 <p>No label means any signed-in account can call it. A few internal maintenance endpoints are deliberately left out of the tables.</p>
             </div>
         </div>
@@ -103,7 +104,7 @@
             <div class="step">
                 <p>Endpoints labelled <span class="tag tag-admin">Admin</span> answer <code>403</code> with <code>{"error":"Admin access required"}</code> to any other role. They cover user accounts, changes to the Documentation page's entries, supplier API credentials, deleting a kit, and the kit-booking BOM.</p>
                 <p>Endpoints labelled <span class="tag tag-admin">Changes inventory</span> need a role that may change inventory: admin, manager or engineer. A viewer gets <code>403</code> with <code>{"error":"Only admins, managers and engineers can change inventory, prices and part numbers."}</code>. They cover starting and stopping bulk pricing runs, bulk pricing review decisions, and part-number fixes.</p>
-                <p>Endpoints labelled <span class="tag tag-admin">Updates projects</span> need a role that may update projects: admin, manager or engineer. A viewer gets <code>403</code> with <code>{"error":"Only admins, managers and engineers can move projects between stages, put them on hold or add updates."}</code>. They cover moving projects on the Project Progress board, holds and progress updates. Changing the list of stages is admin-only and answers other roles with <code>{"error":"Only admins can change settings."}</code>.</p>
+                <p>Endpoints labelled <span class="tag tag-admin">Updates projects</span> need a role that may update projects: admin, manager or engineer. A viewer gets <code>403</code> with <code>{"error":"Only admins, managers and engineers can change projects, project progress and production."}</code>. They cover moving projects on the Project Progress board, holds and progress updates. Changing the list of stages is admin-only and answers other roles with <code>{"error":"Only admins can change settings."}</code>.</p>
             </div>
 
             <h3 id="limits-on-sign-in-attempts">Limits on sign-in attempts</h3>

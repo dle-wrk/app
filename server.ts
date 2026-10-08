@@ -21,6 +21,7 @@ import {
 } from './src/lib/authRoutes';
 import { registerUsersRoutes } from './src/lib/usersRoutes';
 import { registerDocsRoutes } from './src/lib/docsRoutes';
+import { requireWriteAccess } from './src/lib/writeAccess';
 import { registerSuppliersRoutes } from './src/lib/suppliersRoutes';
 import { registerPricingRoutes } from './src/lib/pricingRoutes';
 import { registerBulkPricingRoutes } from './src/lib/bulkPricingRoutes';
@@ -119,6 +120,10 @@ app.use('/api', (req, res, next) => attachSessionUser(req, res, next));
 // every app.get/post in this file — Express runs middleware in registration
 // order, so a route registered above this line would be reachable by anyone.
 app.use('/api', requireSession);
+
+// Every change (POST/PUT/PATCH/DELETE) needs the permission for its area,
+// by role (src/lib/writeAccess.ts). Same rule as above: ahead of every route.
+app.use('/api', requireWriteAccess);
 
 // Cross-cutting: bump the shared data-version counters on any 2xx write
 // to a matched /api/... path so other tabs / users notice changes via

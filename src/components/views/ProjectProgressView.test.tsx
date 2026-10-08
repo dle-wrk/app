@@ -207,7 +207,7 @@ describe('ProjectProgressView', () => {
   it('lets viewers look but not move', async () => {
     boardData = { ...boardData, can: { move: false, editStages: false } };
     await render();
-    expect(host.textContent).toContain('Only admins, managers and engineers can move projects between stages, put them on hold or add updates. You can see the board.');
+    expect(host.textContent).toContain('Only admins, managers and engineers can change projects, project progress and production. You can see the board.');
     expect(button(/Move NCU05/)).toBeUndefined();
     expect(q('[data-testid="project-card-60"]')!.getAttribute('draggable')).toBe('false');
     expect(button('Edit stages')).toBeUndefined();

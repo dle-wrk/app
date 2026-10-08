@@ -20,7 +20,7 @@ describe('roleCan', () => {
 
   it('lets admins, managers and engineers update projects, and not viewers', () => {
     expect(['admin', 'manager', 'engineer', 'viewer'].map((r) => roleCan(r, 'projects.update'))).toEqual([true, true, true, false]);
-    expect(notAllowedMessage('projects.update')).toBe('Only admins, managers and engineers can move projects between stages, put them on hold or add updates.');
+    expect(notAllowedMessage('projects.update')).toBe('Only admins, managers and engineers can change projects, project progress and production.');
   });
 
   it('keeps settings to admins', () => {

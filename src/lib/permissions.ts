@@ -12,30 +12,40 @@ export type Permission =
   | 'inventory.create' | 'inventory.read' | 'inventory.update' | 'inventory.delete'
   | 'suppliers.create' | 'suppliers.read' | 'suppliers.update' | 'suppliers.delete'
   | 'orders.create' | 'orders.read' | 'orders.update' | 'orders.delete'
-  | 'projects.update'
+  | 'projects.update' | 'projects.delete'
+  | 'quality.update'
   | 'reports.read' | 'settings.update' | 'automation.create' | 'automation.delete';
 
+// Every change to the API is checked against this (./writeAccess), agreed
+// 2026-10-08: managers run bookkeeping and may delete in the areas they
+// change; engineers add and change stock, BOMs, kits, projects and quality
+// records but not bookkeeping, and delete nothing; automation is for admins
+// and managers; viewers only look.
 export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
   admin: [
     'users.create', 'users.read', 'users.update', 'users.delete',
     'inventory.create', 'inventory.read', 'inventory.update', 'inventory.delete',
     'suppliers.create', 'suppliers.read', 'suppliers.update', 'suppliers.delete',
     'orders.create', 'orders.read', 'orders.update', 'orders.delete',
-    'projects.update',
+    'projects.update', 'projects.delete',
+    'quality.update',
     'reports.read', 'settings.update', 'automation.create', 'automation.delete',
   ],
   manager: [
     'users.read',
-    'inventory.create', 'inventory.read', 'inventory.update',
-    'suppliers.read', 'suppliers.update',
-    'orders.create', 'orders.read', 'orders.update',
-    'projects.update',
-    'reports.read', 'automation.create',
+    'inventory.create', 'inventory.read', 'inventory.update', 'inventory.delete',
+    'suppliers.create', 'suppliers.read', 'suppliers.update', 'suppliers.delete',
+    'orders.create', 'orders.read', 'orders.update', 'orders.delete',
+    'projects.update', 'projects.delete',
+    'quality.update',
+    'reports.read', 'automation.create', 'automation.delete',
   ],
-  // Engineers keep part data (part numbers, BOMs) and project progress up to date.
+  // Engineers keep part data (part numbers, BOMs), kits, project progress and
+  // quality records up to date.
   engineer: [
-    'inventory.read', 'inventory.update',
+    'inventory.create', 'inventory.read', 'inventory.update',
     'projects.update',
+    'quality.update',
     'suppliers.read', 'orders.read', 'reports.read',
   ],
   viewer: [
@@ -49,7 +59,16 @@ const PLURAL: Record<string, string> = { admin: 'admins', manager: 'managers', e
 /** What a permission lets someone do, for messages. */
 const DOES: Partial<Record<Permission, string>> = {
   'inventory.update': 'change inventory, prices and part numbers',
-  'projects.update': 'move projects between stages, put them on hold or add updates',
+  'inventory.delete': 'delete items, kits and stock records',
+  'suppliers.update': 'change suppliers',
+  'suppliers.delete': 'delete suppliers',
+  'orders.update': 'change bookkeeping (customers, quotes, orders, invoices, bills, payments)',
+  'orders.delete': 'delete bookkeeping records',
+  'projects.update': 'change projects, project progress and production',
+  'projects.delete': 'delete projects or production records',
+  'quality.update': 'change quality records (inspections, defects, NCRs)',
+  'automation.create': 'change automation (rules, scheduled jobs, auto-PO, forecasts)',
+  'automation.delete': 'delete automation',
   'settings.update': 'change settings',
 };
 

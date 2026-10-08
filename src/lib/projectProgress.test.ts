@@ -357,7 +357,7 @@ describe('moving a project', () => {
 
   it('needs a role that may update projects', async () => {
     expect(await call('POST', '/api/project-progress/60/stage', { stageId: 6 }, 'viewer')).toEqual({
-      status: 403, body: { error: 'Only admins, managers and engineers can move projects between stages, put them on hold or add updates.' },
+      status: 403, body: { error: 'Only admins, managers and engineers can change projects, project progress and production.' },
     });
     expect(await call('POST', '/api/project-progress/60/stage', { stageId: 6 }, null)).toEqual({ status: 401, body: { error: 'Sign in required' } });
     expect((await call('POST', '/api/project-progress/60/stage', { stageId: 6 }, 'manager')).status).toBe(200);
