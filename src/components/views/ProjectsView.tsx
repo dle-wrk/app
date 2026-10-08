@@ -4,6 +4,8 @@ import ProcurementShortageCheckerView from './ProcurementShortageCheckerView';
 import { Item, Project, JobCard } from '../../types';
 import { useEscapeKey } from '../../lib/useEscapeKey';
 import { detectLedSwatch, ledSwatchBackground } from '../../lib/ledColor';
+import { useDataChanged } from '../../lib/liveUpdates';
+import type { Board } from './ProjectProgressView';
 
 // Compact human-friendly "N units ago" for the Last-edited chip.
 // Falls back to a locale date string once we're past a week — beyond
@@ -33,6 +35,8 @@ interface ProjectsViewProps {
   onProjectCreated: (project: Project) => void;
   onProjectDeleted: (projectId: number) => void;
   onProjectUpdated: (project: Project) => void;
+  /** Opens the Project Progress board. */
+  onOpenProgress?: () => void;
 }
 
 interface LinkedComponent {
@@ -51,7 +55,8 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
   triggerToast,
   onProjectCreated,
   onProjectDeleted,
-  onProjectUpdated
+  onProjectUpdated,
+  onOpenProgress,
 }) => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showLinkModal, setShowLinkModal] = useState(false);
@@ -103,6 +108,29 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
       .catch(() => { /* leave empty; card just shows "no kits yet" */ });
     return () => { cancelled = true; };
   }, [projects.length]);
+  // Each project's stage from the Project Progress board, for the card's
+  // stage line and progress bar. Without it (not loaded, or failed) the bar
+  // falls back to dates and job cards as before.
+  const [board, setBoard] = useState<Board | null>(null);
+  const loadBoard = React.useCallback(() => {
+    fetch('/api/project-progress')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data && Array.isArray(data.stages) && Array.isArray(data.projects)) setBoard(data); })
+      .catch(() => { /* keep the fallback bar */ });
+  }, []);
+  useEffect(() => { loadBoard(); }, [loadBoard, projects.length]);
+  useDataChanged(['project_progress', 'projects'], loadBoard);
+  const stageOf = useMemo(() => {
+    const stages = [...(board?.stages ?? [])].sort((a, b) => a.position - b.position || a.id - b.id);
+    const map = new Map<number, { name: string; index: number; total: number; set: boolean; onHold: boolean; holdReason: string | null }>();
+    for (const p of board?.projects ?? []) {
+      const index = Math.max(0, stages.findIndex(s => s.id === p.stageId));
+      if (!stages.length) continue;
+      map.set(p.id, { name: stages[index].name, index, total: stages.length, set: p.stageSet, onHold: p.onHold, holdReason: p.holdReason });
+    }
+    return map;
+  }, [board]);
+
   const kitsByProject = useMemo(() => {
     const map: Record<number, typeof allKits> = {};
     for (const k of allKits) {
@@ -369,10 +397,15 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
           const completedJobs = projectJobs.filter(j => j.status === 'Completed').length;
           const jobProgress = projectJobs.length > 0 ? Math.round((completedJobs / projectJobs.length) * 100) : 0;
 
-          // Weighted progress: 40% timeline, 60% execution
-          const totalProgress = projectJobs.length > 0
-            ? Math.round((dateProgress * 0.4) + (jobProgress * 0.6))
-            : dateProgress;
+          // The stage it has reached on the Project Progress board: the
+          // first stage is 0%, the last (finished) 100%. Without the board,
+          // the old estimate: 40% timeline, 60% completed job cards.
+          const stage = stageOf.get(project.id);
+          const totalProgress = stage
+            ? (stage.total > 1 ? Math.round((stage.index / (stage.total - 1)) * 100) : 100)
+            : projectJobs.length > 0
+              ? Math.round((dateProgress * 0.4) + (jobProgress * 0.6))
+              : dateProgress;
 
           return (
           <div key={project.id} className="bg-surface-container border border-outline-variant rounded-xl p-lg hover:border-primary/50 transition-all flex flex-col">
@@ -405,15 +438,30 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
               {/* Timeline Progress */}
               <div className="space-y-1">
                 <div className="flex justify-between text-[10px] font-mono text-outline">
-                  <span className="flex items-center gap-1">
-                    <Activity className="w-3 h-3 text-primary" />
-                    Unified Progress
-                  </span>
+                  {stage ? (
+                    <button
+                      type="button"
+                      onClick={onOpenProgress}
+                      disabled={!onOpenProgress}
+                      title="Open the Project Progress board"
+                      data-testid={`project-stage-${project.id}`}
+                      className="flex items-center gap-1 text-left hover:text-primary disabled:hover:text-outline"
+                    >
+                      <Activity className="w-3 h-3 text-primary" />
+                      {stage.set ? `${stage.name} (${stage.index + 1} of ${stage.total})` : `Stage not set yet`}
+                      {stage.onHold && <span className="text-amber-500 font-bold" title={stage.holdReason ?? undefined}>· On hold</span>}
+                    </button>
+                  ) : (
+                    <span className="flex items-center gap-1">
+                      <Activity className="w-3 h-3 text-primary" />
+                      Unified Progress
+                    </span>
+                  )}
                   <span>{totalProgress}%</span>
                 </div>
                 <div className="w-full bg-surface-container-high h-1.5 rounded-full overflow-hidden border border-outline-variant/30">
                   <div
-                    className="bg-primary h-full transition-all duration-500"
+                    className={`${stage?.onHold ? 'bg-amber-500' : 'bg-primary'} h-full transition-all duration-500`}
                     style={{ width: `${totalProgress}%` }}
                   />
                 </div>

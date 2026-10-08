@@ -2195,6 +2195,7 @@ if (currentView === 'alternates') {
                    projectPlacementStats={projectPlacementStats}
                    jobCards={jobCards}
                    triggerToast={triggerToast}
+                   onOpenProgress={() => setView('project_progress')}
                    onProjectCreated={(project) => {
                      project = { ...project, id: Number(project.id) };
                      setProjects(prev => [...prev, project]);

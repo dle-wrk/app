@@ -152,3 +152,34 @@ describe('BOM Manager', () => {
     expect(document.body.textContent).not.toContain('BOM Manager');
   });
 });
+
+describe('project cards', () => {
+  const STAGES = ['Planning', 'Design & BOM', 'Sourcing', 'Kitting', 'Assembly', 'Testing', 'Complete'].map((name, i) => ({ id: i + 1, name, position: i }));
+  const board = (over: Record<string, unknown> = {}) => ({
+    stages: STAGES, can: { move: true, editStages: false },
+    projects: [{ id: 60, stageId: 5, stageSet: true, onHold: false, holdReason: null, ...over }],
+  });
+  const stageButton = () => document.querySelector('[data-testid="project-stage-60"]') as HTMLButtonElement | null;
+  const percent = () => stageButton()?.parentElement?.lastElementChild?.textContent;
+
+  it('show the stage the project has reached, and the bar follows it', async () => {
+    replies['GET /api/project-progress'] = { status: 200, body: board() };
+    await render();
+    expect(stageButton()!.textContent).toContain('Assembly (5 of 7)');
+    expect(percent()).toBe('67%');
+  });
+
+  it('say when a project is on hold or has no stage yet', async () => {
+    replies['GET /api/project-progress'] = { status: 200, body: board({ stageId: 1, stageSet: false, onHold: true, holdReason: 'Waiting for PCBs' }) };
+    await render();
+    expect(stageButton()!.textContent).toContain('Stage not set yet');
+    expect(stageButton()!.textContent).toContain('On hold');
+    expect(percent()).toBe('0%');
+  });
+
+  it('fall back to the old estimate without the board', async () => {
+    await render();
+    expect(stageButton()).toBeNull();
+    expect(document.body.textContent).toContain('Unified Progress');
+  });
+});
