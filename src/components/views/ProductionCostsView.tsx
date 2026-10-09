@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Plus, Pencil, Trash2, Loader2, TrendingUp, Package, Wallet, AlertTriangle, FileUp, Download } from 'lucide-react';
+import { Plus, Pencil, Trash2, Loader2, TrendingUp, Package, Wallet, AlertTriangle, FileUp, Download, Search } from 'lucide-react';
 import { ProductionProduct } from '../../types';
 import {
   Modal, fmtMoney, apiGet, apiPost, apiPut, apiDelete,
@@ -27,6 +27,7 @@ export const ProductionCostsView: React.FC<ProductionCostsViewProps> = ({ trigge
   const [products, setProducts] = useState<ProductionProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const [categoryFilter, setCategoryFilter] = useState('ALL');
+  const [search, setSearch] = useState('');
   const [editing, setEditing] = useState<ProductionProduct | null>(null);
   const [showEditor, setShowEditor] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -57,7 +58,15 @@ export const ProductionCostsView: React.FC<ProductionCostsViewProps> = ({ trigge
   useEffect(() => { load(); }, []);
 
   const categories = useMemo(() => ['ALL', ...Array.from(new Set(products.map(p => p.category).filter(Boolean) as string[]))], [products]);
-  const filtered = useMemo(() => products.filter(p => categoryFilter === 'ALL' || p.category === categoryFilter), [products, categoryFilter]);
+  // In the category, matching the search (model #, description, category or
+  // notes), ascending by model number (TCU-2 before TCU-10).
+  const filtered = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    return products
+      .filter(p => categoryFilter === 'ALL' || p.category === categoryFilter)
+      .filter(p => !needle || [p.modelNumber, p.description, p.category, p.notes].some(v => String(v ?? '').toLowerCase().includes(needle)))
+      .sort((a, b) => a.modelNumber.localeCompare(b.modelNumber, undefined, { numeric: true, sensitivity: 'base' }));
+  }, [products, categoryFilter, search]);
 
   const stats = useMemo(() => {
     const withPrice = products.filter(p => p.sellingPrice !== null);
@@ -108,7 +117,21 @@ export const ProductionCostsView: React.FC<ProductionCostsViewProps> = ({ trigge
 
       <div className="bg-surface-container rounded-xl border border-outline-variant overflow-hidden">
         <div className="px-lg py-sm border-b border-outline-variant bg-surface-container-high/30 flex justify-between items-center flex-wrap gap-2">
-          <span className="font-bold text-sm">Product Catalog</span>
+          <div className="flex items-center gap-sm flex-wrap">
+            <span className="font-bold text-sm">Product Catalog</span>
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-outline" />
+              <input
+                type="search"
+                aria-label="Search products"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search model #, description…"
+                className="w-56 rounded-lg border border-outline-variant bg-surface-container-low pl-8 pr-3 py-1 text-xs text-on-surface focus:outline-none focus:border-primary"
+              />
+            </div>
+            {search.trim() && <span className="text-[10px] text-outline">{filtered.length} of {products.length}</span>}
+          </div>
           <div className="flex gap-1 flex-wrap">
             {categories.map(c => (
               <button key={c} onClick={() => setCategoryFilter(c)} className={`px-2 py-0.5 rounded text-[10px] font-bold border transition-colors ${categoryFilter === c ? 'bg-primary text-white border-primary' : 'bg-surface-container-high text-on-surface-variant border-outline-variant'}`}>{c}</button>
@@ -152,7 +175,7 @@ export const ProductionCostsView: React.FC<ProductionCostsViewProps> = ({ trigge
                   </tr>
                 ))}
                 {filtered.length === 0 && (
-                  <tr><td colSpan={8} className="py-8 text-center text-outline text-xs italic">No products in this category.</td></tr>
+                  <tr><td colSpan={8} className="py-8 text-center text-outline text-xs italic">{search.trim() ? 'No products match the search.' : 'No products in this category.'}</td></tr>
                 )}
               </tbody>
             </table>
