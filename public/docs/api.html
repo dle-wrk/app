@@ -514,6 +514,7 @@
                         <tr><td><span class="m m-get">GET</span></td><td>/api/production-products</td><td>List finished products (the production catalogue).</td></tr>
                         <tr><td><span class="m m-post">POST</span></td><td>/api/production-products</td><td>Create a finished product.</td></tr>
                         <tr><td><span class="m m-put">PUT</span></td><td>/api/production-products/:id</td><td>Update a finished product.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/production-products/import</td><td>Bulk import: <code>{"rows":[{"line","modelNumber","description"?,"category"?,"productionCost"?,"sellingPrice"?,"notes"?}],"apply"?}</code>. Matches by model number; adds new ones and sets only the fields given. Without <code>apply</code> it only returns what would change (<code>added</code>, <code>updated</code>, <code>unchanged</code>, <code>changes</code>); with it, applies everything in one transaction.</td></tr>
                         <tr><td><span class="m m-delete">DELETE</span></td><td>/api/production-products/:id</td><td>Delete a finished product.</td></tr>
                         <tr><td><span class="m m-get">GET</span></td><td>/api/build-jobs</td><td>List build jobs (older list).</td></tr>
                         <tr><td><span class="m m-post">POST</span></td><td>/api/build-jobs</td><td>Create a build job.</td></tr>

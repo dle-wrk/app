@@ -25,6 +25,7 @@ import type { Express } from 'express';
 import { z } from 'zod';
 import { pool, query, queryOne, exec } from './db';
 import { requireAdmin } from './authRoutes';
+import { planProductImport, type ProductChange, type ProductImportRow } from './productImport';
 
 // --- Finished-goods catalogue --------------------------------------------
 // Seeded once from Tracklab_Production_Costs_2026-04-30.xlsx; editable
@@ -61,6 +62,73 @@ const ProductionProductSchema = z.object({
   currency: z.string().optional(),
   notes: z.string().optional(),
 });
+
+// Rows of a bulk import, as the page read them from the file (see ./productImport).
+const amount = z.number().min(0).max(1e9);
+const ProductImportSchema = z.object({
+  apply: z.boolean().optional(),
+  rows: z.array(z.object({
+    line: z.number().int().min(1),
+    modelNumber: z.string().trim().min(1).max(100),
+    description: z.string().max(1000).optional(),
+    category: z.string().max(100).optional(),
+    productionCost: amount.optional(),
+    sellingPrice: amount.optional(),
+    notes: z.string().max(2000).optional(),
+  })).min(1).max(5000),
+});
+
+/**
+ * Works out what importing these rows does to the catalogue and, with
+ * apply, does it in one transaction: new model numbers are added, existing
+ * ones get the fields the file filled in. The plan is worked out again here
+ * against the catalogue as it is now, whatever the page previewed.
+ */
+export async function importProductionProducts(rows: ProductImportRow[], apply: boolean, who: string) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: existing } = await client.query(
+      `SELECT * FROM production_products ORDER BY id ${apply ? 'FOR UPDATE' : ''}`
+    );
+    const changes = planProductImport(rows, existing.map(mapProductionProduct) as any);
+    if (apply) {
+      for (const c of changes) {
+        if (c.kind === 'new') {
+          await client.query(
+            `INSERT INTO production_products (model_number, description, category, production_cost, selling_price, notes)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [c.modelNumber, c.set.description ?? null, c.set.category ?? null, c.set.productionCost ?? null, c.set.sellingPrice ?? null, c.set.notes ?? null]
+          );
+        } else if (c.kind === 'changed') {
+          const cols: Record<keyof ProductChange['set'], string> = {
+            description: 'description', category: 'category', productionCost: 'production_cost', sellingPrice: 'selling_price', notes: 'notes',
+          };
+          const fields = Object.keys(c.set) as Array<keyof ProductChange['set']>;
+          await client.query(
+            `UPDATE production_products SET ${fields.map((f, i) => `${cols[f]} = $${i + 2}`).join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+            [c.id, ...fields.map((f) => c.set[f])]
+          );
+        }
+      }
+    }
+    await client.query(apply ? 'COMMIT' : 'ROLLBACK');
+    const count = (k: ProductChange['kind']) => changes.filter((c) => c.kind === k).length;
+    const summary = { added: count('new'), updated: count('changed'), unchanged: count('unchanged') };
+    if (apply && (summary.added || summary.updated)) {
+      await query(
+        `INSERT INTO user_activity_logs (user_email, action, entity_type, entity_id, details, status) VALUES ($1, 'IMPORT_PRODUCTION_COSTS', 'ProductionProduct', NULL, $2, 'SUCCESS')`,
+        [who, JSON.stringify({ ...summary, models: changes.filter((c) => c.kind !== 'unchanged').map((c) => c.modelNumber) })]
+      ).catch(() => {});
+    }
+    return { applied: apply, ...summary, changes };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
 
 // [model, description, category, productionCost|null, sellingPrice|null]
 // Selling prices come straight from the workbook's Ordering Calculator / model price lists.
@@ -278,6 +346,28 @@ export function registerProductionRoutes(app: Express): void {
       res.status(201).json(mapProductionProduct(row));
     } catch (err: any) {
       if (String(err.message).includes('duplicate key')) return res.status(400).json({ error: `Model number "${b.modelNumber}" already exists.` });
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Bulk import (Production Costs > Import): {rows, apply}. Without apply it
+  // only says what would change. Needs a role that may change stock
+  // (production-products is in the inventory area, see ./writeAccess).
+  app.post('/api/production-products/import', async (req: any, res) => {
+    const parsed = ProductImportSchema.safeParse(req.body);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      return res.status(400).json({ error: `The rows can't be imported: ${issue.path.join('.') || 'body'}: ${issue.message}` });
+    }
+    const seen = new Set<string>();
+    for (const r of parsed.data.rows) {
+      const key = r.modelNumber.toLowerCase();
+      if (seen.has(key)) return res.status(400).json({ error: `${r.modelNumber} is in the rows twice.` });
+      seen.add(key);
+    }
+    try {
+      res.json(await importProductionProducts(parsed.data.rows, parsed.data.apply === true, req.user?.email || 'unknown'));
+    } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });

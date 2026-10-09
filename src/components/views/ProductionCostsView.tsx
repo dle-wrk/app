@@ -1,11 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Plus, Pencil, Trash2, Loader2, TrendingUp, Package, Wallet, AlertTriangle } from 'lucide-react';
+import { Plus, Pencil, Trash2, Loader2, TrendingUp, Package, Wallet, AlertTriangle, FileUp, Download } from 'lucide-react';
 import { ProductionProduct } from '../../types';
 import {
   Modal, fmtMoney, apiGet, apiPost, apiPut, apiDelete,
   PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass,
 } from '../bookkeeping/shared';
 import { confirmDialog } from '../../lib/confirmDialog';
+import { currentUserCan } from '../../lib/permissions';
+import { productsToCsv } from '../../lib/productImport';
+import { ProductImportModal } from '../ProductImportModal';
 
 interface ProductionCostsViewProps {
   triggerToast: (msg: string, type?: any) => void;
@@ -27,6 +30,18 @@ export const ProductionCostsView: React.FC<ProductionCostsViewProps> = ({ trigge
   const [editing, setEditing] = useState<ProductionProduct | null>(null);
   const [showEditor, setShowEditor] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const canChange = currentUserCan('inventory.update');
+
+  const exportCsv = () => {
+    const blob = new Blob([productsToCsv(products as any)], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `production-costs-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const load = async () => {
     setLoading(true);
@@ -76,7 +91,11 @@ export const ProductionCostsView: React.FC<ProductionCostsViewProps> = ({ trigge
           <h3 className="font-headline-sm text-xl font-black text-on-surface tracking-tighter mb-1">Production Costs</h3>
           <p className="text-xs text-on-surface-variant">Finished-product catalog — build cost, selling price and margin. Model numbers align with invoice line items in Bookkeeping. Prices exclude VAT.</p>
         </div>
-        <PrimaryButton icon={<Plus className="w-3.5 h-3.5" />} onClick={() => { setEditing(null); setShowEditor(true); }}>New Product</PrimaryButton>
+        <div className="flex gap-sm flex-wrap">
+          <SecondaryButton icon={<Download className="w-3.5 h-3.5" />} onClick={exportCsv} disabled={!products.length}>Export CSV</SecondaryButton>
+          {canChange && <SecondaryButton icon={<FileUp className="w-3.5 h-3.5" />} onClick={() => setImporting(true)}>Import</SecondaryButton>}
+          <PrimaryButton icon={<Plus className="w-3.5 h-3.5" />} onClick={() => { setEditing(null); setShowEditor(true); }}>New Product</PrimaryButton>
+        </div>
       </div>
 
       {/* Summary */}
@@ -140,6 +159,15 @@ export const ProductionCostsView: React.FC<ProductionCostsViewProps> = ({ trigge
           </div>
         )}
       </div>
+
+      {importing && (
+        <ProductImportModal
+          onClose={() => setImporting(false)}
+          onExport={exportCsv}
+          triggerToast={triggerToast}
+          onImported={async (message) => { setImporting(false); triggerToast(message); await load(); }}
+        />
+      )}
 
       {showEditor && (
         <ProductEditorModal

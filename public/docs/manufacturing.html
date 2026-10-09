@@ -88,6 +88,21 @@
                     <li>Edit costs and prices as needed</li>
                 </ol>
             </div>
+            <div class="step">
+                <h4 id="production-costs-import">Import costs and prices in bulk</h4>
+                <ol>
+                    <li>Click <strong>Export CSV</strong> to download the catalogue, and edit it in Excel (or use your own sheet).</li>
+                    <li>Click <strong>Import</strong> and choose the file (.xlsx or .csv). Columns are found by their headers: <strong>Model #</strong> (needed) and any of <strong>Description</strong>, <strong>Category</strong>, <strong>Production cost</strong>, <strong>Selling price</strong>, <strong>Notes</strong>. In a workbook, the first sheet with a Model # column is used.</li>
+                    <li>Check the preview: what is new, what changes (old value crossed out, new value next to it), and anything that was left out, such as a price that isn't a number.</li>
+                    <li>Click <strong>Import</strong> to apply it. It all goes in at once, or not at all.</li>
+                </ol>
+                <ul>
+                    <li>A model number already in the catalogue is updated; a new one is added. Nothing is deleted.</li>
+                    <li>An empty cell keeps what is there, so a sheet with only model numbers and selling prices changes only prices.</li>
+                    <li>Prices exclude VAT. "R 8 827,89", "8 827.89" and "8827,89" all work.</li>
+                    <li>Admins, managers and engineers can import; everyone can export.</li>
+                </ul>
+            </div>
 
             <div class="tip">
                 <strong>💡 Tip:</strong> Track BOM costs carefully - they're the foundation of accurate pricing and margin calculations.
