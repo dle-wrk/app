@@ -28,7 +28,8 @@ test.describe('command palette', () => {
     // Landing state: Bookkeeping's Dispatch sub-tab is active. The section
     // pill "Sales" and the sub-pill "Delivery & Collection" both show as
     // primary-styled after the deep-link fires.
-    await expect(page.getByText(/Delivery & Collection Notes/)).toBeVisible({ timeout: 10_000 });
+    // (The tab itself is labelled "Delivery & Collection".)
+    await expect(page.getByRole('button', { name: 'Delivery & Collection', exact: true })).toBeVisible({ timeout: 10_000 });
   });
 
   test('Escape closes the palette', async ({ page }) => {

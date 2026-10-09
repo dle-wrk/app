@@ -9,7 +9,8 @@ test('verify app navigation and rendering', async ({ page }) => {
   await page.screenshot({ path: test.info().outputPath('dashboard_v2.png') });
 
   // Navigate to Items (in the STOCK section, closed at first)
-  await page.click('button:has-text("STOCK")');
+  // Exactly "STOCK": has-text would also match the "Stock Tables" button.
+  await page.getByRole('button', { name: 'STOCK', exact: true }).click();
   await page.click('button:has-text("Items & Inventory")');
   await page.waitForTimeout(1000);
   await expect(page.getByRole('heading', { name: 'Inventory items' })).toBeVisible();

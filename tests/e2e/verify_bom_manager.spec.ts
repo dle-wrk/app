@@ -31,7 +31,7 @@ test('verify enhanced BOM management in ProjectsView', async ({ page }) => {
   await openSignedIn(page, '/?test=true&v=' + Date.now());
 
   // Navigate to Project Manager via the sidebar (the PROJECTS section is closed at first)
-  await page.click('button:has-text("PROJECTS")');
+  await page.getByRole('button', { name: 'PROJECTS', exact: true }).click();
   await page.click('span:has-text("Project Manager")');
 
   // Create a new project to have a clean state
@@ -53,7 +53,8 @@ test('verify enhanced BOM management in ProjectsView', async ({ page }) => {
   await leftCol.locator('input[placeholder="Search stock code or name..."]').fill('ANT-001');
 
   // Click to add (from left column)
-  await leftCol.locator('span:has-text("ANT-001")').click();
+  // The part's row has the code twice (nested spans); either is the row.
+  await leftCol.locator('span:has-text("ANT-001")').first().click();
 
   // Verify it's in the Current BOM (Right Column)
   const rightCol = modal.locator('div.flex.flex-col.h-full.overflow-hidden').nth(1);
