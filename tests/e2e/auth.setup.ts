@@ -6,21 +6,14 @@ import { ADMIN, AUTH_FILE } from './env';
 // Signs in once through the API and saves what the app keeps in the browser
 // after a sign-in, so the other tests start signed in.
 //
-// On an empty database the server takes a while to create its tables after
-// the page server is already answering, and sign-in says "database
-// unavailable" (503) until then, so keep trying for a few minutes.
+// The run starts only once the server reports ready (playwright.config.ts
+// waits on /healthz), so one sign-in is enough: each attempt counts towards
+// the sign-in rate limit.
 async function signIn(request: APIRequestContext) {
-  const deadline = Date.now() + 180_000;
-  for (;;) {
-    const res = await request.post('/api/login', { data: { email: ADMIN.email, password: ADMIN.password } }).catch(() => null);
-    const retryable = !res || res.status() === 503 || res.status() === 502 || res.status() === 504;
-    if (!retryable || Date.now() > deadline) return res;
-    await new Promise((r) => setTimeout(r, 3000));
-  }
+  return request.post('/api/login', { data: { email: ADMIN.email, password: ADMIN.password } }).catch(() => null);
 }
 
 setup('sign in as the test admin', async ({ request, baseURL }) => {
-  setup.setTimeout(240_000);
   const res = await signIn(request);
   expect(res, 'the server never answered').toBeTruthy();
   expect(res!.ok(), `sign-in failed: ${res!.status()} ${await res!.text()}`).toBeTruthy();

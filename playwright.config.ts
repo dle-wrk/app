@@ -79,7 +79,9 @@ export default defineConfig({
   // already running: a dev server started the usual way is on production.
   webServer: baseURLOverride ? undefined : {
     command: 'npm run dev',
-    url: 'http://localhost:3000',
+    // The API server's readiness, not just the page server: the tests start
+    // once it has finished setting up the database.
+    url: 'http://localhost:3001/healthz',
     reuseExistingServer: false,
     timeout: 180_000,
     // The server's own output, so CI can show why it failed (see ci.yml).

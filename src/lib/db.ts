@@ -517,6 +517,39 @@ async function ensureAutomationTables() {
   await exec(`CREATE INDEX IF NOT EXISTS alert_subscriptions_user_idx ON alert_subscriptions (user_id, alert_type)`).catch(() => {});
 }
 
+// Customers and their orders. Created here, ahead of the production tables
+// that refer to client_orders: on an empty database those failed with
+// "relation client_orders does not exist" and the server never finished
+// setting up (no users table, so nobody could sign in). The same statements
+// are in server.ts's bootstrap, where they are then a no-op.
+async function ensureClientOrderTables() {
+  await exec(`CREATE TABLE IF NOT EXISTS clients (
+      id SERIAL PRIMARY KEY,
+      client_name TEXT NOT NULL,
+      contact_name TEXT,
+      email TEXT,
+      phone TEXT,
+      address TEXT,
+      vat_number TEXT,
+      status TEXT DEFAULT 'ACTIVE',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`);
+  await exec(`CREATE TABLE IF NOT EXISTS client_orders (
+      id SERIAL PRIMARY KEY,
+      client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL,
+      order_number TEXT UNIQUE NOT NULL,
+      order_date DATE NOT NULL DEFAULT CURRENT_DATE,
+      required_date DATE,
+      status TEXT DEFAULT 'DRAFT',
+      currency TEXT DEFAULT 'ZAR',
+      subtotal NUMERIC(12,2) DEFAULT 0,
+      tax NUMERIC(12,2) DEFAULT 0,
+      total NUMERIC(12,2) DEFAULT 0,
+      notes TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`);
+}
+
 async function ensureProjectsTable() {
   await exec(`CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY,
@@ -625,6 +658,7 @@ export async function ensureSchema() {
     await ensureSuppliersTable();
     await ensureProjectsTable();
     await ensurePricingTables();
+    await ensureClientOrderTables();
     await ensureProductionTables();
     await ensureAutomationTables();
     return;
@@ -636,6 +670,7 @@ export async function ensureSchema() {
   await ensureInventoryTable();
   await ensureSuppliersTable();
   await ensureProjectsTable();
+  await ensureClientOrderTables();
   await ensureProductionTables();
   await ensureAutomationTables();
 

@@ -110,6 +110,14 @@ app.use((_req, res, next) => {
   next();
 });
 
+// Readiness: 200 once the start-up schema setup has finished, 503 until
+// then. Outside /api, so it needs no session. The E2E run waits on it before
+// signing in (on an empty database the setup takes a while).
+let schemaReady = false;
+app.get('/healthz', (_req, res) => {
+  res.status(schemaReady ? 200 : 503).json({ ready: schemaReady });
+});
+
 // Populate req.user from the client's X-Session-Id header when present.
 // Scoped to /api so static asset requests don't trigger a DB lookup.
 app.use('/api', (req, res, next) => attachSessionUser(req, res, next));
@@ -1213,6 +1221,7 @@ async function bootstrap() {
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
       await runSchemaBootstrap();
+      schemaReady = true;
       break;
     } catch (err) {
       if (attempt === MAX_ATTEMPTS) {
