@@ -66,7 +66,9 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 1 : undefined,
-  reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'list',
+  // CI also writes e2e-results.json, which ci.yml turns into one short
+  // annotation per failed test (GitHub keeps only 10 per step).
+  reporter: process.env.CI ? [['github'], ['html', { open: 'never' }], ['json', { outputFile: 'e2e-results.json' }]] : 'list',
   use: {
     baseURL: baseURLOverride || 'http://localhost:3000',
     trace: 'on-first-retry',

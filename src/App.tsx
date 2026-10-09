@@ -877,7 +877,8 @@ export default function App() {
   const [pendingBookkeepingTarget, setPendingBookkeepingTarget] = useState<{ section?: string; subSection?: string } | null>(null);
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      // Either case: with Caps Lock (or Shift) the key comes through as "K".
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setPaletteOpen(true);
       }

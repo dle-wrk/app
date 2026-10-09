@@ -79,6 +79,9 @@ jobs:
           npm run test:e2e 2>&1 | tee e2e.log
       # The full log needs a GitHub sign-in to read; annotations don't. Turn
       # the server's errors into annotations so a failure explains itself.
+      - name: Failed tests as annotations
+        if: failure()
+        run: node scripts/e2e-failures.mjs e2e-results.json || true
       - name: Server errors as annotations
         if: failure()
         run: |
