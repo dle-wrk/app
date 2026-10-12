@@ -1,9 +1,10 @@
 import React from 'react';
-import { Upload, Plus, Search, Download } from 'lucide-react';
+import { Upload, Plus, Search, Download, X } from 'lucide-react';
 import { Item } from '../../types';
 import { fmtUSD, fmtZAR, fmtNumber } from '../../lib/formatMoney';
 import { CSV_HEADER, itemToCsvRow } from '../../mockData';
 import { detectLedSwatch, ledSwatchBackground } from '../../lib/ledColor';
+import { NO_PRICE_RANGE, inPriceRange, isPriceRangeSet, type PriceRange } from '../../lib/priceFilter';
 
 const USD_TO_ZAR_RATE = 18.50;
 
@@ -60,6 +61,14 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   isAdmin = false,
   reservedByPart = {},
 }) => {
+  // Price range on top of the filters above (kept here: only this list has it).
+  const [priceRange, setPriceRange] = React.useState<PriceRange>(NO_PRICE_RANGE);
+  const priceSet = isPriceRangeSet(priceRange);
+  const shownItems = React.useMemo(
+    () => (priceSet ? filteredItems.filter((item) => inPriceRange(item.price, priceRange, USD_TO_ZAR_RATE)) : filteredItems),
+    [filteredItems, priceRange, priceSet],
+  );
+
   return (
     <div className="p-container-margin space-y-4 max-w-7xl mx-auto w-full">
       {/* Header overview content */}
@@ -78,7 +87,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               // Exports the CURRENT filter view so operators can share a
               // slice (e.g. all critical stock) rather than the whole
               // catalogue every time.
-              const rows = filteredItems.map(itemToCsvRow);
+              const rows = shownItems.map(itemToCsvRow);
               const csv = CSV_HEADER + '\n' + rows.join('\n') + '\n';
               const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
               const url = URL.createObjectURL(blob);
@@ -92,7 +101,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               URL.revokeObjectURL(url);
             }}
             className="bg-surface-container-high hover:bg-surface-container-highest text-primary border border-primary/20 text-xs font-bold px-md py-2 rounded flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
-            title={`Export ${filteredItems.length} rows (current filter) as CSV`}
+            title={`Export ${shownItems.length} rows (current filter) as CSV`}
           >
             <Download className="w-4 h-4" /> Export CSV
           </button>
@@ -206,15 +215,51 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           </select>
         </div>
 
+        {/* Price range: min and/or max, in dollars or rand */}
+        <div className="flex items-center gap-1.5">
+          <span className="text-outline text-[11px] font-medium">Price:</span>
+          <select
+            aria-label="Price currency"
+            value={priceRange.currency}
+            onChange={(e) => setPriceRange({ ...priceRange, currency: e.target.value as PriceRange['currency'] })}
+            className="bg-surface-container-high border border-outline-variant rounded px-1.5 py-1 text-xs cursor-pointer focus:outline-none focus:border-primary text-on-surface"
+          >
+            <option value="USD">$</option>
+            <option value="ZAR">R</option>
+          </select>
+          <input
+            aria-label="Minimum price"
+            inputMode="decimal"
+            placeholder="min"
+            value={priceRange.min}
+            onChange={(e) => setPriceRange({ ...priceRange, min: e.target.value })}
+            className="w-16 bg-surface-container-high border border-outline-variant rounded px-2 py-1 text-xs font-mono focus:outline-none focus:border-primary text-on-surface"
+          />
+          <span className="text-outline text-[11px]">–</span>
+          <input
+            aria-label="Maximum price"
+            inputMode="decimal"
+            placeholder="max"
+            value={priceRange.max}
+            onChange={(e) => setPriceRange({ ...priceRange, max: e.target.value })}
+            className="w-16 bg-surface-container-high border border-outline-variant rounded px-2 py-1 text-xs font-mono focus:outline-none focus:border-primary text-on-surface"
+          />
+          {priceSet && (
+            <button type="button" aria-label="Clear price filter" title="Clear price filter" onClick={() => setPriceRange({ ...NO_PRICE_RANGE, currency: priceRange.currency })} className="p-1 rounded text-outline hover:text-on-surface hover:bg-surface-container-high">
+              <X className="w-3 h-3" />
+            </button>
+          )}
+        </div>
+
         {/* Filter Yield Output Counter */}
         <div className="ml-auto text-outline font-mono text-[11px]">
-          Yield: <span className="text-primary font-bold">{filteredItems.length}</span> / {items.length}
+          Yield: <span className="text-primary font-bold">{shownItems.length}</span> / {items.length}
         </div>
       </div>
 
       {/* Grid Item Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-md">
-        {filteredItems.map(item => (
+        {shownItems.map(item => (
           <div
             key={item.partNumber}
             onClick={() => setSelectedDetailPartNumber(item.partNumber)}
