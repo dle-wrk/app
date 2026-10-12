@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { classifyPartNumberBySupplier, SUPPLIER_SLOTS } from './lib/partNumbers';
 import {
   Menu,
   Search,
@@ -75,6 +76,13 @@ const TIMEZONES = [
   { name: 'JST (Japan Standard Time - UTC+9)', value: 'Asia/Tokyo' },
   { name: 'AEST (Australian Eastern Time - UTC+10)', value: 'Australia/Sydney' }
 ];
+
+/** Five supplier part-number slots with `pn` in its supplier's (slot 4, Other, when unknown). */
+function supplierSlots(pn: string): string[] {
+  const supplier = classifyPartNumberBySupplier(pn);
+  const slot = supplier ? SUPPLIER_SLOTS.findIndex((s) => s.supplier === supplier) : 3;
+  return SUPPLIER_SLOTS.map((_, i) => (i === slot ? pn : ''));
+}
 
 export default function App() {
   // Authentication State
@@ -930,7 +938,9 @@ export default function App() {
       // symmetric — a SKU added here can be edited later without any
       // data disappearing.
       manPns: newItem.manPn?.trim() ? [newItem.manPn.trim()] : undefined,
-      supPns: newItem.supPn?.trim() ? [newItem.supPn.trim()] : undefined,
+      // In its supplier's slot (1 Mouser, 2 DigiKey, 3 LCSC; 4 when it
+      // isn't recognisably any of them), the way BOM downloads read them.
+      supPns: newItem.supPn?.trim() ? supplierSlots(newItem.supPn.trim()) : undefined,
     };
 
     const now = new Date();
@@ -2486,7 +2496,7 @@ if (currentView === 'alternates') {
                     remapping. */}
                 <div className="grid grid-cols-2 gap-sm">
                   <div className="flex flex-col gap-1">
-                    <label className="font-bold text-outline">Supplier part number</label>
+                    <label className="font-bold text-outline">Supplier part number <span className="font-normal">(goes in its supplier's slot: Mouser, DigiKey or LCSC)</span></label>
                     <input
                       name="supPn"
                       type="text"

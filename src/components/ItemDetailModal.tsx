@@ -4,6 +4,7 @@ import { Item } from '../types';
 import { fmtUSD, fmtZAR, fmtNumber } from '../lib/formatMoney';
 import { detectLedSwatch, ledSwatchBackground } from '../lib/ledColor';
 import { ITEM_CATEGORIES } from '../lib/itemCategories';
+import { SUPPLIER_SLOTS, rightSlotFor } from '../lib/partNumbers';
 import { CategoryCombobox } from './CategoryCombobox';
 import {
   X,
@@ -156,6 +157,17 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete, reser
       category: trimmed
     }));
     setNewCategory("");
+  };
+
+  // Swaps two supplier part-number slots, so a number typed into the wrong
+  // supplier's slot moves to its own and nothing is lost.
+  const moveSupplierPn = (from: number, to: number) => {
+    setEdited(prev => {
+      const arr = [...(prev.supPns || [])];
+      while (arr.length < 5) arr.push('');
+      [arr[from], arr[to]] = [arr[to], arr[from]];
+      return { ...prev, supPns: arr };
+    });
   };
 
   // Handle change for basic text / select inputs
@@ -778,17 +790,35 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete, reser
                     </div>
                     <div className="space-y-2">
                       <label className="font-bold text-outline block text-[10px] uppercase">Supplier Part Numbers (1-5)</label>
+                      <p className="text-[10px] text-outline -mt-1">Each slot is one supplier's, so BOM downloads can be filtered by supplier: 1 Mouser, 2 DigiKey, 3 LCSC, 4-5 others.</p>
                       <div className="grid grid-cols-1 gap-1.5">
-                        {[0, 1, 2, 3, 4].map((i) => (
-                          <input
-                            key={`supPns_${i}`}
-                            name={`supPns_${i}`}
-                            value={edited.supPns?.[i] || ''}
-                            onChange={handleChange}
-                            placeholder={`Sup PN ${i + 1}`}
-                            className="w-full bg-surface-container-high border border-outline-variant rounded px-2 py-1.5 text-on-surface outline-none focus:border-primary font-mono"
-                          />
-                        ))}
+                        {SUPPLIER_SLOTS.map((slot, i) => {
+                          const value = edited.supPns?.[i] || '';
+                          const right = value ? rightSlotFor(value, i) : null;
+                          return (
+                            <div key={`supPns_${i}`}>
+                              <div className="flex items-center gap-1.5">
+                                <span className={`w-16 shrink-0 text-[10px] font-bold ${slot.supplier ? 'text-primary' : 'text-outline'}`}>{i + 1}. {slot.label}</span>
+                                <input
+                                  name={`supPns_${i}`}
+                                  aria-label={`Supplier part number ${i + 1} (${slot.label})`}
+                                  value={value}
+                                  onChange={handleChange}
+                                  placeholder={slot.supplier ? `${slot.label} part number` : 'Other supplier part number'}
+                                  className={`w-full bg-surface-container-high border rounded px-2 py-1.5 text-on-surface outline-none focus:border-primary font-mono ${right !== null ? 'border-amber-500/60' : 'border-outline-variant'}`}
+                                />
+                              </div>
+                              {right !== null && (
+                                <div className="ml-[4.4rem] mt-0.5 text-[10px] text-amber-500 flex items-center gap-1.5">
+                                  Looks like a {SUPPLIER_SLOTS[right].label} number.
+                                  <button type="button" onClick={() => moveSupplierPn(i, right)} className="font-bold underline hover:text-on-surface">
+                                    Move to {right + 1}. {SUPPLIER_SLOTS[right].label}
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   </div>

@@ -5,6 +5,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 // what the operator sees in the preview matches what they'd get if
 // they picked one of these presets as the active build quantity.
 const PRESET_QTYS = [50, 100, 250, 500, 1000] as const;
+import { classifyPartNumberBySupplier } from '../../lib/partNumbers';
 import { Project } from '../../types';
 import { fmtNumber } from '../../lib/formatMoney';
 import { detectLedSwatch, ledSwatchBackground } from '../../lib/ledColor';
@@ -241,19 +242,9 @@ interface AuditResult {
   color?: string;
 }
 
-// Classify a candidate part-number string by supplier convention.
-// LCSC: starts with C followed by digits (C123456).
-// DigiKey: ends with -ND (case insensitive), often distributor
-//   part numbers like 283-…-ND.
-// Mouser: numeric prefix + hyphen + rest, e.g. 504-…, 683-….
-export function classifyPartNumberBySupplier(pn: string): 'lcsc' | 'digikey' | 'mouser' | null {
-  const s = String(pn || '').trim();
-  if (!s) return null;
-  if (/^C\d+$/i.test(s)) return 'lcsc';
-  if (/-ND$/i.test(s)) return 'digikey';
-  if (/^\d{2,4}-\S+/.test(s)) return 'mouser';
-  return null;
-}
+// Classify a candidate part-number string by supplier convention (the
+// rules now live in ../../lib/partNumbers, shared with the item form).
+export { classifyPartNumberBySupplier };
 
 // Given a row's man_pn + sup_pn arrays, return the first PN that
 // classifies to the requested supplier, or empty string.

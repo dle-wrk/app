@@ -94,3 +94,38 @@ export function pickPartNumbers(values: Array<string | null | undefined>): { par
   const real = trimmed.find((v) => isUsablePartNumber(v) && !LCSC_CODE_RE.test(v));
   return { partNumber: real ?? lcscCode, lcscCode };
 }
+
+// ---------------------------------------------------------------------------
+// Supplier part-number slots. Supplier part number 1 is Mouser's, 2 DigiKey's,
+// 3 LCSC's, 4 and 5 any other supplier's: the Supplier BOM Generator and the
+// BOM exports read them by slot. classifyPartNumberBySupplier tells whose a
+// number looks like, so the item form can point out one in the wrong slot.
+// ---------------------------------------------------------------------------
+export type SlotSupplier = 'mouser' | 'digikey' | 'lcsc';
+
+export const SUPPLIER_SLOTS: Array<{ supplier: SlotSupplier | null; label: string }> = [
+  { supplier: 'mouser', label: 'Mouser' },
+  { supplier: 'digikey', label: 'DigiKey' },
+  { supplier: 'lcsc', label: 'LCSC' },
+  { supplier: null, label: 'Other' },
+  { supplier: null, label: 'Other' },
+];
+
+// LCSC: C followed by digits (C123456). DigiKey: ends with -ND (283-…-ND).
+// Mouser: a numeric prefix and a hyphen (504-…, 683-…).
+export function classifyPartNumberBySupplier(pn: string): SlotSupplier | null {
+  const s = String(pn || '').trim();
+  if (!s) return null;
+  if (/^C\d+$/i.test(s)) return 'lcsc';
+  if (/-ND$/i.test(s)) return 'digikey';
+  if (/^\d{2,4}-\S+/.test(s)) return 'mouser';
+  return null;
+}
+
+/** The slot (0-based) a supplier part number belongs in, when it isn't the one it is in; else null. */
+export function rightSlotFor(pn: string, slot: number): number | null {
+  const supplier = classifyPartNumberBySupplier(pn);
+  if (!supplier) return null;
+  const right = SUPPLIER_SLOTS.findIndex((s) => s.supplier === supplier);
+  return right === slot ? null : right;
+}
