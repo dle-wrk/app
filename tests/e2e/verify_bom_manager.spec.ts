@@ -50,7 +50,7 @@ test('verify enhanced BOM management in ProjectsView', async ({ page }) => {
 
   // Search for a component in the LEFT column
   const leftCol = modal.locator('div.flex.flex-col.h-full.overflow-hidden.border-r');
-  await leftCol.locator('input[placeholder="Search stock code or name..."]').fill('ANT-001');
+  await leftCol.locator('input[placeholder^="Search stock code"]').fill('ANT-001');
 
   // Click to add (from left column)
   // The part's row has the code twice (nested spans); either is the row.

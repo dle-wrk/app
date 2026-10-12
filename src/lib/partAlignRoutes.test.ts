@@ -1,4 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+// The routes import ./db, which refuses to load without DATABASE_URL (CI has none).
+vi.mock('./db', () => ({
+  pool: { connect: async () => { throw new Error('no database in tests'); } },
+  query: async () => { throw new Error('no database in tests'); },
+  queryOne: async () => null,
+  exec: async () => {},
+}));
+
 import { findForItem, type AlignDeps } from './partAlignRoutes';
 import { alignItem } from './partAlign';
 
