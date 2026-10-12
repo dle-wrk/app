@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { itemMatches } from '../../lib/itemSearch';
 import { canChange } from '../../lib/changeAccess';
 import { Plus, Folder, X, Link as LinkIcon, Trash2, Edit, Search, Calendar, Users, FileText, CheckCircle2, AlertTriangle, Activity, Package, ShoppingCart } from 'lucide-react';
 import ProcurementShortageCheckerView from './ProcurementShortageCheckerView';
@@ -759,7 +760,7 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
                   <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-outline" />
                   <input
                     type="text"
-                    placeholder="Search stock code or name..."
+                    placeholder="Search stock code, name, footprint, value..."
                     className="w-full bg-surface-container-high border border-outline-variant rounded pl-8 pr-2 py-1.5 text-xs font-mono outline-none focus:border-primary"
                     value={searchQuery}
                     onChange={e => setSearchQuery(e.target.value)}
@@ -769,9 +770,7 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
                 <div className="flex-1 overflow-y-auto space-y-1 pr-1">
                   {items
                     .filter(item =>
-                      searchQuery === '' ||
-                      (item.partNumber || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-                      (item.name || '').toLowerCase().includes(searchQuery.toLowerCase())
+                      itemMatches(item, searchQuery)
                     )
                     .map(item => {
                       const isSelected = selectedComponents[item.partNumber] !== undefined;

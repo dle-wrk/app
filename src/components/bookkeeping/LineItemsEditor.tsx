@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { itemMatches } from '../../lib/itemSearch';
 import { Plus, Trash2, ChevronDown, Copy } from 'lucide-react';
 import { Item, TaxRate, Account } from '../../types';
 import { fmtMoney, inputClass, selectClass } from './shared';
@@ -262,7 +263,7 @@ export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChang
                                   const manHit = (Array.isArray(i?.manPns) ? i.manPns : []).find((p: string) => p && p.toLowerCase().includes(q));
                                   const partHit = String(i?.partNumber || '').toLowerCase().includes(q);
                                   const textHit = (i?.name || i?.description || '').toLowerCase().includes(q);
-                                  const anyHit = !q || partHit || textHit || !!supHit || !!manHit;
+                                  const anyHit = !q || partHit || textHit || !!supHit || !!manHit || itemMatches(i, q);
                                   return { item: i, anyHit, supHit, manHit };
                                 })
                                 .filter(r => r.anyHit)

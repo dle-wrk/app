@@ -75,3 +75,20 @@ describe('rand prices', () => {
     expect(host.querySelector('[title*="fallback"]')).not.toBeNull();
   });
 });
+
+describe('footprint filter', () => {
+  it('lists the footprints in use with their counts, and picks one', async () => {
+    const picked: string[] = [];
+    await act(async () => {
+      root.render(<InventoryView items={ITEMS} filteredItems={ITEMS} searchQuery="" setSearchQuery={noop} selectedItemType="ALL" setSelectedItemType={noop}
+        selectedStatus="ALL" setSelectedStatus={noop} selectedStockStatus="ALL" setSelectedStockStatus={noop} selectedPackaging="ALL" setSelectedPackaging={noop}
+        availablePackagingModes={[]} availablePrefixes={[]} sortBy="name" setSortBy={noop} handleResetFilters={noop} setShowImportModal={noop}
+        setShowAddModal={noop} setSelectedDetailPartNumber={noop}
+        selectedFootprint="ALL" setSelectedFootprint={(f) => picked.push(f)} availableFootprints={[{ key: '1206', count: 8 }, { key: '0603', count: 80 }]} />);
+    });
+    const select = host.querySelector('select[aria-label="Filter by footprint"]') as HTMLSelectElement;
+    expect([...select.options].map((o) => o.textContent)).toEqual(['All Footprints', '1206 (8)', '0603 (80)']);
+    await act(async () => { select.value = '1206'; select.dispatchEvent(new Event('change', { bubbles: true })); });
+    expect(picked).toEqual(['1206']);
+  });
+});

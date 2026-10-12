@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { footprintOptions, itemFootprints, itemMatches } from './lib/itemSearch';
 import { usdToZarRate } from './lib/usdToZar';
 import { classifyPartNumberBySupplier, SUPPLIER_SLOTS } from './lib/partNumbers';
 import {
@@ -238,6 +239,7 @@ export default function App() {
   const [selectedStatus, setSelectedStatus] = useState<string>('ALL');
   const [selectedStockStatus, setSelectedStockStatus] = useState<'ALL' | 'OK' | 'LOW' | 'CRITICAL'>('ALL');
   const [selectedPackaging, setSelectedPackaging] = useState<string>('ALL');
+  const [selectedFootprint, setSelectedFootprint] = useState<string>('ALL');
   const [sortBy, setSortBy] = useState<'name' | 'stockLevel' | 'price'>('name');
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
   const [isSidebarCollapsed, setIsSidebarCollapsedState] = useState<boolean>(() => {
@@ -259,6 +261,7 @@ export default function App() {
     setSelectedStatus('ALL');
     setSelectedStockStatus('ALL');
     setSelectedPackaging('ALL');
+    setSelectedFootprint('ALL');
     setSortBy('name');
   };
 
@@ -1591,10 +1594,9 @@ export default function App() {
   // --- ADDED DYNAMIC FILTER LOGIC ---
   const filteredItems = React.useMemo(() => {
     return items.filter(item => {
-      const matchesSearch =
-        item.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.partNumber?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (item.manufacturer && item.manufacturer.toLowerCase().includes(searchQuery.toLowerCase()));
+      // Every word in any of the item's fields (lib/itemSearch).
+      const matchesSearch = itemMatches(item, searchQuery);
+      const matchesFootprint = selectedFootprint === 'ALL' || itemFootprints(item).includes(selectedFootprint);
 
       const matchesStatus = selectedStatus === 'ALL' || item.status === selectedStatus;
 
@@ -1616,9 +1618,10 @@ export default function App() {
         else matchesPackaging = mode === selectedPackaging;
       }
 
-      return matchesSearch && matchesStatus && matchesStock && matchesType && matchesPackaging;
+      return matchesSearch && matchesStatus && matchesStock && matchesType && matchesPackaging && matchesFootprint;
     });
-  }, [items, searchQuery, selectedStatus, selectedStockStatus, selectedItemType, selectedPackaging, normalizePackaging]);
+  }, [items, searchQuery, selectedStatus, selectedStockStatus, selectedItemType, selectedPackaging, selectedFootprint, normalizePackaging]);
+  const availableFootprints = React.useMemo(() => footprintOptions(items), [items]);
 
   // Dedupe packaging modes present in the current inventory. UNSPECIFIED
   // is appended when at least one item has a blank packaging column so
@@ -2003,6 +2006,9 @@ export default function App() {
                   selectedPackaging={selectedPackaging}
                   setSelectedPackaging={setSelectedPackaging}
                   availablePackagingModes={availablePackagingModes}
+                  selectedFootprint={selectedFootprint}
+                  setSelectedFootprint={setSelectedFootprint}
+                  availableFootprints={availableFootprints}
                   sortBy={sortBy}
                   setSortBy={setSortBy}
                   availablePrefixes={availablePrefixes}

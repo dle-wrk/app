@@ -23,6 +23,10 @@ interface InventoryViewProps {
   selectedPackaging: string;
   setSelectedPackaging: (mode: string) => void;
   availablePackagingModes: string[];
+  /** Footprint filter: 'ALL' or a footprint from availableFootprints. */
+  selectedFootprint?: string;
+  setSelectedFootprint?: (footprint: string) => void;
+  availableFootprints?: Array<{ key: string; count: number }>;
   availablePrefixes: string[];
   sortBy: 'name' | 'stockLevel' | 'price';
   setSortBy: (sort: 'name' | 'stockLevel' | 'price') => void;
@@ -54,6 +58,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   selectedPackaging,
   setSelectedPackaging,
   availablePackagingModes,
+  selectedFootprint = 'ALL',
+  setSelectedFootprint,
+  availableFootprints = [],
   availablePrefixes,
   sortBy,
   setSortBy,
@@ -224,6 +231,24 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             ))}
           </select>
         </div>
+
+        {/* Footprint: from the footprint, package and size fields, the ones in use */}
+        {setSelectedFootprint && availableFootprints.length > 0 && (
+          <div className="flex items-center gap-1.5">
+            <span className="text-outline text-[11px] font-medium">Footprint:</span>
+            <select
+              aria-label="Filter by footprint"
+              value={selectedFootprint}
+              onChange={(e) => setSelectedFootprint(e.target.value)}
+              className="bg-surface-container-high border border-outline-variant rounded px-2 py-1 text-xs cursor-pointer focus:outline-none focus:border-primary text-on-surface font-mono"
+            >
+              <option value="ALL" className="font-sans">All Footprints</option>
+              {availableFootprints.map((f) => (
+                <option key={f.key} value={f.key}>{f.key} ({f.count})</option>
+              ))}
+            </select>
+          </div>
+        )}
 
         {/* Price range: min and/or max, in dollars or rand */}
         <div className="flex items-center gap-1.5">

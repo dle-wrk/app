@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { itemMatches } from '../../lib/itemSearch';
 import {
   Database,
   Plus,
@@ -194,14 +195,7 @@ export const StockTablesView: React.FC<StockTablesViewProps> = ({
 
   const filteredPricingItems = useMemo(() => {
     if (!tableSearch) return items;
-    const q = tableSearch.toLowerCase();
-    return items.filter(
-      (item) =>
-        item.partNumber.toLowerCase().includes(q) ||
-        item.name.toLowerCase().includes(q) ||
-        (item.supplier || '').toLowerCase().includes(q) ||
-        (item.manufacturer || '').toLowerCase().includes(q)
-    );
+    return items.filter((item) => itemMatches(item, tableSearch));
   }, [items, tableSearch]);
 
   // SANS 24 grouping — non-breaking space every three digits from

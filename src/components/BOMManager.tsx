@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { searchFields, searchWords } from '../lib/itemSearch';
 import { canChange } from '../lib/changeAccess';
 import { useEscapeKey } from '../lib/useEscapeKey';
 import { Item, Transaction, Project, BOMItem } from '../types';
@@ -104,20 +105,13 @@ export default function BOMManager({
   // (existing behaviour).
   const [bomSearch, setBomSearch] = useState<string>('');
   const filteredBOM = useMemo(() => {
-    const q = bomSearch.trim().toLowerCase();
-    if (!q) return projectBOM;
+    const words = searchWords(bomSearch);
+    if (!words.length) return projectBOM;
     return projectBOM.filter(line => {
       const inv = items.find(i => i.partNumber === line.stockCode);
-      const haystack = [
-        line.stockCode,
-        line.designator,
-        line.description,
-        line.comment,
-        inv?.description,
-        inv?.name,
-        ...(inv?.manPns || []),
-      ].filter(Boolean).join(' ').toLowerCase();
-      return haystack.includes(q);
+      const haystack = [line.stockCode, line.designator, line.description, line.comment, ...(inv ? searchFields(inv) : [])]
+        .filter(Boolean).join(' ').toLowerCase();
+      return words.every(w => haystack.includes(w));
     });
   }, [projectBOM, bomSearch, items]);
 

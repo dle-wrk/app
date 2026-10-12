@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { itemMatches } from '../lib/itemSearch';
 import {
   LayoutDashboard, Boxes, TableProperties, Tag, Factory, Receipt, Calculator, Database,
   ArrowLeftRight, ClipboardList, Zap, Settings, Shield, Brain, Activity, User,
@@ -196,6 +197,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
           fuzzyScore(q, i.partNumber).score,
           fuzzyScore(q, label).score,
           i.manufacturer ? fuzzyScore(q, i.manufacturer).score : -1,
+          // Found by any field (footprint, value, part numbers…): listed, after the close matches.
+          itemMatches(i, q) ? 0 : -1,
         );
         return { item: i, score: s, label };
       })
