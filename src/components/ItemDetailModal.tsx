@@ -8,7 +8,7 @@ import { ITEM_CATEGORIES } from '../lib/itemCategories';
 import { SUPPLIER_SLOTS, rightSlotFor } from '../lib/partNumbers';
 import { linkSupplier } from '../lib/partAlign';
 import { usdToZarRate } from '../lib/usdToZar';
-import { applyFill, fillOptions, parseProductLink, type FillOption, type ProductDetails } from '../lib/productLink';
+import { applyFill, canLookUp, fillOptions, type FillOption, type ProductDetails } from '../lib/productLink';
 import { CategoryCombobox } from './CategoryCombobox';
 import {
   X,
@@ -175,9 +175,9 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete, reser
   const lookedUp = React.useRef(new Set<string>());
   // A link is looked up once when typed or pasted; the Fill button next to
   // a link already there (force) looks it up again.
-  const lookupLink = async (raw: string | undefined, force = false) => {
+  const lookupLink = async (raw: string | undefined, slot: number, force = false) => {
     const url = String(raw ?? '').trim();
-    if (!url || (!force && lookedUp.current.has(url)) || !parseProductLink(url)) return;
+    if (!url || (!force && lookedUp.current.has(url)) || !canLookUp(url)) return;
     lookedUp.current.add(url);
     setLinkChoices(null);
     setLinkNotice({ text: 'Looking the product up…', tone: 'info' });
@@ -187,7 +187,7 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete, reser
       if (!res.ok) { setLinkNotice({ text: data.error || 'The lookup failed.', tone: 'error' }); return; }
       const details: ProductDetails | null = data.details;
       if (!details) { setLinkNotice({ text: data.note || 'Nothing found for that link.', tone: 'info' }); return; }
-      const options = fillOptions(editedRef.current, details);
+      const options = fillOptions(editedRef.current, details, slot);
       if (!options.length) {
         setLinkNotice({ text: `${details.supplierName}: nothing new, the item already has everything it lists.${data.note ? ` ${data.note}` : ''}`, tone: 'info' });
         return;
@@ -900,7 +900,7 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete, reser
 
                   <div className="space-y-2">
                     <label className="font-bold text-outline block text-[10px] uppercase">External Web Links (1-5)</label>
-                    <p className="text-[10px] text-outline -mt-1">Same slots: 1 Mouser, 2 DigiKey, 3 LCSC, 4-5 others. Add an LCSC, Mouser or DigiKey product link to choose what to fill in from it.</p>
+                    <p className="text-[10px] text-outline -mt-1">Same slots: 1 Mouser, 2 DigiKey, 3 LCSC, 4-5 others. Add a product link (LCSC, Mouser, DigiKey or any other shop) to choose what to fill in from it.</p>
                     {linkNotice && (
                       <div role="status" data-testid="link-notice" className={`rounded border px-2 py-1.5 text-[11px] flex items-start justify-between gap-2 ${
                         linkNotice.tone === 'ok' ? 'border-green-500/30 bg-green-500/10 text-green-400' : linkNotice.tone === 'error' ? 'border-error/30 bg-error/10 text-error' : 'border-outline-variant bg-surface-container-high text-on-surface-variant'}`}>
@@ -955,13 +955,13 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete, reser
                                 aria-label={`Web link ${i + 1} (${slot.label})`}
                                 value={value}
                                 onChange={handleChange}
-                                onBlur={(e) => void lookupLink(e.currentTarget.value)}
-                                onPaste={(e) => { const input = e.currentTarget; setTimeout(() => void lookupLink(input.value), 0); }}
+                                onBlur={(e) => void lookupLink(e.currentTarget.value, i)}
+                                onPaste={(e) => { const input = e.currentTarget; setTimeout(() => void lookupLink(input.value, i), 0); }}
                                 placeholder={slot.supplier ? `${slot.label} product link` : 'Other link'}
                                 className={`w-full bg-surface-container-high border rounded px-2 py-1.5 text-on-surface outline-none focus:border-primary font-mono ${right >= 0 && right !== i ? 'border-amber-500/60' : 'border-outline-variant'}`}
                               />
-                              {parseProductLink(value) && (
-                                <button type="button" onClick={() => void lookupLink(value, true)} aria-label={`Fill from web link ${i + 1}`}
+                              {canLookUp(value) && (
+                                <button type="button" onClick={() => void lookupLink(value, i, true)} aria-label={`Fill from web link ${i + 1}`}
                                   title="Look this product up and choose what to fill in from it"
                                   className="shrink-0 px-2 py-1.5 rounded border border-primary/40 text-primary text-[10px] font-bold hover:bg-primary/10">
                                   Fill

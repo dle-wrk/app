@@ -47,9 +47,21 @@ export function parseProductLink(raw: string): ProductLink | null {
   return null;
 }
 
+/** Whether a link can be looked up: a supplier's product page, or any other web page. */
+export function canLookUp(raw: string): boolean {
+  if (parseProductLink(raw)) return true;
+  try {
+    const url = new URL(raw.trim());
+    return (url.protocol === 'https:' || url.protocol === 'http:') && url.hostname.includes('.');
+  } catch {
+    return false;
+  }
+}
+
 /** A product's details, as the lookup returns them. Missing ones are null. */
 export interface ProductDetails {
-  supplier: LinkSupplier;
+  /** 'other': any other shop's page, read by ./pageProduct. */
+  supplier: LinkSupplier | 'other';
   supplierName: string;
   supplierPartNumber: string | null;
   manufacturerPartNumber: string | null;
@@ -98,6 +110,8 @@ export interface FillOption {
   current: string;
   /** Ticked to start with: the field is empty. */
   checked: boolean;
+  /** For a part number: the slot (0-based) it goes in. */
+  slot?: number;
 }
 
 type FillItem = {
@@ -114,15 +128,17 @@ const slots = (list: string[] | undefined) => Array.from({ length: 5 }, (_, i) =
  * it replaces it). Both part numbers go in that supplier's slot (1 Mouser,
  * 2 DigiKey, 3 LCSC): the manufacturer part number as this supplier lists
  * it in Mfr PN n, its own number in Sup PN n. A supplier number the item
- * already has anywhere isn't offered.
+ * already has anywhere isn't offered. Another shop's page fills the "other"
+ * slot its link is in (4 or 5; 4 when the link is elsewhere).
  */
-export function fillOptions(item: FillItem, d: ProductDetails): FillOption[] {
+export function fillOptions(item: FillItem, d: ProductDetails, linkSlot?: number): FillOption[] {
   const options: FillOption[] = [];
+  const slot = d.supplier === 'other' ? (linkSlot === 3 || linkSlot === 4 ? linkSlot : 3) : SLOT[d.supplier];
   const offer = (field: FillField, label: string, value: string | null, current: unknown) => {
     if (!value) return;
     const now = blank(current) ? '' : String(current).trim();
     if (now.toLowerCase() === value.trim().toLowerCase()) return;
-    options.push({ field, label, value, current: now, checked: !now });
+    options.push({ field, label, value, current: now, checked: !now, ...(field === 'manPn' || field === 'supPn' ? { slot } : {}) });
   };
   offer('description', 'Description', d.description, item.description);
   offer('value', 'Value', d.value, item.value);
@@ -131,7 +147,6 @@ export function fillOptions(item: FillItem, d: ProductDetails): FillOption[] {
   if (d.package && /^\d{4}$/.test(d.package)) offer('size', 'Size', d.package, item.size);
   offer('datasheet', 'Datasheet', d.datasheet, item.datasheet);
   offer('supplier', 'Preferred supplier', d.supplierName, item.supplier);
-  const slot = SLOT[d.supplier];
   const man = slots(item.manPns);
   if (d.manufacturerPartNumber) offer('manPn', `Manufacturer PN (Mfr PN ${slot + 1}, ${d.supplierName})`, d.manufacturerPartNumber, man[slot]);
   const sup = slots(item.supPns);
@@ -146,14 +161,15 @@ export function fillOptions(item: FillItem, d: ProductDetails): FillOption[] {
 export function applyFill(item: FillItem, d: ProductDetails, chosen: FillOption[]): ItemFill {
   const patch: ItemFill = {};
   for (const o of chosen) {
+    const slot = o.slot ?? (d.supplier === 'other' ? 3 : SLOT[d.supplier]);
     if (o.field === 'manPn') {
       const man = slots(item.manPns);
-      man[SLOT[d.supplier]] = o.value;
+      man[slot] = o.value;
       patch.manPns = man;
-      if (SLOT[d.supplier] === 0) patch.manufacturer = o.value; // the form keeps it in step with Mfr PN 1
+      if (slot === 0) patch.manufacturer = o.value; // the form keeps it in step with Mfr PN 1
     } else if (o.field === 'supPn') {
       const sup = slots(item.supPns);
-      sup[SLOT[d.supplier]] = o.value;
+      sup[slot] = o.value;
       patch.supPns = sup;
     } else {
       (patch as any)[o.field] = o.value;

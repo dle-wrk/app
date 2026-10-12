@@ -15,6 +15,8 @@
 // Dependencies deliberately kept narrow: db + serverUtils for the crypto
 // primitives, and authRoutes only for the admin gate on key management.
 
+import { fetchPublicPage, PageFetchError } from './safeFetch';
+import { isBotWall, readProductPage } from './pageProduct';
 import type { Express } from 'express';
 import { z } from 'zod';
 import { createHmac, randomBytes } from 'node:crypto';
@@ -601,6 +603,30 @@ export async function mouserLookup(keyword: string): Promise<ProductDetails | nu
 }
 
 /**
+ * Any other shop's page: read for the product it shows (./pageProduct).
+ * A site that only lets people in a browser in (a "just a moment" check)
+ * is reported, not worked around.
+ */
+async function lookupOtherPage(url: string): Promise<{ details: ProductDetails | null; note: string | null }> {
+  let page;
+  try {
+    page = await fetchPublicPage(url);
+  } catch (err: any) {
+    if (err instanceof PageFetchError) return { details: null, note: err.message };
+    return { details: null, note: `Couldn't open the page (${String(err?.message || err).slice(0, 120)}).` };
+  }
+  let host = 'The site';
+  try { host = new URL(page.url).hostname.replace(/^www\./i, ''); } catch { /* keep */ }
+  if (isBotWall(page.status, page.html)) {
+    return { details: null, note: `${host} only shows its pages to a person in a browser, so the app can't read this one. Fill it in by hand.` };
+  }
+  if (page.status >= 400) return { details: null, note: `${host} answered ${page.status}: the page may have moved.` };
+  const details = readProductPage(page.html, page.url);
+  if (!details) return { details: null, note: `${host}'s page doesn't say what the product is.` };
+  return { details, note: `Read from ${details.supplierName}'s page: check the values before filling them in.` };
+}
+
+/**
  * What a supplier link says about the product: LCSC links are looked up by
  * their LCSC number, Mouser links through Mouser's API by the part number in
  * them, DigiKey links through DigiKey's API by the part number in them.
@@ -609,7 +635,7 @@ export async function mouserLookup(keyword: string): Promise<ProductDetails | nu
  */
 export async function lookupProductLink(url: string): Promise<{ details: ProductDetails | null; note: string | null }> {
   const link = parseProductLink(url);
-  if (!link) return { details: null, note: 'That is not an LCSC, Mouser or DigiKey product link.' };
+  if (!link) return lookupOtherPage(url);
   if (link.supplier === 'lcsc') {
     const details = lcscDetails(await fetchLcscDetail(link.lcscCode!));
     return { details, note: details ? null : `LCSC doesn't know ${link.lcscCode}.` };
