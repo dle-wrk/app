@@ -70,6 +70,7 @@ const lineRows = () =>
   });
 
 beforeEach(() => {
+  localStorage.setItem('currentUser', JSON.stringify({ role: 'manager' }));
   calls = [];
   orderItemsStatus = 200;
   toast.mockClear();

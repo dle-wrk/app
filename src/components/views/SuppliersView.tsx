@@ -1,4 +1,5 @@
 import React from 'react';
+import { canChange } from '../../lib/changeAccess';
 import { Plus, ExternalLink, Shield, Clock, Trash2 } from 'lucide-react';
 import { Supplier } from '../../types';
 
@@ -30,7 +31,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
             Configure external vendor connections, compliance directories, and contact parameters.
           </p>
         </div>
-        <button
+        {canChange('/api/suppliers') && <button
           onClick={() => {
             setEditingSupplier(null);
             setShowSupplierModal(true);
@@ -39,7 +40,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
         >
           <Plus className="w-3.5 h-3.5" />
           Add Supplier
-        </button>
+        </button>}
       </div>
 
       {/* Table containing the mock suppliers directories list */}
@@ -95,7 +96,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
                   </td>
                   <td className="px-lg py-sm text-right">
                     <div className="flex justify-end gap-1">
-                      <button
+                      {canChange('/api/suppliers', 'PUT') && <button
                         onClick={() => {
                           setEditingSupplier(s);
                           setShowSupplierModal(true);
@@ -103,8 +104,8 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
                         className="text-primary hover:text-primary/80 font-bold p-1 hover:bg-primary/10 rounded transition-all"
                       >
                         Edit
-                      </button>
-                      {onDeleteSupplier && (
+                      </button>}
+                      {onDeleteSupplier && canChange('/api/suppliers/1', 'DELETE') && (
                         <button
                           onClick={() => onDeleteSupplier(s)}
                           className="text-error hover:text-error/80 p-1 hover:bg-error/10 rounded transition-all"

@@ -9,8 +9,7 @@ import { Plus, Package, CheckCircle2, Trash2 } from 'lucide-react';
 import {
   ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate,
   apiGet, apiPost, apiDelete,
-  PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard,
-} from './shared';
+  PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard, CreateButton } from './shared';
 
 export const LandedCostTab: React.FC<ModuleDataProps> = ({ triggerToast, bills }) => {
   const [batches, setBatches] = useState<any[]>([]);
@@ -45,7 +44,7 @@ export const LandedCostTab: React.FC<ModuleDataProps> = ({ triggerToast, bills }
       <SectionCard
         title="Landed Cost Allocations"
         badge={`${batches.length} batch${batches.length === 1 ? '' : 'es'}`}
-        actions={<PrimaryButton icon={<Plus className="w-3.5 h-3.5" />} onClick={() => setCreating(true)}>New Batch</PrimaryButton>}
+        actions={<CreateButton path="/api/landed-cost-batches" icon={<Plus className="w-3.5 h-3.5" />} onClick={() => setCreating(true)}>New Batch</CreateButton>}
       >
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse text-xs">

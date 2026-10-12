@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { canChange } from '../lib/changeAccess';
 import { useEscapeKey } from '../lib/useEscapeKey';
 import { Item, Transaction, Project, BOMItem } from '../types';
 import { mapDbRowsToItems } from '../lib/mapDbItem';
@@ -428,7 +429,7 @@ export default function BOMManager({
               </div>
             )}
 
-            <button
+            {canChange('/api/kit-booking/execute') && <button
               onClick={requestBookOut}
               className={`w-full font-bold px-lg py-sm rounded-lg flex items-center justify-center gap-xs shadow text-xs uppercase tracking-wider transition-all duration-150 ${
                 totalShortagesCount > 0 
@@ -438,7 +439,7 @@ export default function BOMManager({
             >
               <ShoppingBag className="w-3.5 h-3.5" />
               Book Out Entire BOM ({auditResults.length} Lines)
-            </button>
+            </button>}
           </div>
         </div>
 

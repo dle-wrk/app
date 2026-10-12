@@ -69,7 +69,8 @@ describe('who may change what', () => {
   it('lets everyone signed in read, sign out, log, look up prices and check kits', () => {
     for (const [method, p] of [['GET', '/api/invoices'], ['POST', '/api/session/logout'], ['POST', '/api/activity-log'],
       ['POST', '/api/pricing/quote'], ['POST', '/api/kit-booking/validate'], ['PUT', '/api/notifications/3/mark-read'],
-      ['POST', '/api/settings']] as const) {
+      ['POST', '/api/settings'], ['POST', '/api/kits/12/presence'], ['DELETE', '/api/kits/12/presence'],
+      ['POST', '/api/landed-cost-batches/3/preview'], ['POST', '/api/bookkeeping/ocr/receipt']] as const) {
       expect(who(method, p), `${method} ${p}`).toEqual([true, true, true, true]);
     }
   });

@@ -19,6 +19,7 @@ let root: Root;
 let calls: Array<{ url: string; body: any }>;
 beforeEach(() => {
   calls = [];
+  localStorage.setItem('currentUser', JSON.stringify({ role: 'engineer' }));
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     calls.push({ url: String(input), body: JSON.parse(String(init?.body)) });
     return { ok: true, status: 200, json: async () => ({ details: DETAILS, note: null }) } as unknown as Response;

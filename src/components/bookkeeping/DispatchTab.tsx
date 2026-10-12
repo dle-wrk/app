@@ -4,8 +4,7 @@ import { buildAndSaveDocPdf } from '../../lib/pdfDocs';
 import { DispatchNote, DispatchNoteItem, DispatchNoteType } from '../../types';
 import {
   ModuleDataProps, Modal, StatusPill, fmtDate, todayISO, apiGet, apiPost, apiPut, apiDelete,
-  PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard,
-} from './shared';
+  PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard, CreateButton } from './shared';
 import { confirmDialog } from '../../lib/confirmDialog';
 import { renderBrandHeader, waitForBrandImage } from '../../lib/printBrand';
 
@@ -179,7 +178,7 @@ const DispatchNotesPanel: React.FC<ModuleDataProps & { type: DispatchNoteType } 
       <SectionCard
         title={meta.plural}
         badge={`${rows.length}`}
-        actions={<PrimaryButton icon={<Plus className="w-3.5 h-3.5" />} onClick={() => { setEditing(null); setSeed(null); setShowEditor(true); }}>New {meta.label}</PrimaryButton>}
+        actions={<CreateButton path="/api/dispatch-notes" icon={<Plus className="w-3.5 h-3.5" />} onClick={() => { setEditing(null); setSeed(null); setShowEditor(true); }}>New {meta.label}</CreateButton>}
       >
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse text-xs">

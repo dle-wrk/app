@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { canChange } from '../../lib/changeAccess';
 import { Plus, Folder, X, Link as LinkIcon, Trash2, Edit, Search, Calendar, Users, FileText, CheckCircle2, AlertTriangle, Activity, Package, ShoppingCart } from 'lucide-react';
 import ProcurementShortageCheckerView from './ProcurementShortageCheckerView';
 import { Item, Project, JobCard } from '../../types';
@@ -365,12 +366,14 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
             Create new projects and link components for BOM and Pick & Place operations.
           </p>
         </div>
-        <button
-          onClick={() => setShowCreateModal(true)}
-          className="bg-primary text-on-primary text-xs font-bold px-md py-2 rounded flex items-center gap-1 shadow cursor-pointer"
-        >
-          <Plus className="w-4 h-4" /> New Project
-        </button>
+        {canChange('/api/projects') && (
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="bg-primary text-on-primary text-xs font-bold px-md py-2 rounded flex items-center gap-1 shadow cursor-pointer"
+          >
+            <Plus className="w-4 h-4" /> New Project
+          </button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-md">
@@ -530,6 +533,7 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
               )}
             </div>
 
+            {canChange('/api/projects') && (
             <div className="flex gap-sm mt-auto">
               <button
                 onClick={() => handleOpenLinkModal(project)}
@@ -543,13 +547,16 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
               >
                 <Edit className="w-3.5 h-3.5" />
               </button>
-              <button
-                onClick={() => setDeletingProject(project)}
-                className="bg-surface-container-high hover:bg-red-500/10 text-red-400 p-1.5 rounded cursor-pointer"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
+              {canChange('/api/projects/1', 'DELETE') && (
+                <button
+                  onClick={() => setDeletingProject(project)}
+                  className="bg-surface-container-high hover:bg-red-500/10 text-red-400 p-1.5 rounded cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
+            )}
           </div>
         )})}
       </div>

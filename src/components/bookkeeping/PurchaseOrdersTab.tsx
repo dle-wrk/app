@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Plus, Eye, FileText, Trash2 } from 'lucide-react';
 import { PurchaseOrder, Item } from '../../types';
-import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, apiPost, apiPut, apiGet, apiDelete, isAdminUser, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
+import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, apiPost, apiPut, apiGet, apiDelete, isAdminUser, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard, CreateButton } from './shared';
 import { LineItemsEditor, EditableLine, newEditableLine } from './LineItemsEditor';
 import { confirmDialog } from '../../lib/confirmDialog';
 import { ErrorBoundary } from '../ErrorBoundary';
@@ -75,7 +75,7 @@ export const PurchaseOrdersTab: React.FC<ModuleDataProps & { onConvertToBill?: (
       <SectionCard
         title="Purchase Orders"
         badge={`${purchaseOrders.length} orders`}
-        actions={<PrimaryButton icon={<Plus className="w-3.5 h-3.5" />} onClick={() => setShowCreate(true)}>New Purchase Order</PrimaryButton>}
+        actions={<CreateButton path="/api/purchase-orders" icon={<Plus className="w-3.5 h-3.5" />} onClick={() => setShowCreate(true)}>New Purchase Order</CreateButton>}
       >
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse text-xs">

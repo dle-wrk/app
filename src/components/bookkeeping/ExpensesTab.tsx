@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Plus, Ban } from 'lucide-react';
-import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, apiPost, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
+import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, apiPost, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard, CreateButton } from './shared';
 import { confirmDialog } from '../../lib/confirmDialog';
 
 export const ExpensesTab: React.FC<ModuleDataProps> = (props) => {
@@ -43,7 +43,7 @@ export const ExpensesTab: React.FC<ModuleDataProps> = (props) => {
       <SectionCard
         title="Expenses"
         badge="Paid immediately — no accounts payable"
-        actions={<PrimaryButton icon={<Plus className="w-3.5 h-3.5" />} onClick={() => setShowCreate(true)}>New Expense</PrimaryButton>}
+        actions={<CreateButton path="/api/expenses" icon={<Plus className="w-3.5 h-3.5" />} onClick={() => setShowCreate(true)}>New Expense</CreateButton>}
       >
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse text-xs">

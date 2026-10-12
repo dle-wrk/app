@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { canChange } from '../../lib/changeAccess';
 import { Eye, Trash2, FileText } from 'lucide-react';
 import { Client } from '../../types';
 import { ModuleDataProps, Modal, StatusPill, fmtMoney, EmptyState, SectionCard, apiGet } from './shared';
@@ -55,8 +56,8 @@ export const CustomersTab: React.FC<ModuleDataProps> = ({ clients, setClients, c
       <SectionCard 
         title="Customers" 
         badge={`${clients.length} customers`}
-        actions={
-          <button 
+        actions={canChange('/api/clients') &&
+          <button
             onClick={() => setShowNewClientModal(true)}
             className="px-3 py-1.5 rounded bg-primary text-white text-xs font-bold hover:opacity-90 transition"
           >

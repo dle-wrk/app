@@ -26,7 +26,7 @@ describe('supplier part-number rules', () => {
 describe('the item form', () => {
   let host: HTMLDivElement;
   let root: Root;
-  beforeEach(() => { host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host); });
+  beforeEach(() => { localStorage.setItem('currentUser', JSON.stringify({ role: 'engineer' })); host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host); });
   afterEach(() => { act(() => root.unmount()); host.remove(); });
 
   it('labels each slot with its supplier and moves a number to the right one', async () => {
@@ -55,5 +55,19 @@ describe('the item form', () => {
 
     await act(async () => { (document.getElementById('item-detail-form') as HTMLFormElement).requestSubmit(); });
     expect(onSave.mock.calls[0][0].supPns).toEqual(['', '5440-FM31X104K251EEGTR-ND', 'C365814', '', '']);
+  });
+});
+
+describe('item details by role', () => {
+  let host: HTMLDivElement;
+  let root: Root;
+  beforeEach(() => { host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host); });
+  afterEach(() => { act(() => root.unmount()); host.remove(); localStorage.clear(); });
+  const item = { partNumber: 'CAP-009', name: '100nF', description: '', manufacturer: 'X', supplier: 'N/A', stockLevel: 1, price: 0, category: 'Capacitors', status: 'ACTIVE' } as any;
+  it.each([['viewer', false, false], ['engineer', true, false], ['manager', true, true]])('%s: edit %s, delete %s', async (role, edit, del) => {
+    localStorage.setItem('currentUser', JSON.stringify({ role }));
+    await act(async () => { root.render(<ItemDetailModal item={item} onClose={() => {}} onSave={() => {}} />); });
+    expect(!!document.getElementById('btn-edit-item')).toBe(edit);
+    expect(!!document.getElementById('btn-delete-item')).toBe(del);
   });
 });

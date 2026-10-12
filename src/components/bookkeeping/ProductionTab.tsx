@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Plus } from 'lucide-react';
 import { BuildJob, BomStructure, SubAssembly, FieldedAsset, StockLedgerEntry } from '../../types';
-import { ModuleDataProps, Modal, StatusPill, fmtDate, apiGet, apiPost, PrimaryButton, SecondaryButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
+import { ModuleDataProps, Modal, StatusPill, fmtDate, apiGet, apiPost, PrimaryButton, SecondaryButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard, CreateButton } from './shared';
 
 type ProdSubTab = 'BUILD_JOBS' | 'BOM' | 'SUB_ASSEMBLIES' | 'FIELDED_ASSETS' | 'STOCK_LEDGER';
 
@@ -58,7 +58,7 @@ const BuildJobsPanel: React.FC<ModuleDataProps> = ({ clientOrders, triggerToast 
   const [showCreate, setShowCreate] = useState(false);
 
   return (
-    <SectionCard title="Build Jobs" badge={`${rows.length} jobs`} actions={<PrimaryButton icon={<Plus className="w-3.5 h-3.5" />} onClick={() => setShowCreate(true)}>New Build Job</PrimaryButton>}>
+    <SectionCard title="Build Jobs" badge={`${rows.length} jobs`} actions={<CreateButton path="/api/build-jobs" icon={<Plus className="w-3.5 h-3.5" />} onClick={() => setShowCreate(true)}>New Build Job</CreateButton>}>
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse text-xs">
           <thead><tr className="bg-surface-container-high/50 text-[10px] uppercase font-bold text-outline border-b border-outline-variant"><th className="px-lg py-sm">Job #</th><th className="px-lg py-sm">Status</th><th className="px-lg py-sm text-right">Qty</th><th className="px-lg py-sm">Start</th><th className="px-lg py-sm">End</th><th className="px-lg py-sm">Team</th></tr></thead>
@@ -98,7 +98,7 @@ const BomStructuresPanel: React.FC<ModuleDataProps> = ({ triggerToast }) => {
   const [showCreate, setShowCreate] = useState(false);
 
   return (
-    <SectionCard title="BOM Structures" badge={`${rows.length} entries`} actions={<PrimaryButton icon={<Plus className="w-3.5 h-3.5" />} onClick={() => setShowCreate(true)}>New BOM Entry</PrimaryButton>}>
+    <SectionCard title="BOM Structures" badge={`${rows.length} entries`} actions={<CreateButton path="/api/bom-structures" icon={<Plus className="w-3.5 h-3.5" />} onClick={() => setShowCreate(true)}>New BOM Entry</CreateButton>}>
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse text-xs">
           <thead><tr className="bg-surface-container-high/50 text-[10px] uppercase font-bold text-outline border-b border-outline-variant"><th className="px-lg py-sm">Parent Part #</th><th className="px-lg py-sm">Child Part #</th><th className="px-lg py-sm text-right">Qty</th><th className="px-lg py-sm">Description</th></tr></thead>
@@ -138,7 +138,7 @@ const SubAssembliesPanel: React.FC<ModuleDataProps> = ({ triggerToast }) => {
   const [showCreate, setShowCreate] = useState(false);
 
   return (
-    <SectionCard title="Sub-Assemblies" badge={`${rows.length} entries`} actions={<PrimaryButton icon={<Plus className="w-3.5 h-3.5" />} onClick={() => setShowCreate(true)}>New Sub-Assembly</PrimaryButton>}>
+    <SectionCard title="Sub-Assemblies" badge={`${rows.length} entries`} actions={<CreateButton path="/api/sub-assemblies" icon={<Plus className="w-3.5 h-3.5" />} onClick={() => setShowCreate(true)}>New Sub-Assembly</CreateButton>}>
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse text-xs">
           <thead><tr className="bg-surface-container-high/50 text-[10px] uppercase font-bold text-outline border-b border-outline-variant"><th className="px-lg py-sm">Assembly Name</th><th className="px-lg py-sm">Parent Part #</th><th className="px-lg py-sm">Child Part #</th><th className="px-lg py-sm text-right">Qty</th></tr></thead>
@@ -180,7 +180,7 @@ const FieldedAssetsPanel: React.FC<ModuleDataProps> = ({ clients, triggerToast }
   const clientName = (id?: number) => clients.find(c => c.id === id)?.clientName || '—';
 
   return (
-    <SectionCard title="Fielded Assets" badge={`${rows.length} assets`} actions={<PrimaryButton icon={<Plus className="w-3.5 h-3.5" />} onClick={() => setShowCreate(true)}>New Fielded Asset</PrimaryButton>}>
+    <SectionCard title="Fielded Assets" badge={`${rows.length} assets`} actions={<CreateButton path="/api/fielded-assets" icon={<Plus className="w-3.5 h-3.5" />} onClick={() => setShowCreate(true)}>New Fielded Asset</CreateButton>}>
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse text-xs">
           <thead><tr className="bg-surface-container-high/50 text-[10px] uppercase font-bold text-outline border-b border-outline-variant"><th className="px-lg py-sm">Asset Tag</th><th className="px-lg py-sm">Client</th><th className="px-lg py-sm">Serial #</th><th className="px-lg py-sm">Status</th><th className="px-lg py-sm">Location</th><th className="px-lg py-sm">Installed</th></tr></thead>
@@ -220,7 +220,7 @@ const StockLedgerPanel: React.FC<ModuleDataProps> = ({ items, triggerToast }) =>
   const [showCreate, setShowCreate] = useState(false);
 
   return (
-    <SectionCard title="Stock Ledger" badge={`${rows.length} movements`} actions={<PrimaryButton icon={<Plus className="w-3.5 h-3.5" />} onClick={() => setShowCreate(true)}>New Movement</PrimaryButton>}>
+    <SectionCard title="Stock Ledger" badge={`${rows.length} movements`} actions={<CreateButton path="/api/stock-ledger" icon={<Plus className="w-3.5 h-3.5" />} onClick={() => setShowCreate(true)}>New Movement</CreateButton>}>
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse text-xs">
           <thead><tr className="bg-surface-container-high/50 text-[10px] uppercase font-bold text-outline border-b border-outline-variant"><th className="px-lg py-sm">Part #</th><th className="px-lg py-sm">Movement</th><th className="px-lg py-sm text-right">Qty</th><th className="px-lg py-sm">Date</th><th className="px-lg py-sm">Reference</th></tr></thead>

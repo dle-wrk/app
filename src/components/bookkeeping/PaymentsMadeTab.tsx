@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Plus, Ban, Eye } from 'lucide-react';
 import { PaymentMade } from '../../types';
-import { ModuleDataProps, Modal, fmtMoney, fmtDate, todayISO, apiPost, apiGet, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
+import { ModuleDataProps, Modal, fmtMoney, fmtDate, todayISO, apiPost, apiGet, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard, CreateButton } from './shared';
 import { confirmDialog } from '../../lib/confirmDialog';
 
 export const PaymentsMadeTab: React.FC<ModuleDataProps> = (props) => {
@@ -41,7 +41,7 @@ export const PaymentsMadeTab: React.FC<ModuleDataProps> = (props) => {
       <SectionCard
         title="Payments Made"
         badge={`${paymentsMade.length} payments · ${fmtMoney(total)} total`}
-        actions={<PrimaryButton icon={<Plus className="w-3.5 h-3.5" />} onClick={() => setShowCreate(true)}>Record Payment</PrimaryButton>}
+        actions={<CreateButton path="/api/payments-made" icon={<Plus className="w-3.5 h-3.5" />} onClick={() => setShowCreate(true)}>Record Payment</CreateButton>}
       >
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse text-xs">

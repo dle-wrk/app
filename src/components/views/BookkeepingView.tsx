@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { canChange } from '../../lib/changeAccess';
+import { notAllowedMessage } from '../../lib/permissions';
 import { LayoutDashboard, Users, ShoppingCart, Receipt, Wallet, Truck, FileText, CreditCard, Landmark, Wrench, BarChart3, Loader2 } from 'lucide-react';
 import {
   Client, ClientOrder, ClientOrderItem, BuildJob, BomStructure, SubAssembly, FieldedAsset, StockLedgerEntry,
@@ -188,6 +190,11 @@ export const BookkeepingView: React.FC<BookkeepingViewProps> = ({
         ))}
       </div>
 
+      {!canChange('/api/invoices') && (
+        <p className="text-[11px] text-on-surface-variant rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2 mb-md" data-testid="bookkeeping-view-only">
+          {notAllowedMessage('orders.update')} You can see everything here.
+        </p>
+      )}
       {section === 'OVERVIEW' && <OverviewTab {...moduleData} />}
 
       {section === 'SALES' && (

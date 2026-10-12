@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, Eye, Trash2, Upload, Download, Paperclip, CheckCircle2, XCircle, Printer, Truck, AlertTriangle, Zap, Pencil } from 'lucide-react';
 import { ClientOrder } from '../../types';
-import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, apiGet, apiPost, apiPut, apiDelete, isAdminUser, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
+import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, apiGet, apiPost, apiPut, apiDelete, isAdminUser, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard, CreateButton } from './shared';
 import { LineItemsEditor, EditableLine, newEditableLine, lineTotals } from './LineItemsEditor';
 import { buildAndSaveDocPdf } from '../../lib/pdfDocs';
 import { openAuthedFile } from '../../lib/openAuthedFile';
@@ -179,7 +179,7 @@ export const SalesOrdersTab: React.FC<ModuleDataProps & SalesOrdersTabExtras> = 
                 Auto-Fulfil {selectedIds.size}…
               </PrimaryButton>
             )}
-            <PrimaryButton icon={<Plus className="w-3.5 h-3.5" />} onClick={() => setShowEditor(true)}>New Sales Order</PrimaryButton>
+            <CreateButton path="/api/client-orders" icon={<Plus className="w-3.5 h-3.5" />} onClick={() => setShowEditor(true)}>New Sales Order</CreateButton>
           </div>
         }
       >

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { canChange as canChangePath } from '../../lib/changeAccess';
 import { Plus, Pencil, Trash2, Loader2, TrendingUp, Package, Wallet, AlertTriangle, FileUp, Download, Search } from 'lucide-react';
 import { ProductionProduct } from '../../types';
 import {
@@ -6,7 +7,6 @@ import {
   PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass,
 } from '../bookkeeping/shared';
 import { confirmDialog } from '../../lib/confirmDialog';
-import { currentUserCan } from '../../lib/permissions';
 import { productsToCsv } from '../../lib/productImport';
 import { ProductImportModal } from '../ProductImportModal';
 
@@ -32,7 +32,9 @@ export const ProductionCostsView: React.FC<ProductionCostsViewProps> = ({ trigge
   const [showEditor, setShowEditor] = useState(false);
   const [busy, setBusy] = useState(false);
   const [importing, setImporting] = useState(false);
-  const canChange = currentUserCan('inventory.update');
+  // The same rule the server uses for production-products (./lib/writeAccess).
+  const canChange = canChangePath('/api/production-products');
+  const canDelete = canChangePath('/api/production-products/1', 'DELETE');
 
   const exportCsv = () => {
     const blob = new Blob([productsToCsv(products as any)], { type: 'text/csv;charset=utf-8' });
@@ -103,7 +105,7 @@ export const ProductionCostsView: React.FC<ProductionCostsViewProps> = ({ trigge
         <div className="flex gap-sm flex-wrap">
           <SecondaryButton icon={<Download className="w-3.5 h-3.5" />} onClick={exportCsv} disabled={!products.length}>Export CSV</SecondaryButton>
           {canChange && <SecondaryButton icon={<FileUp className="w-3.5 h-3.5" />} onClick={() => setImporting(true)}>Import</SecondaryButton>}
-          <PrimaryButton icon={<Plus className="w-3.5 h-3.5" />} onClick={() => { setEditing(null); setShowEditor(true); }}>New Product</PrimaryButton>
+          {canChange && <PrimaryButton icon={<Plus className="w-3.5 h-3.5" />} onClick={() => { setEditing(null); setShowEditor(true); }}>New Product</PrimaryButton>}
         </div>
       </div>
 
@@ -168,8 +170,8 @@ export const ProductionCostsView: React.FC<ProductionCostsViewProps> = ({ trigge
                     <td className={`px-lg py-sm text-right font-mono font-bold ${marginClass(p.marginPct)}`}>{p.marginPct === null ? '—' : `${p.marginPct}%`}</td>
                     <td className="px-lg py-sm text-right">
                       <div className="flex justify-end gap-1">
-                        <button onClick={() => { setEditing(p); setShowEditor(true); }} className="p-1.5 rounded hover:bg-surface-container-high text-on-surface-variant" title="Edit"><Pencil className="w-3.5 h-3.5" /></button>
-                        <button onClick={() => handleDelete(p)} disabled={busy} className="p-1.5 rounded hover:bg-surface-container-high text-error disabled:opacity-40" title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>
+                        {canChange && <button onClick={() => { setEditing(p); setShowEditor(true); }} className="p-1.5 rounded hover:bg-surface-container-high text-on-surface-variant" title="Edit"><Pencil className="w-3.5 h-3.5" /></button>}
+                        {canDelete && <button onClick={() => handleDelete(p)} disabled={busy} className="p-1.5 rounded hover:bg-surface-container-high text-error disabled:opacity-40" title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>}
                       </div>
                     </td>
                   </tr>

@@ -1,4 +1,5 @@
 import React from 'react';
+import { canChange } from '../../lib/changeAccess';
 import { Upload, Plus, Search, Download, X } from 'lucide-react';
 import { Item } from '../../types';
 import { fmtUSD, fmtZAR, fmtNumber } from '../../lib/formatMoney';
@@ -119,12 +120,14 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               <Upload className="w-4 h-4" /> Import CSV
             </button>
           )}
-          <button
-            onClick={() => setShowAddModal(true)}
-            className="bg-primary text-on-primary text-xs font-bold px-md py-2 rounded flex items-center gap-1 shadow cursor-pointer"
-          >
-            <Plus className="w-4 h-4" /> Add SKU
-          </button>
+          {canChange('/api/items') && (
+            <button
+              onClick={() => setShowAddModal(true)}
+              className="bg-primary text-on-primary text-xs font-bold px-md py-2 rounded flex items-center gap-1 shadow cursor-pointer"
+            >
+              <Plus className="w-4 h-4" /> Add SKU
+            </button>
+          )}
         </div>
       </div>
 

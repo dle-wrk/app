@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Plus, Ban, ChevronDown, ChevronRight as ChevronRightIcon } from 'lucide-react';
 import { Account } from '../../types';
-import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, apiGet, apiPost, apiPut, apiDelete, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
+import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, apiGet, apiPost, apiPut, apiDelete, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard, CreateButton } from './shared';
 import { confirmDialog } from '../../lib/confirmDialog';
 
 const ACCOUNT_TYPES = ['ASSET', 'LIABILITY', 'EQUITY', 'INCOME', 'EXPENSE'] as const;
@@ -56,7 +56,7 @@ const ChartOfAccountsPanel: React.FC<ModuleDataProps> = ({ accounts, triggerToas
 
   return (
     <div className="space-y-4">
-      <SectionCard title="Chart of Accounts" badge={`${accounts.length} accounts`} actions={<PrimaryButton icon={<Plus className="w-3.5 h-3.5" />} onClick={() => setShowCreate(true)}>New Account</PrimaryButton>}>
+      <SectionCard title="Chart of Accounts" badge={`${accounts.length} accounts`} actions={<CreateButton path="/api/accounts" icon={<Plus className="w-3.5 h-3.5" />} onClick={() => setShowCreate(true)}>New Account</CreateButton>}>
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse text-xs">
             <thead>
@@ -195,7 +195,7 @@ const JournalPanel: React.FC<ModuleDataProps> = ({ accounts, triggerToast }) => 
 
   return (
     <div className="space-y-4">
-      <SectionCard title="General Ledger" badge={`${entries.length} entries`} actions={<PrimaryButton icon={<Plus className="w-3.5 h-3.5" />} onClick={() => setShowManual(true)}>Manual Entry</PrimaryButton>}>
+      <SectionCard title="General Ledger" badge={`${entries.length} entries`} actions={<CreateButton path="/api/journal-entries" icon={<Plus className="w-3.5 h-3.5" />} onClick={() => setShowManual(true)}>Manual Entry</CreateButton>}>
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse text-xs">
             <thead>

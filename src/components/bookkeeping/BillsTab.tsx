@@ -1,7 +1,7 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { Plus, Send, Ban, Eye, Wallet, Camera, Image as ImageIcon, X, Trash2, Sparkles, Download } from 'lucide-react';
 import { Bill, PurchaseOrder } from '../../types';
-import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, addDaysISO, apiPost, apiGet, apiDelete, isAdminUser, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
+import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, addDaysISO, apiPost, apiGet, apiDelete, isAdminUser, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard, CreateButton } from './shared';
 import { buildAndSaveDocPdf } from '../../lib/pdfDocs';
 import { runOcr, OcrResult } from '../../lib/receiptOcr';
 import { LineItemsEditor, EditableLine, newEditableLine } from './LineItemsEditor';
@@ -182,7 +182,7 @@ export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
               ))}
             </div>
             <SecondaryButton icon={<Camera className="w-3.5 h-3.5" />} onClick={() => setScanningForNewBill(true)}>Scan Receipt</SecondaryButton>
-            <PrimaryButton icon={<Plus className="w-3.5 h-3.5" />} onClick={() => setShowEditor(true)}>New Bill</PrimaryButton>
+            <CreateButton path="/api/bills" icon={<Plus className="w-3.5 h-3.5" />} onClick={() => setShowEditor(true)}>New Bill</CreateButton>
           </>
         }
       >

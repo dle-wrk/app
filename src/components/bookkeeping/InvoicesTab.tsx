@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Plus, Printer, Ban, Eye, Wallet, FileText, Download } from 'lucide-react';
 import { Invoice, InvoiceItem } from '../../types';
-import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, addDaysISO, apiPost, apiPut, apiDelete, apiGet, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
+import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, addDaysISO, apiPost, apiPut, apiDelete, apiGet, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard, CreateButton } from './shared';
 import { buildAndSaveDocPdf } from '../../lib/pdfDocs';
 import { LineItemsEditor, EditableLine, newEditableLine, lineTotals } from './LineItemsEditor';
 import { ErrorBoundary } from '../ErrorBoundary';
@@ -132,7 +132,7 @@ export const InvoicesTab: React.FC<ModuleDataProps> = (props) => {
                 <button key={s} onClick={() => setStatusFilter(s)} className={`px-2 py-0.5 rounded text-[10px] font-bold border transition-colors ${statusFilter === s ? 'bg-primary text-white border-primary' : 'bg-surface-container-high text-on-surface-variant border-outline-variant'}`}>{s}</button>
               ))}
             </div>
-            <PrimaryButton icon={<Plus className="w-3.5 h-3.5" />} onClick={() => { setEditingInvoice(null); setShowEditor(true); }}>New Invoice</PrimaryButton>
+            <CreateButton path="/api/invoices" icon={<Plus className="w-3.5 h-3.5" />} onClick={() => { setEditingInvoice(null); setShowEditor(true); }}>New Invoice</CreateButton>
           </>
         }
       >

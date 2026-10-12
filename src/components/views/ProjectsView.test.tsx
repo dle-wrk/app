@@ -50,6 +50,7 @@ const type = async (input: HTMLInputElement, value: string) => {
 const posts = (path: string) => calls.filter((c) => c.method === 'POST' && c.url === path);
 
 beforeEach(() => {
+  localStorage.setItem('currentUser', JSON.stringify({ role: 'engineer' }));
   calls = [];
   replies = {};
   toast.mockClear();
@@ -181,5 +182,23 @@ describe('project cards', () => {
     await render();
     expect(stageButton()).toBeNull();
     expect(document.body.textContent).toContain('Unified Progress');
+  });
+});
+
+describe('buttons by role', () => {
+  const texts = () => Array.from(document.querySelectorAll('button')).map((b) => b.textContent?.trim());
+  it('shows a viewer no buttons that change projects', async () => {
+    localStorage.setItem('currentUser', JSON.stringify({ role: 'viewer' }));
+    await render();
+    expect(texts()).not.toContain('New Project');
+    expect(texts().some((t) => t?.includes('Link Components'))).toBe(false);
+  });
+  it('lets an engineer change projects but not delete them', async () => {
+    await render();
+    expect(texts()).toContain('New Project');
+    expect(document.querySelector('button.text-red-400')).toBeNull();
+    localStorage.setItem('currentUser', JSON.stringify({ role: 'manager' }));
+    await render();
+    expect(document.querySelector('button.text-red-400')).not.toBeNull();
   });
 });

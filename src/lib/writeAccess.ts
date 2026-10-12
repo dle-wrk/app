@@ -54,8 +54,14 @@ export const AREAS: Record<string, Area> = {
   users: 'open', docs: 'open', start: 'open',
 };
 
-// Areas whose writes inside are lookups rather than changes.
-const LOOKUPS = [/^\/api\/kit-booking\/validate$/];
+// Writes that change no records, open to everyone signed in: lookups,
+// previews, and Kit Booking's "who has this kit open" signal.
+const LOOKUPS = [
+  /^\/api\/kit-booking\/validate$/,
+  /^\/api\/kits\/[^/]+\/presence$/,
+  /^\/api\/landed-cost-batches\/[^/]+\/preview$/,
+  /^\/api\/bookkeeping\/ocr\/receipt$/,
+];
 
 /** The permission a write needs, or null when any signed-in user may make it. */
 export function permissionForWrite(method: string, path: string): Permission | 'not-viewer' | null {

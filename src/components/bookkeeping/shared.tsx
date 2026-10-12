@@ -1,4 +1,5 @@
 import React from 'react';
+import { canChange } from '../../lib/changeAccess';
 import { X, Loader2 } from 'lucide-react';
 import { Account, TaxRate, Invoice, PaymentReceived, PurchaseOrder, Bill, PaymentMade, Expense, Client, Supplier, Item, ClientOrder } from '../../types';
 import { useEscapeKey } from '../../lib/useEscapeKey';
@@ -202,6 +203,12 @@ export const PrimaryButton: React.FC<React.ButtonHTMLAttributes<HTMLButtonElemen
   <button {...props} className={`inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-white hover:opacity-90 transition-all disabled:opacity-40 disabled:cursor-not-allowed ${className}`}>
     {icon}{children}
   </button>
+);
+
+/** A "New …" button that only shows when the signed-in user may create that
+ * record (the server's rule for `path`, see lib/changeAccess). */
+export const CreateButton: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement> & { icon?: React.ReactNode; path: string }> = ({ path, ...props }) => (
+  canChange(path) ? <PrimaryButton {...props} /> : null
 );
 
 export const SecondaryButton: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement> & { icon?: React.ReactNode }> = ({ icon, children, className = '', ...props }) => (

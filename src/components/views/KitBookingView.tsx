@@ -5,6 +5,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 // what the operator sees in the preview matches what they'd get if
 // they picked one of these presets as the active build quantity.
 const PRESET_QTYS = [50, 100, 250, 500, 1000] as const;
+import { canChange } from '../../lib/changeAccess';
 import { classifyPartNumberBySupplier } from '../../lib/partNumbers';
 import { Project } from '../../types';
 import { fmtNumber } from '../../lib/formatMoney';
@@ -1284,7 +1285,7 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
                 </>
               )}
             </button>
-            <button
+            {canChange('/api/kits') && <button
               onClick={() => setShowSaveKit(true)}
               disabled={loading || auditResults.length === 0}
               title={auditResults.length === 0 ? 'Nothing to save yet.' : currentKitName ? `Save (currently loaded: ${currentKitName})` : 'Save this audit as a named kit'}
@@ -1292,7 +1293,7 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
             >
               <Save className="w-3.5 h-3.5" />
               Save Kit
-            </button>
+            </button>}
             <button
               onClick={() => { loadSavedKits(); setShowKitBrowser(true); }}
               disabled={loading}
@@ -1312,7 +1313,7 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
             </button>
           </div>
 
-          {totalShortages > 0 && (
+          {totalShortages > 0 && canChange('/api/purchase-orders') && (
             <button
               onClick={() => setShowShortagePOModal(true)}
               className="mt-auto h-9 px-lg rounded-lg flex items-center gap-xs text-xs font-bold uppercase tracking-wider transition-all bg-error/10 text-error hover:bg-error/20 active:scale-95 border border-error/20"
@@ -1322,7 +1323,7 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
             </button>
           )}
 
-          <button
+          {canChange('/api/kit-booking/execute') && <button
             onClick={() => setShowConfirmBooking(true)}
             disabled={totalShortages > 0 || loading || executing || auditResults.length === 0}
             title={totalShortages > 0 ? `Booking blocked: ${totalShortages} component shortage(s). Resolve shortages or generate a PO first.` : auditResults.length === 0 ? 'No BOM data for this project.' : undefined}
@@ -1334,7 +1335,7 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
           >
             {executing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
             {executing ? 'Processing...' : 'Process Booking'}
-          </button>
+          </button>}
         </div>
       </div>
 

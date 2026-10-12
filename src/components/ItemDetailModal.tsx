@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { canChange } from '../lib/changeAccess';
 import { useEscapeKey } from '../lib/useEscapeKey';
 import { Item } from '../types';
 import { fmtUSD, fmtZAR, fmtNumber } from '../lib/formatMoney';
@@ -385,6 +386,7 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete, reser
           <div className="flex items-center gap-2">
             {!isEditing ? (
               <>
+                {canChange('/api/items', 'PUT') && (
                 <button
                   onClick={() => setIsEditing(true)}
                   className="bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 px-md py-1.5 rounded-lg text-xs font-bold transition-all duration-150 flex items-center gap-1"
@@ -394,7 +396,9 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete, reser
                   <Edit3 className="w-3.5 h-3.5" />
                   Edit Parameters
                 </button>
+                )}
 
+                {canChange('/api/items', 'DELETE') && (
                 <button
                   onClick={handleDeleteClick}
                   disabled={isDeleting || checkingReferences}
@@ -406,6 +410,7 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete, reser
                   <Trash2 className="w-3.5 h-3.5" />
                   Delete
                 </button>
+                )}
               </>
             ) : null}
 
