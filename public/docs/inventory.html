@@ -118,6 +118,14 @@
                     <li>Changes save automatically</li>
                 </ol>
             </div>
+            <div class="step">
+                <h4 id="supplier-part-number-slots">Supplier part numbers and web links</h4>
+                <ul>
+                    <li>Supplier part numbers have a slot per supplier: <strong>1 Mouser, 2 DigiKey, 3 LCSC</strong>, 4 and 5 any other. The Supplier BOM Generator and BOM downloads read them by slot. A number that looks like another supplier's (LCSC <em>C123456</em>, DigiKey <em>…-ND</em>, Mouser <em>581-…</em>) is outlined, with a <em>Move to</em> button. To tidy many items at once, use Pricing → Part Numbers → <em>Supplier numbers in the wrong slot</em>.</li>
+                    <li><strong>Fill from a link:</strong> add an LCSC, Mouser or DigiKey product link in a web link field (paste it, or type it and click away). The app looks the product up and lists what it can fill in: description, value, tolerance, package and size, datasheet, preferred supplier, and the part numbers (manufacturer in Mfr PN 1, the supplier's in its slot). Empty fields are ticked; a field that already holds something else is shown with both values, unticked. Tick what you want and click <em>Fill … selected</em>, then <em>Save</em>. <em>Undo</em> puts the fields back.</li>
+                    <li>LCSC links give all of that. Mouser links give what Mouser's API returns. DigiKey links only give the manufacturer part number from the link until DigiKey is authorised again.</li>
+                </ul>
+            </div>
 
             <div class="warning">
                 <strong>⚠️ Warning:</strong> Carefully verify part numbers before creating new items to avoid duplicates. Check Similar Part Numbers section before adding.

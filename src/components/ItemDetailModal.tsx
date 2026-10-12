@@ -5,6 +5,7 @@ import { fmtUSD, fmtZAR, fmtNumber } from '../lib/formatMoney';
 import { detectLedSwatch, ledSwatchBackground } from '../lib/ledColor';
 import { ITEM_CATEGORIES } from '../lib/itemCategories';
 import { SUPPLIER_SLOTS, rightSlotFor } from '../lib/partNumbers';
+import { applyFill, fillOptions, parseProductLink, type FillOption, type ProductDetails } from '../lib/productLink';
 import { CategoryCombobox } from './CategoryCombobox';
 import {
   X,
@@ -157,6 +158,54 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete, reser
       category: trimmed
     }));
     setNewCategory("");
+  };
+
+  // Adding a supplier product link looks the product up and lists what it
+  // can fill in, as a checklist (src/lib/productLink.ts): empty fields are
+  // ticked, fields holding something else are offered unticked. Nothing is
+  // saved until Save, and Undo puts the applied fields back.
+  const [linkNotice, setLinkNotice] = useState<null | { text: string; tone: 'ok' | 'info' | 'error'; undo?: Partial<Item> }>(null);
+  const [linkChoices, setLinkChoices] = useState<null | { details: ProductDetails; options: FillOption[]; note: string | null }>(null);
+  const lookedUp = React.useRef(new Set<string>());
+  const lookupLink = async (raw: string | undefined) => {
+    const url = String(raw ?? '').trim();
+    if (!url || lookedUp.current.has(url) || !parseProductLink(url)) return;
+    lookedUp.current.add(url);
+    setLinkChoices(null);
+    setLinkNotice({ text: 'Looking the product up…', tone: 'info' });
+    try {
+      const res = await fetch('/api/pricing/link-lookup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setLinkNotice({ text: data.error || 'The lookup failed.', tone: 'error' }); return; }
+      const details: ProductDetails | null = data.details;
+      if (!details) { setLinkNotice({ text: data.note || 'Nothing found for that link.', tone: 'info' }); return; }
+      const options = fillOptions(editedRef.current, details);
+      if (!options.length) {
+        setLinkNotice({ text: `${details.supplierName}: nothing new, the item already has everything it lists.${data.note ? ` ${data.note}` : ''}`, tone: 'info' });
+        return;
+      }
+      setLinkNotice(null);
+      setLinkChoices({ details, options, note: data.note ?? null });
+    } catch (err: any) {
+      setLinkNotice({ text: `The lookup failed: ${err?.message || err}`, tone: 'error' });
+    }
+  };
+  const editedRef = React.useRef(edited);
+  editedRef.current = edited;
+  const toggleChoice = (index: number) => setLinkChoices(c => c && ({ ...c, options: c.options.map((o, i) => (i === index ? { ...o, checked: !o.checked } : o)) }));
+  const applyChoices = () => {
+    if (!linkChoices) return;
+    const chosen = linkChoices.options.filter(o => o.checked);
+    const patch = applyFill(editedRef.current, linkChoices.details, chosen);
+    const undo = Object.fromEntries(Object.keys(patch).map(k => [k, (editedRef.current as any)[k]])) as Partial<Item>;
+    setEdited(prev => ({ ...prev, ...patch }));
+    setLinkChoices(null);
+    setLinkNotice({ text: `Filled from ${linkChoices.details.supplierName}: ${chosen.map(o => o.label).join(', ')}. Save to keep it.`, tone: 'ok', undo });
+  };
+  const undoLinkFill = () => {
+    const undo = linkNotice?.undo;
+    if (undo) setEdited(prev => ({ ...prev, ...undo }));
+    setLinkNotice(null);
   };
 
   // Swaps two supplier part-number slots, so a number typed into the wrong
@@ -825,6 +874,47 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete, reser
 
                   <div className="space-y-2">
                     <label className="font-bold text-outline block text-[10px] uppercase">External Web Links (1-5)</label>
+                    <p className="text-[10px] text-outline -mt-1">Add an LCSC, Mouser or DigiKey product link to choose what to fill in from it.</p>
+                    {linkNotice && (
+                      <div role="status" data-testid="link-notice" className={`rounded border px-2 py-1.5 text-[11px] flex items-start justify-between gap-2 ${
+                        linkNotice.tone === 'ok' ? 'border-green-500/30 bg-green-500/10 text-green-400' : linkNotice.tone === 'error' ? 'border-error/30 bg-error/10 text-error' : 'border-outline-variant bg-surface-container-high text-on-surface-variant'}`}>
+                        <span>{linkNotice.text}</span>
+                        {linkNotice.undo && <button type="button" onClick={undoLinkFill} className="font-bold underline shrink-0">Undo</button>}
+                      </div>
+                    )}
+                    {linkChoices && (
+                      <div data-testid="link-choices" className="rounded border border-primary/30 bg-primary/5 p-2 space-y-1.5 text-[11px]">
+                        <div className="font-bold text-on-surface">
+                          From {linkChoices.details.supplierName}{linkChoices.details.supplierPartNumber ? ` (${linkChoices.details.supplierPartNumber})` : ''}: tick what to fill in
+                        </div>
+                        <ul className="space-y-1">
+                          {linkChoices.options.map((o, i) => (
+                            <li key={o.field}>
+                              <label className="flex items-start gap-2 cursor-pointer">
+                                <input type="checkbox" className="mt-0.5" checked={o.checked} onChange={() => toggleChoice(i)} aria-label={`Fill ${o.label}`} />
+                                <span className="min-w-0">
+                                  <span className="font-bold text-on-surface">{o.label}: </span>
+                                  <span className="font-mono break-all">{o.value}</span>
+                                  {o.current && <span className="block text-amber-500">Replaces {o.current}</span>}
+                                </span>
+                              </label>
+                            </li>
+                          ))}
+                        </ul>
+                        {(linkChoices.details.extra.length > 0 || linkChoices.note) && (
+                          <p className="text-outline">
+                            {linkChoices.details.extra.length > 0 && `Also listed: ${linkChoices.details.extra.slice(0, 6).map(e => `${e.name} ${e.value}`).join(', ')}. `}
+                            {linkChoices.note}
+                          </p>
+                        )}
+                        <div className="flex justify-end gap-2">
+                          <button type="button" onClick={() => setLinkChoices(null)} className="px-2 py-1 rounded border border-outline-variant text-on-surface-variant hover:text-on-surface">Dismiss</button>
+                          <button type="button" onClick={applyChoices} disabled={!linkChoices.options.some(o => o.checked)} className="px-2 py-1 rounded bg-primary text-white font-bold disabled:opacity-40">
+                            Fill {linkChoices.options.filter(o => o.checked).length} selected
+                          </button>
+                        </div>
+                      </div>
+                    )}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-sm">
                       {[0, 1, 2, 3, 4].map((i) => (
                         <input
@@ -832,6 +922,8 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete, reser
                           name={`weblinks_${i}`}
                           value={edited.weblinks?.[i] || ''}
                           onChange={handleChange}
+                          onBlur={(e) => void lookupLink(e.currentTarget.value)}
+                          onPaste={(e) => { const input = e.currentTarget; setTimeout(() => void lookupLink(input.value), 0); }}
                           placeholder={`Web Link ${i + 1} URL`}
                           className="w-full bg-surface-container-high border border-outline-variant rounded px-2 py-1.5 text-on-surface outline-none focus:border-primary font-mono"
                         />

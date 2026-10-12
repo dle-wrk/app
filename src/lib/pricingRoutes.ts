@@ -28,6 +28,7 @@ import {
 } from './serverUtils';
 import { requireAdmin } from './authRoutes';
 import { LCSC_CODE_RE, lcscCodeSql, partNumberSql } from './partNumbers';
+import { SUPPLIER_NAMES, parseProductLink, type ProductDetails } from './productLink';
 
 // ---------------------------------------------------------------------------
 // At-rest encryption for provider API keys. AES-256-GCM keyed on PRICING_CRED_KEY.
@@ -471,7 +472,8 @@ export function lcscPriceAt(breaks: Array<{ qty: number; price: number }>, qty: 
   return b ? { price: b.price, breakQty: b.qty } : null;
 }
 
-export async function fetchLcscProduct(code: string): Promise<LcscProduct | null> {
+/** LCSC's product-detail answer for an LCSC part number, as JSON. */
+async function fetchLcscDetail(code: string): Promise<any> {
   const res = await fetch(`https://wmsc.lcsc.com/ftps/wm/product/detail?productCode=${encodeURIComponent(code)}`, {
     headers: {
       'Accept': 'application/json',
@@ -483,7 +485,103 @@ export async function fetchLcscProduct(code: string): Promise<LcscProduct | null
   if (!(res.headers.get('content-type') || '').includes('json')) {
     throw new Error('LCSC lookup unavailable (it answered with a web page, not data)');
   }
-  return parseLcscProduct(await res.json());
+  return res.json();
+}
+
+export async function fetchLcscProduct(code: string): Promise<LcscProduct | null> {
+  return parseLcscProduct(await fetchLcscDetail(code));
+}
+
+// The parameters that are a part's "value", in the order to prefer them.
+const VALUE_PARAMS = ['Capacitance', 'Resistance', 'Inductance', 'Frequency', 'Voltage - Zener (Nom) (Vz)', 'Zener Voltage (Nom)', 'Color', 'Colour'];
+
+/** An item's details from LCSC's product-detail answer, or null when LCSC doesn't know it. */
+export function lcscDetails(data: any): ProductDetails | null {
+  const p = data?.result;
+  if (!p || !p.productCode) return null;
+  const params: Array<{ name: string; value: string }> = (Array.isArray(p.paramVOList) ? p.paramVOList : [])
+    .map((x: any) => ({ name: String(x?.paramNameEn ?? '').trim(), value: String(x?.paramValueEn ?? '').trim() }))
+    .filter((x: { name: string; value: string }) => x.name && x.value && x.value !== '-');
+  const param = (names: string[]) => names.map((n) => params.find((x) => x.name.toLowerCase() === n.toLowerCase())?.value).find(Boolean) ?? null;
+  const value = param(VALUE_PARAMS);
+  const tolerance = param(['Tolerance']);
+  return {
+    supplier: 'lcsc',
+    supplierName: SUPPLIER_NAMES.lcsc,
+    supplierPartNumber: String(p.productCode).trim().toUpperCase(),
+    manufacturerPartNumber: p.productModel ? String(p.productModel).trim() : null,
+    manufacturer: p.brandNameEn ? String(p.brandNameEn).trim() : null,
+    description: String(p.productIntroEn || p.productDescEn || '').trim() || null,
+    value,
+    tolerance,
+    package: p.encapStandard && p.encapStandard !== '-' ? String(p.encapStandard).trim() : null,
+    datasheet: p.pdfUrl ? String(p.pdfUrl) : null,
+    extra: params.filter((x) => x.value !== value && x.value !== tolerance),
+  };
+}
+
+/** An item's details from a Mouser search answer's first part. */
+export function mouserDetails(part: any): ProductDetails | null {
+  if (!part) return null;
+  const attrs: Array<{ name: string; value: string }> = (Array.isArray(part.ProductAttributes) ? part.ProductAttributes : [])
+    .map((a: any) => ({ name: String(a?.AttributeName ?? '').trim(), value: String(a?.AttributeValue ?? '').trim() }))
+    .filter((a: { name: string; value: string }) => a.name && a.value);
+  const attr = (name: string) => attrs.find((a) => a.name.toLowerCase() === name.toLowerCase())?.value ?? null;
+  return {
+    supplier: 'mouser',
+    supplierName: SUPPLIER_NAMES.mouser,
+    supplierPartNumber: part.MouserPartNumber && part.MouserPartNumber !== 'N/A' ? String(part.MouserPartNumber).trim() : null,
+    manufacturerPartNumber: part.ManufacturerPartNumber ? String(part.ManufacturerPartNumber).trim() : null,
+    manufacturer: part.Manufacturer ? String(part.Manufacturer).trim() : null,
+    description: part.Description ? String(part.Description).trim() : null,
+    value: null,
+    tolerance: attr('Tolerance'),
+    package: attr('Package / Case') ?? attr('Case Code - in'),
+    datasheet: part.DataSheetUrl ? String(part.DataSheetUrl) : null,
+    extra: attrs.filter((a) => !['Packaging', 'Tolerance', 'Package / Case', 'Case Code - in'].includes(a.name)).slice(0, 8),
+  };
+}
+
+/**
+ * What a supplier link says about the product: LCSC links are looked up by
+ * their LCSC number, Mouser links through Mouser's API by the part number in
+ * them; DigiKey links give the manufacturer part number in the link only
+ * (DigiKey's API needs authorising).
+ */
+export async function lookupProductLink(url: string): Promise<{ details: ProductDetails | null; note: string | null }> {
+  const link = parseProductLink(url);
+  if (!link) return { details: null, note: 'That is not an LCSC, Mouser or DigiKey product link.' };
+  if (link.supplier === 'lcsc') {
+    const details = lcscDetails(await fetchLcscDetail(link.lcscCode!));
+    return { details, note: details ? null : `LCSC doesn't know ${link.lcscCode}.` };
+  }
+  if (link.supplier === 'mouser') {
+    const apiKey = await getPricingCredential('mouser', 'api_key', 'MOUSER_API_KEY');
+    if (apiKey && link.mpn) {
+      const res = await fetch(`https://api.mouser.com/api/v1/search/keyword?apiKey=${encodeURIComponent(apiKey)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ SearchByKeywordRequest: { keyword: link.mpn, records: 1, searchOptions: 'None' } }),
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (res.ok) {
+        const details = mouserDetails((await res.json() as any).SearchResults?.Parts?.[0]);
+        if (details) return { details, note: null };
+      }
+    }
+  }
+  // DigiKey, or Mouser without an answer: what the link itself says.
+  if (!link.mpn) return { details: null, note: `Couldn't read a part number from the ${SUPPLIER_NAMES[link.supplier]} link.` };
+  return {
+    details: {
+      supplier: link.supplier, supplierName: SUPPLIER_NAMES[link.supplier], supplierPartNumber: null,
+      manufacturerPartNumber: link.mpn, manufacturer: link.manufacturer ?? null,
+      description: null, value: null, tolerance: null, package: null, datasheet: null, extra: [],
+    },
+    note: link.supplier === 'digikey'
+      ? 'From the link: DigiKey gives no other details until its connection is authorised again.'
+      : 'From the link: Mouser gave no details for it.',
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1139,6 +1237,18 @@ export async function quotePart(
 }
 
 export function registerPricingRoutes(app: Express): void {
+  // A supplier product link's details, for the item form to fill in empty
+  // fields from (src/lib/productLink.ts). Changes nothing.
+  app.post('/api/pricing/link-lookup', async (req, res) => {
+    const url = typeof req.body?.url === 'string' ? req.body.url.trim() : '';
+    if (!url || url.length > 2000) return res.status(400).json({ error: 'Send the product link as url.' });
+    try {
+      res.json(await lookupProductLink(url));
+    } catch (err: any) {
+      res.status(502).json({ error: `The lookup failed: ${err?.message || err}` });
+    }
+  });
+
   app.get('/api/pricing/usage', async (_req, res) => {
     try {
       const [digikey, mouser, nexar, element14, tme] = await Promise.all([
