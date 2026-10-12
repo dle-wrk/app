@@ -17,6 +17,8 @@ export default function Login({ onLogin, isLoading = false }: LoginProps) {
   const [focused, setFocused] = useState<string | null>(null);
   const [forgotSubmitting, setForgotSubmitting] = useState(false);
   const [forgotSent, setForgotSent] = useState(false);
+  // False when the server has no email service: no link is sent, so say so.
+  const [emailOn, setEmailOn] = useState(true);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -58,6 +60,8 @@ export default function Login({ onLogin, isLoading = false }: LoginProps) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || 'Too many attempts — please wait a while.');
       }
+      const body = await res.json().catch(() => ({}));
+      setEmailOn(body.emailConfigured !== false);
       setForgotSent(true);
     } catch (err: any) {
       setError(err.message || 'Could not send reset link');
@@ -99,7 +103,7 @@ export default function Login({ onLogin, isLoading = false }: LoginProps) {
               {mode === 'login'
                 ? 'Sign in to your account to continue'
                 : forgotSent
-                  ? 'Check your inbox for a reset link.'
+                  ? (emailOn ? 'Check your inbox for a reset link.' : 'Reset emails are not available yet.')
                   : 'Enter your email — we\'ll send a reset link if the account exists.'}
             </p>
           </div>
@@ -123,7 +127,20 @@ export default function Login({ onLogin, isLoading = false }: LoginProps) {
           })()}
 
           {mode === 'forgot' ? (
-            forgotSent ? (
+            forgotSent && !emailOn ? (
+              <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 flex items-start gap-3" data-testid="reset-email-off">
+                <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-bold text-amber-500">No email was sent</p>
+                  <p className="text-xs text-on-surface-variant mt-1">
+                    Reset emails aren't set up on this system yet. Ask an admin to reset your password: they can give you a temporary one from Settings → Users.
+                  </p>
+                  <button type="button" onClick={goToLogin} className="text-xs text-primary font-bold mt-3 flex items-center gap-1 hover:underline">
+                    <ArrowLeft className="w-3 h-3" /> Back to sign in
+                  </button>
+                </div>
+              </div>
+            ) : forgotSent ? (
               <div className="bg-primary/10 border border-primary/30 rounded-xl p-4 flex items-start gap-3">
                 <CheckCircle2 className="w-5 h-5 text-primary flex-shrink-0 mt-0.5" />
                 <div>

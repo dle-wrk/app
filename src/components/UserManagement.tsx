@@ -86,6 +86,12 @@ export default function UserManagement({ triggerToast }: UserManagementProps) {
     fetchUsers();
   }, []);
 
+  // Whether "Forgot password?" can email a reset link (admins only).
+  const [emailStatus, setEmailStatus] = useState<{ configured: boolean; from: string | null; lastError: string | null; lastErrorAt: string | null } | null>(null);
+  useEffect(() => {
+    fetch('/api/auth/email-status').then((r) => (r.ok ? r.json() : null)).then(setEmailStatus).catch(() => {});
+  }, []);
+
   const fetchUsers = async () => {
     setLoading(true);
     try {
@@ -265,6 +271,22 @@ export default function UserManagement({ triggerToast }: UserManagementProps) {
           </h3>
           <p className="text-xs text-on-surface-variant mt-1">Create and manage system users with role-based access</p>
         </div>
+        {emailStatus && (!emailStatus.configured || emailStatus.lastError) && (
+          <div role="alert" data-testid="email-status-warning" className="basis-full rounded-lg border border-amber-500/30 bg-amber-500/10 p-sm flex items-start gap-sm text-xs">
+            <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+            {!emailStatus.configured ? (
+              <span className="text-on-surface-variant">
+                <strong className="text-amber-500">"Forgot password?" can't send emails.</strong> No email service is set up, so people who forget their password can't reset it themselves: reset it for them here (the key button on their row). To turn on reset emails, set the <code className="font-mono">RESEND_API_KEY</code> and <code className="font-mono">RESEND_FROM</code> secrets on the server.
+              </span>
+            ) : (
+              <span className="text-on-surface-variant">
+                <strong className="text-amber-500">The last reset email didn't send</strong>
+                {emailStatus.lastErrorAt ? ` (${new Date(emailStatus.lastErrorAt).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })})` : ''}: {emailStatus.lastError}
+                {emailStatus.from ? <> Sending from <code className="font-mono">{emailStatus.from}</code>; that domain must be verified in Resend.</> : null}
+              </span>
+            )}
+          </div>
+        )}
         <button
           onClick={() => {
             resetForm();

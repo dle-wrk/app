@@ -212,6 +212,15 @@ function hashResetToken(token: string): string {
   return createHmac('sha256', CRED_KEY).update(token).digest('hex');
 }
 
+/** Whether reset emails can be sent (a Resend key is set). */
+export const emailConfigured = () => !!process.env.RESEND_API_KEY;
+
+// How the last reset email went, for the admin warning in Settings > Users
+// (GET /api/auth/email-status): a set key can still fail, e.g. while
+// Resend hasn't verified the sending domain.
+const emailState: { lastSentAt: string | null; lastError: string | null; lastErrorAt: string | null } = { lastSentAt: null, lastError: null, lastErrorAt: null };
+const emailFailed = (message: string) => { emailState.lastError = message; emailState.lastErrorAt = new Date().toISOString(); };
+
 async function sendPasswordResetEmail(toEmail: string, resetUrl: string): Promise<void> {
   const apiKey = process.env.RESEND_API_KEY;
   const from = process.env.RESEND_FROM || 'Tracklab IM <noreply@tracklab.local>';
@@ -237,9 +246,16 @@ async function sendPasswordResetEmail(toEmail: string, resetUrl: string): Promis
     if (!res.ok) {
       const body = await res.text();
       console.warn(`[password-reset] Resend rejected (${res.status}): ${body.slice(0, 200)}`);
+      let reason = body.slice(0, 200);
+      try { reason = JSON.parse(body).message || reason; } catch { /* not JSON */ }
+      emailFailed(`Resend refused it (${res.status}): ${reason}`);
+    } else {
+      emailState.lastSentAt = new Date().toISOString();
+      emailState.lastError = null;
     }
   } catch (err: any) {
     console.warn('[password-reset] Resend call failed:', err.message);
+    emailFailed(`Couldn't reach Resend: ${err.message}`);
   }
 }
 
@@ -487,8 +503,23 @@ export function registerAuthRoutes(app: Express): void {
       }
     })();
 
-    // Constant response regardless of whether the email exists.
-    res.json({ ok: true, message: 'If that email is registered, a reset link has been sent.' });
+    // Constant response regardless of whether the email exists. Without an
+    // email service nothing is sent to anyone, so say so (that reveals
+    // nothing about the address).
+    if (!emailConfigured()) {
+      return res.json({ ok: true, emailConfigured: false, message: "Reset emails aren't set up yet, so no link can be sent. Ask an admin to reset your password in Settings > Users." });
+    }
+    res.json({ ok: true, emailConfigured: true, message: 'If that email is registered, a reset link has been sent.' });
+  });
+
+  // -------------------- GET /api/auth/email-status (admin) --------------------
+  app.get('/api/auth/email-status', requireAdmin, (_req, res) => {
+    res.json({
+      configured: emailConfigured(),
+      from: process.env.RESEND_FROM || null,
+      appOrigin: process.env.APP_ORIGIN || null,
+      ...emailState,
+    });
   });
 
   // -------------------- POST /api/auth/reset-password --------------------
