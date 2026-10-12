@@ -354,7 +354,7 @@ function pickBreakForQty<T>(breaks: T[], qty: number, getQty: (b: T) => number):
   return chosen ?? breaks[0];
 }
 
-async function searchDigikey(partNumber: string, qty = 1) {
+export async function searchDigikey(partNumber: string, qty = 1) {
   const token = await getDigikeyToken();
   const res = await fetch('https://api.digikey.com/products/v4/search/keyword', {
     method: 'POST',
@@ -473,7 +473,7 @@ export function lcscPriceAt(breaks: Array<{ qty: number; price: number }>, qty: 
 }
 
 /** LCSC's product-detail answer for an LCSC part number, as JSON. */
-async function fetchLcscDetail(code: string): Promise<any> {
+export async function fetchLcscDetail(code: string): Promise<any> {
   const res = await fetch(`https://wmsc.lcsc.com/ftps/wm/product/detail?productCode=${encodeURIComponent(code)}`, {
     headers: {
       'Accept': 'application/json',
@@ -540,6 +540,20 @@ export function mouserDetails(part: any): ProductDetails | null {
     datasheet: part.DataSheetUrl ? String(part.DataSheetUrl) : null,
     extra: attrs.filter((a) => !['Packaging', 'Tolerance', 'Package / Case', 'Case Code - in'].includes(a.name)).slice(0, 8),
   };
+}
+
+/** Mouser's details for a part number (its own or the manufacturer's), or null. */
+export async function mouserLookup(keyword: string): Promise<ProductDetails | null> {
+  const apiKey = await getPricingCredential('mouser', 'api_key', 'MOUSER_API_KEY');
+  if (!apiKey) throw new Error('Mouser API key not configured');
+  const res = await fetch(`https://api.mouser.com/api/v1/search/keyword?apiKey=${encodeURIComponent(apiKey)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ SearchByKeywordRequest: { keyword, records: 1, searchOptions: 'None' } }),
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!res.ok) throw new Error(`Mouser search failed: ${res.status}`);
+  return mouserDetails((await res.json() as any).SearchResults?.Parts?.[0]);
 }
 
 /**

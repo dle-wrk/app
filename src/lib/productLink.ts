@@ -107,9 +107,10 @@ const slots = (list: string[] | undefined) => Array.from({ length: 5 }, (_, i) =
  * The checklist for filling an item from a product's details: each value
  * the product has that the item doesn't already have. Empty fields are
  * ticked; a field holding something different is offered unticked (ticking
- * it replaces it). The manufacturer part number goes in Mfr PN 1, the
- * supplier's part number in that supplier's slot (1 Mouser, 2 DigiKey,
- * 3 LCSC); a part number the item already has anywhere isn't offered.
+ * it replaces it). Both part numbers go in that supplier's slot (1 Mouser,
+ * 2 DigiKey, 3 LCSC): the manufacturer part number as this supplier lists
+ * it in Mfr PN n, its own number in Sup PN n. A supplier number the item
+ * already has anywhere isn't offered.
  */
 export function fillOptions(item: FillItem, d: ProductDetails): FillOption[] {
   const options: FillOption[] = [];
@@ -126,12 +127,10 @@ export function fillOptions(item: FillItem, d: ProductDetails): FillOption[] {
   if (d.package && /^\d{4}$/.test(d.package)) offer('size', 'Size', d.package, item.size);
   offer('datasheet', 'Datasheet', d.datasheet, item.datasheet);
   offer('supplier', 'Preferred supplier', d.supplierName, item.supplier);
-  const man = slots(item.manPns);
-  if (d.manufacturerPartNumber && !man.some((v) => v.trim().toUpperCase() === d.manufacturerPartNumber!.toUpperCase())) {
-    offer('manPn', 'Manufacturer PN (Mfr PN 1)', d.manufacturerPartNumber, man[0]);
-  }
-  const sup = slots(item.supPns);
   const slot = SLOT[d.supplier];
+  const man = slots(item.manPns);
+  if (d.manufacturerPartNumber) offer('manPn', `Manufacturer PN (Mfr PN ${slot + 1}, ${d.supplierName})`, d.manufacturerPartNumber, man[slot]);
+  const sup = slots(item.supPns);
   if (d.supplierPartNumber && !sup.some((v) => v.trim().toUpperCase() === d.supplierPartNumber!.toUpperCase())) {
     offer('supPn', `${d.supplierName} PN (Sup PN ${slot + 1})`, d.supplierPartNumber, sup[slot]);
   }
@@ -144,9 +143,9 @@ export function applyFill(item: FillItem, d: ProductDetails, chosen: FillOption[
   for (const o of chosen) {
     if (o.field === 'manPn') {
       const man = slots(item.manPns);
-      man[0] = o.value;
+      man[SLOT[d.supplier]] = o.value;
       patch.manPns = man;
-      patch.manufacturer = o.value; // the form keeps it in step with Mfr PN 1
+      if (SLOT[d.supplier] === 0) patch.manufacturer = o.value; // the form keeps it in step with Mfr PN 1
     } else if (o.field === 'supPn') {
       const sup = slots(item.supPns);
       sup[SLOT[d.supplier]] = o.value;

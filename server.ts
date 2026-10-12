@@ -26,6 +26,7 @@ import { registerSuppliersRoutes } from './src/lib/suppliersRoutes';
 import { registerPricingRoutes } from './src/lib/pricingRoutes';
 import { registerBulkPricingRoutes } from './src/lib/bulkPricingRoutes';
 import { registerPartNumberReviewRoutes } from './src/lib/partNumberReview';
+import { registerPartAlignRoutes, ensurePartAlignSchema } from './src/lib/partAlignRoutes';
 import { registerBulkPricingReviewRoutes } from './src/lib/bulkPricingReview';
 import { AUTO_RUN_CRON, ensureBulkPricingSchema, runAutoBulkPricing } from './src/lib/bulkPricing';
 import { registerExchangeRateRoutes, updateExchangeRate } from './src/lib/exchangeRate';
@@ -184,6 +185,8 @@ registerBulkPricingReviewRoutes(app);
 // supplier names in part-number fields, with fixes for roles that may change
 // inventory.
 registerPartNumberReviewRoutes(app);
+// Lining up part numbers and links by supplier slot (/api/inventory/part-align).
+registerPartAlignRoutes(app);
 
 // Exchange rate (/api/exchange-rate, /api/exchange-rate/update). Consumed by
 // bulk pricing; also refreshed on boot and daily at 06:00 UTC.
@@ -1146,6 +1149,7 @@ async function runSchemaBootstrap() {
     await ensureKitsSchema().catch((e) => console.error('Failed to bootstrap kits schema:', e));
     await ensureProcurementSchema().catch((e) => console.error('Failed to bootstrap procurement schema:', e));
     await ensureBulkPricingSchema().catch((e) => console.error('Failed to bootstrap bulk pricing schema:', e));
+    await ensurePartAlignSchema().catch((e) => console.error('Failed to bootstrap part-align schema:', e));
     await ensureProjectProgressSchema().catch((e) => console.error('Failed to bootstrap project progress schema:', e));
     await ensureDataVersionsTable().catch((e) => console.error('Failed to bootstrap data_versions table:', e));
 

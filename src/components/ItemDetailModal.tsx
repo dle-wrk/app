@@ -6,6 +6,7 @@ import { fmtUSD, fmtZAR, fmtNumber } from '../lib/formatMoney';
 import { detectLedSwatch, ledSwatchBackground } from '../lib/ledColor';
 import { ITEM_CATEGORIES } from '../lib/itemCategories';
 import { SUPPLIER_SLOTS, rightSlotFor } from '../lib/partNumbers';
+import { linkSupplier } from '../lib/partAlign';
 import { usdToZarRate } from '../lib/usdToZar';
 import { applyFill, fillOptions, parseProductLink, type FillOption, type ProductDetails } from '../lib/productLink';
 import { CategoryCombobox } from './CategoryCombobox';
@@ -221,6 +222,16 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete, reser
       while (arr.length < 5) arr.push('');
       [arr[from], arr[to]] = [arr[to], arr[from]];
       return { ...prev, supPns: arr };
+    });
+  };
+
+  // The same for web links: a supplier's page moves to that supplier's slot.
+  const moveWebLink = (from: number, to: number) => {
+    setEdited(prev => {
+      const arr = [...(prev.weblinks || [])];
+      while (arr.length < 5) arr.push('');
+      [arr[from], arr[to]] = [arr[to], arr[from]];
+      return { ...prev, weblinks: arr };
     });
   };
 
@@ -833,16 +844,20 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete, reser
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-md">
                     <div className="space-y-2">
                       <label className="font-bold text-outline block text-[10px] uppercase">Manufacturer Part Numbers (1-5)</label>
+                      <p className="text-[10px] text-outline -mt-1">The component's part number as each supplier lists it, in the same slots: 1 Mouser, 2 DigiKey, 3 LCSC, 4-5 others. N/A where a supplier doesn't have it.</p>
                       <div className="grid grid-cols-1 gap-1.5">
-                        {[0, 1, 2, 3, 4].map((i) => (
-                          <input
-                            key={`manPns_${i}`}
-                            name={`manPns_${i}`}
-                            value={edited.manPns?.[i] || ''}
-                            onChange={handleChange}
-                            placeholder={`Mfr PN ${i + 1}`}
-                            className="w-full bg-surface-container-high border border-outline-variant rounded px-2 py-1.5 text-on-surface outline-none focus:border-primary font-mono"
-                          />
+                        {SUPPLIER_SLOTS.map((slot, i) => (
+                          <div key={`manPns_${i}`} className="flex items-center gap-1.5">
+                            <span className={`w-16 shrink-0 text-[10px] font-bold ${slot.supplier ? 'text-primary' : 'text-outline'}`}>{i + 1}. {slot.label}</span>
+                            <input
+                              name={`manPns_${i}`}
+                              aria-label={`Manufacturer part number ${i + 1} (${slot.label})`}
+                              value={edited.manPns?.[i] || ''}
+                              onChange={handleChange}
+                              placeholder={slot.supplier ? `Part number at ${slot.label}` : 'Other part number'}
+                              className="w-full bg-surface-container-high border border-outline-variant rounded px-2 py-1.5 text-on-surface outline-none focus:border-primary font-mono"
+                            />
+                          </div>
                         ))}
                       </div>
                     </div>
@@ -883,7 +898,7 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete, reser
 
                   <div className="space-y-2">
                     <label className="font-bold text-outline block text-[10px] uppercase">External Web Links (1-5)</label>
-                    <p className="text-[10px] text-outline -mt-1">Add an LCSC, Mouser or DigiKey product link to choose what to fill in from it.</p>
+                    <p className="text-[10px] text-outline -mt-1">Same slots: 1 Mouser, 2 DigiKey, 3 LCSC, 4-5 others. Add an LCSC, Mouser or DigiKey product link to choose what to fill in from it.</p>
                     {linkNotice && (
                       <div role="status" data-testid="link-notice" className={`rounded border px-2 py-1.5 text-[11px] flex items-start justify-between gap-2 ${
                         linkNotice.tone === 'ok' ? 'border-green-500/30 bg-green-500/10 text-green-400' : linkNotice.tone === 'error' ? 'border-error/30 bg-error/10 text-error' : 'border-outline-variant bg-surface-container-high text-on-surface-variant'}`}>
@@ -925,18 +940,36 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete, reser
                       </div>
                     )}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-sm">
-                      {[0, 1, 2, 3, 4].map((i) => (
-                        <input
-                          key={`weblinks_${i}`}
-                          name={`weblinks_${i}`}
-                          value={edited.weblinks?.[i] || ''}
-                          onChange={handleChange}
-                          onBlur={(e) => void lookupLink(e.currentTarget.value)}
-                          onPaste={(e) => { const input = e.currentTarget; setTimeout(() => void lookupLink(input.value), 0); }}
-                          placeholder={`Web Link ${i + 1} URL`}
-                          className="w-full bg-surface-container-high border border-outline-variant rounded px-2 py-1.5 text-on-surface outline-none focus:border-primary font-mono"
-                        />
-                      ))}
+                      {SUPPLIER_SLOTS.map((slot, i) => {
+                        const value = edited.weblinks?.[i] || '';
+                        const whose = linkSupplier(value);
+                        const right = whose && whose !== 'other' ? SUPPLIER_SLOTS.findIndex((x) => x.supplier === whose) : -1;
+                        return (
+                          <div key={`weblinks_${i}`}>
+                            <div className="flex items-center gap-1.5">
+                              <span className={`w-16 shrink-0 text-[10px] font-bold ${slot.supplier ? 'text-primary' : 'text-outline'}`}>{i + 1}. {slot.label}</span>
+                              <input
+                                name={`weblinks_${i}`}
+                                aria-label={`Web link ${i + 1} (${slot.label})`}
+                                value={value}
+                                onChange={handleChange}
+                                onBlur={(e) => void lookupLink(e.currentTarget.value)}
+                                onPaste={(e) => { const input = e.currentTarget; setTimeout(() => void lookupLink(input.value), 0); }}
+                                placeholder={slot.supplier ? `${slot.label} product link` : 'Other link'}
+                                className={`w-full bg-surface-container-high border rounded px-2 py-1.5 text-on-surface outline-none focus:border-primary font-mono ${right >= 0 && right !== i ? 'border-amber-500/60' : 'border-outline-variant'}`}
+                              />
+                            </div>
+                            {right >= 0 && right !== i && (
+                              <div className="ml-[4.4rem] mt-0.5 text-[10px] text-amber-500 flex items-center gap-1.5">
+                                A {SUPPLIER_SLOTS[right].label} link.
+                                <button type="button" onClick={() => moveWebLink(i, right)} className="font-bold underline hover:text-on-surface">
+                                  Move to {right + 1}. {SUPPLIER_SLOTS[right].label}
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 </div>

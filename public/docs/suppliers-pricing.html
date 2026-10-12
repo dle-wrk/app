@@ -211,6 +211,12 @@
                 <strong>💡 For administrators:</strong> the automatic run only happens on the live server. A copy of the app started on a computer for development never starts it, even though it uses the same database. Setting <code>BULK_PRICING_AUTO=off</code> on the server stops the daily run without changing the setting; <code>BULK_PRICING_AUTO=on</code> enables it elsewhere.
             </div>
 
+            <h3 id="part-align">Part numbers: line up by supplier</h3>
+            <div class="step">
+                <p>Manufacturer part numbers, supplier part numbers and web links each have five slots, and slot n is the same supplier in all three: <strong>1 Mouser, 2 DigiKey, 3 LCSC</strong>, 4 and 5 other. Mfr PN 2 is the component's part number as DigiKey lists it, Sup PN 2 DigiKey's own number, Web Link 2 the DigiKey page.</p>
+                <p><strong>Check every item</strong> (top of the Part Numbers tab) asks LCSC, Mouser and DigiKey for each item's manufacturer part number and shows, item by item, what would move. A slot whose supplier has nothing for the item says <strong>N/A</strong>. Nothing is thrown away: a manufacturer part number no supplier gave, a second link of one supplier or a link to another site goes to slot 4 or 5. A supplier that couldn't be asked keeps its slot as it is. The check takes a while (Mouser allows 30 calls a minute) and carries on if you leave the page. Nothing changes until you press <strong>Apply</strong> (one item) or <strong>Apply all</strong>; an item edited since the check is skipped. Each change is in the activity log.</p>
+            </div>
+
             <h3 id="part-number-review">Part numbers: review and fix</h3>
             <div class="step">
                 <p>The <strong>Part Numbers</strong> tab under <span class="menu-path">Pricing Directory</span> (or <strong>Review part numbers</strong> on the Bulk Pricing tab) lists what in the part-number fields stops items being priced or makes suppliers return the wrong part, grouped by problem, each with what to do.</p>

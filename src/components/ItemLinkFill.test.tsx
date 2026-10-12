@@ -63,8 +63,14 @@ describe('filling an item from a supplier link', () => {
     expect(field('tolerance').value).toBe('±10%');
     expect(field('datasheet')?.value ?? '').toBe('');
     expect(field('supPns_2').value).toBe('C365814');
-    expect(field('manPns_0').value).toBe('FM31X104K251EEG');
+    expect(field('manPns_2').value).toBe('FM31X104K251EEG'); // Mfr PN 3 is LCSC's
+    expect(field('manPns_0').value).toBe('');
     expect(host.querySelector('[data-testid="link-notice"]')!.textContent).toContain('Filled from LCSC');
+
+    // The LCSC link was typed in slot 1 (Mouser's): offered a move to 3.
+    await act(async () => { button(/^Move to 3\. LCSC$/).click(); });
+    expect(field('weblinks_2').value).toBe(LINK);
+    expect(field('weblinks_0').value).toBe('');
 
     await act(async () => { button(/^Undo$/).click(); });
     expect(field('value').value).toBe('');

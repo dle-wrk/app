@@ -66,8 +66,9 @@ describe('the checklist', () => {
       ['Size', '1206', '', true],
       ['Datasheet', details.datasheet, '', true],
       ['Preferred supplier', 'LCSC', '', true],
+      ['Manufacturer PN (Mfr PN 3, LCSC)', 'FM31X104K251EEG', '', true],
       ['LCSC PN (Sup PN 3)', 'C365814', '', true],
-    ]); // Value matches; the manufacturer PN is already in Mfr PN 2
+    ]); // Value matches; Mfr PN 3 is LCSC's, so it is offered though Mfr PN 2 has it
   });
 
   it('fills in only the ticked lines, part numbers in their slots', () => {
@@ -78,6 +79,6 @@ describe('the checklist', () => {
       supPns: ['5440-FM31X104K251EEGTR-ND', '', 'C365814', '', ''],
     });
     const fresh = fillOptions({}, details).find((o) => o.field === 'manPn')!;
-    expect(applyFill({}, details, [fresh])).toEqual({ manPns: ['FM31X104K251EEG', '', '', '', ''], manufacturer: 'FM31X104K251EEG' });
+    expect(applyFill({}, details, [fresh])).toEqual({ manPns: ['', '', 'FM31X104K251EEG', '', ''] });
   });
 });

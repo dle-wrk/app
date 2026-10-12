@@ -3,6 +3,7 @@ import { Item, ViewType } from '../../types';
 import { ChevronLeft, ChevronRight, Search, Settings, Database, Wrench } from 'lucide-react';
 import BulkPricingWizard from '../BulkPricingWizard';
 import PartNumberReview from '../PartNumberReview';
+import PartAlign from '../PartAlign';
 import { fmtCurrency, fmtUSD, fmtNumber } from '../../lib/formatMoney';
 import { detectLedSwatch, ledSwatchBackground } from '../../lib/ledColor';
 
@@ -517,7 +518,10 @@ export const PricingView: React.FC<PricingViewProps> = ({
 
       {/* Part-number review: src/lib/partNumberReview.ts */}
       {activeTab === 'partnumbers' && (
-        <PartNumberReview onShowNotification={triggerToast} onOpenItem={setSelectedDetailPartNumber} onChanged={onPricesUpdated} />
+        <div className="space-y-lg">
+          <PartAlign onShowNotification={triggerToast} onOpenItem={setSelectedDetailPartNumber} onChanged={onPricesUpdated} />
+          <PartNumberReview onShowNotification={triggerToast} onOpenItem={setSelectedDetailPartNumber} onChanged={onPricesUpdated} />
+        </div>
       )}
 
       {/* Price Directory tab */}
