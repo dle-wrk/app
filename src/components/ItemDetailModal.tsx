@@ -5,6 +5,7 @@ import { fmtUSD, fmtZAR, fmtNumber } from '../lib/formatMoney';
 import { detectLedSwatch, ledSwatchBackground } from '../lib/ledColor';
 import { ITEM_CATEGORIES } from '../lib/itemCategories';
 import { SUPPLIER_SLOTS, rightSlotFor } from '../lib/partNumbers';
+import { usdToZarRate } from '../lib/usdToZar';
 import { applyFill, fillOptions, parseProductLink, type FillOption, type ProductDetails } from '../lib/productLink';
 import { CategoryCombobox } from './CategoryCombobox';
 import {
@@ -95,9 +96,12 @@ interface ItemDetailModalProps {
    * Fed from the App-level /api/inventory/reservations/summary map.
    * Missing / 0 = the row hides the reserved-vs-available breakdown. */
   reservedQty?: number;
+  /** The app's daily USD→ZAR rate, as App has it; a fallback until it loads. */
+  liveUsdToZar?: number | null;
 }
 
-export default function ItemDetailModal({ item, onClose, onSave, onDelete, reservedQty = 0 }: ItemDetailModalProps) {
+export default function ItemDetailModal({ item, onClose, onSave, onDelete, reservedQty = 0, liveUsdToZar }: ItemDetailModalProps) {
+  const zarRate = usdToZarRate(liveUsdToZar).rate;
   const [isEditing, setIsEditing] = useState(false);
   // Which read-only tab is showing. Defaults to Overview so the headline
   // numbers + description are always the first thing the user sees.
@@ -117,7 +121,7 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete, reser
   // USD<->ZAR conversion used when one price field derives the other. This was
   // hard-coded to 19, which no longer matches the stored rate (~16.69) and so
   // wrote a wrong figure into whichever field the user was not editing.
-  const [usdToZar, setUsdToZar] = useState<number>(19);
+  const [usdToZar, setUsdToZar] = useState<number>(zarRate);
 
   React.useEffect(() => {
     fetch('/api/exchange-rate')
@@ -132,7 +136,7 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete, reser
       enriched.sizeMetric = deriveMetric(enriched.size);
     }
     if (enriched.bulkPriceZar === undefined || enriched.bulkPriceZar === null || enriched.bulkPriceZar === 0) {
-      enriched.bulkPriceZar = enriched.price * 19;
+      enriched.bulkPriceZar = enriched.price * zarRate;
     }
     return enriched;
   });
@@ -467,7 +471,7 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete, reser
                         {fmtUSD(item.price, 3)}
                       </span>
                       <span className="text-[10px] font-mono text-outline mt-1 block">
-                        {fmtZAR(item.bulkPriceZar || item.price * 19, 3)} ZAR
+                        {fmtZAR(item.bulkPriceZar || item.price * zarRate, 3)} ZAR
                       </span>
                     </div>
                   </div>
@@ -479,7 +483,7 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete, reser
                         {fmtUSD(item.price * item.stockLevel)}
                       </span>
                       <span className="text-[10px] font-mono text-outline mt-1 block">
-                        {fmtZAR((item.bulkPriceZar || item.price * 19) * item.stockLevel)} ZAR
+                        {fmtZAR((item.bulkPriceZar || item.price * zarRate) * item.stockLevel)} ZAR
                       </span>
                     </div>
                   </div>
@@ -625,7 +629,7 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete, reser
                         </div>
                         <div className="flex justify-between items-center">
                           <span className="text-outline">Bulk Rate (ZAR):</span>
-                          <span className="font-mono font-semibold text-green-400">{fmtZAR(item.bulkPriceZar || item.price * 19)}</span>
+                          <span className="font-mono font-semibold text-green-400">{fmtZAR(item.bulkPriceZar || item.price * zarRate)}</span>
                         </div>
                       </div>
 

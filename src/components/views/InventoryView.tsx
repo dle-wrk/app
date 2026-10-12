@@ -5,8 +5,8 @@ import { fmtUSD, fmtZAR, fmtNumber } from '../../lib/formatMoney';
 import { CSV_HEADER, itemToCsvRow } from '../../mockData';
 import { detectLedSwatch, ledSwatchBackground } from '../../lib/ledColor';
 import { NO_PRICE_RANGE, inPriceRange, isPriceRangeSet, type PriceRange } from '../../lib/priceFilter';
+import { rateNote, usdToZarRate } from '../../lib/usdToZar';
 
-const USD_TO_ZAR_RATE = 18.50;
 
 interface InventoryViewProps {
   items: Item[];
@@ -35,6 +35,8 @@ interface InventoryViewProps {
    * and refreshed whenever the SO list moves. Missing entries mean "no
    * reservations for this part" — treat as 0 in the render. */
   reservedByPart?: Record<string, number>;
+  /** The app's daily USD→ZAR rate, for the rand prices; a fallback until it loads. */
+  usdToZar?: number | null;
 }
 
 export const InventoryView: React.FC<InventoryViewProps> = ({
@@ -59,14 +61,17 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   setShowAddModal,
   setSelectedDetailPartNumber,
   isAdmin = false,
+  usdToZar,
   reservedByPart = {},
 }) => {
+  const zar = usdToZarRate(usdToZar);
+
   // Price range on top of the filters above (kept here: only this list has it).
   const [priceRange, setPriceRange] = React.useState<PriceRange>(NO_PRICE_RANGE);
   const priceSet = isPriceRangeSet(priceRange);
   const shownItems = React.useMemo(
-    () => (priceSet ? filteredItems.filter((item) => inPriceRange(item.price, priceRange, USD_TO_ZAR_RATE)) : filteredItems),
-    [filteredItems, priceRange, priceSet],
+    () => (priceSet ? filteredItems.filter((item) => inPriceRange(item.price, priceRange, zar.rate)) : filteredItems),
+    [filteredItems, priceRange, priceSet, zar.rate],
   );
 
   return (
@@ -334,8 +339,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   <span className="font-mono text-sm font-bold text-green-400">
                     {fmtUSD(Number(item.price ?? 0))}
                   </span>
-                  <span className="font-mono text-xs font-bold text-green-400">
-                    {fmtZAR(Number(item.price ?? 0) * USD_TO_ZAR_RATE)}
+                  <span className="font-mono text-xs font-bold text-green-400" title={`Rand ${rateNote(zar)}`}>
+                    {fmtZAR(Number(item.price ?? 0) * zar.rate)}
                   </span>
                 </div>
               </div>

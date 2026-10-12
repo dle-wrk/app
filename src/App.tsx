@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { usdToZarRate } from './lib/usdToZar';
 import { classifyPartNumberBySupplier, SUPPLIER_SLOTS } from './lib/partNumbers';
 import {
   Menu,
@@ -930,7 +931,7 @@ export default function App() {
       status: newItem.status as any,
       size: newItem.size,
       sizeMetric: newItem.sizeMetric,
-      bulkPriceZar: newItem.bulkPriceZar || Number((newItem.price * 19).toFixed(5)),
+      bulkPriceZar: newItem.bulkPriceZar || Number((newItem.price * usdToZarRate(fxRate?.usdToZar).rate).toFixed(5)),
       packagingQuantity: newItem.packagingQuantity,
       packagingType: newItem.packagingType,
       // Populate the *arrays* the mapper reads: sup_pn_1 / man_pn_1.
@@ -1041,7 +1042,7 @@ export default function App() {
   };
 
   const handleNewItemPriceChange = (usdVal: number) => {
-    const zarVal = Number((usdVal * 19).toFixed(5));
+    const zarVal = Number((usdVal * usdToZarRate(fxRate?.usdToZar).rate).toFixed(5));
     setNewItem(prev => ({
       ...prev,
       price: usdVal,
@@ -1990,6 +1991,7 @@ export default function App() {
               return (
                 <InventoryView
                   items={items}
+                  usdToZar={fxRate?.usdToZar}
                   searchQuery={searchQuery}
                   setSearchQuery={setSearchQuery}
                   selectedItemType={selectedItemType}
@@ -2559,7 +2561,7 @@ if (currentView === 'alternates') {
                       step="any"
                       min="0"
                       required
-                      value={newItem.bulkPriceZar || Number((newItem.price * 19).toFixed(5))}
+                      value={newItem.bulkPriceZar || Number((newItem.price * usdToZarRate(fxRate?.usdToZar).rate).toFixed(5))}
                       onChange={(e) => handleNewItemPriceZarChange(Number(e.target.value))}
                     />
                   </div>
@@ -3097,6 +3099,7 @@ if (currentView === 'alternates') {
             onSave={handleSaveItemDetail}
             onDelete={handleDeleteItem}
             reservedQty={reservedByPart[detailItem.partNumber] || 0}
+            liveUsdToZar={fxRate?.usdToZar}
           />
         )}
 

@@ -17,9 +17,9 @@ beforeEach(() => { host = document.createElement('div'); document.body.appendChi
 afterEach(() => { act(() => root.unmount()); host.remove(); });
 
 const noop = () => {};
-const render = async () => {
+const render = async (usdToZar?: number) => {
   await act(async () => {
-    root.render(<InventoryView items={ITEMS} filteredItems={ITEMS} searchQuery="" setSearchQuery={noop} selectedItemType="ALL" setSelectedItemType={noop}
+    root.render(<InventoryView usdToZar={usdToZar} items={ITEMS} filteredItems={ITEMS} searchQuery="" setSearchQuery={noop} selectedItemType="ALL" setSelectedItemType={noop}
       selectedStatus="ALL" setSelectedStatus={noop} selectedStockStatus="ALL" setSelectedStockStatus={noop} selectedPackaging="ALL" setSelectedPackaging={noop}
       availablePackagingModes={[]} availablePrefixes={[]} sortBy="name" setSortBy={noop} handleResetFilters={noop} setShowImportModal={noop}
       setShowAddModal={noop} setSelectedDetailPartNumber={noop} />);
@@ -55,5 +55,23 @@ describe('Items & Inventory price filter', () => {
     await act(async () => { (host.querySelector('button[aria-label="Clear price filter"]') as HTMLButtonElement).click(); });
     expect(shown()).toEqual(['CAP-009', 'CHP-002', 'ANT-001', 'ENC-004']);
     expect((host.querySelector('select[aria-label="Price currency"]') as HTMLSelectElement).value).toBe('ZAR');
+  });
+});
+
+describe('rand prices', () => {
+  it('use the daily rate when the app has it, and say which rate', async () => {
+    await render(20);
+    expect(host.textContent).toContain('R240.00'); // ANT-001: $12 at 20
+    expect(host.querySelector('[title^="Rand at 20.00 ZAR/USD (the daily rate)"]')).not.toBeNull();
+    await type('Minimum price', '');
+    const currency = host.querySelector('select[aria-label="Price currency"]') as HTMLSelectElement;
+    await act(async () => { currency.value = 'ZAR'; currency.dispatchEvent(new Event('change', { bubbles: true })); });
+    await type('Minimum price', '240');
+    expect(shown()).toEqual(['ANT-001', 'ENC-004']);
+  });
+
+  it('fall back to a fixed rate, saying so, before the daily rate loads', async () => {
+    await render();
+    expect(host.querySelector('[title*="fallback"]')).not.toBeNull();
   });
 });
