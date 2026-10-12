@@ -12,8 +12,8 @@ import { currentUserCan, notAllowedMessage } from '../lib/permissions';
 import { useDataChanged } from '../lib/liveUpdates';
 import { PrimaryButton, SecondaryButton } from './bookkeeping/shared';
 
-type IssueKind = 'supplier_name' | 'placeholder' | 'lcsc_extra_text' | 'wrong_slot' | 'not_a_part_number' | 'held_back' | 'swapped' | 'no_part_number';
-type FixAction = 'move_to_supplier' | 'clear' | 'set' | 'arrange_slots';
+type IssueKind = 'supplier_name' | 'number_in_supplier_field' | 'supplier_number_in_mfr' | 'placeholder' | 'lcsc_extra_text' | 'wrong_slot' | 'not_a_part_number' | 'held_back' | 'swapped' | 'no_part_number';
+type FixAction = 'move_to_supplier' | 'clear' | 'set' | 'arrange_slots' | 'move_to_slot' | 'supplier_from_number';
 type ToastType = 'SUCCESS' | 'ERROR' | 'INFO';
 
 export interface PartNumberIssue {
@@ -46,6 +46,10 @@ interface Props {
 const SECTIONS: Array<{ kind: IssueKind; title: string; blurb: string; collapsed?: boolean }> = [
   { kind: 'supplier_name', title: 'Supplier names in part-number fields',
     blurb: 'The item form used to save the supplier into the first supplier part-number field, so suppliers were asked for a part called "Digikey". The fix moves the name to the item\'s Supplier field.' },
+  { kind: 'number_in_supplier_field', title: 'Part numbers in the Supplier field',
+    blurb: 'The Supplier field should say who you buy from. The fix sets it to that supplier\'s name, and puts the number in its supplier slot if the item doesn\'t have it there.' },
+  { kind: 'supplier_number_in_mfr', title: 'Supplier numbers in manufacturer part-number fields',
+    blurb: 'A DigiKey (…-ND), LCSC (C123456) or Mouser (603-… followed by the item\'s manufacturer number) part number in a Mfr PN field. The fix moves it to its supplier slot (1 Mouser, 2 DigiKey, 3 LCSC, else a free 4-5), or clears the copy when the item has it there already.' },
   { kind: 'lcsc_extra_text', title: 'LCSC numbers with extra text',
     blurb: 'LCSC can only be asked by its part number on its own.' },
   { kind: 'wrong_slot', title: 'Supplier numbers in the wrong slot',
@@ -72,6 +76,10 @@ function fixLabel(issue: PartNumberIssue): string {
   if (issue.fix.action === 'move_to_supplier') return 'Move to Supplier';
   if (issue.fix.action === 'set') return `Use ${issue.fix.value}`;
   if (issue.fix.action === 'arrange_slots') return 'Move to the right slots';
+  if (issue.fix.action === 'move_to_slot') return `Move to ${FIELD_LABEL[issue.fix.value ?? ''] ?? issue.fix.value}`;
+  if (issue.fix.action === 'supplier_from_number') {
+    try { return `Set Supplier to ${JSON.parse(issue.fix.value ?? '{}').supplier}`; } catch { return 'Fix'; }
+  }
   return 'Clear';
 }
 
@@ -138,7 +146,7 @@ export default function PartNumberReview({ onShowNotification, onOpenItem, onCha
   }, [data]);
 
   const apply = async (issues: PartNumberIssue[], key: string) => {
-    const fixable = issues.filter((i) => i.fix && i.value && (i.field || i.fix.action === 'arrange_slots'));
+    const fixable = issues.filter((i) => i.fix && i.value && (i.field || i.fix.action === 'arrange_slots' || i.fix.action === 'supplier_from_number'));
     if (!fixable.length) return;
     if (fixable.length > 1) {
       const ok = await confirmDialog({
@@ -262,7 +270,7 @@ export default function PartNumberReview({ onShowNotification, onOpenItem, onCha
                               : <span className="font-mono font-bold">{i.serialNumber}</span>}
                             {i.name && <span className="block text-[11px] text-on-surface-variant">{i.name}</span>}
                           </td>
-                          <td className="px-lg py-sm text-on-surface-variant whitespace-nowrap">{i.field ? FIELD_LABEL[i.field] ?? i.field : i.slots ? 'SupPN1-5' : '—'}</td>
+                          <td className="px-lg py-sm text-on-surface-variant whitespace-nowrap">{i.field ? FIELD_LABEL[i.field] ?? i.field : i.slots ? 'SupPN1-5' : i.kind === 'number_in_supplier_field' ? 'Supplier' : '—'}</td>
                           <td className="px-lg py-sm font-mono">
                             {i.slots ? <SlotChange from={i.slots.from} to={i.slots.to} /> : i.value ?? '—'}
                           </td>

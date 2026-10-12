@@ -24,8 +24,8 @@ import {
   type PartNumberField,
 } from './partNumbers';
 
-export type IssueKind = 'supplier_name' | 'placeholder' | 'lcsc_extra_text' | 'wrong_slot' | 'not_a_part_number' | 'held_back' | 'swapped' | 'no_part_number';
-export type FixAction = 'move_to_supplier' | 'clear' | 'set' | 'arrange_slots';
+export type IssueKind = 'supplier_name' | 'number_in_supplier_field' | 'supplier_number_in_mfr' | 'placeholder' | 'lcsc_extra_text' | 'wrong_slot' | 'not_a_part_number' | 'held_back' | 'swapped' | 'no_part_number';
+export type FixAction = 'move_to_supplier' | 'clear' | 'set' | 'arrange_slots' | 'move_to_slot' | 'supplier_from_number';
 
 export interface PartNumberIssue {
   kind: IssueKind;
@@ -43,6 +43,26 @@ export interface PartNumberIssue {
 }
 
 const SUP_FIELDS = ['sup_pn_1', 'sup_pn_2', 'sup_pn_3', 'sup_pn_4', 'sup_pn_5'] as const;
+const MAN_FIELDS = ['man_pn_1', 'man_pn_2', 'man_pn_3', 'man_pn_4', 'man_pn_5'] as const;
+const OWN_SLOT: Record<string, number> = { mouser: 0, digikey: 1, lcsc: 2 };
+const SUPPLIER_LABEL: Record<string, string> = { mouser: 'Mouser', digikey: 'DigiKey', lcsc: 'LCSC' };
+
+/**
+ * Whose supplier number a manufacturer field holds, if it is one for sure:
+ * LCSC (C123456) and DigiKey (…-ND) numbers always; a Mouser-looking one
+ * (581-…) only when the rest of it is the item's own manufacturer part
+ * number (603-CC0603KR… next to CC0603KR…), since real manufacturer part
+ * numbers can start with digits and a hyphen too.
+ */
+function supplierNumberIn(value: string, otherNumbers: string[]): string | null {
+  const whose = classifyPartNumberBySupplier(value);
+  if (whose === 'lcsc' || whose === 'digikey') return whose;
+  if (whose === 'mouser') {
+    const rest = value.slice(value.indexOf('-') + 1).toUpperCase();
+    return otherNumbers.some((o) => o.toUpperCase() === rest) ? 'mouser' : null;
+  }
+  return null;
+}
 const slotName = (i: number) => `SupPN${i + 1} (${SUPPLIER_SLOTS[i].label})`;
 
 /** "C365814 (LCSC): SupPN2 (DigiKey) → SupPN3 (LCSC)", one per number that moves. */
@@ -86,6 +106,10 @@ export function reviewItems(rows: ReviewRow[]): PartNumberIssue[] {
     const supplierField = String(r.supplier ?? '').trim();
     // The supplier the item will have once its earlier fixes are applied.
     let supplier = supplierField && !NONE_MARKERS.includes(supplierField.toUpperCase()) ? supplierField : '';
+    // A part number in the Supplier field (the item form used to mix them up):
+    // the item gets that supplier's name instead.
+    const supplierFieldWhose = classifyPartNumberBySupplier(supplierField);
+    if (supplierFieldWhose) supplier = SUPPLIER_LABEL[supplierFieldWhose];
 
     for (const field of PART_NUMBER_FIELDS) {
       const value = String(r[field] ?? '').trim();
@@ -117,13 +141,58 @@ export function reviewItems(rows: ReviewRow[]): PartNumberIssue[] {
       }
     }
 
+    // Supplier numbers in the Supplier field or in manufacturer fields: to
+    // their supplier's slot (a free 4-5 when it is taken), or just cleared
+    // when the item has them in a supplier slot already.
+    const supNow = SUP_FIELDS.map((f) => String(r[f] ?? '').trim());
+    const manNow = MAN_FIELDS.map((f) => String(r[f] ?? '').trim());
+    const taken = new Set(supNow.map((v, i) => (v ? i : -1)).filter((i) => i >= 0));
+    const adding: string[] = [];
+    const inSupplierSlots = (v: string) => [...supNow, ...adding].some((x) => x && x.toUpperCase() === v.toUpperCase());
+    const claim = (whose: string): number | null => {
+      for (const i of [OWN_SLOT[whose], 3, 4]) if (!taken.has(i)) { taken.add(i); return i; }
+      return null;
+    };
+    if (supplierFieldWhose) {
+      const name = SUPPLIER_LABEL[supplierFieldWhose];
+      const slot = inSupplierSlots(supplierField) ? null : claim(supplierFieldWhose);
+      if (slot !== null) adding.push(supplierField);
+      issues.push({ ...base, kind: 'number_in_supplier_field', field: null, value: supplierField,
+        fix: { action: 'supplier_from_number', value: JSON.stringify({ supplier: name, slot: slot === null ? null : SUP_FIELDS[slot] }) },
+        note: slot === null
+          ? `A ${name} part number in the Supplier field; the item has it in a supplier slot already. The fix sets Supplier to ${name}.`
+          : `A ${name} part number in the Supplier field. The fix sets Supplier to ${name} and puts the number in SupPN${slot + 1}.` });
+    }
+    MAN_FIELDS.forEach((field, n) => {
+      const value = manNow[n];
+      if (!value) return;
+      const whose = supplierNumberIn(value, manNow.filter((v, j) => j !== n && v));
+      if (!whose) return;
+      const name = SUPPLIER_LABEL[whose];
+      if (inSupplierSlots(value)) {
+        issues.push({ ...base, kind: 'supplier_number_in_mfr', field, value, fix: { action: 'clear' },
+          note: `A ${name} part number, not the manufacturer's. The item has it in a supplier slot already, so the fix clears this copy.` });
+        return;
+      }
+      const slot = claim(whose);
+      if (slot === null) {
+        issues.push({ ...base, kind: 'supplier_number_in_mfr', field, value, fix: null,
+          note: `A ${name} part number, not the manufacturer's, and every supplier slot is full. Open the item to sort it out.` });
+        return;
+      }
+      adding.push(value);
+      issues.push({ ...base, kind: 'supplier_number_in_mfr', field, value, fix: { action: 'move_to_slot', value: SUP_FIELDS[slot] },
+        note: `A ${name} part number, not the manufacturer's. The fix moves it to SupPN${slot + 1}${slot === OWN_SLOT[whose] ? ` (${name})` : ' (that supplier\'s slot is taken)'}.` });
+    });
+
     // Supplier part numbers in another supplier's slot (1 Mouser, 2 DigiKey,
     // 3 LCSC): one fix per item moves them all. Offered once the item's
     // other supplier-field fixes are done, so two fixes never touch one field.
     const from = SUP_FIELDS.map((f) => String(r[f] ?? '').trim());
     const to = arrangeSupplierSlots(from);
     if (to === null || to.some((v, i) => v !== from[i])) {
-      const pending = issues.some((i) => i.serialNumber === r.serial_number && i.fix && i.field?.startsWith('sup_pn_'));
+      const pending = issues.some((i) => i.serialNumber === r.serial_number && i.fix
+        && (i.field?.startsWith('sup_pn_') || i.fix.action === 'move_to_slot' || i.fix.action === 'supplier_from_number'));
       if (!to) {
         issues.push({ ...base, kind: 'wrong_slot', field: null, value: from.filter(Boolean).join(', '), fix: null, slots: { from, to: null },
           note: 'Supplier part numbers are in the wrong slots (1 Mouser, 2 DigiKey, 3 LCSC, 4-5 other), and there is no free slot to move them to. Open the item to sort them out.' });
@@ -173,13 +242,15 @@ function parseFixes(body: any): RequestedFix[] | string {
   const out: RequestedFix[] = [];
   for (const f of list) {
     if (!f || typeof f.serialNumber !== 'string' || !f.serialNumber.trim()) return 'Each fix needs a serialNumber.';
-    if (!['move_to_supplier', 'clear', 'set', 'arrange_slots'].includes(f.action)) return `Unknown action: ${f.action}.`;
-    if (f.action !== 'arrange_slots' && !(PART_NUMBER_FIELDS as readonly string[]).includes(f.field)) return `Unknown field: ${f.field}.`;
+    if (!['move_to_supplier', 'clear', 'set', 'arrange_slots', 'move_to_slot', 'supplier_from_number'].includes(f.action)) return `Unknown action: ${f.action}.`;
+    const fieldless = f.action === 'arrange_slots' || f.action === 'supplier_from_number';
+    if (!fieldless && !(PART_NUMBER_FIELDS as readonly string[]).includes(f.field)) return `Unknown field: ${f.field}.`;
+    if (f.action === 'move_to_slot' && !(SUP_FIELDS as readonly string[]).includes(f.value)) return `Unknown slot: ${f.value}.`;
     if (typeof f.expected !== 'string' || !f.expected.trim()) return 'Each fix needs the value it expects to change (expected).';
-    if ((f.action === 'set' || f.action === 'arrange_slots') && typeof f.value !== 'string') return `A ${f.action} fix needs a value.`;
+    if (['set', 'arrange_slots', 'move_to_slot', 'supplier_from_number'].includes(f.action) && typeof f.value !== 'string') return `A ${f.action} fix needs a value.`;
     out.push({
-      serialNumber: f.serialNumber.trim(), field: f.action === 'arrange_slots' ? null : f.field, action: f.action, expected: f.expected.trim(),
-      value: f.action === 'set' ? f.value.trim() : f.action === 'arrange_slots' ? f.value : undefined,
+      serialNumber: f.serialNumber.trim(), field: fieldless ? null : f.field, action: f.action, expected: f.expected.trim(),
+      value: f.action === 'set' ? f.value.trim() : ['arrange_slots', 'move_to_slot', 'supplier_from_number'].includes(f.action) ? f.value : undefined,
     });
   }
   return out;
@@ -231,8 +302,13 @@ export function registerPartNumberReviewRoutes(app: Express, deps: ReviewDeps = 
         [serials]
       );
       const offered = new Map<string, PartNumberIssue>();
-      const keyOf = (serial: string, field: string | null, action: FixAction) => `${serial}|${action === 'arrange_slots' ? 'slots' : field}`;
-      for (const issue of reviewItems(rows)) if (issue.fix && (issue.field || issue.fix.action === 'arrange_slots')) offered.set(keyOf(issue.serialNumber, issue.field, issue.fix.action), issue);
+      const keyOf = (serial: string, field: string | null, action: FixAction) =>
+        `${serial}|${action === 'arrange_slots' ? 'slots' : action === 'supplier_from_number' ? 'supplier' : field}`;
+      for (const issue of reviewItems(rows)) {
+        if (issue.fix && (issue.field || issue.fix.action === 'arrange_slots' || issue.fix.action === 'supplier_from_number')) {
+          offered.set(keyOf(issue.serialNumber, issue.field, issue.fix.action), issue);
+        }
+      }
 
       const applied: Array<{ serialNumber: string; field: PartNumberField | null; action: FixAction; from: string; to: string | null; supplier?: string }> = [];
       const skipped: Array<{ serialNumber: string; field: string; reason: string }> = [];
@@ -243,12 +319,33 @@ export function registerPartNumberReviewRoutes(app: Express, deps: ReviewDeps = 
         const key = keyOf(f.serialNumber, f.field, f.action);
         const issue = offered.get(key);
         const matches = issue && issue.value === f.expected && issue.fix!.action === f.action
-          && (!['set', 'arrange_slots'].includes(f.action) || issue.fix!.value === f.value);
+          && (!['set', 'arrange_slots', 'move_to_slot', 'supplier_from_number'].includes(f.action) || issue.fix!.value === f.value);
         if (!matches) {
           skipped.push({ serialNumber: f.serialNumber, field: f.field ?? 'sup_pn', reason: 'Changed since the list was loaded, or no longer needs this fix.' });
           continue;
         }
         offered.delete(key); // each fix once
+        const logFix = (details: Record<string, unknown>) => client!.query(
+          `INSERT INTO user_activity_logs (user_email, action, entity_type, entity_id, details, status)
+           VALUES ($1, 'FIX_PART_NUMBER', 'Item', $2, $3, 'SUCCESS')`,
+          [who, f.serialNumber, JSON.stringify(details)]
+        );
+        if (f.action === 'move_to_slot') {
+          // value and field are from the fixed lists checked above.
+          await client.query(`UPDATE inventory SET "${f.value}" = $2, "${f.field}" = NULL WHERE serial_number = $1`, [f.serialNumber, f.expected]);
+          await logFix({ field: f.field, action: f.action, from: f.expected, to: f.value });
+          applied.push({ serialNumber: f.serialNumber, field: f.field, action: f.action, from: f.expected, to: f.value! });
+          continue;
+        }
+        if (f.action === 'supplier_from_number') {
+          const { supplier: name, slot } = JSON.parse(f.value!) as { supplier: string; slot: string | null };
+          if (slot && !(SUP_FIELDS as readonly string[]).includes(slot)) throw new Error('bad slot');
+          if (slot) await client.query(`UPDATE inventory SET supplier = $2, "${slot}" = $3 WHERE serial_number = $1`, [f.serialNumber, name, f.expected]);
+          else await client.query(`UPDATE inventory SET supplier = $2 WHERE serial_number = $1`, [f.serialNumber, name]);
+          await logFix({ field: 'supplier', action: f.action, from: f.expected, to: name, ...(slot ? { slot } : {}) });
+          applied.push({ serialNumber: f.serialNumber, field: null, action: f.action, from: f.expected, to: name, supplier: name });
+          continue;
+        }
         if (f.action === 'arrange_slots') {
           // All five slots in one statement: nothing can be lost half way.
           const to: string[] = JSON.parse(f.value!);

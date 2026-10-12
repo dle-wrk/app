@@ -131,6 +131,10 @@ function fakeClient() {
     }
     m = sql.match(/^UPDATE inventory SET "(\w+)" = NULL WHERE serial_number = \$1$/);
     if (m) { if (failOnUpdate) throw new Error('connection reset'); inventory.get(p[0])![m[1]] = null; return { rows: [], rowCount: 1 }; }
+    let mv = sql.match(/^UPDATE inventory SET "(sup_pn_\d)" = \$2, "(man_pn_\d)" = NULL WHERE serial_number = \$1$/);
+    if (mv) { const r = inventory.get(p[0])!; r[mv[1]] = p[1]; r[mv[2]] = null; return { rows: [], rowCount: 1 }; }
+    mv = sql.match(/^UPDATE inventory SET supplier = \$2(?:, "(sup_pn_\d)" = \$3)? WHERE serial_number = \$1$/);
+    if (mv) { const r = inventory.get(p[0])!; r.supplier = p[1]; if (mv[1]) r[mv[1]] = p[2]; return { rows: [], rowCount: 1 }; }
     if (sql === 'UPDATE inventory SET "sup_pn_1" = $2, "sup_pn_2" = $3, "sup_pn_3" = $4, "sup_pn_4" = $5, "sup_pn_5" = $6 WHERE serial_number = $1') {
       if (failOnUpdate) throw new Error('connection reset');
       const r = inventory.get(p[0])!;
@@ -329,5 +333,55 @@ describe('supplier numbers in the wrong slot', () => {
     expect(statements.filter((q) => q.startsWith('UPDATE inventory'))).toHaveLength(1);
     // Nothing left to move.
     expect((await call('GET', '/api/inventory/part-number-review')).body.issues.some((i: any) => i.kind === 'wrong_slot')).toBe(false);
+  });
+});
+
+describe('supplier numbers in manufacturer fields and in the Supplier field', () => {
+  // CAP-008 as it was on 2026-10-12: DigiKey and LCSC numbers copied into Mfr PN 2 and 3.
+  const CAP_008 = { man_pn_1: 'CC0603KRX7R9BB681', man_pn_2: '311-1188-2-ND', man_pn_3: 'C107096', man_pn_4: 'N/A',
+    sup_pn_1: '603-CC603KRX7R9BB681', sup_pn_2: '311-1188-2-ND', sup_pn_3: 'C107096', sup_pn_4: 'N/A', supplier: 'Mouser' };
+
+  it('clears copies of numbers the item has in its supplier slots', () => {
+    const issues = reviewItems([item('CAP-008', CAP_008)]).filter((i) => i.kind === 'supplier_number_in_mfr');
+    expect(issues.map((i) => [i.field, i.value, i.fix])).toEqual([
+      ['man_pn_2', '311-1188-2-ND', { action: 'clear' }],
+      ['man_pn_3', 'C107096', { action: 'clear' }],
+    ]);
+  });
+
+  it('moves a supplier number to its slot, or a free 4-5, and recognises Mouser numbers only next to their own part', () => {
+    const issues = reviewItems([item('CAP-030', {
+      man_pn_1: 'CL10B104KB8NNNC', man_pn_2: 'C1591', man_pn_3: '187-CL10B104KB8NNNC', man_pn_4: '1276-1000-1-ND', man_pn_5: '0603-123',
+      sup_pn_2: '1276-9999-1-ND',
+    })]).filter((i) => i.kind === 'supplier_number_in_mfr');
+    expect(issues.map((i) => [i.field, i.fix])).toEqual([
+      ['man_pn_2', { action: 'move_to_slot', value: 'sup_pn_3' }],
+      ['man_pn_3', { action: 'move_to_slot', value: 'sup_pn_1' }],
+      ['man_pn_4', { action: 'move_to_slot', value: 'sup_pn_4' }], // DigiKey's slot is taken
+    ]); // 0603-123 isn't another number with a prefix: left alone
+  });
+
+  it('turns a part number in the Supplier field into the supplier\'s name', () => {
+    const [issue] = reviewItems([item('CAP-024', { man_pn_1: 'FM31X104K251EEG', supplier: '5440-FM31X104K251EEGTR-ND' })])
+      .filter((i) => i.kind === 'number_in_supplier_field');
+    expect(issue.fix).toEqual({ action: 'supplier_from_number', value: JSON.stringify({ supplier: 'DigiKey', slot: 'sup_pn_2' }) });
+  });
+
+  it('applies the moves, and leaves the slot fix for the next round', async () => {
+    inventory.set('CAP-024', item('CAP-024', { man_pn_1: 'FM31X104K251EEG', man_pn_2: 'C365814', supplier: '5440-FM31X104K251EEGTR-ND', sup_pn_1: '' }));
+    const listed = (await call('GET', '/api/inventory/part-number-review')).body.issues.filter((i: any) => i.serialNumber === 'CAP-024');
+    expect(listed.map((i: any) => [i.kind, i.fix?.action ?? null])).toEqual([
+      ['number_in_supplier_field', 'supplier_from_number'],
+      ['supplier_number_in_mfr', 'move_to_slot'],
+    ]);
+    const res = await call('POST', '/api/inventory/part-number-review/fix', { fixes: listed.map((i: any) => ({
+      serialNumber: i.serialNumber, ...(i.field ? { field: i.field } : {}), action: i.fix.action, expected: i.value, value: i.fix.value })) });
+    expect(res.body.skipped).toEqual([]);
+    expect(inventory.get('CAP-024')).toMatchObject({ supplier: 'DigiKey', sup_pn_2: '5440-FM31X104K251EEGTR-ND', sup_pn_3: 'C365814', man_pn_2: null, man_pn_1: 'FM31X104K251EEG' });
+    // A changed request is refused.
+    inventory.set('CAP-031', item('CAP-031', { man_pn_1: 'X1', man_pn_2: 'C42' }));
+    const bad = await call('POST', '/api/inventory/part-number-review/fix', { fixes: [{ serialNumber: 'CAP-031', field: 'man_pn_2', action: 'move_to_slot', expected: 'C42', value: 'sup_pn_1' }] });
+    expect(bad.body.applied).toEqual([]);
+    expect((await call('POST', '/api/inventory/part-number-review/fix', { fixes: [{ serialNumber: 'CAP-031', field: 'man_pn_2', action: 'move_to_slot', expected: 'C42', value: 'name' }] })).status).toBe(400);
   });
 });
