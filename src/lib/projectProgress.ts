@@ -6,6 +6,7 @@
 //   GET  /api/project-progress/:id/history   everything recorded for one project, newest first
 //   POST /api/project-progress/:id/stage     move a project to a stage: {stageId, note?}
 //   POST /api/project-progress/:id/hold      put a project on hold, or resume it: {onHold, reason?}
+//   POST /api/project-progress/:id/active    mark a project inactive, or active again: {active, reason?}
 //   POST /api/project-progress/:id/update    add a progress update: {note}
 //   PUT  /api/project-progress/stages        change the stage list (admins): {stages: [{id?, name}]}, in order
 //
@@ -32,7 +33,7 @@ export class ProgressError extends Error {
   }
 }
 
-export type LogKind = 'stage' | 'hold' | 'resume' | 'update';
+export type LogKind = 'stage' | 'hold' | 'resume' | 'update' | 'inactive' | 'active';
 
 export interface LogEntry {
   id: number;
@@ -268,6 +269,31 @@ export async function setHold(projectId: number, onHold: boolean, reason: string
   return { projectId, onHold, entry: done.entry };
 }
 
+/**
+ * Marks a project inactive (it leaves the board's "in progress"), or active
+ * again. This is the project's status, the same one Project Manager shows;
+ * a Completed project made active becomes Active.
+ */
+export async function setActive(projectId: number, active: boolean, reason: string | null, who: string) {
+  const done = await inTransaction(async (client) => {
+    const { rows } = await client.query(`SELECT project_name, status FROM projects WHERE TRIM(id) = $1 FOR UPDATE`, [String(projectId)]);
+    if (!rows.length) throw new ProgressError(404, 'That project no longer exists.');
+    const name = rows[0].project_name || `Project ${projectId}`;
+    const inactive = String(rows[0].status ?? '').trim().toLowerCase() === 'inactive';
+    if (!active && inactive) throw new ProgressError(409, `${name} is already inactive.`);
+    if (active && !inactive && String(rows[0].status ?? '').trim().toLowerCase() !== 'completed') throw new ProgressError(409, `${name} is already active.`);
+    await client.query(`UPDATE projects SET status = $2, updated_at = now() WHERE TRIM(id) = $1`, [String(projectId), active ? 'Active' : 'Inactive']);
+    await client.query(
+      `INSERT INTO project_progress (project_id, updated_at) VALUES ($1, now()) ON CONFLICT (project_id) DO UPDATE SET updated_at = now()`,
+      [projectId]
+    );
+    const entry = await addLog(client, projectId, active ? 'active' : 'inactive', null, null, reason, who);
+    return { name, entry };
+  });
+  await logActivity(who, active ? 'ACTIVATE_PROJECT' : 'DEACTIVATE_PROJECT', 'Project', String(projectId), { project: done.name, ...(reason ? { reason } : {}) });
+  return { projectId, status: active ? 'Active' : 'Inactive', entry: done.entry };
+}
+
 export async function addUpdate(projectId: number, note: string, who: string) {
   const done = await inTransaction(async (client) => {
     const name = await projectName(client, projectId);
@@ -372,6 +398,15 @@ export function registerProjectProgressRoutes(app: Express): void {
     if (!Number.isInteger(stageId) || stageId <= 0) return res.status(400).json({ error: 'Say which stage (stageId) to move the project to.' });
     try {
       res.json(await moveProject(id, stageId, cleanNote(req.body?.note), who(req)));
+    } catch (err) { fail(res, err); }
+  });
+
+  app.post('/api/project-progress/:id/active', gate, async (req: any, res) => {
+    const id = projectIdOf(req);
+    if (!id) return badId(res);
+    if (typeof req.body?.active !== 'boolean') return res.status(400).json({ error: 'active must be true or false.' });
+    try {
+      res.json(await setActive(id, req.body.active, cleanNote(req.body?.reason), who(req)));
     } catch (err) { fail(res, err); }
   });
 

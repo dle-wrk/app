@@ -264,6 +264,33 @@ describe('ProjectProgressView', () => {
     expect(toast).toHaveBeenCalledWith('TCU06 PCB moved to Sourcing.', 'SUCCESS');
   });
 
+  it('marks a project inactive, which moves it out of in progress into the inactive count', async () => {
+    await render();
+    await click(button('NCU05'));
+    await click(button('Mark inactive'));
+    replies['POST /api/project-progress/60/active'] = { status: 200, body: { projectId: 60, status: 'Inactive', entry: {} } };
+    await type(q<HTMLInputElement>('#inactive-reason'), 'Shelved');
+    await submit(q<HTMLInputElement>('#inactive-reason')!.form);
+    expect(posts('/api/project-progress/60/active')).toEqual([{ active: false, reason: 'Shelved' }]);
+    expect(toast).toHaveBeenCalledWith('NCU05 is inactive.', 'SUCCESS');
+
+    boardData = { ...boardData, projects: [TCU, { ...NCU, status: 'Inactive' }, PACK] };
+    await act(async () => { announceDataChanged(['project_progress']); });
+    await settle();
+    await click(button('Close modal'));
+    expect(button('1 in progress')).toBeTruthy();
+    expect(q('[data-testid="project-card-60"]')).toBeNull();
+    await click(button('2 inactive'));
+    expect(q('[data-testid="project-card-60"]')!.textContent).toContain('Inactive');
+    expect(q('[data-testid="project-card-62"]')).not.toBeNull();
+    expect(q('[data-testid="project-card-1"]')).toBeNull();
+
+    await click(button('NCU05'));
+    replies['POST /api/project-progress/60/active'] = { status: 200, body: { projectId: 60, status: 'Active', entry: {} } };
+    await click(button('Make active'));
+    expect(posts('/api/project-progress/60/active')[1]).toEqual({ active: true });
+  });
+
   it('opens Project Manager from the details', async () => {
     await render();
     await click(button('NCU05'));

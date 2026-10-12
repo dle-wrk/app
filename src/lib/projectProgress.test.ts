@@ -88,6 +88,14 @@ vi.mock('./db', () => {
     if (sql === 'SELECT project_name FROM projects WHERE TRIM(id) = $1') {
       return result(s.projects.filter((p) => String(p.id).trim() === params[0]).map((p) => ({ project_name: p.project_name })));
     }
+    if (sql === 'SELECT project_name, status FROM projects WHERE TRIM(id) = $1 FOR UPDATE') {
+      return result(s.projects.filter((p) => String(p.id).trim() === params[0]).map((p) => ({ project_name: p.project_name, status: p.status })));
+    }
+    if (sql === 'UPDATE projects SET status = $2, updated_at = now() WHERE TRIM(id) = $1') {
+      const row = s.projects.find((p) => String(p.id).trim() === params[0]);
+      if (row) Object.assign(row, { status: params[1], updated_at: now() });
+      return result([], row ? 1 : 0);
+    }
     if (sql === 'SELECT id, name, position FROM project_stages ORDER BY position, id') {
       return result([...s.stages].sort((a, b) => a.position - b.position || a.id - b.id).map((r) => ({ ...r })));
     }
@@ -421,6 +429,29 @@ describe('holds and updates', () => {
   it('has no history for a project that does not exist', async () => {
     expect(await call('GET', '/api/project-progress/5/history')).toEqual({ status: 404, body: { error: 'That project no longer exists.' } });
     expect(await call('GET', '/api/project-progress/abc/history')).toEqual({ status: 400, body: { error: 'That is not a project id.' } });
+  });
+});
+
+describe('inactive and active', () => {
+  it('marks a project inactive with the reason, and active again', async () => {
+    const off = await call('POST', '/api/project-progress/60/active', { active: false, reason: 'Shelved' });
+    expect(off.body).toMatchObject({ projectId: 60, status: 'Inactive', entry: { kind: 'inactive', note: 'Shelved', by: 'engineer@example.com' } });
+    expect(db.state.projects.find((p) => p.id === '60')?.status).toBe('Inactive');
+    expect(await project(60)).toMatchObject({ status: 'Inactive', stageId: 5 }); // keeps its stage
+    expect(await call('POST', '/api/project-progress/60/active', { active: false })).toEqual({ status: 409, body: { error: 'NCU05 is already inactive.' } });
+
+    const on = await call('POST', '/api/project-progress/60/active', { active: true });
+    expect(on.body).toMatchObject({ status: 'Active', entry: { kind: 'active' } });
+    expect(await call('POST', '/api/project-progress/60/active', { active: true })).toEqual({ status: 409, body: { error: 'NCU05 is already active.' } });
+    expect(db.state.activity.map((a) => a.action)).toEqual(['DEACTIVATE_PROJECT', 'ACTIVATE_PROJECT']);
+  });
+
+  it('makes a completed project active, and checks the request', async () => {
+    db.state.projects.find((p) => p.id === '1')!.status = 'Completed';
+    expect((await call('POST', '/api/project-progress/1/active', { active: true })).body).toMatchObject({ status: 'Active' });
+    expect(await call('POST', '/api/project-progress/1/active', { active: 'no' })).toEqual({ status: 400, body: { error: 'active must be true or false.' } });
+    expect((await call('POST', '/api/project-progress/5/active', { active: false })).status).toBe(404);
+    expect((await call('POST', '/api/project-progress/1/active', { active: false }, 'viewer')).status).toBe(403);
   });
 });
 

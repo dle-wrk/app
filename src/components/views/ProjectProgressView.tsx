@@ -9,7 +9,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle, ArrowDown, ArrowUp, CalendarClock, Check, ChevronLeft, ChevronRight, ClipboardList,
-  Columns3, History, List, Loader2, PauseCircle, PlayCircle, Plus, RefreshCw, Search, Settings2, X,
+  Archive, Columns3, History, List, Loader2, PauseCircle, PlayCircle, Plus, RefreshCw, Search, Settings2, X,
 } from 'lucide-react';
 import { useDataChanged } from '../../lib/liveUpdates';
 import { notAllowedMessage } from '../../lib/permissions';
@@ -20,7 +20,7 @@ import {
 import { Modal, PrimaryButton, SecondaryButton, inputClass } from '../bookkeeping/shared';
 
 type ToastType = 'SUCCESS' | 'ERROR' | 'INFO';
-type LogKind = 'stage' | 'hold' | 'resume' | 'update';
+type LogKind = 'stage' | 'hold' | 'resume' | 'update' | 'inactive' | 'active';
 
 export interface LogEntry {
   id: number;
@@ -66,7 +66,7 @@ interface Props {
   onOpenProjectManager?: () => void;
 }
 
-type Focus = 'all' | 'moving' | 'hold' | 'overdue' | 'finished';
+type Focus = 'all' | 'moving' | 'hold' | 'overdue' | 'finished' | 'inactive';
 type Layout = 'board' | 'list';
 const LAYOUT_KEY = 'projectProgress.layout';
 // inputClass's look, for fields that need their own size and padding.
@@ -232,6 +232,9 @@ const ProjectCard: React.FC<CardProps> = ({ placed, stages, readiness, canMove, 
           <span>On hold{project.holdReason ? `: ${project.holdReason}` : ''}</span>
         </p>
       )}
+      {isInactive(project.status) && (
+        <p className="text-[11px] text-on-surface-variant font-bold flex items-center gap-1"><Archive className="w-3.5 h-3.5" />Inactive</p>
+      )}
       <p className={`text-[11px] ${line.className}`} title={line.title}>{line.text}</p>
       {due && <p className={`text-[11px] flex items-center gap-1 ${due.className}`}><CalendarClock className="w-3 h-3" />{due.text}</p>}
       <Signals project={project} readiness={readiness} />
@@ -328,6 +331,8 @@ function historyText(e: LogEntry): string {
   if (e.kind === 'stage') return e.fromStage ? `Moved from ${e.fromStage} to ${e.toStage}` : `Set to ${e.toStage}`;
   if (e.kind === 'hold') return 'Put on hold';
   if (e.kind === 'resume') return 'Resumed';
+  if (e.kind === 'inactive') return 'Marked inactive';
+  if (e.kind === 'active') return 'Made active again';
   return 'Update';
 }
 
@@ -336,7 +341,11 @@ const KIND_ICON: Record<LogKind, React.ReactNode> = {
   hold: <PauseCircle className="w-3.5 h-3.5 text-amber-500" />,
   resume: <PlayCircle className="w-3.5 h-3.5 text-green-500" />,
   update: <ClipboardList className="w-3.5 h-3.5 text-on-surface-variant" />,
+  inactive: <Archive className="w-3.5 h-3.5 text-outline" />,
+  active: <PlayCircle className="w-3.5 h-3.5 text-green-500" />,
 };
+
+const isInactive = (status: string | null | undefined) => String(status ?? '').trim().toLowerCase() === 'inactive';
 
 const Fact: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
   <div className="bg-surface-container-high/40 rounded-lg border border-outline-variant/40 px-2.5 py-1.5 min-w-0">
@@ -379,6 +388,10 @@ const ProjectDetails: React.FC<{
   }, [project.id]);
   useEffect(() => { void loadHistory(); }, [loadHistory, refreshKey]);
 
+  const [inactiveOpen, setInactiveOpen] = useState(false);
+  const [inactiveReason, setInactiveReason] = useState('');
+  const inactive = isInactive(project.status);
+
   const act = async (key: string, url: string, body: unknown, message: (data: any) => string, after?: () => void) => {
     setBusy(key);
     try {
@@ -393,6 +406,14 @@ const ProjectDetails: React.FC<{
       setBusy(null);
     }
   };
+
+  const markInactive = (e: React.FormEvent) => {
+    e.preventDefault();
+    void act('inactive', `/api/project-progress/${project.id}/active`, { active: false, reason: inactiveReason },
+      () => `${project.name} is inactive.`, () => { setInactiveOpen(false); setInactiveReason(''); });
+  };
+  const makeActive = () => act('active', `/api/project-progress/${project.id}/active`, { active: true },
+    () => `${project.name} is active again.`);
 
   const move = (e: React.FormEvent) => {
     e.preventDefault();
@@ -473,6 +494,17 @@ const ProjectDetails: React.FC<{
           {project.stageSet && project.stageSince && <span className="text-outline font-normal not-italic"> · since {dateText(project.stageSince)}{project.stageBy ? `, moved by ${whoText(project.stageBy)}` : ''}</span>}
         </p>
 
+        {inactive && (
+          <div className="rounded-lg border border-outline-variant bg-surface-container-high/60 p-sm flex items-center justify-between gap-sm">
+            <div className="text-xs text-on-surface-variant font-bold flex items-center gap-1"><Archive className="w-3.5 h-3.5" /> Inactive: not counted as in progress, and hidden from the board unless you show inactive projects.</div>
+            {canMove && (
+              <SecondaryButton type="button" onClick={() => void makeActive()} disabled={busy !== null} icon={busy === 'active' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <PlayCircle className="w-3.5 h-3.5" />}>
+                Make active
+              </SecondaryButton>
+            )}
+          </div>
+        )}
+
         {project.onHold && (
           <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-sm flex items-start justify-between gap-sm">
             <div className="text-xs text-amber-500">
@@ -500,8 +532,25 @@ const ProjectDetails: React.FC<{
 
         {canMove && (
           <div className="space-y-sm">
-            {!project.onHold && !holdOpen && (
-              <SecondaryButton type="button" onClick={() => setHoldOpen(true)} icon={<PauseCircle className="w-3.5 h-3.5" />}>Put on hold</SecondaryButton>
+            {!holdOpen && !inactiveOpen && (!project.onHold || !inactive) && (
+              <div className="flex flex-wrap gap-sm">
+                {!project.onHold && (
+                  <SecondaryButton type="button" onClick={() => setHoldOpen(true)} icon={<PauseCircle className="w-3.5 h-3.5" />}>Put on hold</SecondaryButton>
+                )}
+                {!inactive && (
+                  <SecondaryButton type="button" onClick={() => setInactiveOpen(true)} icon={<Archive className="w-3.5 h-3.5" />}>Mark inactive</SecondaryButton>
+                )}
+              </div>
+            )}
+            {!inactive && inactiveOpen && (
+              <form onSubmit={markInactive} className="rounded-lg border border-outline-variant bg-surface-container-high/40 p-sm space-y-sm">
+                <label htmlFor="inactive-reason" className="block text-xs font-bold text-on-surface">Why is it inactive? <span className="font-normal text-outline">(optional; it leaves "in progress" and the board)</span></label>
+                <input id="inactive-reason" maxLength={NOTE_MAX} value={inactiveReason} onChange={(e) => setInactiveReason(e.target.value)} className={inputClass} placeholder="e.g. Shelved until the client confirms" />
+                <div className="flex justify-end gap-sm">
+                  <SecondaryButton type="button" onClick={() => { setInactiveOpen(false); setInactiveReason(''); }}>Cancel</SecondaryButton>
+                  <PrimaryButton type="submit" disabled={busy !== null} icon={busy === 'inactive' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Archive className="w-3.5 h-3.5" />}>Mark inactive</PrimaryButton>
+                </div>
+              </form>
             )}
             {!project.onHold && holdOpen && (
               <form onSubmit={hold} className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-sm space-y-sm">
@@ -643,7 +692,7 @@ const StagesEditor: React.FC<{
 // ---------------------------------------------------------------------------
 // The page.
 // ---------------------------------------------------------------------------
-const FOCUS_LABEL: Record<Exclude<Focus, 'all'>, string> = { moving: 'In progress', hold: 'On hold', overdue: 'Overdue', finished: 'Finished' };
+const FOCUS_LABEL: Record<Exclude<Focus, 'all'>, string> = { moving: 'In progress', hold: 'On hold', overdue: 'Overdue', finished: 'Finished', inactive: 'Inactive' };
 
 function readLayout(): Layout {
   try {
@@ -694,16 +743,18 @@ export default function ProjectProgressView({ projectReadiness = {}, triggerToas
   const closedCount = placed.filter((p) => p.closed).length;
   const open = placed.filter((p) => showClosed || !p.closed);
   const summary = {
-    moving: open.filter((p) => !p.finished && !p.project.onHold).length,
+    moving: open.filter((p) => !p.closed && !p.finished && !p.project.onHold).length,
     hold: open.filter((p) => p.project.onHold).length,
     overdue: open.filter((p) => p.due?.overdue).length,
     finished: open.filter((p) => p.finished).length,
+    inactive: placed.filter((p) => isInactive(p.project.status)).length,
   };
   const notSet = open.filter((p) => !p.project.stageSet).length;
   const needle = search.trim().toLowerCase();
-  const visible = open
-    .filter((p) => focus === 'all'
-      || (focus === 'moving' && !p.finished && !p.project.onHold)
+  // "Inactive" shows the inactive projects whether or not the box is ticked.
+  const visible = (focus === 'inactive' ? placed.filter((p) => isInactive(p.project.status)) : open)
+    .filter((p) => focus === 'all' || focus === 'inactive'
+      || (focus === 'moving' && !p.closed && !p.finished && !p.project.onHold)
       || (focus === 'hold' && p.project.onHold)
       || (focus === 'overdue' && p.due?.overdue)
       || (focus === 'finished' && p.finished))
@@ -802,6 +853,7 @@ export default function ProjectProgressView({ projectReadiness = {}, triggerToas
         {chip('hold', summary.hold, 'bg-amber-500/10 text-amber-500 border-amber-500/25')}
         {chip('overdue', summary.overdue, 'bg-error/10 text-error border-error/25')}
         {chip('finished', summary.finished, 'bg-green-500/10 text-green-500 border-green-500/25')}
+        {chip('inactive', summary.inactive, 'bg-surface-container-highest text-on-surface-variant border-outline')}
         {closedCount > 0 && (
           <label className="ml-1 inline-flex items-center gap-1.5 text-[11px] text-on-surface-variant cursor-pointer">
             <input type="checkbox" checked={showClosed} onChange={(e) => setShowClosed(e.target.checked)} />
