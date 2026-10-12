@@ -354,7 +354,8 @@ function pickBreakForQty<T>(breaks: T[], qty: number, getQty: (b: T) => number):
   return chosen ?? breaks[0];
 }
 
-export async function searchDigikey(partNumber: string, qty = 1) {
+/** DigiKey's keyword search answer, as JSON. */
+async function digikeyKeywordSearch(keywords: string, limit = 5): Promise<any> {
   const token = await getDigikeyToken();
   const res = await fetch('https://api.digikey.com/products/v4/search/keyword', {
     method: 'POST',
@@ -367,10 +368,15 @@ export async function searchDigikey(partNumber: string, qty = 1) {
       'X-DIGIKEY-Locale-ShipToCountry': (await getPricingCredential('digikey', 'locale_ship_to_country', 'DIGIKEY_LOCALE_SHIP_TO_COUNTRY')) || 'ZA',
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ Keywords: partNumber, Limit: 5 }),
+    body: JSON.stringify({ Keywords: keywords, Limit: limit }),
+    signal: AbortSignal.timeout(20_000),
   });
   if (!res.ok) throw new Error(`DigiKey search failed: ${res.status}`);
-  const data: any = await res.json();
+  return res.json();
+}
+
+export async function searchDigikey(partNumber: string, qty = 1) {
+  const data: any = await digikeyKeywordSearch(partNumber);
   const product = data.Products?.[0];
   if (!product) return null;
   const variation = product.ProductVariations?.[0];
@@ -542,6 +548,41 @@ export function mouserDetails(part: any): ProductDetails | null {
   };
 }
 
+/** An item's details from a DigiKey product (keyword search answer). */
+export function digikeyDetails(product: any): ProductDetails | null {
+  if (!product) return null;
+  const params: Array<{ name: string; value: string }> = (Array.isArray(product.Parameters) ? product.Parameters : [])
+    .map((x: any) => ({ name: String(x?.ParameterText ?? '').trim(), value: String(x?.ValueText ?? '').trim() }))
+    .filter((x: { name: string; value: string }) => x.name && x.value && x.value !== '-');
+  const param = (names: string[]) => names.map((n) => params.find((x) => x.name.toLowerCase() === n.toLowerCase())?.value).find(Boolean) ?? null;
+  const value = param(VALUE_PARAMS);
+  const tolerance = param(['Tolerance']);
+  const pkg = param(['Package / Case', 'Supplier Device Package']);
+  const variation = Array.isArray(product.ProductVariations) ? product.ProductVariations[0] : null;
+  const desc = product.Description?.DetailedDescription || product.Description?.ProductDescription || '';
+  return {
+    supplier: 'digikey',
+    supplierName: SUPPLIER_NAMES.digikey,
+    supplierPartNumber: variation?.DigiKeyProductNumber ? String(variation.DigiKeyProductNumber).trim() : null,
+    manufacturerPartNumber: product.ManufacturerProductNumber ? String(product.ManufacturerProductNumber).trim() : null,
+    manufacturer: product.Manufacturer?.Name ? String(product.Manufacturer.Name).trim() : null,
+    description: String(desc).trim() || null,
+    value,
+    tolerance,
+    package: pkg ? pkg.replace(/\s*\(.*\)\s*$/, '').trim() || pkg : null,
+    datasheet: product.DatasheetUrl ? String(product.DatasheetUrl).replace(/^\/\//, 'https://') : null,
+    extra: params.filter((x) => x.value !== value && x.value !== tolerance && x.value !== pkg).slice(0, 8),
+  };
+}
+
+/** DigiKey's details for a manufacturer part number, preferring an exact match. */
+export async function digikeyLookup(mpn: string): Promise<ProductDetails | null> {
+  const data: any = await digikeyKeywordSearch(mpn);
+  const products: any[] = Array.isArray(data?.Products) ? data.Products : [];
+  const exact = products.find((x) => String(x?.ManufacturerProductNumber ?? '').toUpperCase() === mpn.toUpperCase());
+  return digikeyDetails(exact ?? products[0]);
+}
+
 /** Mouser's details for a part number (its own or the manufacturer's), or null. */
 export async function mouserLookup(keyword: string): Promise<ProductDetails | null> {
   const apiKey = await getPricingCredential('mouser', 'api_key', 'MOUSER_API_KEY');
@@ -559,8 +600,9 @@ export async function mouserLookup(keyword: string): Promise<ProductDetails | nu
 /**
  * What a supplier link says about the product: LCSC links are looked up by
  * their LCSC number, Mouser links through Mouser's API by the part number in
- * them; DigiKey links give the manufacturer part number in the link only
- * (DigiKey's API needs authorising).
+ * them, DigiKey links through DigiKey's API by the part number in them.
+ * When the supplier can't be asked, what the link itself says (the
+ * manufacturer part number) is offered, with the reason.
  */
 export async function lookupProductLink(url: string): Promise<{ details: ProductDetails | null; note: string | null }> {
   const link = parseProductLink(url);
@@ -584,7 +626,17 @@ export async function lookupProductLink(url: string): Promise<{ details: Product
       }
     }
   }
-  // DigiKey, or Mouser without an answer: what the link itself says.
+  let failed: string | null = null;
+  if (link.supplier === 'digikey' && link.mpn) {
+    try {
+      const details = await digikeyLookup(link.mpn);
+      if (details) return { details, note: null };
+    } catch (err: any) {
+      failed = String(err?.message || err).slice(0, 200);
+      console.warn('[link-lookup] DigiKey:', failed);
+    }
+  }
+  // No answer from the supplier: what the link itself says.
   if (!link.mpn) return { details: null, note: `Couldn't read a part number from the ${SUPPLIER_NAMES[link.supplier]} link.` };
   return {
     details: {
@@ -593,7 +645,7 @@ export async function lookupProductLink(url: string): Promise<{ details: Product
       description: null, value: null, tolerance: null, package: null, datasheet: null, extra: [],
     },
     note: link.supplier === 'digikey'
-      ? 'From the link: DigiKey gives no other details until its connection is authorised again.'
+      ? (failed ? `From the link only: DigiKey couldn't be asked (${failed}).` : 'From the link only: DigiKey found nothing for it.')
       : 'From the link: Mouser gave no details for it.',
   };
 }

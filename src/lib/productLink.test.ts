@@ -8,7 +8,7 @@ vi.mock('./db', () => ({
 }));
 
 import { applyFill, fillOptions, parseProductLink, type ProductDetails } from './productLink';
-import { lcscDetails } from './pricingRoutes';
+import { digikeyDetails, lcscDetails } from './pricingRoutes';
 
 // LCSC's answer for C365814 (trimmed to the fields used), as it came on 2026-10-12.
 const LCSC_C365814 = {
@@ -48,6 +48,23 @@ describe('lcscDetails', () => {
       extra: [{ name: 'Temperature Coefficient', value: 'X7R' }, { name: 'Voltage Rating', value: '250V' }],
     });
     expect(lcscDetails({ result: null })).toBeNull();
+  });
+});
+
+describe('digikeyDetails', () => {
+  it("reads DigiKey's product", () => {
+    expect(digikeyDetails({
+      ManufacturerProductNumber: 'FT24C08A-ELR-T', Manufacturer: { Name: 'Fremont Micro Devices Ltd' },
+      Description: { ProductDescription: 'IC EEPROM 8KBIT I2C SOT23-5', DetailedDescription: 'EEPROM Memory IC 8Kbit I2C 1 MHz SOT-23-5' },
+      DatasheetUrl: '//www.fremontmicro.com/ft24c08a.pdf',
+      Parameters: [{ ParameterText: 'Package / Case', ValueText: 'SC-74A, SOT-753' }, { ParameterText: 'Memory Size', ValueText: '8Kbit' }, { ParameterText: 'Grade', ValueText: '-' }],
+      ProductVariations: [{ DigiKeyProductNumber: '1219-1233-2-ND' }],
+    })).toEqual({
+      supplier: 'digikey', supplierName: 'DigiKey', supplierPartNumber: '1219-1233-2-ND', manufacturerPartNumber: 'FT24C08A-ELR-T',
+      manufacturer: 'Fremont Micro Devices Ltd', description: 'EEPROM Memory IC 8Kbit I2C 1 MHz SOT-23-5', value: null, tolerance: null,
+      package: 'SC-74A, SOT-753', datasheet: 'https://www.fremontmicro.com/ft24c08a.pdf', extra: [{ name: 'Memory Size', value: '8Kbit' }],
+    });
+    expect(digikeyDetails(undefined)).toBeNull();
   });
 });
 
