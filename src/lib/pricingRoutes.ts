@@ -558,7 +558,9 @@ export function digikeyDetails(product: any): ProductDetails | null {
   const value = param(VALUE_PARAMS);
   const tolerance = param(['Tolerance']);
   const pkg = param(['Package / Case', 'Supplier Device Package']);
-  const variation = Array.isArray(product.ProductVariations) ? product.ProductVariations[0] : null;
+  // One part, several packagings: offer cut tape (bought in any quantity) first.
+  const variations: any[] = (Array.isArray(product.ProductVariations) ? product.ProductVariations : []).filter((v: any) => v?.DigiKeyProductNumber);
+  const variation = variations.find((v) => /cut tape/i.test(String(v?.PackageType?.Name ?? ''))) ?? variations[0] ?? null;
   const desc = product.Description?.DetailedDescription || product.Description?.ProductDescription || '';
   return {
     supplier: 'digikey',
@@ -572,6 +574,7 @@ export function digikeyDetails(product: any): ProductDetails | null {
     package: pkg ? pkg.replace(/\s*\(.*\)\s*$/, '').trim() || pkg : null,
     datasheet: product.DatasheetUrl ? String(product.DatasheetUrl).replace(/^\/\//, 'https://') : null,
     extra: params.filter((x) => x.value !== value && x.value !== tolerance && x.value !== pkg).slice(0, 8),
+    otherSupplierPartNumbers: variations.filter((v) => v !== variation).map((v) => String(v.DigiKeyProductNumber).trim()),
   };
 }
 

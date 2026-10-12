@@ -61,6 +61,10 @@ export interface ProductDetails {
   datasheet: string | null;
   /** Other parameters (Voltage Rating, Temperature Coefficient…), for the note. */
   extra: Array<{ name: string; value: string }>;
+  /** The supplier's numbers for other packagings of the same part (DigiKey's
+   *  cut tape -1-ND, reel -2-ND, Digi-Reel -6-ND): an item with any of them
+   *  already has this supplier's number. */
+  otherSupplierPartNumbers?: string[];
 }
 
 export const SUPPLIER_NAMES: Record<LinkSupplier, string> = { lcsc: 'LCSC', mouser: 'Mouser', digikey: 'DigiKey' };
@@ -131,7 +135,8 @@ export function fillOptions(item: FillItem, d: ProductDetails): FillOption[] {
   const man = slots(item.manPns);
   if (d.manufacturerPartNumber) offer('manPn', `Manufacturer PN (Mfr PN ${slot + 1}, ${d.supplierName})`, d.manufacturerPartNumber, man[slot]);
   const sup = slots(item.supPns);
-  if (d.supplierPartNumber && !sup.some((v) => v.trim().toUpperCase() === d.supplierPartNumber!.toUpperCase())) {
+  const theirs = [d.supplierPartNumber, ...(d.otherSupplierPartNumbers ?? [])].filter(Boolean).map((v) => v!.toUpperCase());
+  if (d.supplierPartNumber && !sup.some((v) => theirs.includes(v.trim().toUpperCase()))) {
     offer('supPn', `${d.supplierName} PN (Sup PN ${slot + 1})`, d.supplierPartNumber, sup[slot]);
   }
   return options;

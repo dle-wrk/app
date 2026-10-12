@@ -58,13 +58,20 @@ describe('digikeyDetails', () => {
       Description: { ProductDescription: 'IC EEPROM 8KBIT I2C SOT23-5', DetailedDescription: 'EEPROM Memory IC 8Kbit I2C 1 MHz SOT-23-5' },
       DatasheetUrl: '//www.fremontmicro.com/ft24c08a.pdf',
       Parameters: [{ ParameterText: 'Package / Case', ValueText: 'SC-74A, SOT-753' }, { ParameterText: 'Memory Size', ValueText: '8Kbit' }, { ParameterText: 'Grade', ValueText: '-' }],
-      ProductVariations: [{ DigiKeyProductNumber: '1219-1233-2-ND' }],
+      ProductVariations: [{ DigiKeyProductNumber: '1219-1233-2-ND', PackageType: { Name: 'Tape & Reel (TR)' } }, { DigiKeyProductNumber: '1219-1233-1-ND', PackageType: { Name: 'Cut Tape (CT)' } }],
     })).toEqual({
-      supplier: 'digikey', supplierName: 'DigiKey', supplierPartNumber: '1219-1233-2-ND', manufacturerPartNumber: 'FT24C08A-ELR-T',
+      supplier: 'digikey', supplierName: 'DigiKey', supplierPartNumber: '1219-1233-1-ND', otherSupplierPartNumbers: ['1219-1233-2-ND'], manufacturerPartNumber: 'FT24C08A-ELR-T',
       manufacturer: 'Fremont Micro Devices Ltd', description: 'EEPROM Memory IC 8Kbit I2C 1 MHz SOT-23-5', value: null, tolerance: null,
       package: 'SC-74A, SOT-753', datasheet: 'https://www.fremontmicro.com/ft24c08a.pdf', extra: [{ name: 'Memory Size', value: '8Kbit' }],
     });
     expect(digikeyDetails(undefined)).toBeNull();
+  });
+
+  it("isn't offered when the item has the same part in another packaging", () => {
+    const d = { supplier: 'digikey', supplierName: 'DigiKey', supplierPartNumber: '1276-6600-1-ND', otherSupplierPartNumbers: ['1276-6600-2-ND', '1276-6600-6-ND'],
+      manufacturerPartNumber: null, manufacturer: null, description: null, value: null, tolerance: null, package: null, datasheet: null, extra: [] } as ProductDetails;
+    expect(fillOptions({ supPns: ['', '1276-6600-2-ND'] }, d).filter((o) => o.field === 'supPn')).toEqual([]);
+    expect(fillOptions({ supPns: ['', ''] }, d).filter((o) => o.field === 'supPn').map((o) => o.value)).toEqual(['1276-6600-1-ND']);
   });
 });
 
