@@ -129,3 +129,39 @@ export function rightSlotFor(pn: string, slot: number): number | null {
   const right = SUPPLIER_SLOTS.findIndex((s) => s.supplier === supplier);
   return right === slot ? null : right;
 }
+
+/**
+ * Supplier part-number slots rearranged so each recognised number is in its
+ * supplier's slot (the first of each supplier's; a second one goes to slot
+ * 4-5). Every other value stays where it is if that slot
+ * is still free, else moves to the first free slot of 4-5, then 1-3; none
+ * is dropped. Returns null when they don't fit, or the slots unchanged when
+ * nothing is out of place.
+ */
+export function arrangeSupplierSlots(slots: string[]): string[] | null {
+  const values = Array.from({ length: SUPPLIER_SLOTS.length }, (_, i) => String(slots[i] ?? '').trim());
+  const target: Array<string | null> = values.map(() => null);
+  const placed = new Set<number>();
+  // Each supplier's number: the one already in its slot, else its first.
+  for (const [slot, { supplier }] of SUPPLIER_SLOTS.entries()) {
+    if (!supplier) continue;
+    const own = classifyPartNumberBySupplier(values[slot]) === supplier ? slot
+      : values.findIndex((v, i) => !placed.has(i) && classifyPartNumberBySupplier(v) === supplier && SUPPLIER_SLOTS[i].supplier !== supplier);
+    if (own >= 0) { target[slot] = values[own]; placed.add(own); }
+  }
+  const rest = values.map((v, i) => ({ v, i })).filter(({ v, i }) => v && !placed.has(i));
+  const overflow: string[] = [];
+  for (const { v, i } of rest) {
+    // A recognised number left over (a supplier's second) doesn't stay in
+    // another supplier's slot, where downloads would take it for theirs.
+    const recognised = classifyPartNumberBySupplier(v) !== null && SUPPLIER_SLOTS[i].supplier !== null;
+    if (target[i] === null && !recognised) target[i] = v; else overflow.push(v);
+  }
+  const free = [3, 4, 0, 1, 2].filter((i) => target[i] === null);
+  for (const v of overflow) {
+    const i = free.shift();
+    if (i === undefined) return null;
+    target[i] = v;
+  }
+  return target.map((v) => v ?? '');
+}

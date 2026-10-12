@@ -12,8 +12,8 @@ import { currentUserCan, notAllowedMessage } from '../lib/permissions';
 import { useDataChanged } from '../lib/liveUpdates';
 import { PrimaryButton, SecondaryButton } from './bookkeeping/shared';
 
-type IssueKind = 'supplier_name' | 'placeholder' | 'lcsc_extra_text' | 'not_a_part_number' | 'held_back' | 'swapped' | 'no_part_number';
-type FixAction = 'move_to_supplier' | 'clear' | 'set';
+type IssueKind = 'supplier_name' | 'placeholder' | 'lcsc_extra_text' | 'wrong_slot' | 'not_a_part_number' | 'held_back' | 'swapped' | 'no_part_number';
+type FixAction = 'move_to_supplier' | 'clear' | 'set' | 'arrange_slots';
 type ToastType = 'SUCCESS' | 'ERROR' | 'INFO';
 
 export interface PartNumberIssue {
@@ -24,6 +24,8 @@ export interface PartNumberIssue {
   value: string | null;
   fix: { action: FixAction; value?: string } | null;
   note: string;
+  /** wrong_slot: the supplier part numbers now and after the fix. */
+  slots?: { from: string[]; to: string[] | null };
 }
 
 interface ReviewResponse {
@@ -46,6 +48,8 @@ const SECTIONS: Array<{ kind: IssueKind; title: string; blurb: string; collapsed
     blurb: 'The item form used to save the supplier into the first supplier part-number field, so suppliers were asked for a part called "Digikey". The fix moves the name to the item\'s Supplier field.' },
   { kind: 'lcsc_extra_text', title: 'LCSC numbers with extra text',
     blurb: 'LCSC can only be asked by its part number on its own.' },
+  { kind: 'wrong_slot', title: 'Supplier numbers in the wrong slot',
+    blurb: 'Supplier part number 1 is Mouser\'s, 2 DigiKey\'s, 3 LCSC\'s, 4-5 any other supplier\'s; the Supplier BOM Generator and BOM downloads read them by slot. The fix moves each recognised number (LCSC C123456, DigiKey …-ND, Mouser 581-…) to its supplier\'s slot, all of an item\'s at once; nothing is removed. Fix the sections above first: an item with one of those waits for it.' },
   { kind: 'placeholder', title: 'Placeholders',
     blurb: 'Values that mean "no part number". Clearing them changes nothing else.' },
   { kind: 'held_back', title: 'Prices held back: the part number matched the wrong part',
@@ -67,8 +71,30 @@ function fixLabel(issue: PartNumberIssue): string {
   if (!issue.fix) return '';
   if (issue.fix.action === 'move_to_supplier') return 'Move to Supplier';
   if (issue.fix.action === 'set') return `Use ${issue.fix.value}`;
+  if (issue.fix.action === 'arrange_slots') return 'Move to the right slots';
   return 'Clear';
 }
+
+const SLOT_LABELS = ['Mouser', 'DigiKey', 'LCSC', 'Other', 'Other'];
+
+/** The five supplier slots before and after the fix; changed slots highlighted. */
+const SlotChange: React.FC<{ from: string[]; to: string[] | null }> = ({ from, to }) => (
+  <table className="text-[11px]" data-testid="slot-change">
+    <tbody>
+      {SLOT_LABELS.map((label, n) => {
+        const changed = to !== null && to[n] !== from[n];
+        if (!from[n] && !(to && to[n])) return null;
+        return (
+          <tr key={n}>
+            <td className="pr-2 text-outline font-sans whitespace-nowrap">{n + 1}. {label}</td>
+            <td className={`pr-2 ${changed ? 'line-through text-outline' : ''}`}>{from[n] || '—'}</td>
+            {to && changed && <td className="text-primary font-bold">→ {to[n] || 'empty'}</td>}
+          </tr>
+        );
+      })}
+    </tbody>
+  </table>
+);
 
 const issueKey = (i: PartNumberIssue) => `${i.kind}|${i.serialNumber}|${i.field ?? ''}`;
 
@@ -112,7 +138,7 @@ export default function PartNumberReview({ onShowNotification, onOpenItem, onCha
   }, [data]);
 
   const apply = async (issues: PartNumberIssue[], key: string) => {
-    const fixable = issues.filter((i) => i.fix && i.field && i.value);
+    const fixable = issues.filter((i) => i.fix && i.value && (i.field || i.fix.action === 'arrange_slots'));
     if (!fixable.length) return;
     if (fixable.length > 1) {
       const ok = await confirmDialog({
@@ -128,7 +154,7 @@ export default function PartNumberReview({ onShowNotification, onOpenItem, onCha
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          fixes: fixable.map((i) => ({ serialNumber: i.serialNumber, field: i.field, action: i.fix!.action, expected: i.value, ...(i.fix!.value ? { value: i.fix!.value } : {}) })),
+          fixes: fixable.map((i) => ({ serialNumber: i.serialNumber, ...(i.field ? { field: i.field } : {}), action: i.fix!.action, expected: i.value, ...(i.fix!.value ? { value: i.fix!.value } : {}) })),
         }),
       });
       const body = await res.json().catch(() => ({}));
@@ -236,8 +262,10 @@ export default function PartNumberReview({ onShowNotification, onOpenItem, onCha
                               : <span className="font-mono font-bold">{i.serialNumber}</span>}
                             {i.name && <span className="block text-[11px] text-on-surface-variant">{i.name}</span>}
                           </td>
-                          <td className="px-lg py-sm text-on-surface-variant whitespace-nowrap">{i.field ? FIELD_LABEL[i.field] ?? i.field : '—'}</td>
-                          <td className="px-lg py-sm font-mono">{i.value ?? '—'}</td>
+                          <td className="px-lg py-sm text-on-surface-variant whitespace-nowrap">{i.field ? FIELD_LABEL[i.field] ?? i.field : i.slots ? 'SupPN1-5' : '—'}</td>
+                          <td className="px-lg py-sm font-mono">
+                            {i.slots ? <SlotChange from={i.slots.from} to={i.slots.to} /> : i.value ?? '—'}
+                          </td>
                           <td className="px-lg py-sm text-on-surface-variant max-w-[420px]">{i.note}</td>
                           <td className="px-lg py-sm text-right whitespace-nowrap">
                             {i.fix && canFix && (
