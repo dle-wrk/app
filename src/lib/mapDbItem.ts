@@ -1,5 +1,6 @@
 import { Item } from '../types';
 import { preferredSupplier } from './partNumbers';
+import { isItemStatus } from './itemStatus';
 
 const SLOTS = [1, 2, 3, 4, 5];
 function slots(record: any, prefix: string): string[] {
@@ -43,7 +44,7 @@ export function mapDbRowToItem(record: any): Item {
   // Stock health is a separate dimension with its own filter; keep them separate.
   const rawStatus = String(record['status'] ?? '').trim().toUpperCase();
   const status: Item['status'] =
-    rawStatus === 'ACTIVE' || rawStatus === 'INACTIVE' || rawStatus === 'BOOKED OUT' || rawStatus === 'DISCONTINUED'
+    isItemStatus(rawStatus)
       ? rawStatus
       : 'ACTIVE';
 

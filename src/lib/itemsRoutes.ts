@@ -14,6 +14,7 @@ import type { Express } from 'express';
 import { z } from 'zod';
 import { query, queryOne } from './db';
 import { getAllVersions } from './dataVersion';
+import { ITEM_STATUSES, ITEM_STATUS_SQL } from './itemStatus';
 
 // Per-handler inventory bumps are no longer needed â€” the global
 // attachDataVersionMiddleware in server.ts bumps 'inventory' on any
@@ -42,7 +43,7 @@ const ItemSchema = z.object({
   bulk_price_zar: z.number().optional(),
   last_order_qty: z.number().int().optional(),
   last_order_date: z.string().optional(),
-  status: z.enum(['ACTIVE', 'INACTIVE', 'BOOKED OUT', 'DISCONTINUED']).optional(),
+  status: z.enum(ITEM_STATUSES).optional(),
   man_pn_1: z.string().optional(),
   man_pn_2: z.string().optional(),
   man_pn_3: z.string().optional(),
@@ -492,7 +493,7 @@ export function registerItemsRoutes(app: Express): void {
   // blank.
   app.post('/api/items/set-all-active', async (_req, res) => {
     try {
-      const sqlText = `UPDATE inventory SET status = 'ACTIVE' WHERE status IS NULL OR status = '' OR status NOT IN ('ACTIVE', 'INACTIVE', 'BOOKED OUT', 'DISCONTINUED')`;
+      const sqlText = `UPDATE inventory SET status = 'ACTIVE' WHERE status IS NULL OR status = '' OR status NOT IN ${ITEM_STATUS_SQL}`;
       const { rowCount } = await query(sqlText);
       console.log(`[POST /api/items/set-all-active] Update complete. ${rowCount} items set to ACTIVE.`);
       res.json({ ok: true, updatedCount: rowCount });
@@ -509,7 +510,7 @@ export function registerItemsRoutes(app: Express): void {
       // still work but wouldn't produce that breakdown.
       const fixNull = await query(`UPDATE inventory SET status = 'ACTIVE' WHERE status IS NULL`);
       const fixEmpty = await query(`UPDATE inventory SET status = 'ACTIVE' WHERE status = ''`);
-      const fixInvalid = await query(`UPDATE inventory SET status = 'ACTIVE' WHERE status NOT IN ('ACTIVE', 'INACTIVE', 'BOOKED OUT', 'DISCONTINUED')`);
+      const fixInvalid = await query(`UPDATE inventory SET status = 'ACTIVE' WHERE status NOT IN ${ITEM_STATUS_SQL}`);
 
       const total = (fixNull.rowCount || 0) + (fixEmpty.rowCount || 0) + (fixInvalid.rowCount || 0);
       console.log(`[POST /api/items/fix-status] Fixed ${total} items with invalid status. NULL: ${fixNull.rowCount}, Empty: ${fixEmpty.rowCount}, Invalid: ${fixInvalid.rowCount}`);

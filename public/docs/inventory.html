@@ -42,12 +42,23 @@
                     <li>Use dropdown filters:
                         <ul>
                             <li>Stock Code filter for exact SKU matches</li>
-                            <li>Status filter (Active/Inactive/etc.)</li>
+                            <li>Status filter (Active, Inactive, Booked Out, Discontinued, Do Not Use)</li>
                             <li>Stock Health filter (All Levels, Low, Critical)</li>
+                            <li>Packaging filter</li>
+                            <li>Price: a minimum and/or maximum, in $ or R</li>
                         </ul>
                     </li>
                     <li>Results update in real-time</li>
                 </ol>
+            </div>
+            <div class="step">
+                <h4 id="item-statuses">Item statuses</h4>
+                <ul>
+                    <li><strong>Active</strong>: in use. <strong>Inactive</strong>: kept, but not currently used.</li>
+                    <li><strong>Do Not Use</strong>: still in stock but must not be used, for example a faulty or quarantined batch. P&amp;P Kit Booking treats its stock as none (a kit is short of it, or takes an alternate), and the BOM Manager doesn't suggest it as an alternate.</li>
+                    <li><strong>Booked Out</strong> and <strong>Discontinued</strong>: no longer held for use or sale.</li>
+                    <li>On Stock Tables, the value cards count Active (and other usable) stock only. Inactive and Do Not Use stock is valued on its own card, <em>Inactive &amp; Do Not Use</em>; Booked Out and Discontinued stock is not counted.</li>
+                </ul>
             </div>
 
             <div class="tip">

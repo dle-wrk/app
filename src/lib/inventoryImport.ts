@@ -24,6 +24,8 @@
 //    what is on file;
 //  - quoted CSV fields may hold the delimiter.
 
+import { ITEM_STATUSES } from './itemStatus';
+
 export type ImportValue = string | number;
 export type ImportRow = { serial_number: string } & Record<string, ImportValue>;
 
@@ -43,7 +45,7 @@ export interface ImportPlan {
 const SLOT_GROUPS = ['man_pn', 'sup_pn', 'weblink'] as const;
 const INTEGER_COLUMNS = new Set(['stock', 'low_stock_lvl', 'last_order_qty']);
 const NUMBER_COLUMNS = new Set(['qty_per_pcb', 'current_cost_dollar', 'bulk_price_usd', 'bulk_price_zar']);
-const STATUSES = ['ACTIVE', 'INACTIVE', 'BOOKED OUT', 'DISCONTINUED'];
+const STATUSES: readonly string[] = ITEM_STATUSES;
 
 // Header names, lower-cased with spaces, underscores, dashes and dots
 // removed. Covers the app's own export/template (serial_number;name;...)

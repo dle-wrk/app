@@ -2,6 +2,7 @@ import pg from 'pg';
 import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
+import { ITEM_STATUSES, ITEM_STATUS_SQL } from './itemStatus';
 
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
@@ -81,7 +82,7 @@ async function seedTable(tableName: string, filePath: string, delimiter = ';') {
   if (!headers.length || !rows.length) return 0;
 
   const integerColumns = new Set<string>();
-  const statusValidValues = ['ACTIVE', 'INACTIVE', 'BOOKED OUT', 'DISCONTINUED'];
+  const statusValidValues: readonly string[] = ITEM_STATUSES;
   const statusIdx = headers.indexOf('status');
   let pkColumn = headers.find(h => ['serial_number', 'id', 'kitId', 'trxId'].includes(h)) || null;
   let compositePk = '';
@@ -100,7 +101,7 @@ async function seedTable(tableName: string, filePath: string, delimiter = ';') {
       return `"${h}" INTEGER`;
     }
     if (h === 'status') {
-      return `"${h}" TEXT CHECK ("${h}" IN ('ACTIVE', 'INACTIVE', 'BOOKED OUT', 'DISCONTINUED'))`;
+      return `"${h}" TEXT CHECK ("${h}" IN ${ITEM_STATUS_SQL})`;
     }
     return `"${h}" TEXT`;
   });
@@ -166,7 +167,7 @@ async function ensureInventoryTable() {
     bulk_price_zar NUMERIC(12,4),
     last_order_qty INTEGER,
     last_order_date TEXT,
-    status TEXT CHECK (status IN ('ACTIVE', 'INACTIVE', 'BOOKED OUT', 'DISCONTINUED')) DEFAULT 'ACTIVE',
+    status TEXT CHECK (status IN ${ITEM_STATUS_SQL}) DEFAULT 'ACTIVE',
     man_pn_1 TEXT, man_pn_2 TEXT, man_pn_3 TEXT, man_pn_4 TEXT, man_pn_5 TEXT,
     sup_pn_1 TEXT, sup_pn_2 TEXT, sup_pn_3 TEXT, sup_pn_4 TEXT, sup_pn_5 TEXT,
     weblink_1 TEXT, weblink_2 TEXT, weblink_3 TEXT, weblink_4 TEXT, weblink_5 TEXT,
@@ -629,6 +630,19 @@ async function seedFallbackProjects() {
   console.log(`Seeded ${FALLBACK_PROJECTS.length} fallback projects (no Projects.csv found).`);
 }
 
+// The database's rule for item statuses (inventory_status_check) follows
+// ITEM_STATUSES: when it doesn't allow every status (DO NOT USE was added in
+// 2026-10), it is replaced, in one statement so the table is never without it.
+async function ensureItemStatusRule() {
+  const rule = await queryOne<{ def: string }>(
+    `SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conrelid = 'inventory'::regclass AND conname = 'inventory_status_check'`
+  ).catch(() => null);
+  if (rule && ITEM_STATUSES.every((s) => rule.def.includes(`'${s}'`))) return;
+  await exec(`ALTER TABLE inventory DROP CONSTRAINT IF EXISTS inventory_status_check,
+    ADD CONSTRAINT inventory_status_check CHECK (status IN ${ITEM_STATUS_SQL})`)
+    .catch((e) => console.error('Could not update the item status rule:', e?.message || e));
+}
+
 export async function ensureSchema() {
   const exists = await queryOne<{ exists: boolean }>(`
     SELECT EXISTS (
@@ -637,7 +651,8 @@ export async function ensureSchema() {
     ) as exists
   `);
   if (exists?.exists) {
-    await exec(`ALTER TABLE inventory ADD COLUMN IF NOT EXISTS status TEXT CHECK (status IN ('ACTIVE', 'INACTIVE', 'BOOKED OUT', 'DISCONTINUED'))`).catch(() => {});
+    await exec(`ALTER TABLE inventory ADD COLUMN IF NOT EXISTS status TEXT CHECK (status IN ${ITEM_STATUS_SQL})`).catch(() => {});
+    await ensureItemStatusRule();
     await exec(`UPDATE inventory SET status = 'ACTIVE' WHERE status IS NULL`).catch(() => {});
     await exec(`ALTER TABLE inventory ADD COLUMN IF NOT EXISTS deleted BOOLEAN DEFAULT FALSE`).catch(() => {});
     // Free-text colour marker (LEDs and any SKU where colour matters).

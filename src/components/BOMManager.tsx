@@ -142,6 +142,7 @@ export default function BOMManager({
       clean(i.footprint) === targetFootprint &&
       clean(i.description) === targetDesc &&
       i.status !== 'DISCONTINUED' &&
+      i.status !== 'DO NOT USE' &&
       i.stockLevel > 0
     ).sort((a, b) => {
       // Priority scoring helper

@@ -6,7 +6,7 @@ export interface Item {
   stockLevel: number; // stock
   price: number; // current_cost_dollar or bulk_price_usd
   category: string; // type/category
-  status: 'ACTIVE' | 'INACTIVE' | 'BOOKED OUT' | 'DISCONTINUED';
+  status: 'ACTIVE' | 'INACTIVE' | 'BOOKED OUT' | 'DISCONTINUED' | 'DO NOT USE';
   supplier?: string;
 
   // Rich CSV properties

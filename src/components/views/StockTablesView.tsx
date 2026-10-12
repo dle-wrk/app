@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { ProductionKit, Project, Item, Transaction } from '../../types';
 import { fmtNumber } from '../../lib/formatMoney';
+import { stockValues } from '../../lib/stockValue';
 import { detectLedSwatch, ledSwatchBackground } from '../../lib/ledColor';
 
 interface StockTablesViewProps {
@@ -69,19 +70,11 @@ export const StockTablesView: React.FC<StockTablesViewProps> = ({
 
   // ── Computed analytics from real data ─────────────────────────────────────
   const analytics = useMemo(() => {
-    // Asset valuation at cost — MUST mirror the dashboard's totalValuation
-    // filter so the two cards report the same figure. Only items that are
-    // current assets count: positive stock and not DISCONTINUED/BOOKED OUT.
-    // Negative stock is an over-issue (a data fault, not a negative asset),
-    // and DISCONTINUED/BOOKED OUT items are no longer held for use or sale.
-    const totalInventoryValue = items
-      .filter(
-        (item) =>
-          (item.stockLevel || 0) > 0 &&
-          item.status !== 'DISCONTINUED' &&
-          item.status !== 'BOOKED OUT'
-      )
-      .reduce((sum, item) => sum + (item.price || 0) * (item.stockLevel || 0), 0);
+    // Asset valuation at cost, and at the bulk price (src/lib/stockValue):
+    // INACTIVE and DO NOT USE items are valued on their own (setAside), not
+    // in these totals; DISCONTINUED and BOOKED OUT count nowhere.
+    const values = stockValues(items);
+    const totalInventoryValue = values.counted.costUsd;
     const totalSkus = items.length;
     const lowStockItems = items.filter(
       (item) => (item.lowStockLvl ?? 50) > 0 && (item.stockLevel || 0) <= (item.lowStockLvl ?? 50)
@@ -108,21 +101,18 @@ export const StockTablesView: React.FC<StockTablesViewProps> = ({
       .filter((tx) => tx.qtyChange < 0)
       .reduce((sum, tx) => sum + Math.abs(tx.qtyChange), 0);
 
-    const zarValue = items.reduce(
-      (sum, item) => sum + (item.bulkPriceZar || 0) * (item.stockLevel || 0),
-      0
-    );
+    const zarValue = values.counted.bulkZar;
 
     // Coverage for the bulk-pricing figure: it only sums items that actually
     // carry a bulk_price_zar, so the card states how much of the stock it spans.
-    const stockedCount = items.filter(i => (i.stockLevel || 0) > 0).length;
-    const bulkPricedCount = items.filter(
-      i => (i.stockLevel || 0) > 0 && (i.bulkPriceZar || 0) > 0
-    ).length;
+    const stockedCount = values.counted.stocked;
+    const bulkPricedCount = values.counted.bulkPriced;
+    const setAside = values.setAside;
 
     return {
       totalInventoryValue,
       zarValue,
+      setAside,
       stockedCount,
       bulkPricedCount,
       totalSkus,
@@ -265,6 +255,9 @@ export const StockTablesView: React.FC<StockTablesViewProps> = ({
               ${formatCurrency(analytics.totalInventoryValue)}
             </span>
             <span className="text-[10px] text-on-surface-variant/60">Total Inventory Value (at cost)</span>
+            {analytics.setAside.stocked > 0 && (
+              <span className="text-[9px] text-on-surface-variant/50">Excludes inactive and do-not-use items</span>
+            )}
             {/* Same conversion the dashboard's Asset Valuation card shows, so the
                 two pages report the same rand figure for stock at cost. This is
                 distinct from Bulk Pricing Value, which is a resale measure. */}
@@ -298,6 +291,25 @@ export const StockTablesView: React.FC<StockTablesViewProps> = ({
               </span>
             )}
           </div>
+
+          {/* Inactive and DO NOT USE stock, valued on its own */}
+          {analytics.setAside.stocked > 0 && (
+            <div className="bg-surface-container p-4 flex flex-col gap-1.5" data-testid="set-aside-value">
+              <div className="flex items-center justify-between">
+                <Wallet className="w-4 h-4 text-outline" />
+                <span className="text-[9px] font-mono text-on-surface-variant/50 uppercase">Set aside</span>
+              </div>
+              <span className="text-lg font-black text-on-surface-variant tracking-tight">
+                ${formatCurrency(analytics.setAside.costUsd)}
+              </span>
+              <span className="text-[10px] text-on-surface-variant/60">Inactive & Do Not Use (at cost)</span>
+              <span className="text-[9px] text-on-surface-variant/50">
+                {fmtNumber(analytics.setAside.stocked)} item{analytics.setAside.stocked === 1 ? '' : 's'}
+                {fxRate?.usdToZar ? ` · ≈ R${formatCurrency(analytics.setAside.costUsd * fxRate.usdToZar)}` : ''}
+                {analytics.setAside.bulkZar > 0 ? ` · bulk R${formatCurrency(analytics.setAside.bulkZar)}` : ''}
+              </span>
+            </div>
+          )}
 
           {/* Total SKUs */}
           <div className="bg-surface-container p-4 flex flex-col gap-1.5">
@@ -689,7 +701,7 @@ export const StockTablesView: React.FC<StockTablesViewProps> = ({
                         <span
                           className={`inline-block px-1.5 py-0.5 rounded text-[9px] font-bold border ${item.status === 'ACTIVE'
                             ? 'bg-green-500/10 text-green-400 border-green-500/20'
-                            : item.status === 'DISCONTINUED'
+                            : item.status === 'DISCONTINUED' || item.status === 'DO NOT USE'
                               ? 'bg-red-500/10 text-red-400 border-red-500/20'
                               : item.status === 'BOOKED OUT'
                                 ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20'

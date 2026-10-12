@@ -174,6 +174,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             <option value="ACTIVE">Active</option>
             <option value="INACTIVE">Inactive</option>
             <option value="BOOKED OUT">Booked Out</option>
+            <option value="DISCONTINUED">Discontinued</option>
+            <option value="DO NOT USE">Do Not Use</option>
           </select>
         </div>
 
@@ -269,6 +271,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               <div className="flex justify-between items-start mb-sm">
                 <span className="text-[10px] font-mono text-primary font-bold">{item.partNumber}</span>
                 <span className={`inline-block px-1.5 py-0.5 rounded text-[9px] font-bold border ${item.status === 'ACTIVE' ? 'bg-green-500/10 text-green-400 border-green-500/20' :
+                  item.status === 'DO NOT USE' ? 'bg-error text-white border-error' :
                   item.status === 'INACTIVE' ? 'bg-red-500/10 text-red-500 border-red-500/20' :
                     item.status === 'BOOKED OUT' ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' :
                       'bg-surface-container-highest text-outline border-outline-variant'

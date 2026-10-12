@@ -670,7 +670,7 @@ export default function App() {
     supPn: '',
     manPn: '',
     category: 'Micro-ctrl',
-    status: 'ACTIVE' as 'ACTIVE' | 'INACTIVE' | 'BOOKED OUT' | 'DISCONTINUED',
+    status: 'ACTIVE' as Item['status'],
     size: '',
     sizeMetric: '',
     bulkPriceZar: 0.00,

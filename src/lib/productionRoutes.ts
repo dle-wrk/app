@@ -246,7 +246,10 @@ async function auditKitStock(projectId: number, buildQty: number, opts?: { exclu
   for (const [stockCode, bomInfo] of aggregatedBOM.entries()) {
     const qtyRequired = bomInfo.quantity * buildQty;
     const item = await queryOne(`SELECT * FROM inventory WHERE serial_number = $1`, [stockCode]);
-    const rawStock = item ? (parseInt(item.stock || '0') || 0) : 0;
+    // A part marked DO NOT USE counts as none in stock, so the kit is short
+    // of it (or takes an alternate) rather than booking it out.
+    const usable = (row: any) => (row && String(row.status ?? '').trim().toUpperCase() !== 'DO NOT USE' ? (parseInt(row.stock || '0') || 0) : 0);
+    const rawStock = usable(item);
     let qtyOnHand = availableFor(stockCode, rawStock);
     let resolvedPartNumber = stockCode;
     let usedAlternative = false;
@@ -255,7 +258,7 @@ async function auditKitStock(projectId: number, buildQty: number, opts?: { exclu
       const alternatives = await query(`SELECT alternative_part_number FROM alternative_components WHERE primary_part_number = $1`, [stockCode]);
       for (const alt of alternatives.rows as any[]) {
         const altItem = await queryOne(`SELECT * FROM inventory WHERE serial_number = $1`, [alt.alternative_part_number]);
-        const altRaw = altItem ? (parseInt(altItem.stock || '0') || 0) : 0;
+        const altRaw = usable(altItem);
         const altAvail = availableFor(alt.alternative_part_number, altRaw);
         if (altAvail >= qtyRequired) {
           qtyOnHand = altAvail;

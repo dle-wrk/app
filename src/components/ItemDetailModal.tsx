@@ -427,6 +427,7 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete, reser
                     <span className="text-[10px] text-outline font-label-caps uppercase block mb-1">Status</span>
                     <span className={`inline-flex items-center gap-1 px-2 py-0.5 mt-0.5 rounded text-[9px] font-bold font-mono border ${
                       item.status === 'ACTIVE' ? 'bg-green-500/10 text-green-400 border-green-500/20' : 
+                      item.status === 'DO NOT USE' ? 'bg-error text-white border-error' :
                       item.status === 'INACTIVE' ? 'bg-red-500/10 text-red-500 border-red-500/20' : 
                       item.status === 'BOOKED OUT' ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' :
                       'bg-outline-variant/10 text-outline border-outline-variant/20'
@@ -911,6 +912,7 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete, reser
                         <option value="INACTIVE">INACTIVE</option>
                         <option value="BOOKED OUT">BOOKED OUT</option>
                         <option value="DISCONTINUED">DISCONTINUED</option>
+                        <option value="DO NOT USE">DO NOT USE</option>
                       </select>
                     </div>
                   </div>
