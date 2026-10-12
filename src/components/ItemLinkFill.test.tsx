@@ -76,4 +76,22 @@ describe('filling an item from a supplier link', () => {
     expect(field('value').value).toBe('');
     expect(field('supPns_2').value).toBe('');
   });
+
+  it('brings the checklist back for a link the item already has', async () => {
+    const onSave = vi.fn();
+    const item = { partNumber: 'CAP-024', name: '100nF', description: '', manufacturer: 'Generic', supplier: 'N/A', stockLevel: 1, price: 0, category: 'Capacitors',
+      status: 'ACTIVE', value: '', packageName: '0603', weblinks: ['', '', LINK, '', ''] } as any;
+    await act(async () => { root.render(<ItemDetailModal item={item} onClose={() => {}} onSave={onSave} />); });
+    await act(async () => { (document.getElementById('btn-edit-item') as HTMLButtonElement).click(); });
+    expect(calls).toEqual([]);
+    expect(host.querySelector('[aria-label="Fill from web link 1"]')).toBeNull(); // empty slot: no button
+    const fill = host.querySelector('[aria-label="Fill from web link 3"]') as HTMLButtonElement;
+    await act(async () => { fill.click(); });
+    await settle();
+    expect(calls).toEqual([{ url: '/api/pricing/link-lookup', body: { url: LINK } }]);
+    expect(host.querySelector('[data-testid="link-choices"]')).not.toBeNull();
+    await act(async () => { fill.click(); }); // again: asked again
+    await settle();
+    expect(calls.length).toBe(2);
+  });
 });

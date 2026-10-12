@@ -173,9 +173,11 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete, reser
   const [linkNotice, setLinkNotice] = useState<null | { text: string; tone: 'ok' | 'info' | 'error'; undo?: Partial<Item> }>(null);
   const [linkChoices, setLinkChoices] = useState<null | { details: ProductDetails; options: FillOption[]; note: string | null }>(null);
   const lookedUp = React.useRef(new Set<string>());
-  const lookupLink = async (raw: string | undefined) => {
+  // A link is looked up once when typed or pasted; the Fill button next to
+  // a link already there (force) looks it up again.
+  const lookupLink = async (raw: string | undefined, force = false) => {
     const url = String(raw ?? '').trim();
-    if (!url || lookedUp.current.has(url) || !parseProductLink(url)) return;
+    if (!url || (!force && lookedUp.current.has(url)) || !parseProductLink(url)) return;
     lookedUp.current.add(url);
     setLinkChoices(null);
     setLinkNotice({ text: 'Looking the product up…', tone: 'info' });
@@ -958,6 +960,13 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete, reser
                                 placeholder={slot.supplier ? `${slot.label} product link` : 'Other link'}
                                 className={`w-full bg-surface-container-high border rounded px-2 py-1.5 text-on-surface outline-none focus:border-primary font-mono ${right >= 0 && right !== i ? 'border-amber-500/60' : 'border-outline-variant'}`}
                               />
+                              {parseProductLink(value) && (
+                                <button type="button" onClick={() => void lookupLink(value, true)} aria-label={`Fill from web link ${i + 1}`}
+                                  title="Look this product up and choose what to fill in from it"
+                                  className="shrink-0 px-2 py-1.5 rounded border border-primary/40 text-primary text-[10px] font-bold hover:bg-primary/10">
+                                  Fill
+                                </button>
+                              )}
                             </div>
                             {right >= 0 && right !== i && (
                               <div className="ml-[4.4rem] mt-0.5 text-[10px] text-amber-500 flex items-center gap-1.5">
