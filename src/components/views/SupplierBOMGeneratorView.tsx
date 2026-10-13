@@ -14,6 +14,7 @@ import React, { useMemo, useState } from 'react';
 import { Upload, FileSpreadsheet, Download, CheckSquare, Square, ListFilter, AlertTriangle } from 'lucide-react';
 import { fmtNumber } from '../../lib/formatMoney';
 import { downloadCsv, toDigikeyCsv, toLcscCsv, toMouserCsv } from '../../lib/supplierBom';
+import RestockOrderFiles from '../RestockOrderFiles';
 
 const SUPPLIERS = ['LCSC', 'DigiKey', 'Mouser'] as const;
 type Supplier = typeof SUPPLIERS[number];
@@ -257,6 +258,9 @@ export const SupplierBOMGeneratorView: React.FC<Props> = ({ triggerToast }) => {
         <h3 className="font-headline-sm text-2xl font-black text-on-surface tracking-tighter leading-none mb-1">Supplier BOM Generator</h3>
         <p className="text-on-surface-variant font-body-sm/80">Upload a pick-and-place BOM, resolve each part against the three inventory supplier columns, and export the shape each supplier's upload form expects.</p>
       </div>
+
+      {/* Restock: what the reorder recommendations say to order, no BOM needed */}
+      <RestockOrderFiles onShowNotification={triggerToast} />
 
       {/* Source panel */}
       <div className="bg-surface-container rounded-xl border border-outline-variant p-lg space-y-md">

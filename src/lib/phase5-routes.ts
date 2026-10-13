@@ -15,6 +15,17 @@ async function loadInventory() {
   const { rows } = await query(`SELECT serial_number, name, stock, low_stock_lvl, current_cost_dollar FROM inventory WHERE deleted != true`);
   return rows;
 }
+// For reordering: only items still in use (not Inactive, Do Not Use or
+// Discontinued), with what a supplier order file needs.
+async function loadReorderableInventory() {
+  const { rows } = await query(
+    `SELECT serial_number, name, stock, low_stock_lvl, current_cost_dollar, description, footprint,
+            sup_pn_1, sup_pn_2, sup_pn_3, sup_pn_4, sup_pn_5
+       FROM inventory
+      WHERE deleted != true AND UPPER(COALESCE(TRIM(status), 'ACTIVE')) NOT IN ('INACTIVE', 'DO NOT USE', 'DISCONTINUED')`
+  );
+  return rows;
+}
 async function loadTransactions() {
   const { rows } = await query(`SELECT itempartnumber, itemname, qtychange, datetime, type FROM transactions`);
   return rows;
@@ -560,14 +571,27 @@ router.get('/api/analytics/reorder-recommendations', async (req, res) => {
   try {
     const leadTimeDays = parseInt(String(req.query.leadTimeDays ?? 14), 10) || 14;
     const safetyDays = parseInt(String(req.query.safetyDays ?? 7), 10) || 7;
-    const [items, transactions] = await Promise.all([loadInventory(), loadTransactions()]);
+    const [items, transactions] = await Promise.all([loadReorderableInventory(), loadTransactions()]);
     const recs = computeReorderRecommendations(items, transactions, { leadTimeDays, safetyDays });
+    const byPart = new Map(items.map((i: any) => [String(i.serial_number), i]));
     res.json({
       leadTimeDays,
       safetyDays,
       count: recs.length,
       demandBased: recs.filter(r => r.dailyRate > 0).length,
       recommendations: recs.slice(0, 200),
+      // Every recommendation, as lines for the supplier order files (../supplierBom).
+      orderLines: recs.map((r) => {
+        const i: any = byPart.get(r.partNumber) ?? {};
+        return {
+          stockCode: r.partNumber,
+          description: String(i.description || r.itemName || ''),
+          footprint: String(i.footprint || ''),
+          supPns: [i.sup_pn_1, i.sup_pn_2, i.sup_pn_3, i.sup_pn_4, i.sup_pn_5].map((v) => String(v ?? '')),
+          qty: r.suggestedOrderQty,
+          urgency: r.urgency,
+        };
+      }),
     });
   } catch (err: any) {
     console.error('[ANALYTICS] reorder recommendations failed:', err.message);

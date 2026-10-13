@@ -103,6 +103,10 @@ export default function App() {
     }
   }, []);
 
+  // The password just signed in with, kept in memory only (never stored), so
+  // the forced password change after a reset doesn't ask for it again.
+  const signInPassword = useRef<string | null>(null);
+
   const handleLogin = async (email: string, password: string) => {
     setIsLoginLoading(true);
     try {
@@ -120,6 +124,7 @@ export default function App() {
       }
 
       const user = await response.json();
+      signInPassword.current = user.mustChangePassword ? password : null;
       localStorage.setItem('userLoggedIn', 'true');
       localStorage.setItem('currentUser', JSON.stringify(user));
       if (user.sessionId) localStorage.setItem('sessionId', user.sessionId);
@@ -154,6 +159,7 @@ export default function App() {
       const body = await res.json().catch(() => ({}));
       throw new Error(body?.error || `Failed to change password (${res.status})`);
     }
+    signInPassword.current = null;
     // Persist cleared flag so a page reload doesn't re-open the modal.
     const updated = { ...(currentUser || {}), mustChangePassword: false };
     setCurrentUser(updated);
@@ -162,6 +168,7 @@ export default function App() {
   };
 
   const handleLogout = (opts?: { kicked?: boolean; reason?: 'idle_timeout' | 'signed_in_elsewhere' }) => {
+    signInPassword.current = null;
     const sessionId = localStorage.getItem('sessionId');
     localStorage.removeItem('userLoggedIn');
     localStorage.removeItem('currentUser');
@@ -2387,8 +2394,9 @@ if (currentView === 'alternates') {
             can't slip past it into the app. */}
         {currentUser?.mustChangePassword && (
           <MustChangePasswordModal
+            currentPassword={signInPassword.current ?? undefined}
             onSubmit={handleChangePassword}
-            onSignOut={() => handleLogout()}
+            onSignOut={() => { signInPassword.current = null; handleLogout(); }}
           />
         )}
 

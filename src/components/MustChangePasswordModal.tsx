@@ -17,6 +17,9 @@ interface Props {
 
 export default function MustChangePasswordModal({ currentPassword: prefilled, onSubmit, onSignOut }: Props) {
   const [currentPassword, setCurrentPassword] = useState(prefilled || '');
+  // Straight after signing in, the current password is the one just typed:
+  // no box to fill, so a browser can't put an old saved password in it.
+  const [askCurrent, setAskCurrent] = useState(!prefilled);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showCurrent, setShowCurrent] = useState(false);
@@ -71,6 +74,12 @@ export default function MustChangePasswordModal({ currentPassword: prefilled, on
         </div>
 
         <form onSubmit={submit} className="px-lg py-md space-y-md">
+          {!askCurrent ? (
+            <p className="text-[11px] text-on-surface-variant" data-testid="current-from-sign-in">
+              Your current password is the one you just signed in with.{' '}
+              <button type="button" onClick={() => { setAskCurrent(true); setCurrentPassword(''); }} className="text-primary font-bold hover:underline">Type it instead</button>
+            </p>
+          ) : (
           <div>
             <label className="block text-xs font-bold text-outline uppercase mb-1">Current password</label>
             <div className="relative">
@@ -80,7 +89,7 @@ export default function MustChangePasswordModal({ currentPassword: prefilled, on
                 className="w-full px-3 py-2 pr-10 rounded border border-outline-variant bg-surface-container-low text-on-surface text-sm focus:outline-none focus:border-primary"
                 value={currentPassword}
                 onChange={(e) => setCurrentPassword(e.target.value)}
-                placeholder='"tracklab" if this is your first login'
+                placeholder="The password you signed in with"
                 required
               />
               <button
@@ -93,6 +102,7 @@ export default function MustChangePasswordModal({ currentPassword: prefilled, on
               </button>
             </div>
           </div>
+          )}
 
           <div>
             <label className="block text-xs font-bold text-outline uppercase mb-1">New password</label>

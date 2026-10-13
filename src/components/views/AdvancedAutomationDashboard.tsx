@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Brain, AlertCircle, TrendingUp, Zap, Plus, Loader2, BarChart3, Activity } from 'lucide-react';
+import RestockOrderFiles from '../RestockOrderFiles';
 
 interface Props {
   triggerToast: (msg: string, type?: string) => void;
@@ -518,6 +519,7 @@ export default function AdvancedAutomationDashboard({ triggerToast }: Props) {
               topping up to the configured reorder level — each row states which basis was used.
             </p>
           </div>
+          <RestockOrderFiles onShowNotification={(m, t) => triggerToast(m, t)} />
           {!reorder ? (
             <div className="flex items-center gap-2 text-outline py-8">
               <Loader2 className="w-4 h-4 animate-spin" />

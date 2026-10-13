@@ -15,13 +15,16 @@ export interface OrderFileLine extends Omit<OrderLine, 'qty'> {
 
 const fileSafe = (s: string) => s.replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '') || 'project';
 
-export default function SupplierOrderFiles({ lines, projectName, pcbQty, onShowNotification }: {
+export default function SupplierOrderFiles({ lines, projectName, pcbQty, onShowNotification, restock }: {
   lines: OrderFileLine[];
   projectName: string;
   pcbQty: number;
   onShowNotification: (msg: string, type?: 'SUCCESS' | 'ERROR' | 'INFO') => void;
+  /** Restock: the quantities are the reorder suggestions (in `required`); no shortages/build choice. */
+  restock?: { title: string; intro: string };
 }) {
-  const [basis, setBasis] = useState<'shortage' | 'build'>('shortage');
+  const [basisChoice, setBasis] = useState<'shortage' | 'build'>('shortage');
+  const basis = restock ? 'build' : basisChoice;
   const [showMissing, setShowMissing] = useState(false);
   const orders = useMemo(
     () => supplierOrders(lines.map((l) => ({ ...l, qty: basis === 'shortage' ? l.shortage : l.required }))),
@@ -33,7 +36,9 @@ export default function SupplierOrderFiles({ lines, projectName, pcbQty, onShowN
   const download = (i: number) => {
     const o = orders[i];
     if (!o.rows.length) { onShowNotification(`No line has a ${o.label} part number.`, 'ERROR'); return; }
-    const name = `${fileSafe(projectName)}_${o.supplier}_${basis === 'shortage' ? 'shortages' : 'build'}_${pcbQty}pcs.csv`;
+    const name = restock
+      ? `${fileSafe(projectName)}_${o.supplier}_${new Date().toISOString().slice(0, 10)}.csv`
+      : `${fileSafe(projectName)}_${o.supplier}_${basis === 'shortage' ? 'shortages' : 'build'}_${pcbQty}pcs.csv`;
     downloadCsv(name, orderCsv(o.supplier, o.rows));
     onShowNotification(`${o.label}: ${fmtNumber(o.rows.length)} lines written${o.missing.length ? `; ${fmtNumber(o.missing.length)} have no ${o.label} number` : ''}.`, 'SUCCESS');
   };
@@ -42,19 +47,19 @@ export default function SupplierOrderFiles({ lines, projectName, pcbQty, onShowN
     <div className="bg-surface-container border border-outline-variant rounded-xl p-md space-y-sm" data-testid="order-files">
       <div className="flex flex-wrap items-center justify-between gap-sm">
         <div>
-          <h4 className="text-sm font-bold text-on-surface flex items-center gap-2"><ShoppingCart className="w-4 h-4 text-primary" /> Order files</h4>
-          <p className="text-[11px] text-on-surface-variant">One file per supplier, ready to upload on their website: Mouser's BOM tool, DigiKey's BOM manager, LCSC's BOM tool. Part numbers come from Sup PN 1 Mouser, 2 DigiKey, 3 LCSC.</p>
+          <h4 className="text-sm font-bold text-on-surface flex items-center gap-2"><ShoppingCart className="w-4 h-4 text-primary" /> {restock?.title ?? 'Order files'}</h4>
+          <p className="text-[11px] text-on-surface-variant">{restock?.intro ?? "One file per supplier, ready to upload on their website: Mouser's BOM tool, DigiKey's BOM manager, LCSC's BOM tool. Part numbers come from Sup PN 1 Mouser, 2 DigiKey, 3 LCSC."}</p>
         </div>
-        <div className="flex rounded-lg border border-outline-variant overflow-hidden text-[11px] font-bold" role="group" aria-label="Quantities">
+        {!restock && <div className="flex rounded-lg border border-outline-variant overflow-hidden text-[11px] font-bold" role="group" aria-label="Quantities">
           {([['shortage', 'Shortages only'], ['build', `Whole build (${fmtNumber(pcbQty)} pcs)`]] as const).map(([k, label]) => (
             <button key={k} type="button" onClick={() => setBasis(k)} aria-pressed={basis === k}
               className={`px-sm py-1 ${basis === k ? 'bg-primary text-white' : 'text-on-surface-variant hover:text-on-surface'}`}>{label}</button>
           ))}
-        </div>
+        </div>}
       </div>
 
       {counted === 0 ? (
-        <p className="text-xs text-on-surface-variant">{basis === 'shortage' ? `Nothing is short for ${fmtNumber(pcbQty)} pcs: no order needed.` : 'This BOM has no lines to order.'}</p>
+        <p className="text-xs text-on-surface-variant">{restock ? 'Nothing needs reordering.' : basis === 'shortage' ? `Nothing is short for ${fmtNumber(pcbQty)} pcs: no order needed.` : 'This BOM has no lines to order.'}</p>
       ) : (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-sm">
