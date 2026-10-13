@@ -1,5 +1,6 @@
 # Build stage
-FROM node:20-alpine AS builder
+# Node 24 (LTS to April 2028); CI runs the same version.
+FROM node:24-alpine AS builder
 
 WORKDIR /app
 
@@ -17,14 +18,14 @@ COPY . .
 RUN npm run build
 
 # Production stage
-FROM node:20-alpine
+FROM node:24-alpine
 
 WORKDIR /app
 
 # Install only production dependencies
 COPY package*.json ./
 COPY .npmrc ./
-RUN npm ci --only=production
+RUN npm ci --omit=dev
 
 # Copy built React app from builder (already built in builder stage)
 COPY --from=builder /app/dist ./dist

@@ -15,12 +15,15 @@ concurrency:
 jobs:
   typecheck-and-unit:
     name: Typecheck + Vitest + Build
-    runs-on: ubuntu-latest
+    # Pinned rather than ubuntu-latest, so a runner image change (ubuntu-latest
+    # becomes Ubuntu 26 from 19 Oct 2026) can't break the build unannounced.
+    # Node matches the Dockerfile.
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
       - run: npm ci
       # Explicit lint step so a bad tsc failure shows up under the right
@@ -34,7 +37,7 @@ jobs:
 
   e2e:
     name: Playwright E2E
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # The tests create and change data, so they run on an empty Postgres that
     # lives only for this job, never the real database. The server creates
     # its tables, sample items and projects, and the test admin on start-up.
@@ -54,16 +57,16 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
       - run: npm ci
       # Playwright pins a specific Chromium build per version; caching it
       # cuts ~30s off every subsequent CI run.
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('**/package-lock.json') }}
@@ -92,7 +95,7 @@ jobs:
       # video + trace without re-running the flaky path locally.
       - name: Upload Playwright report
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: playwright-report
           path: playwright-report/
