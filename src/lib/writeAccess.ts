@@ -45,11 +45,11 @@ export const AREAS: Record<string, Area> = {
   'alert-subscriptions': AUTOMATION, 'ml-models': AUTOMATION, analytics: AUTOMATION, 'demand-forecasts': AUTOMATION,
   'predictive-orders': AUTOMATION, 'supplier-intelligence': AUTOMATION,
   // Anyone signed in. Signing in and out, the app's own logging and
-  // notifications, price lookups and the supplier BOM lookup (they change no
-  // records; the parts that do check their own rules), and settings, which
+  // notifications, price lookups, supplier price checks and the supplier BOM
+  // lookup (they change no records; the parts that do check their own rules), and settings, which
   // also hold each person's profile.
   login: 'open', session: 'open', auth: 'open', 'activity-log': 'open', 'event-log': 'open',
-  notifications: 'open', pricing: 'open', 'supplier-bom': 'open', settings: 'open',
+  notifications: 'open', pricing: 'open', 'supplier-bom': 'open', 'supplier-quotes': 'open', settings: 'open',
   // Checked by the routes themselves (admins).
   users: 'open', docs: 'open', start: 'open',
 };

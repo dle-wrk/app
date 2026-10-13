@@ -225,6 +225,13 @@
                 <p><strong>Restock order files</strong> (top of <span class="menu-path">Supplier BOM Generator</span>, and on Advanced Automation → Reorder) do the same for everything that needs reordering, no BOM needed: each item at its suggested reorder quantity (enough for lead time and safety stock where it has usage history, else back up to its low-stock level). Items marked Inactive, Do Not Use or Discontinued are left out, of the recommendations too. Files are named like <code>restock_lcsc_2026-10-13.csv</code>.</p>
             </div>
 
+            <h3 id="cheapest-supplier">Cheapest supplier per line</h3>
+            <div class="step">
+                <p>In any Order files panel (project BOM or restock), <strong>Compare prices</strong> asks Mouser, DigiKey and LCSC for each line's price at the quantity, using the item's own part number at each (Sup PN 1, 2, 3). The price is what that supplier charges for what would actually be bought: its price break for the quantity, raised to its minimum order or the next multiple, and DigiKey in the item's packaging (cut tape isn't priced as a reel). Everything is in rand at the daily rate, before shipping and import costs.</p>
+                <p>Each line is given to the supplier with the lowest total that has enough stock (or the lowest of all when none has). <strong>Cheapest per line</strong> makes the three files from that split; <strong>Everything each supplier lists</strong> goes back to one file per supplier with every line it lists. Click a price in the table to buy that line there instead. Out-of-stock and minimum-order notes show under each price.</p>
+                <p>Mouser allows 30 lookups a minute, so a long list takes a few minutes; each supplier's price list for a part is kept for a day, so checking again is quick. Lookups count against each supplier's daily limit.</p>
+            </div>
+
             <h3 id="part-number-review">Part numbers: review and fix</h3>
             <div class="step">
                 <p>The <strong>Part Numbers</strong> tab under <span class="menu-path">Pricing Directory</span> (or <strong>Review part numbers</strong> on the Bulk Pricing tab) lists what in the part-number fields stops items being priced or makes suppliers return the wrong part, grouped by problem, each with what to do.</p>

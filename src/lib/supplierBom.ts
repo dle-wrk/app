@@ -58,13 +58,16 @@ export interface SupplierOrder {
 /**
  * The order for each supplier from a list of lines (quantity already worked
  * out): the lines it has a number for, the same number added together once.
+ * With `assign` (a split, e.g. the cheapest supplier per line), each line goes
+ * only to the supplier it is assigned, and a line not assigned goes nowhere.
  */
-export function supplierOrders(lines: OrderLine[]): SupplierOrder[] {
+export function supplierOrders(lines: OrderLine[], assign?: Record<string, SlotSupplier | null | undefined>): SupplierOrder[] {
   const wanted = lines.filter((l) => l.qty > 0);
   return ORDER_SUPPLIERS.map(({ key, label }) => {
     const byPn = new Map<string, OrderRow>();
     const missing: string[] = [];
     for (const l of wanted) {
+      if (assign && assign[l.stockCode] !== key) { missing.push(l.stockCode); continue; }
       const pn = supplierNumberFor(l.supPns, key);
       if (!pn) { missing.push(l.stockCode); continue; }
       const row = byPn.get(pn.toUpperCase());

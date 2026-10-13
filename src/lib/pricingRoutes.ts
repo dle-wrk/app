@@ -15,6 +15,7 @@
 // Dependencies deliberately kept narrow: db + serverUtils for the crypto
 // primitives, and authRoutes only for the admin gate on key management.
 
+import type { Ladder } from './supplierQuotes';
 import { fetchPublicPage, PageFetchError } from './safeFetch';
 import { isBotWall, readProductPage } from './pageProduct';
 import type { Express } from 'express';
@@ -616,6 +617,85 @@ export async function digikeyFind(mpn: string): Promise<SupplierMatch | null> {
   const d = digikeyDetails(product);
   if (!d?.supplierPartNumber) return null;
   return { mpn: d.manufacturerPartNumber || mpn, supplierPn: d.supplierPartNumber, url: product?.ProductUrl ? String(product.ProductUrl) : null };
+}
+
+/** A price as a number: "R1 234.50", "$0.4700", "12,50". */
+export function parsePriceText(raw: unknown): number {
+  let t = String(raw ?? '').replace(/[^0-9.,]/g, '');
+  if (t.includes(',') && !t.includes('.')) t = t.replace(/,(\d{1,4})$/, '.$1');
+  t = t.replace(/,/g, '');
+  const n = Number(t);
+  return Number.isFinite(n) ? n : NaN;
+}
+
+/** Mouser's price ladder for its own part number, or null when Mouser has no such part. */
+export async function mouserLadder(mouserPn: string): Promise<Ladder | null> {
+  const apiKey = await getPricingCredential('mouser', 'api_key', 'MOUSER_API_KEY');
+  if (!apiKey) throw new Error('Mouser API key not configured');
+  const res = await fetch(`https://api.mouser.com/api/v1/search/partnumber?apiKey=${encodeURIComponent(apiKey)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ SearchByPartRequest: { mouserPartNumber: mouserPn, partSearchOptions: 'Exact' } }),
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!res.ok) throw new Error(`Mouser search failed: ${res.status}`);
+  const parts: any[] = (await res.json() as any).SearchResults?.Parts ?? [];
+  const p = parts.find((x) => String(x?.MouserPartNumber ?? '').toUpperCase() === mouserPn.toUpperCase());
+  if (!p) return null;
+  const breaks = (Array.isArray(p.PriceBreaks) ? p.PriceBreaks : [])
+    .map((b: any) => ({ qty: Number(b.Quantity), price: parsePriceText(b.Price), currency: b.Currency || String(b.Price ?? '').match(/^[^\d.,]+/)?.[0] }))
+    .filter((b: any) => b.qty > 0 && b.price > 0);
+  const stockText = p.AvailabilityInStock ?? p.Availability;
+  const stock = stockText === undefined || stockText === null ? null : Number(String(stockText).replace(/[^0-9]/g, '')) || 0;
+  return {
+    supplierPn: String(p.MouserPartNumber).trim(),
+    currency: normaliseCurrency(breaks[0]?.currency),
+    breaks: breaks.map((b: any) => ({ qty: b.qty, price: b.price })),
+    moq: Number(p.Min) || 1,
+    mult: Number(p.Mult) || 1,
+    stock,
+    url: p.ProductDetailUrl ? String(p.ProductDetailUrl) : null,
+  };
+}
+
+/** DigiKey's price ladder for its own part number, in that packaging (cut tape isn't priced as a reel). */
+export async function digikeyLadder(digikeyPn: string): Promise<Ladder | null> {
+  const data: any = await digikeyKeywordSearch(digikeyPn, 5);
+  const want = digikeyPn.trim().toUpperCase();
+  for (const product of (Array.isArray(data?.Products) ? data.Products : [])) {
+    const v = (Array.isArray(product?.ProductVariations) ? product.ProductVariations : [])
+      .find((x: any) => String(x?.DigiKeyProductNumber ?? '').toUpperCase() === want);
+    if (!v) continue;
+    const breaks = (Array.isArray(v.StandardPricing) ? v.StandardPricing : [])
+      .map((b: any) => ({ qty: Number(b.BreakQuantity), price: Number(b.UnitPrice) }))
+      .filter((b: any) => b.qty > 0 && b.price > 0);
+    const stock = v.QuantityAvailableforPackageType ?? product.QuantityAvailable;
+    return {
+      supplierPn: String(v.DigiKeyProductNumber).trim(),
+      currency: normaliseCurrency((await getPricingCredential('digikey', 'locale_currency', 'DIGIKEY_LOCALE_CURRENCY')) || 'ZAR'),
+      breaks,
+      moq: Number(v.MinimumOrderQuantity) || 1,
+      mult: 1,
+      stock: stock === undefined || stock === null ? null : Number(stock) || 0,
+      url: product.ProductUrl ? String(product.ProductUrl) : null,
+    };
+  }
+  return null;
+}
+
+/** LCSC's price ladder for its part number (C123456), or null. */
+export async function lcscLadder(code: string): Promise<Ladder | null> {
+  const p = await fetchLcscProduct(code);
+  if (!p || !p.priceBreaks.length) return null;
+  return { supplierPn: p.partNumber, currency: p.currency, breaks: p.priceBreaks, moq: p.priceBreaks[0].qty, mult: 1, stock: p.stock, url: p.productUrl };
+}
+
+/** Today's count of live calls to a supplier, and whether one more is allowed. */
+export async function pricingCallAllowed(provider: 'mouser' | 'digikey'): Promise<boolean> {
+  return (await getPricingUsage(provider)) < PRICING_DAILY_LIMIT;
+}
+export async function countPricingCall(provider: 'mouser' | 'digikey'): Promise<void> {
+  await incrementPricingUsage(provider);
 }
 
 /** Mouser's details for a part number (its own or the manufacturer's), or null. */
