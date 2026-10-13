@@ -15,6 +15,7 @@ import { z } from 'zod';
 import { query, queryOne } from './db';
 import { getAllVersions } from './dataVersion';
 import { ITEM_STATUSES, ITEM_STATUS_SQL } from './itemStatus';
+import { blankSlotsToNA } from './partNumbers';
 
 // Per-handler inventory bumps are no longer needed â€” the global
 // attachDataVersionMiddleware in server.ts bumps 'inventory' on any
@@ -149,7 +150,7 @@ export function registerItemsRoutes(app: Express): void {
       console.error(`[PATCH ITEM] safety validation failed:`, result.error.format());
       return res.status(400).json({ error: 'Invalid update data', details: result.error.format() });
     }
-    const data = result.data as Record<string, any>;
+    const data = blankSlotsToNA(result.data as Record<string, any>);
     console.log(`[PATCH ITEM] after validation, data fields:`, Object.keys(data));
     console.log(`[PATCH ITEM] ALLOWED_ITEM_FIELDS:`, ALLOWED_ITEM_FIELDS);
     console.log(`[PATCH ITEM] status in data?:`, data.status);
@@ -249,7 +250,7 @@ export function registerItemsRoutes(app: Express): void {
     if (!result.success) {
       return res.status(400).json({ error: 'Invalid update data', details: result.error.format() });
     }
-    const data = result.data as Record<string, any>;
+    const data = blankSlotsToNA(result.data as Record<string, any>);
     const sets: string[] = [];
     const vals: any[] = [];
     for (const key of ALLOWED_ITEM_FIELDS) {
@@ -368,7 +369,7 @@ export function registerItemsRoutes(app: Express): void {
     if (!result.success) {
       return res.status(400).json({ error: 'Invalid item data', details: result.error.format() });
     }
-    const data: any = result.data;
+    const data: any = blankSlotsToNA(result.data);
     const fields: string[] = [];
     const placeholders: string[] = [];
     const vals: any[] = [];
@@ -418,7 +419,7 @@ export function registerItemsRoutes(app: Express): void {
     if (!result.success) {
       return res.status(400).json({ error: 'Invalid items array', details: result.error.format() });
     }
-    const items = result.data;
+    const items = result.data.map((item) => blankSlotsToNA(item));
 
     // PARTIAL upsert: only touch the columns actually present in each payload row.
     // Previously this wrote ALL columns (missing ones -> NULL), so a price-only

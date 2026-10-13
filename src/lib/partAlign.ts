@@ -32,7 +32,9 @@ export function linkSupplier(url: string): SlotSupplier | 'other' | null {
 
 /** What one supplier said about the item. */
 export type SupplierFind =
-  | { status: 'found'; mpn: string | null; supplierPn?: string | null }
+  // link: the supplier's product page; discovered: found by searching the
+  // supplier for the part number (the item had nothing of theirs).
+  | { status: 'found'; mpn: string | null; supplierPn?: string | null; link?: string | null; discovered?: boolean }
   | { status: 'none' }    // the supplier has nothing for it (no number, no link, or not found)
   | { status: 'error'; message: string }; // couldn't ask: keep what is there
 
@@ -64,7 +66,9 @@ export function alignItem(current: ItemSlots, found: Partial<Record<SlotSupplier
     const links = cur.web.map((v, i) => ({ v, i, whose: linkSupplier(v) })).filter((l) => l.whose);
     for (const [slot, s] of SLOT_SUPPLIERS.entries()) {
       const pick = links.find((l) => l.i === slot && l.whose === s) ?? links.find((l) => l.whose === s);
-      if (pick) { target[slot] = pick.v; links.splice(links.indexOf(pick), 1); }
+      if (pick) { target[slot] = pick.v; links.splice(links.indexOf(pick), 1); continue; }
+      const f = found[s];
+      if (f?.status === 'found' && f.link?.trim()) target[slot] = f.link.trim();
     }
     // What is left keeps a 4-5 slot it is in, else takes a free one.
     for (const l of links) { if (l.i >= 3 && target[l.i] === null) target[l.i] = l.v; else extras.push(l.v); }

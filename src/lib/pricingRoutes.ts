@@ -588,6 +588,36 @@ export async function digikeyLookup(mpn: string): Promise<ProductDetails | null>
   return digikeyDetails(exact ?? products[0]);
 }
 
+/** What a supplier has for a manufacturer part number: its own number and product page. */
+export interface SupplierMatch { mpn: string; supplierPn: string; url: string | null }
+
+const sameMpn = (a: unknown, b: string) => String(a ?? '').trim().toUpperCase() === b.trim().toUpperCase();
+
+/** Mouser's part for exactly this manufacturer part number, or null (a near match isn't taken). */
+export async function mouserFind(mpn: string): Promise<SupplierMatch | null> {
+  const apiKey = await getPricingCredential('mouser', 'api_key', 'MOUSER_API_KEY');
+  if (!apiKey) throw new Error('Mouser API key not configured');
+  const res = await fetch(`https://api.mouser.com/api/v1/search/keyword?apiKey=${encodeURIComponent(apiKey)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ SearchByKeywordRequest: { keyword: mpn, records: 10, searchOptions: 'None' } }),
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!res.ok) throw new Error(`Mouser search failed: ${res.status}`);
+  const parts: any[] = (await res.json() as any).SearchResults?.Parts ?? [];
+  const p = parts.find((x) => sameMpn(x?.ManufacturerPartNumber, mpn) && x?.MouserPartNumber && String(x.MouserPartNumber).toUpperCase() !== 'N/A');
+  return p ? { mpn: String(p.ManufacturerPartNumber).trim(), supplierPn: String(p.MouserPartNumber).trim(), url: p.ProductDetailUrl ? String(p.ProductDetailUrl) : null } : null;
+}
+
+/** DigiKey's part for exactly this manufacturer part number (cut tape first), or null. */
+export async function digikeyFind(mpn: string): Promise<SupplierMatch | null> {
+  const data: any = await digikeyKeywordSearch(mpn, 10);
+  const product = (Array.isArray(data?.Products) ? data.Products : []).find((x: any) => sameMpn(x?.ManufacturerProductNumber, mpn));
+  const d = digikeyDetails(product);
+  if (!d?.supplierPartNumber) return null;
+  return { mpn: d.manufacturerPartNumber || mpn, supplierPn: d.supplierPartNumber, url: product?.ProductUrl ? String(product.ProductUrl) : null };
+}
+
 /** Mouser's details for a part number (its own or the manufacturer's), or null. */
 export async function mouserLookup(keyword: string): Promise<ProductDetails | null> {
   const apiKey = await getPricingCredential('mouser', 'api_key', 'MOUSER_API_KEY');

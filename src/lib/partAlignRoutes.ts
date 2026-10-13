@@ -8,18 +8,21 @@
 //
 // The check asks LCSC (by its part number), Mouser (by its part number, or
 // the one in a Mouser link) and DigiKey (the part number in a DigiKey link,
-// else by DigiKey's number) what the manufacturer part number is, one item
-// at a time with pauses between calls, and keeps a proposal for each item
-// whose slots would change. Nothing changes until the proposals are applied;
+// else by DigiKey's number) what the manufacturer part number is. Then, for
+// Mouser and DigiKey where the item has nothing of theirs, it searches them
+// for that manufacturer part number and takes their number and product page
+// on an exact match only (LCSC can't be searched from a server: its slot
+// fills from an LCSC number or link). One item at a time with pauses
+// between calls; it keeps a proposal for each item whose slots would change. Nothing changes until the proposals are applied;
 // applying skips an item that changed since it was checked.
 
 import type { Express } from 'express';
 import { pool, query, exec } from './db';
 import { requirePermission } from './authRoutes';
 import { NA, alignItem, linkSupplier, sameSlots, type ItemSlots, type SupplierFind } from './partAlign';
-import { classifyPartNumberBySupplier, type SlotSupplier } from './partNumbers';
+import { classifyPartNumberBySupplier, isUsablePartNumber, type SlotSupplier } from './partNumbers';
 import { parseProductLink } from './productLink';
-import { fetchLcscDetail, mouserLookup, searchDigikey } from './pricingRoutes';
+import { digikeyFind, fetchLcscDetail, mouserFind, mouserLookup, searchDigikey, type SupplierMatch } from './pricingRoutes';
 
 const MAN = ['man_pn_1', 'man_pn_2', 'man_pn_3', 'man_pn_4', 'man_pn_5'];
 const SUP = ['sup_pn_1', 'sup_pn_2', 'sup_pn_3', 'sup_pn_4', 'sup_pn_5'];
@@ -45,6 +48,9 @@ export interface AlignDeps {
   lcsc: (code: string) => Promise<string | null>;       // the manufacturer part number LCSC gives, or null
   mouser: (keyword: string) => Promise<{ mpn: string | null; mouserPn: string | null } | null>;
   digikey: (digikeyPn: string) => Promise<string | null>;
+  /** Exact-match searches by manufacturer part number, for a supplier the item has nothing of. */
+  mouserFind: (mpn: string) => Promise<SupplierMatch | null>;
+  digikeyFind: (mpn: string) => Promise<SupplierMatch | null>;
   pause: (ms: number) => Promise<void>;
 }
 
@@ -52,6 +58,8 @@ export const defaultAlignDeps: AlignDeps = {
   lcsc: async (code) => { const d = await fetchLcscDetail(code); return d?.result?.productModel ? String(d.result.productModel).trim() : null; },
   mouser: async (keyword) => { const d = await mouserLookup(keyword); return d ? { mpn: d.manufacturerPartNumber, mouserPn: d.supplierPartNumber } : null; },
   digikey: async (pn) => (await searchDigikey(pn))?.partNumber ?? null,
+  mouserFind,
+  digikeyFind,
   pause: (ms) => new Promise((r) => setTimeout(r, ms)),
 };
 
@@ -101,6 +109,25 @@ export async function findForItem(slots: ItemSlots, deps: AlignDeps): Promise<Pa
       found.mouser = mLink?.manufacturer && mLink.mpn ? { status: 'found', mpn: mLink.mpn } : errorOf(err);
     }
     await deps.pause(2100); // Mouser allows 30 calls a minute
+  }
+
+  // Suppliers the item has nothing of: search them for the component's part
+  // number (what a supplier gave, else one already in Mfr PN), exact match only.
+  const mpn = (['lcsc', 'digikey', 'mouser'] as SlotSupplier[])
+    .map((s) => { const f = found[s]; return f?.status === 'found' ? f.mpn?.trim() : ''; })
+    .concat(slots.man.map((v) => v.trim()).filter((v) => isUsablePartNumber(v) && !classifyPartNumberBySupplier(v)))
+    .find((v) => !!v);
+  if (mpn) {
+    const search = async (s: 'mouser' | 'digikey', find: (m: string) => Promise<SupplierMatch | null>, pauseMs: number) => {
+      if (found[s]?.status !== 'none') return;
+      try {
+        const m = await find(mpn);
+        if (m) found[s] = { status: 'found', mpn: m.mpn, supplierPn: m.supplierPn, link: m.url, discovered: true };
+      } catch (err) { found[s] = errorOf(err); }
+      await deps.pause(pauseMs);
+    };
+    await search('mouser', deps.mouserFind, 2100);
+    await search('digikey', deps.digikeyFind, 600);
   }
   return found;
 }

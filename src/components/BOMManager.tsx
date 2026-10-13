@@ -7,6 +7,7 @@ import { mapDbRowsToItems } from '../lib/mapDbItem';
 import { fmtNumber } from '../lib/formatMoney';
 import { detectLedSwatch, ledSwatchBackground } from '../lib/ledColor';
 import BuildQtyPicker from './BuildQtyPicker';
+import SupplierOrderFiles from './SupplierOrderFiles';
 import { colorToCssBackground } from './views/KitBookingView';
 import { 
   ClipboardCheck, 
@@ -325,6 +326,21 @@ export default function BOMManager({
           </select>
         </div>
       </div>
+
+      {/* One upload file per supplier, from the audit (substitutions included) */}
+      <SupplierOrderFiles
+        projectName={activeProject?.projectName || 'project'}
+        pcbQty={pcbQty}
+        onShowNotification={triggerToast}
+        lines={auditResults.filter(r => !r.isVoided).map(r => ({
+          stockCode: r.resolvedCode,
+          description: r.inventoryItem?.description || r.line.description || r.line.comment || '',
+          footprint: r.inventoryItem?.footprint || r.line.footprint || '',
+          supPns: r.inventoryItem?.supPns,
+          required: r.requiredTotal,
+          shortage: r.shortageAmount,
+        }))}
+      />
 
       {/* Main Operations Split Panels */}
       <div className="grid grid-cols-12 gap-lg items-start">

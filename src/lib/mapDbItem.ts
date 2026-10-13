@@ -60,7 +60,8 @@ export function mapDbRowToItem(record: any): Item {
     partNumber,
     name: record['name'] || 'Unnamed Item',
     description: record['description'] || '',
-    manufacturer: manPns.find(Boolean) || record['manufacturer'] || 'Generic',
+    // The first real one: a slot saying N/A (nothing at that supplier) isn't a manufacturer part number.
+    manufacturer: manPns.find((v) => v && !/^(N\/?A|-|NONE)$/i.test(v.trim())) || record['manufacturer'] || 'Generic',
     // The supplier field, else a supplier name the item form used to keep in
     // the supplier part-number fields; never a part number (see ./partNumbers).
     supplier: preferredSupplier(record['supplier'], supPns) || 'N/A',

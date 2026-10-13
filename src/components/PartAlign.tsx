@@ -12,7 +12,8 @@ import { fmtNumber } from '../lib/formatMoney';
 import { PrimaryButton, SecondaryButton } from './bookkeeping/shared';
 
 interface Slots { man: string[]; sup: string[]; web: string[] }
-interface Proposal { serialNumber: string; name: string | null; before: Slots; after: Slots; found: Record<string, { status: string; message?: string }> | null; notes: string[] }
+interface Proposal { serialNumber: string; name: string | null; before: Slots; after: Slots; found: Record<string, { status: string; message?: string; discovered?: boolean }> | null; notes: string[] }
+const SUPPLIER_NAME: Record<string, string> = { mouser: 'Mouser', digikey: 'DigiKey', lcsc: 'LCSC' };
 interface Run { running: boolean; total: number; done: number; proposals: number; startedAt: string | null; finishedAt: string | null; error: string | null }
 
 const SLOT = ['1. Mouser', '2. DigiKey', '3. LCSC', '4. Other', '5. Other'];
@@ -73,7 +74,7 @@ export default function PartAlign({ onShowNotification, onOpenItem, onChanged }:
   const start = async () => {
     const ok = await confirmDialog({
       title: 'Check every item with the suppliers',
-      message: 'Asks LCSC, Mouser and DigiKey for each item\'s manufacturer part number and lines up the three lists by slot (1 Mouser, 2 DigiKey, 3 LCSC, 4-5 other). It takes a while (Mouser allows 30 calls a minute) and changes nothing: you see each item\'s changes and apply them.',
+      message: 'Asks LCSC, Mouser and DigiKey for each item\'s manufacturer part number and lines up the three lists by slot (1 Mouser, 2 DigiKey, 3 LCSC, 4-5 other). Where Mouser or DigiKey is N/A, it searches them for the same part number and fills in their number and link (exact matches only). It takes about half an hour (Mouser allows 30 calls a minute) and changes nothing: you see each item\'s changes and apply them.',
       confirmLabel: 'Start the check',
     });
     if (!ok) return;
@@ -108,7 +109,7 @@ export default function PartAlign({ onShowNotification, onOpenItem, onChanged }:
         <div className="max-w-[760px]">
           <h4 className="text-base font-bold text-on-surface flex items-center gap-2"><ListChecks className="w-4 h-4 text-primary" /> Line up by supplier</h4>
           <p className="text-xs text-on-surface-variant mt-1 leading-relaxed">
-            Manufacturer part numbers, supplier part numbers and web links each have five slots, and slot 1 is Mouser in all three, 2 DigiKey, 3 LCSC, 4-5 other. Mfr PN 2 is the manufacturer part number as DigiKey lists it, and so on. The check asks the suppliers and shows what would change; a slot with nothing for its supplier says N/A, and nothing is thrown away (anything that doesn't fit goes to 4-5).
+            Manufacturer part numbers, supplier part numbers and web links each have five slots, and slot 1 is Mouser in all three, 2 DigiKey, 3 LCSC, 4-5 other. Mfr PN 2 is the manufacturer part number as DigiKey lists it, and so on. The check asks the suppliers and shows what would change. Where an item has nothing at Mouser or DigiKey, it searches them for the same part number and fills in their number and link (exact matches only; LCSC can't be searched, so its slot fills from an LCSC number or link). A slot with nothing for its supplier says N/A, and nothing is thrown away (anything that doesn't fit goes to 4-5).
           </p>
         </div>
         {may && (
@@ -141,6 +142,7 @@ export default function PartAlign({ onShowNotification, onOpenItem, onChanged }:
           <div className="max-h-[520px] overflow-y-auto custom-scrollbar divide-y divide-outline-variant/30 rounded-lg border border-outline-variant">
             {proposals.map((p) => {
               const errors = Object.entries(p.found ?? {}).filter(([, f]) => f.status === 'error');
+              const newly = Object.entries(p.found ?? {}).filter(([, f]) => f.status === 'found' && f.discovered).map(([s]) => SUPPLIER_NAME[s] ?? s);
               return (
                 <div key={p.serialNumber} className="p-sm flex flex-col md:flex-row gap-sm">
                   <div className="md:w-48 shrink-0">
@@ -148,6 +150,7 @@ export default function PartAlign({ onShowNotification, onOpenItem, onChanged }:
                       ? <button type="button" className="font-mono font-bold text-primary hover:underline text-xs" onClick={() => onOpenItem(p.serialNumber)}>{p.serialNumber}</button>
                       : <span className="font-mono font-bold text-xs">{p.serialNumber}</span>}
                     {p.name && <span className="block text-[11px] text-on-surface-variant">{p.name}</span>}
+                    {newly.length > 0 && <span className="block text-[10px] text-green-500" data-testid="align-found">Found at {newly.join(' and ')}</span>}
                     {errors.map(([s, f]) => <span key={s} className="block text-[10px] text-amber-500">{s} couldn't be asked ({f.message}); its slot kept.</span>)}
                     {p.notes?.map((n) => <span key={n} className="block text-[10px] text-amber-500">{n}</span>)}
                   </div>

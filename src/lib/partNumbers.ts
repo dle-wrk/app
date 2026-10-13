@@ -165,3 +165,14 @@ export function arrangeSupplierSlots(slots: string[]): string[] | null {
   }
   return target.map((v) => v ?? '');
 }
+
+// The part-number and web-link slots (1 Mouser, 2 DigiKey, 3 LCSC, 4-5
+// other): one saved empty says N/A, so a slot reads "nothing at this
+// supplier" rather than looking forgotten. Only slots sent are touched.
+export const SLOT_FIELDS = [1, 2, 3, 4, 5].flatMap((n) => [`man_pn_${n}`, `sup_pn_${n}`, `weblink_${n}`]);
+export function blankSlotsToNA<T extends Record<string, any>>(data: T): T {
+  for (const key of SLOT_FIELDS) {
+    if (typeof data[key] === 'string' && data[key].trim() === '') (data as any)[key] = 'N/A';
+  }
+  return data;
+}

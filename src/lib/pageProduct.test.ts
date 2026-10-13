@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { isBotWall, readProductPage } from './pageProduct';
 import { isPrivateAddress, publicUrl } from './safeFetch';
 import { applyFill, canLookUp, fillOptions } from './productLink';
+import { blankSlotsToNA } from './partNumbers';
 
 const ld = (o: object) => `<script type="application/ld+json">${JSON.stringify(o)}</script>`;
 
@@ -76,5 +77,13 @@ describe('filling from another shop', () => {
 
   it('looks up any web link, not only supplier pages', () => {
     expect(['https://www.aliexpress.com/item/1.html', 'https://www.lcsc.com/product-detail/C1.html', 'aliexpress', 'N/A', 'mailto:a@b.com'].map(canLookUp)).toEqual([true, true, false, false, false]);
+  });
+});
+
+describe('saving an item', () => {
+  it('writes N/A into a part-number or link slot saved empty, and leaves the rest alone', () => {
+    expect(blankSlotsToNA({ man_pn_2: '', sup_pn_1: '  ', weblink_5: '', sup_pn_3: 'C1', name: '', supplier: '' }))
+      .toEqual({ man_pn_2: 'N/A', sup_pn_1: 'N/A', weblink_5: 'N/A', sup_pn_3: 'C1', name: '', supplier: '' });
+    expect(blankSlotsToNA({ name: 'x' })).toEqual({ name: 'x' }); // slots not sent aren't touched
   });
 });

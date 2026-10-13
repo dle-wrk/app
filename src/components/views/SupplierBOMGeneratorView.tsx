@@ -13,6 +13,7 @@
 import React, { useMemo, useState } from 'react';
 import { Upload, FileSpreadsheet, Download, CheckSquare, Square, ListFilter, AlertTriangle } from 'lucide-react';
 import { fmtNumber } from '../../lib/formatMoney';
+import { downloadCsv, toDigikeyCsv, toLcscCsv, toMouserCsv } from '../../lib/supplierBom';
 
 const SUPPLIERS = ['LCSC', 'DigiKey', 'Mouser'] as const;
 type Supplier = typeof SUPPLIERS[number];
@@ -132,34 +133,7 @@ function availabilityNote(pns: Record<Supplier, string>): string {
   return 'at ' + where.join(', at ');
 }
 
-// ─── CSV writers per supplier (same formats as the Python tool) ───────────
-
-function toMouserCsv(rows: Row[]): string {
-  return rows.map(r => `${r.supplierPn}|${r.qty}`).join('\n') + '\n';
-}
-function toDigikeyCsv(rows: Row[]): string {
-  const head = 'Quantity,Part Number\n';
-  const body = rows.map(r => `${r.qty},"${r.supplierPn.replace(/"/g, '""')}"`).join('\n');
-  return head + body + '\n';
-}
-function toLcscCsv(rows: Row[]): string {
-  const head = 'Comment,Designator,Footprint,LCSC Part #,Quantity\n';
-  const esc = (s: string) => (s || '').replace(/,/g, ' ');
-  const body = rows.map(r => `"${esc(r.description)}","","${esc(r.footprint)}","${r.supplierPn}",${r.qty}`).join('\n');
-  return head + body + '\n';
-}
-
-function downloadCsv(filename: string, content: string) {
-  const blob = new Blob([content], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
+// CSV writers: shared with the project BOM's order files (../../lib/supplierBom).
 
 interface Props {
   triggerToast: (msg: string, type?: 'SUCCESS' | 'ERROR' | 'INFO') => void;
