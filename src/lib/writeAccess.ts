@@ -50,6 +50,8 @@ export const AREAS: Record<string, Area> = {
   // also hold each person's profile.
   login: 'open', session: 'open', auth: 'open', 'activity-log': 'open', 'event-log': 'open',
   notifications: 'open', pricing: 'open', 'supplier-bom': 'open', 'supplier-quotes': 'open', settings: 'open',
+  // Your own preferences (the routes only touch the caller's row).
+  me: 'open',
   // Checked by the routes themselves (admins).
   users: 'open', docs: 'open', start: 'open',
 };

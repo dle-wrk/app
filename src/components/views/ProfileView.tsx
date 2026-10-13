@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { SlidersHorizontal, X, Check, Boxes } from 'lucide-react';
 import { UserProfile, SystemConfig } from '../../types';
+import DisplaySizeCard from '../DisplaySizeCard';
 
 interface ProfileViewProps {
   profile: UserProfile;
@@ -31,6 +32,8 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
   return (
     <div className="p-6 space-y-6 max-w-[1250px] mx-auto w-full select-none">
+      <DisplaySizeCard onShowNotification={(m) => triggerToast(m)} />
+
       {/* Profile Header Block */}
       <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 bg-surface-container p-5 rounded-xl border border-outline-variant/70 shadow-sm">
         <div>

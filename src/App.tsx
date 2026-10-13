@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { footprintOptions, itemFootprints, itemMatches } from './lib/itemSearch';
 import { matchesSourcing, sourcingCounts } from './lib/sourcing';
+import { applyDisplaySize, isDisplaySize } from './lib/displaySize';
 import { usdToZarRate } from './lib/usdToZar';
 import { classifyPartNumberBySupplier, SUPPLIER_SLOTS } from './lib/partNumbers';
 import {
@@ -106,6 +107,14 @@ export default function App() {
   // The password just signed in with, kept in memory only (never stored), so
   // the forced password change after a reset doesn't ask for it again.
   const signInPassword = useRef<string | null>(null);
+
+  // The display size saved to this person's account, once signed in.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    fetch('/api/me/preferences').then((r) => (r.ok ? r.json() : null))
+      .then((p) => { if (p && isDisplaySize(p.displaySize)) applyDisplaySize(p.displaySize); })
+      .catch(() => { /* keep the size this browser last used */ });
+  }, [isAuthenticated]);
 
   const handleLogin = async (email: string, password: string) => {
     setIsLoginLoading(true);
@@ -3131,7 +3140,7 @@ if (currentView === 'alternates') {
         {/* ========================================================================= */}
         {isKitModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-fade-in">
-            <div className="w-full max-w-[896px] max-h-[90vh] overflow-y-auto bg-surface-container border border-outline-variant rounded-xl shadow-2xl relative">
+            <div className="w-full max-w-[896px] max-h-[calc(90vh/var(--app-zoom,1))] overflow-y-auto bg-surface-container border border-outline-variant rounded-xl shadow-2xl relative">
 
               {/* Close Button Anchor Trigger */}
               <button

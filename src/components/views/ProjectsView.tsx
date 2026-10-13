@@ -744,7 +744,7 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
       {/* Link Components Modal */}
       {showLinkModal && selectedProject && (
         <div className="fixed inset-0 bg-background/80 backdrop-blur-xs flex items-center justify-center z-100 p-md">
-          <div className="bg-surface-container rounded-xl border border-outline-variant max-w-[1000px] w-full p-lg shadow-2xl relative max-h-[85vh] flex flex-col">
+          <div className="bg-surface-container rounded-xl border border-outline-variant max-w-[1000px] w-full p-lg shadow-2xl relative max-h-[calc(85vh/var(--app-zoom,1))] flex flex-col">
             <button onClick={() => setShowLinkModal(false)} className="absolute top-sm right-sm text-on-surface-variant hover:text-on-surface p-1.5 rounded-lg transition-colors z-10">
               <X className="w-4 h-4" />
             </button>

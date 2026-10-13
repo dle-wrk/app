@@ -340,7 +340,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-start justify-center pt-[10vh] px-4"
+      className="fixed inset-0 z-[100] flex items-start justify-center pt-[calc(10vh/var(--app-zoom,1))] px-4"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
@@ -373,7 +373,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
           </button>
         </div>
 
-        <div ref={listRef} className="max-h-[60vh] overflow-y-auto py-1">
+        <div ref={listRef} className="max-h-[calc(60vh/var(--app-zoom,1))] overflow-y-auto py-1">
           {grouped.length === 0 ? (
             <div className="px-4 py-8 text-center text-xs text-on-surface-variant">
               No matches for <span className="font-mono">"{query}"</span>

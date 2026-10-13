@@ -280,7 +280,7 @@ const DocLinkEditor: React.FC<DocLinkEditorProps> = ({ mode, doc, onClose, onSav
   };
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-start justify-center pt-[10vh] px-4 bg-black/60 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-[80] flex items-start justify-center pt-[calc(10vh/var(--app-zoom,1))] px-4 bg-black/60 backdrop-blur-sm" onClick={onClose}>
       {/* max-w-lg collides with --spacing-lg (24px) in this Tailwind theme.
           Arbitrary value bypasses the token lookup. */}
       <div className="w-full max-w-[520px] bg-surface border border-outline-variant rounded-xl shadow-2xl" onClick={e => e.stopPropagation()}>

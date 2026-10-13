@@ -619,3 +619,11 @@
   }
 }
 
+/* Display size (src/lib/displaySize.ts): the whole app scaled by one factor.
+   Screen-height sizes scale with it too, so they are divided by it to still
+   fill the window exactly. Printing is always at 100%. */
+html { zoom: var(--app-zoom, 1); }
+.min-h-screen { min-height: calc(100vh / var(--app-zoom, 1)); }
+.h-screen { height: calc(100vh / var(--app-zoom, 1)); }
+.min-h-dvh { min-height: calc(100dvh / var(--app-zoom, 1)); }
+@media print { html { zoom: 1; } }

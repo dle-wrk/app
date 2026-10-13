@@ -633,7 +633,7 @@ function LoadBrowserDialog({ projects, busy, onLoad, onDelete, onClose }: {
   const filtered = projects.filter(p => !q.trim() || p.name.toLowerCase().includes(q.toLowerCase()));
   return (
     <div className="fixed inset-0 z-[200] bg-background/85 backdrop-blur-sm flex items-center justify-center p-md" onClick={onClose}>
-      <div className="bg-surface-container border border-outline-variant rounded-xl shadow-2xl max-w-[720px] w-full max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-surface-container border border-outline-variant rounded-xl shadow-2xl max-w-[720px] w-full max-h-[calc(80vh/var(--app-zoom,1))] flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="px-lg py-md border-b border-outline-variant flex items-center gap-sm">
           <FolderOpen className="w-4 h-4 text-primary" />
           <div className="flex-1">

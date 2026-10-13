@@ -76,7 +76,7 @@ export default function ShortageToPOModal({ shortages, onClose, onSuccess, trigg
 
   return (
     <div className="fixed inset-0 bg-background/80 backdrop-blur-xs flex items-center justify-center z-100 p-md">
-      <div className="bg-surface-container rounded-xl border border-outline-variant w-full max-w-2xl p-lg shadow-2xl max-h-[90vh] overflow-y-auto relative">
+      <div className="bg-surface-container rounded-xl border border-outline-variant w-full max-w-2xl p-lg shadow-2xl max-h-[calc(90vh/var(--app-zoom,1))] overflow-y-auto relative">
         <button
           onClick={onClose}
           className="absolute top-sm right-sm text-on-surface-variant hover:text-on-surface p-1.5 rounded transition-colors"

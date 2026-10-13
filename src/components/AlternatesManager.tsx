@@ -349,7 +349,7 @@ const SimulationMapModal: React.FC<{
       onClick={onClose}
     >
       <div
-        className="bg-surface-container border border-outline-variant rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col"
+        className="bg-surface-container border border-outline-variant rounded-xl shadow-2xl max-w-4xl w-full max-h-[calc(90vh/var(--app-zoom,1))] overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="px-lg py-md border-b border-outline-variant flex items-start gap-sm">
@@ -369,7 +369,7 @@ const SimulationMapModal: React.FC<{
         </div>
 
         <div className="flex-1 overflow-auto p-md">
-          <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto max-h-[60vh]" role="img" aria-label={`Simulation map for ${group.commonName}`}>
+          <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto max-h-[calc(60vh/var(--app-zoom,1))]" role="img" aria-label={`Simulation map for ${group.commonName}`}>
             {/* Guide circle */}
             <circle cx={cx} cy={cy} r={outerRadius} fill="none" stroke="var(--md-sys-color-outline-variant, #444)" strokeDasharray="3 4" opacity={0.4} />
 

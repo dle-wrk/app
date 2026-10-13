@@ -1408,7 +1408,7 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
             wide preset-columns layout, vertical so long BOMs get an
             inner scrollbar and the thead stays pinned at the top of
             the audit table (not the page). */}
-        <div className="overflow-auto max-h-[calc(100vh-280px)]">
+        <div className="overflow-auto max-h-[calc(100vh/var(--app-zoom,1)-280px)]">
           <table className="stacked-mobile w-full text-left border-collapse min-w-[1400px]">
             <thead>
               {/* Grouped header: five preset-qty columns sit under a
@@ -2061,7 +2061,7 @@ function KitBrowserDialog({ kits, busy, projects, defaultProjectId, onLoad, onDe
 
   return (
     <div className="fixed inset-0 z-[200] bg-background/85 backdrop-blur-sm flex items-center justify-center p-md" onClick={onClose}>
-      <div className="bg-surface-container border border-outline-variant rounded-xl shadow-2xl max-w-[720px] w-full max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-surface-container border border-outline-variant rounded-xl shadow-2xl max-w-[720px] w-full max-h-[calc(85vh/var(--app-zoom,1))] flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="px-lg py-md border-b border-outline-variant flex items-center gap-sm">
           <FolderOpen className="w-4 h-4 text-primary" />
           <div className="flex-1">
@@ -2561,7 +2561,7 @@ function KitAllocationDialog({ stockCode, needed, existing, autoResolved, reserv
 
   return (
     <div className="fixed inset-0 z-[210] bg-background/85 backdrop-blur-sm flex items-center justify-center p-md" onClick={onClose}>
-      <div className="bg-surface-container border border-outline-variant rounded-xl shadow-2xl max-w-[960px] w-full max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-surface-container border border-outline-variant rounded-xl shadow-2xl max-w-[960px] w-full max-h-[calc(85vh/var(--app-zoom,1))] flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="px-lg py-md border-b border-outline-variant flex items-center gap-sm">
           <ArrowRightLeft className="w-4 h-4 text-primary" />
           <div className="flex-1">
@@ -2884,7 +2884,7 @@ function PresetCsvDialog({ presets, shortagesAtPreset, dnfCount, onCancel, onExp
   const filesToGo = orderedSelected.length * (1 + orderedSuppliers.length);
   return (
     <div className="fixed inset-0 z-[200] bg-background/85 backdrop-blur-sm flex items-center justify-center p-md" onClick={busy ? undefined : onCancel}>
-      <div className="bg-surface-container border border-outline-variant rounded-xl shadow-2xl max-w-[560px] w-full max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-surface-container border border-outline-variant rounded-xl shadow-2xl max-w-[560px] w-full max-h-[calc(85vh/var(--app-zoom,1))] flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="px-lg py-md border-b border-outline-variant flex items-center gap-sm">
           <Download className="w-4 h-4 text-primary" />
           <div>

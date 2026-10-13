@@ -649,14 +649,14 @@ const ReceiptScanModal: React.FC<{
               playsInline
               muted
               autoPlay
-              className="w-full max-h-[60vh] object-contain bg-black"
+              className="w-full max-h-[calc(60vh/var(--app-zoom,1))] object-contain bg-black"
             />
           </div>
         ) : previews.length > 0 ? (
           <div className="space-y-2">
             {/* Primary preview — largest / most recent page. */}
             <div className="rounded-lg border border-outline-variant bg-black/20 flex items-center justify-center p-2">
-              <img src={previews[previews.length - 1]} alt={`Page ${previews.length}`} className="max-h-[50vh] object-contain rounded" />
+              <img src={previews[previews.length - 1]} alt={`Page ${previews.length}`} className="max-h-[calc(50vh/var(--app-zoom,1))] object-contain rounded" />
             </div>
             {/* Page strip — thumbnails of every page with a per-page
                 remove button. Only visible when we have more than one

@@ -1,10 +1,14 @@
 import {StrictMode} from 'react';
+import { applyDisplaySize, rememberedDisplaySize } from './lib/displaySize';
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 // Sentry side-effect import — must load before we mount <App/> so any error
 // during render is captured. No-ops when VITE_SENTRY_DSN isn't set.
 import { Sentry, sentryEnabled } from './lib/sentryClient';
+
+// Display size: as last used in this browser, until the account's is read (App).
+applyDisplaySize(rememberedDisplaySize());
 
 // Suppress browser extension async message channel errors (Chrome extensions, DevTools, etc.)
 const originalError = console.error;
@@ -74,7 +78,7 @@ window.fetch = function (input, init) {
 const RootTree = sentryEnabled ? (
   <Sentry.ErrorBoundary
     fallback={({ error, resetError }) => (
-      <div style={{ padding: 24, fontFamily: 'system-ui', color: '#fff', background: '#1a1d2b', minHeight: '100vh' }}>
+      <div style={{ padding: 24, fontFamily: 'system-ui', color: '#fff', background: '#1a1d2b', minHeight: 'calc(100vh / var(--app-zoom, 1))' }}>
         <h1 style={{ fontSize: 20, marginBottom: 8 }}>Something broke.</h1>
         <p style={{ opacity: 0.7, fontSize: 14 }}>The error has been reported. Try refreshing.</p>
         <pre style={{ fontSize: 11, opacity: 0.5, marginTop: 16, whiteSpace: 'pre-wrap' }}>{String((error as any)?.message || error)}</pre>

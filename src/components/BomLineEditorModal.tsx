@@ -186,7 +186,7 @@ export default function BomLineEditorModal({ projectId, stockCode, onClose, onSa
       onClick={() => { if (!saving) onClose(); }}
     >
       <div
-        className="bg-surface-container border border-outline-variant rounded-xl shadow-2xl max-w-[960px] w-full max-h-[85vh] flex flex-col"
+        className="bg-surface-container border border-outline-variant rounded-xl shadow-2xl max-w-[960px] w-full max-h-[calc(85vh/var(--app-zoom,1))] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="px-lg py-md border-b border-outline-variant flex items-center gap-sm">

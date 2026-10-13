@@ -368,7 +368,7 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete, reser
 
   return (
     <div className="fixed inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center z-110 p-md">
-      <div className="bg-surface-container rounded-xl border border-outline-variant max-w-[768px] w-full max-h-[90vh] flex flex-col shadow-2xl relative animate-in fade-in duration-200">
+      <div className="bg-surface-container rounded-xl border border-outline-variant max-w-[768px] w-full max-h-[calc(90vh/var(--app-zoom,1))] flex flex-col shadow-2xl relative animate-in fade-in duration-200">
         
         {/* Header toolbar */}
         <div className="px-lg py-md border-b border-outline-variant/60 flex items-center justify-between bg-surface-container-high/40 shrink-0">

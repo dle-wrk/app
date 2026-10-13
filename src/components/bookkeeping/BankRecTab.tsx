@@ -469,7 +469,7 @@ const ReconcileModal: React.FC<{
         {!isLocked && <PrimaryButton icon={<CheckCircle2 className="w-3.5 h-3.5" />} onClick={() => complete(false)} disabled={busy}>Complete</PrimaryButton>}
       </div>
 
-      <div className="rounded-lg border border-outline-variant/40 overflow-hidden max-h-[55vh] overflow-y-auto">
+      <div className="rounded-lg border border-outline-variant/40 overflow-hidden max-h-[calc(55vh/var(--app-zoom,1))] overflow-y-auto">
         <table className="w-full text-left text-xs">
           <thead className="bg-surface-container-high/60 text-outline text-[10px] uppercase sticky top-0">
             <tr>
@@ -587,7 +587,7 @@ const PickCandidateModal: React.FC<{
           </button>
         ))}
       </div>
-      <div className="rounded-lg border border-outline-variant/40 max-h-[50vh] overflow-y-auto">
+      <div className="rounded-lg border border-outline-variant/40 max-h-[calc(50vh/var(--app-zoom,1))] overflow-y-auto">
         {loading ? (
           <div className="p-6 text-center text-xs text-outline"><Loader2 className="w-4 h-4 inline animate-spin mr-2" /> Finding candidates…</div>
         ) : rows.length === 0 ? (
