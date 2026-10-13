@@ -14,6 +14,8 @@ export interface ProductLink {
   mpn?: string;
   /** The manufacturer as written in the link (DigiKey, Mouser). */
   manufacturer?: string;
+  /** Read from another site's link for the same part: JLCPCB's parts are LCSC's. */
+  via?: 'jlcpcb';
 }
 
 const segment = (s: string) => decodeURIComponent(s).replace(/\+/g, ' ').trim();
@@ -32,6 +34,11 @@ export function parseProductLink(raw: string): ProductLink | null {
     // /product-detail/Multilayer-Ceramic-Capacitors-MLCC-SMD-SMT_PSA-FM31X104K251EEG_C365814.html, or /product-detail/C365814.html
     const code = path.match(/(?:^|[/_-])(C\d{2,})(?:\.html)?\/?$/i)?.[1];
     return code ? { supplier: 'lcsc', lcscCode: code.toUpperCase() } : null;
+  }
+  if (/(^|\.)jlcpcb\.com$/.test(host)) {
+    // JLCPCB's parts are LCSC's: /partdetail/<manufacturer>-<mpn>/C1509156 is LCSC part C1509156.
+    const code = path.match(/\/partdetail\/(?:[^/]*\/)?(C\d{2,})\/?$/i)?.[1];
+    return code ? { supplier: 'lcsc', lcscCode: code.toUpperCase(), via: 'jlcpcb' } : null;
   }
   if (/(^|\.)digikey\.[a-z.]+$/.test(host)) {
     // /en/products/detail/<manufacturer>/<mpn>/<digikey id>

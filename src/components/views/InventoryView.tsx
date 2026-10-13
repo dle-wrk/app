@@ -1,4 +1,5 @@
 import React from 'react';
+import { SOURCING_FILTERS } from '../../lib/sourcing';
 import { canChange } from '../../lib/changeAccess';
 import { Upload, Plus, Search, Download, X } from 'lucide-react';
 import { Item } from '../../types';
@@ -27,6 +28,10 @@ interface InventoryViewProps {
   selectedFootprint?: string;
   setSelectedFootprint?: (footprint: string) => void;
   availableFootprints?: Array<{ key: string; count: number }>;
+  /** Sourcing filter: which suppliers an item has a part number for (lib/sourcing). */
+  selectedSourcing?: string;
+  setSelectedSourcing?: (filter: string) => void;
+  sourcingCounts?: Partial<Record<string, number>>;
   availablePrefixes: string[];
   sortBy: 'name' | 'stockLevel' | 'price';
   setSortBy: (sort: 'name' | 'stockLevel' | 'price') => void;
@@ -61,6 +66,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   selectedFootprint = 'ALL',
   setSelectedFootprint,
   availableFootprints = [],
+  selectedSourcing = 'ALL',
+  setSelectedSourcing,
+  sourcingCounts = {},
   availablePrefixes,
   sortBy,
   setSortBy,
@@ -245,6 +253,23 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               <option value="ALL" className="font-sans">All Footprints</option>
               {availableFootprints.map((f) => (
                 <option key={f.key} value={f.key}>{f.key} ({f.count})</option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* Sourcing: which of Mouser, DigiKey and LCSC the item has a part number for */}
+        {setSelectedSourcing && (
+          <div className="flex items-center gap-1.5">
+            <span className="text-outline text-[11px] font-medium">Sourcing:</span>
+            <select
+              aria-label="Filter by supplier"
+              value={selectedSourcing}
+              onChange={(e) => setSelectedSourcing(e.target.value)}
+              className="bg-surface-container-high border border-outline-variant rounded px-2 py-1 text-xs cursor-pointer focus:outline-none focus:border-primary text-on-surface"
+            >
+              {SOURCING_FILTERS.map((f) => (
+                <option key={f.key} value={f.key}>{f.label}{f.key !== 'ALL' && sourcingCounts[f.key] !== undefined ? ` (${sourcingCounts[f.key]})` : ''}</option>
               ))}
             </select>
           </div>

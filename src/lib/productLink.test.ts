@@ -29,12 +29,13 @@ describe('parseProductLink', () => {
     ['lcsc.com/product-detail/C1591.html', { supplier: 'lcsc', lcscCode: 'C1591' }],
     ['https://www.digikey.co.za/en/products/detail/psa-walsin-technology/FM31X104K251EEGTR/16590331', { supplier: 'digikey', manufacturer: 'psa walsin technology', mpn: 'FM31X104K251EEGTR' }],
     ['https://www.mouser.co.za/ProductDetail/KEMET/C0805C152J1RACTU?qs=abc', { supplier: 'mouser', manufacturer: 'KEMET', mpn: 'C0805C152J1RACTU' }],
+    ['https://jlcpcb.com/partdetail/HJTech-HJ_2_4GHzSMA/C1509156', { supplier: 'lcsc', lcscCode: 'C1509156', via: 'jlcpcb' }],
     ['https://www.mouser.com/ProductDetail/581-08051C104KAT2A', { supplier: 'mouser', mpn: '581-08051C104KAT2A' }],
   ])('reads %s', (url, expected) => {
     expect(parseProductLink(url)).toEqual(expected);
   });
 
-  it.each([['https://www.lcsc.com/'], ['https://example.com/C1591.html'], ['not a link at all'], ['']])('ignores %j', (url) => {
+  it.each([['https://www.lcsc.com/'], ['https://jlcpcb.com/parts/basic_parts'], ['https://example.com/C1591.html'], ['not a link at all'], ['']])('ignores %j', (url) => {
     expect(parseProductLink(url)).toBeNull();
   });
 });

@@ -72,13 +72,14 @@ export async function findForItem(slots: ItemSlots, deps: AlignDeps): Promise<Pa
   const linkOf = (s: SlotSupplier) => slots.web.find((u) => linkSupplier(u) === s) ?? null;
   const found: Partial<Record<SlotSupplier, SupplierFind>> = {};
 
-  // LCSC: by its number, from a field or its link.
-  const lcscCode = numberOf('lcsc') ?? (linkOf('lcsc') ? parseProductLink(linkOf('lcsc')!)?.lcscCode ?? null : null);
+  // LCSC: by its number, from a field or a link (LCSC's own, or JLCPCB's, whose parts are LCSC's).
+  const lcscCode = numberOf('lcsc') ?? slots.web.map((u) => parseProductLink(u)?.lcscCode).find(Boolean) ?? null;
   if (!lcscCode) found.lcsc = { status: 'none' };
   else {
     try {
       const mpn = await deps.lcsc(lcscCode);
-      found.lcsc = mpn ? { status: 'found', mpn, supplierPn: lcscCode } : { status: 'none' };
+      // Its product page, for web link 3 when the item has no LCSC link.
+      found.lcsc = mpn ? { status: 'found', mpn, supplierPn: lcscCode, link: `https://www.lcsc.com/product-detail/${encodeURIComponent(lcscCode)}.html` } : { status: 'none' };
     } catch (err) { found.lcsc = errorOf(err); }
     await deps.pause(400);
   }

@@ -64,6 +64,21 @@ describe('filling a supplier the item has nothing of', () => {
   });
 });
 
+describe('JLCPCB links and LCSC numbers', () => {
+  it("reads the LCSC number from a JLCPCB link, and gives an item with only an LCSC number LCSC's page", async () => {
+    const JLC = 'https://jlcpcb.com/partdetail/HJTech-HJ_2_4GHzSMA/C1509156';
+    const slots = { man: ['', '', '', '', ''], sup: ['', '', '', '', ''], web: ['', '', '', JLC, ''] };
+    const { deps, asked } = fakes({ lcsc: async (c) => { asked.push(`lcsc ${c}`); return 'HJ-2.4GHz-SMA'; } });
+    const found = await findForItem(slots, deps);
+    expect(asked[0]).toBe('lcsc C1509156');
+    const { slots: after } = alignItem(slots, found);
+    expect(after.sup[2]).toBe('C1509156');
+    expect(after.man[2]).toBe('HJ-2.4GHz-SMA');
+    expect(after.web[2]).toBe('https://www.lcsc.com/product-detail/C1509156.html');
+    expect(after.web[3]).toBe(JLC); // the JLCPCB page stays, in an "other" slot
+  });
+});
+
 describe('findForItem', () => {
   it('CHP-021: reads DigiKey from its link, asks LCSC by its number, and searches Mouser for the part', async () => {
     const slots = { man: ['', '', '', '', ''], sup: ['', '1219-1233-2-ND', 'C232869', '', ''], web: [DK, LC, '', '', ''] };
@@ -71,7 +86,7 @@ describe('findForItem', () => {
     const found = await findForItem(slots, deps);
     expect(asked).toEqual(['lcsc C232869', 'mouserFind FT24C08A-ELR-T']); // Mouser hasn't got it
     expect(found).toEqual({
-      lcsc: { status: 'found', mpn: 'FT24C08A-ELR-T', supplierPn: 'C232869' },
+      lcsc: { status: 'found', mpn: 'FT24C08A-ELR-T', supplierPn: 'C232869', link: 'https://www.lcsc.com/product-detail/C232869.html' },
       digikey: { status: 'found', mpn: 'FT24C08A-ELR-T' },
       mouser: { status: 'none' },
     });
@@ -83,7 +98,7 @@ describe('findForItem', () => {
     const { deps } = fakes();
     const { slots: after } = alignItem(slots, await findForItem(slots, deps));
     expect(after.man).toEqual(['N/A', 'N/A', 'USB2517I-JZX-TR', 'N/A', 'N/A']);
-    expect(after.web).toEqual(['N/A', 'N/A', 'N/A', 'N/A', 'N/A']);
+    expect(after.web).toEqual(['N/A', 'N/A', 'https://www.lcsc.com/product-detail/C626667.html', 'N/A', 'N/A']); // LCSC's page, from its number
   });
 
   it('asks DigiKey by its number without a link, and reports a supplier it could not ask', async () => {
