@@ -10,7 +10,7 @@ describe('what is logged', () => {
     expect(shouldAudit('POST', '/api/invoices')).toBe(true);
     expect(shouldAudit('DELETE', '/api/items/CAP-001')).toBe(true);
     expect(shouldAudit('GET', '/api/invoices')).toBe(false);
-    for (const p of ['/api/login', '/api/session/verify', '/api/auth/change-password', '/api/activity-log', '/api/kits/4/presence', '/api/pricing/oauth/start']) expect(shouldAudit('POST', p), p).toBe(false);
+    for (const p of ['/api/login', '/api/session/verify', '/api/auth/change-password', '/api/activity-log', '/api/kits/4/presence', '/api/pricing/oauth/start', '/api/kit-booking/validate', '/api/landed-cost-batches/2/preview']) expect(shouldAudit('POST', p), p).toBe(false);
   });
 
   it('names the action in the log style, with the record', () => {

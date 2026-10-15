@@ -35,6 +35,10 @@ const SKIP: RegExp[] = [
   /^\/api\/auth\//,
   /^\/api\/pricing\/oauth\//,
   /^\/api\/kits\/[^/]+\/presence$/,
+  // Automatic checks that change nothing, sent as you type (Kit Booking's
+  // stock check ran several times a second).
+  /^\/api\/kit-booking\/validate$/,
+  /^\/api\/landed-cost-batches\/[^/]+\/preview$/,
 ];
 
 export function shouldAudit(method: string, path: string): boolean {

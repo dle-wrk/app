@@ -108,14 +108,27 @@ export const ActivityLogsView: React.FC<ActivityLogsViewProps> = ({ currentUserE
   const exportCsv = () => {
     const esc = (v: any) => {
       const s = String(v ?? '');
-      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+      return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
-    const header = ['Timestamp', 'User', 'Action', 'Entity Type', 'Entity ID', 'Status', 'IP Address', 'Details'];
-    const rows = filteredLogs.map(l => [
-      l.created_at, l.user_email, l.action, l.entity_type, l.entity_id, l.status, l.ip_address, l.details,
-    ]);
-    const csv = [header, ...rows].map(row => row.map(esc).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    // details arrives as an object (a JSON column): written out as JSON text,
+    // not "[object Object]", with its error and who-it-was in their own columns.
+    const detailsOf = (l: any): any => {
+      if (l.details == null) return null;
+      if (typeof l.details === 'string') { try { return JSON.parse(l.details); } catch { return l.details; } }
+      return l.details;
+    };
+    const header = ['Timestamp', 'User', 'Action', 'Entity Type', 'Entity ID', 'Status', 'Error', 'IP Address', 'Details'];
+    const rows = filteredLogs.map(l => {
+      const d = detailsOf(l);
+      return [
+        l.created_at, l.user_email || actorOf(l), l.action, l.entity_type, l.entity_id, l.status,
+        (d && typeof d === 'object' && (d.error || d.message)) || l.error_message || '',
+        l.ip_address, d == null ? '' : typeof d === 'string' ? d : JSON.stringify(d),
+      ];
+    });
+    const csv = [header, ...rows].map(row => row.map(esc).join(',')).join('\r\n');
+    // The byte-order mark makes Excel read it as UTF-8 (R, ±, µ show correctly).
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
