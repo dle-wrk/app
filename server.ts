@@ -22,7 +22,7 @@ import {
 import { registerUsersRoutes } from './src/lib/usersRoutes';
 import { registerDocsRoutes } from './src/lib/docsRoutes';
 import { requireWriteAccess } from './src/lib/writeAccess';
-import { auditWrites } from './src/lib/auditLog';
+import { auditWrites, ensureAuditSchema } from './src/lib/auditLog';
 import { registerSuppliersRoutes } from './src/lib/suppliersRoutes';
 import { registerPricingRoutes } from './src/lib/pricingRoutes';
 import { registerBulkPricingRoutes } from './src/lib/bulkPricingRoutes';
@@ -1167,6 +1167,7 @@ async function runSchemaBootstrap() {
     await ensureUserPrefsSchema().catch((e) => console.error('Failed to bootstrap user preferences schema:', e));
     await ensureSalesPackagesSchema().catch((e) => console.error('Failed to bootstrap sales packages schema:', e));
     await ensurePotentialOrdersSchema().catch((e) => console.error('Failed to bootstrap potential orders schema:', e));
+    await ensureAuditSchema().catch((e) => console.error('Failed to update the activity log table:', e));
     await ensureProjectProgressSchema().catch((e) => console.error('Failed to bootstrap project progress schema:', e));
     await ensureDataVersionsTable().catch((e) => console.error('Failed to bootstrap data_versions table:', e));
 

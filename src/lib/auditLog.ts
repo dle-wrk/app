@@ -9,10 +9,23 @@
 // refused and unauthenticated attempts are recorded too.
 
 import type { NextFunction, Request, Response } from 'express';
-import { query } from './db';
+import { exec, query } from './db';
 import { clientIp } from './serverUtils';
 
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+/**
+ * The log's user column must be a real account, and was also required, so
+ * an attempt by someone not signed in (or a sign-in with an unknown email)
+ * couldn't be logged, and deleting a user with log entries failed (the
+ * rule clears it on delete). It may now be empty; who it was goes in the details.
+ */
+export async function ensureAuditSchema(run: (sql: string) => Promise<void> = exec): Promise<void> {
+  await run(`ALTER TABLE user_activity_logs ALTER COLUMN user_email DROP NOT NULL`);
+}
+
+/** SQL for a log entry's user: the account with that email, or empty when there is none. */
+export const LOG_USER_SQL = (param: string) => `(SELECT email FROM users WHERE email = ${param})`;
 
 /** Paths not logged here: logged elsewhere, the log itself, or background chatter. */
 const SKIP: RegExp[] = [
@@ -76,8 +89,8 @@ export function redact(value: unknown, depth = 0, key = ''): unknown {
 const MAX_DETAILS = 8000;
 
 /** The details stored with the entry, kept under MAX_DETAILS characters. */
-export function auditDetails(input: { method: string; path: string; status: number; ms: number; body: unknown; query: unknown; error: string | null }) {
-  const d: Record<string, unknown> = { source: 'auto', method: input.method, path: input.path, httpStatus: input.status, ms: input.ms };
+export function auditDetails(input: { method: string; path: string; status: number; ms: number; body: unknown; query: unknown; error: string | null; actor?: string }) {
+  const d: Record<string, unknown> = { source: 'auto', actor: input.actor, method: input.method, path: input.path, httpStatus: input.status, ms: input.ms };
   if (input.error) d.error = input.error.slice(0, 500);
   if (input.query && Object.keys(input.query as object).length) d.query = redact(input.query);
   if (input.body !== undefined && input.body !== null && !(typeof input.body === 'object' && !Object.keys(input.body as object).length)) d.sent = redact(input.body);
@@ -104,10 +117,10 @@ export function auditWrites(insert: Insert = query) {
     res.on('finish', () => {
       const status = res.statusCode;
       const { action, entityType, entityId } = describeWrite(req.method, path);
-      const user = (req as any).user?.email || 'anonymous';
-      const details = auditDetails({ method: req.method, path, status, ms: Date.now() - started, body: (req as any).body, query: req.query, error: status >= 400 ? (error || `HTTP ${status}`) : null });
+      const user = (req as any).user?.email || null;
+      const details = auditDetails({ method: req.method, path, status, ms: Date.now() - started, body: (req as any).body, query: req.query, error: status >= 400 ? (error || `HTTP ${status}`) : null, actor: user ?? 'not signed in' });
       void insert(
-        `INSERT INTO user_activity_logs (user_email, action, entity_type, entity_id, details, ip_address, user_agent, status) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        `INSERT INTO user_activity_logs (user_email, action, entity_type, entity_id, details, ip_address, user_agent, status) VALUES (${LOG_USER_SQL('$1')}, $2, $3, $4, $5, $6, $7, $8)`,
         [user, action, entityType, entityId, details, clientIp(req), String(req.headers['user-agent'] ?? '').slice(0, 500), status >= 400 ? 'ERROR' : 'SUCCESS'],
       ).catch((err: any) => console.warn('[audit] could not log', action, err?.message));
     });

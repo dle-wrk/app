@@ -66,7 +66,8 @@ describe('the recorder', () => {
     const [refused] = await run('DELETE', '/api/sales-packages/3', 403, { error: 'Your role cannot delete bookkeeping records.' }, { email: 'eng@x.com' });
     expect(JSON.parse(refused[4]).error).toContain('cannot');
     const [anon] = await run('POST', '/api/items', 401, { error: 'Sign in required' });
-    expect(anon[0]).toBe('anonymous');
+    expect(anon[0]).toBeNull(); // no account: stored empty, who it was in the details
+    expect(JSON.parse(anon[4]).actor).toBe('not signed in');
   });
 
   it('leaves reads alone', async () => {

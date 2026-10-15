@@ -22,6 +22,16 @@ interface ActivityLogsViewProps {
   currentUserEmail?: string;
 }
 
+
+/** Who a log entry is for when it has no user account: the attempted email, or "not signed in". */
+function actorOf(log: { user_email?: string | null; details?: unknown }): string {
+  if (log.user_email) return log.user_email;
+  try {
+    const d: any = typeof log.details === 'string' ? JSON.parse(log.details) : log.details;
+    return d?.attemptedEmail ? `${d.attemptedEmail} (no account)` : d?.actor || 'not signed in';
+  } catch { return 'not signed in'; }
+}
+
 export const ActivityLogsView: React.FC<ActivityLogsViewProps> = ({ currentUserEmail }) => {
   const [logs, setLogs] = useState<ActivityLog[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -48,7 +58,7 @@ export const ActivityLogsView: React.FC<ActivityLogsViewProps> = ({ currentUserE
       setLogs(allLogs);
 
       const actions = [...new Set(allLogs.map((l: any) => l.action))].sort();
-      const users = [...new Set(allLogs.map((l: any) => l.user_email))].sort();
+      const users = [...new Set(allLogs.map((l: any) => l.user_email).filter(Boolean))].sort();
       setUniqueActions(actions);
       setUniqueUsers(users);
     } catch (err) {
@@ -71,10 +81,10 @@ export const ActivityLogsView: React.FC<ActivityLogsViewProps> = ({ currentUserE
   const toMs = toDate ? new Date(toDate + 'T00:00:00').getTime() + 86_400_000 : null;
 
   const filteredLogs = logs.filter(log => {
+    // Any of these can be empty (an attempt by someone not signed in has no user).
+    const q = searchQuery.toLowerCase();
     const matchesSearch = searchQuery === '' ||
-      log.user_email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      log.action.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      log.entity_id.toLowerCase().includes(searchQuery.toLowerCase());
+      [log.user_email, log.action, log.entity_id, log.entity_type, actorOf(log)].some((v) => String(v ?? '').toLowerCase().includes(q));
 
     const matchesAction = selectedAction === 'ALL' || log.action === selectedAction;
     const matchesStatus = selectedStatus === 'ALL' || log.status === selectedStatus;
@@ -407,7 +417,7 @@ export const ActivityLogsView: React.FC<ActivityLogsViewProps> = ({ currentUserE
                         {formatDate(log.created_at)}
                       </td>
                       <td className="px-lg py-sm">
-                        <span className="font-bold text-primary">{log.user_email}</span>
+                        <span className="font-bold text-primary">{log.user_email || <span className="text-outline font-normal">{actorOf(log)}</span>}</span>
                       </td>
                       <td className="px-lg py-sm">
                         <span className={`inline-block px-2 py-1 rounded font-bold ${getActionColor(log.action)}`}>

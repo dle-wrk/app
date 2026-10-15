@@ -274,11 +274,13 @@ function logAuthEvent(
   details: Record<string, unknown> = {},
 ): void {
   const ua = String(req.headers?.['user-agent'] ?? '').slice(0, 500);
+  // The user column must be a real account: a sign-in with an unknown email
+  // is logged with it empty and the email tried in the details.
   void query(
     `INSERT INTO user_activity_logs (user_email, action, details, ip_address, user_agent, status)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
-    [email, action, JSON.stringify(details), clientIp(req), ua, status]
-  ).catch(() => {});
+     VALUES ((SELECT email FROM users WHERE email = $1), $2, $3, $4, $5, $6)`,
+    [email, action, JSON.stringify({ ...details, attemptedEmail: email }), clientIp(req), ua, status]
+  ).catch((err) => console.warn('[auth] could not log', action, err?.message));
 }
 
 export function registerAuthRoutes(app: Express): void {
