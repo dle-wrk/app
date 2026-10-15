@@ -30,6 +30,7 @@ import { registerPartAlignRoutes, ensurePartAlignSchema } from './src/lib/partAl
 import { registerSupplierQuoteRoutes } from './src/lib/supplierQuoteRoutes';
 import { registerUserPrefsRoutes, ensureUserPrefsSchema } from './src/lib/userPrefsRoutes';
 import { registerSalesPackagesRoutes, ensureSalesPackagesSchema } from './src/lib/salesPackagesRoutes';
+import { registerPotentialOrdersRoutes, ensurePotentialOrdersSchema } from './src/lib/potentialOrdersRoutes';
 import { registerBulkPricingReviewRoutes } from './src/lib/bulkPricingReview';
 import { AUTO_RUN_CRON, ensureBulkPricingSchema, runAutoBulkPricing } from './src/lib/bulkPricing';
 import { registerExchangeRateRoutes, updateExchangeRate } from './src/lib/exchangeRate';
@@ -193,6 +194,7 @@ registerPartAlignRoutes(app);
 registerSupplierQuoteRoutes(app);
 registerUserPrefsRoutes(app);
 registerSalesPackagesRoutes(app);
+registerPotentialOrdersRoutes(app);
 
 // Exchange rate (/api/exchange-rate, /api/exchange-rate/update). Consumed by
 // bulk pricing; also refreshed on boot and daily at 06:00 UTC.
@@ -1158,6 +1160,7 @@ async function runSchemaBootstrap() {
     await ensurePartAlignSchema().catch((e) => console.error('Failed to bootstrap part-align schema:', e));
     await ensureUserPrefsSchema().catch((e) => console.error('Failed to bootstrap user preferences schema:', e));
     await ensureSalesPackagesSchema().catch((e) => console.error('Failed to bootstrap sales packages schema:', e));
+    await ensurePotentialOrdersSchema().catch((e) => console.error('Failed to bootstrap potential orders schema:', e));
     await ensureProjectProgressSchema().catch((e) => console.error('Failed to bootstrap project progress schema:', e));
     await ensureDataVersionsTable().catch((e) => console.error('Failed to bootstrap data_versions table:', e));
 

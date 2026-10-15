@@ -17,15 +17,17 @@
 // client-side.
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { X, Mail, Phone, MapPin, Hash, FileText, Package, DollarSign, TrendingUp, Truck, Receipt, Download, Loader2 } from 'lucide-react';
+import { X, Mail, Phone, MapPin, Hash, FileText, Package, DollarSign, TrendingUp, Truck, Receipt, Download, Loader2, History } from 'lucide-react';
+import { ClientHistory } from './ClientHistory';
 import { Client, ClientOrder, Invoice, PaymentReceived } from '../../types';
 import { StatusPill, fmtMoney, fmtDate, apiGet } from './shared';
 import { buildAndSaveDocPdf } from '../../lib/pdfDocs';
 
-type TabKey = 'OVERVIEW' | 'ORDERS' | 'INVOICES' | 'PAYMENTS' | 'CREDITS' | 'DELIVERIES' | 'STATEMENT';
+type TabKey = 'OVERVIEW' | 'HISTORY' | 'ORDERS' | 'INVOICES' | 'PAYMENTS' | 'CREDITS' | 'DELIVERIES' | 'STATEMENT';
 
 const TABS: { key: TabKey; label: string; icon: React.ReactNode }[] = [
   { key: 'OVERVIEW', label: 'Overview', icon: <TrendingUp className="w-3.5 h-3.5" /> },
+  { key: 'HISTORY', label: 'History', icon: <History className="w-3.5 h-3.5" /> },
   { key: 'ORDERS', label: 'Orders & Quotes', icon: <Package className="w-3.5 h-3.5" /> },
   { key: 'INVOICES', label: 'Invoices', icon: <FileText className="w-3.5 h-3.5" /> },
   { key: 'PAYMENTS', label: 'Payments', icon: <DollarSign className="w-3.5 h-3.5" /> },
@@ -240,6 +242,10 @@ export const Customer360Modal: React.FC<{
                 </Panel>
               )}
             </div>
+          )}
+
+          {tab === 'HISTORY' && (
+            <ClientHistory clientId={client.id} onError={(m) => triggerToast(m, 'ERROR')} onSaved={(m) => triggerToast(m, 'SUCCESS')} />
           )}
 
           {tab === 'ORDERS' && (

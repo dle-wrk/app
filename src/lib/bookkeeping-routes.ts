@@ -183,7 +183,7 @@ const DispatchNoteCreateSchema = z.object({
   items: z.array(DispatchNoteItemSchema).min(1),
 });
 
-async function resolveTaxPercent(taxRateId: number | null | undefined): Promise<number> {
+export async function resolveTaxPercent(taxRateId: number | null | undefined): Promise<number> {
   if (!taxRateId) return 0;
   const row = await queryOne<{ rate: string }>(`SELECT rate FROM tax_rates WHERE id = $1`, [taxRateId]);
   return row ? parseFloat(row.rate) || 0 : 0;
@@ -193,7 +193,7 @@ async function fetchInventoryItem(partNumber: string) {
   return queryOne<any>(`SELECT * FROM inventory WHERE serial_number = $1`, [partNumber]);
 }
 
-async function adjustStock(client: any, partNumber: string, delta: number, type: 'INBOUND' | 'OUTBOUND' | 'BOOK-IN' | 'BOOK-OUT', reference: string, newCost?: number) {
+export async function adjustStock(client: any, partNumber: string, delta: number, type: 'INBOUND' | 'OUTBOUND' | 'BOOK-IN' | 'BOOK-OUT', reference: string, newCost?: number) {
   const item = await client.query(`SELECT name, stock FROM inventory WHERE serial_number = $1`, [partNumber]);
   if (!item.rows.length) return; // silently skip unknown part numbers (loose coupling, matches app convention)
   await client.query(`UPDATE inventory SET stock = stock + $1 WHERE serial_number = $2`, [delta, partNumber]);

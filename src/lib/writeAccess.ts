@@ -31,7 +31,7 @@ export const AREAS: Record<string, Area> = {
   clients: ORDERS, 'client-orders': ORDERS, 'client-order-items': ORDERS, invoices: ORDERS, bills: ORDERS,
   'credit-notes': ORDERS, 'purchase-orders': ORDERS, 'payments-received': ORDERS, 'payments-made': ORDERS,
   'dispatch-notes': ORDERS, expenses: ORDERS, accounts: ORDERS, 'tax-rates': ORDERS, 'journal-entries': ORDERS,
-  'sales-packages': ORDERS,
+  'sales-packages': ORDERS, 'potential-orders': ORDERS, 'client-events': ORDERS,
   bank: ORDERS, 'landed-cost-batches': ORDERS, bookkeeping: ORDERS, 'order-fulfillment': ORDERS,
   suppliers: SUPPLIERS,
   // Projects and production

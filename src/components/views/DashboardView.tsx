@@ -6,6 +6,7 @@ import {
 import { Item, ViewType } from '../../types';
 import { fmtNumber } from '../../lib/formatMoney';
 import { NeedsAttentionStrip, NavigateTarget } from './NeedsAttentionStrip';
+import { FollowUpsCard } from './FollowUpsCard';
 
 interface DashboardViewProps {
   items: Item[];
@@ -60,6 +61,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         criticalCount={criticalCount}
         onNavigate={onNavigate || ((t) => setView(t.view as ViewType))}
       />
+
+      {/* Client follow-ups and potential-order decisions due (hidden when none) */}
+      <FollowUpsCard onNavigate={onNavigate || ((t) => setView(t.view as ViewType))} />
 
       {/* Stats Row: Bento Style */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-md">

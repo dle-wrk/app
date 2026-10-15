@@ -79,6 +79,19 @@
         </div>
 
         <div class="section" id="vat-on-quotes">
+            <h2 id="potential-orders">Potential Orders</h2>
+            <div class="step">
+                <p><span class="menu-path">Bookkeeping → Sales → Potential Orders</span> holds work a client may still go ahead with, kept out of the books and off the overdue and outstanding lists. Each has an expected decision date, a likelihood (10–90%) and a reason; the totals show the open value, the value weighted by likelihood, and how many decisions are due.</p>
+                <ul>
+                    <li><strong>From an invoice</strong> (<em>Move to Potential Order</em> in the invoice's window): the invoice is taken out of the books. Its journal entry (the amount owed, revenue and VAT) is reversed, any stock it took is returned, and it is voided with a note saying where it went. An invoice with payments or an issued credit note can't be moved: reallocate the payment or credit it instead. A draft invoice has nothing to reverse.</li>
+                    <li><strong>From a sales order or quote</strong>: it is parked (status Potential) and a sales order's stock reservations are released. Parked orders leave the Sales Orders list.</li>
+                    <li><strong>New</strong>: <em>New potential order</em>, with the same lines editor (and <em>Add package</em>) as a quote.</li>
+                    <li><strong>Won</strong>: turn it into a quotation, a sales order (stock reserved) or a draft invoice (check it, then <em>Finalize &amp; Send</em> to put it in the books). One parked from a sales order or quote comes back as the same document. One moved from an invoice becomes a new invoice; the old one stays void.</li>
+                    <li><strong>Lost</strong>: mark it lost with the reason; a parked order is cancelled.</li>
+                </ul>
+                <p><strong>Client history</strong>: <span class="menu-path">Customers → a client → History</span> lists everything with that client, newest first: quotes, orders, invoices, payments, credit notes, deliveries, potential orders, moves between them, and notes people log (calls, meetings, emails). A note can have a follow-up date; follow-ups and potential-order decisions that have come due show on the Dashboard, where they can be ticked off.</p>
+            </div>
+
             <h2 id="sales-builder">Sales Builder (packages)</h2>
             <div class="step">
                 <p><span class="menu-path">Bookkeeping → Sales → Sales Builder</span> holds packages: a named set of lines to add to a sales order, quote or invoice in one go. Admins and managers make and change them; everyone can use them.</p>

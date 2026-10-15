@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { MoveToPotential } from './MoveToPotential';
 import { Plus, Eye, Trash2, Upload, Download, Paperclip, CheckCircle2, XCircle, Printer, Truck, AlertTriangle, Zap, Pencil } from 'lucide-react';
 import { ClientOrder } from '../../types';
 import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, apiGet, apiPost, apiPut, apiDelete, isAdminUser, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard, CreateButton } from './shared';
@@ -53,7 +54,7 @@ export const SalesOrdersTab: React.FC<ModuleDataProps & SalesOrdersTabExtras> = 
   useEffect(() => { loadReservations(); }, [clientOrders.length]);
 
   const filtered = useMemo(
-    () => clientOrders.filter(o => statusFilter === 'ALL' || o.status === statusFilter),
+    () => clientOrders.filter(o => o.status !== 'POTENTIAL' && (statusFilter === 'ALL' || o.status === statusFilter)),
     [clientOrders, statusFilter],
   );
 
@@ -316,6 +317,11 @@ export const SalesOrdersTab: React.FC<ModuleDataProps & SalesOrdersTabExtras> = 
           }}
           onClose={() => setViewing(null)}
           onDelete={() => handleDelete(viewing.id)}
+          onMovedToPotential={async (pot) => {
+            triggerToast(`${viewing.orderNumber} parked as Potential Order ${pot}.`, 'SUCCESS');
+            setViewing(null);
+            await refresh();
+          }}
           onDocChanged={() => refetchOrder(viewing.id)}
           onAccepted={async () => {
             // Quotation → SO conversion just landed. Pull the fresh row
@@ -633,6 +639,7 @@ const SalesOrderViewModal: React.FC<{
   onClose: () => void;
   onCreateDispatch?: (noteType: 'DELIVERY' | 'COLLECTION') => void;
   onDelete: () => void;
+  onMovedToPotential?: (potentialNumber: string) => void;
   onDocChanged: () => void;
   onAccepted?: () => void;
   accounts?: any[];
@@ -645,7 +652,7 @@ const SalesOrderViewModal: React.FC<{
   // triggers the callback.
   isAdmin?: boolean;
   onEdit?: () => void;
-}> = ({ order, clientName, busy, setBusy, triggerToast, onClose, onDelete, onDocChanged, onCreateDispatch, onAccepted, accounts, taxRates, isAdmin, onEdit }) => {
+}> = ({ order, clientName, busy, setBusy, triggerToast, onClose, onDelete, onDocChanged, onCreateDispatch, onAccepted, accounts, taxRates, isAdmin, onEdit, onMovedToPotential }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [autoFulfilOpen, setAutoFulfilOpen] = useState(false);
 
@@ -977,8 +984,18 @@ const SalesOrderViewModal: React.FC<{
               Accept → Convert to SO
             </PrimaryButton>
           )}
-          {order.status !== 'FULFILLED' && order.status !== 'CANCELLED' && order.status !== 'QUOTATION' && (
+          {order.status !== 'FULFILLED' && order.status !== 'CANCELLED' && order.status !== 'QUOTATION' && order.status !== 'POTENTIAL' && (
             <PrimaryButton icon={<Zap className="w-3.5 h-3.5" />} onClick={() => setAutoFulfilOpen(true)} disabled={busy}>Auto-Fulfil…</PrimaryButton>
+          )}
+          {['QUOTATION', 'DRAFT', 'APPROVED'].includes(order.status) && onMovedToPotential && (
+            <MoveToPotential
+              source="order"
+              id={order.id}
+              number={order.orderNumber}
+              status={order.status}
+              onMoved={onMovedToPotential}
+              onError={(m) => triggerToast(m, 'ERROR')}
+            />
           )}
           {onCreateDispatch && (
             <>

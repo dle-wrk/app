@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { MoveToPotential } from './MoveToPotential';
 import { Plus, Printer, Ban, Eye, Wallet, FileText, Download } from 'lucide-react';
 import { Invoice, InvoiceItem } from '../../types';
 import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, addDaysISO, apiPost, apiPut, apiDelete, apiGet, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard, CreateButton } from './shared';
@@ -338,6 +339,16 @@ export const InvoicesTab: React.FC<ModuleDataProps> = (props) => {
                 <PrimaryButton icon={<Wallet className="w-3.5 h-3.5" />} onClick={() => { setPayingInvoice(viewingInvoice); setViewingInvoice(null); }}>Record Payment</PrimaryButton>
                 <DangerButton icon={<Ban className="w-3.5 h-3.5" />} onClick={() => handleVoid(viewingInvoice.id)} disabled={busy}>Void</DangerButton>
               </>
+            )}
+            {['DRAFT', 'SENT', 'OVERDUE'].includes(viewingInvoice.status) && !(viewingInvoice.amountPaid > 0) && (
+              <MoveToPotential
+                source="invoice"
+                id={viewingInvoice.id}
+                number={viewingInvoice.invoiceNumber}
+                status={viewingInvoice.status}
+                onMoved={async (pot) => { setViewingInvoice(null); triggerToast(`${viewingInvoice.invoiceNumber} moved to Potential Order ${pot}.`, 'SUCCESS'); await refresh(); }}
+                onError={(m) => triggerToast(m, 'ERROR')}
+              />
             )}
           </div>
         </Modal>
