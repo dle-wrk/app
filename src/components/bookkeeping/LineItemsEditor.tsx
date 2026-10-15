@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { itemMatches } from '../../lib/itemSearch';
-import { Plus, Trash2, ChevronDown, Copy } from 'lucide-react';
+import { Plus, Trash2, ChevronDown, Copy, Package } from 'lucide-react';
+import { PackagePicker, type ExpandedPackage } from './PackagePicker';
 import { Item, TaxRate, Account } from '../../types';
 import { fmtMoney, inputClass, selectClass } from './shared';
 
@@ -64,10 +65,20 @@ interface LineItemsEditorProps {
   mode: 'SALES' | 'PURCHASE';
   currency: string;
   isWarrantyClaim?: boolean;
+  /**
+   * Sales Builder packages (sales orders, quotes, invoices): "Add package"
+   * puts a package's lines on the document. clientId lists that client's
+   * packages first; onNotes receives the package's notes for the document.
+   */
+  packages?: { clientId: number | null; onNotes?: (notes: string) => void; notify?: (msg: string, type?: 'SUCCESS' | 'ERROR' | 'INFO') => void };
 }
 
-export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChange, items, taxRates, accounts, mode, currency, isWarrantyClaim }) => {
+/** A line the user hasn't filled in yet (the editor starts with one). */
+const isBlankLine = (l: EditableLine) => !l.partNumber && !l.description.trim() && !(Number(l.unitPrice) > 0);
+
+export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChange, items, taxRates, accounts, mode, currency, isWarrantyClaim, packages }) => {
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+  const [pickingPackage, setPickingPackage] = useState(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   // SA default: every new line ships with Standard-rated VAT (15%),
@@ -122,6 +133,27 @@ export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChang
     } catch (err) {
       console.error('Error in add:', err);
     }
+  };
+
+  // A package's lines, after the ones already there (an untouched blank line is replaced).
+  const addPackage = (pkg: ExpandedPackage) => {
+    const added: EditableLine[] = pkg.lines.map((l) => ({
+      ...newEditableLine(),
+      partNumber: l.partNumber || undefined,
+      description: l.description || l.partNumber || '',
+      quantity: l.quantity,
+      unitPrice: l.unitPrice,
+      taxRateId: l.taxRateId ?? defaultTaxRateId,
+      taxInclusive: false,
+    }));
+    const kept = lines.filter((l) => !isBlankLine(l));
+    onChange([...kept, ...added]);
+    setPickingPackage(false);
+    if (pkg.notes?.trim()) packages?.onNotes?.(pkg.notes.trim());
+    const bits = [`${pkg.name}: ${added.length} line${added.length === 1 ? '' : 's'} added`];
+    if (pkg.zarPerUnit) bits.push(`prices converted from rand at R${pkg.zarPerUnit.toFixed(4)} per ${pkg.currency}`);
+    packages?.notify?.(bits.join('; ') + '.', 'SUCCESS');
+    if (pkg.warnings.length) packages?.notify?.(`Check before sending: ${pkg.warnings.join(' ')}`, 'INFO');
   };
 
   const onPickPart = (key: string, partNumber: string) => {
@@ -347,7 +379,8 @@ export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChang
                     <label className="block text-xs font-semibold text-outline mb-1.5 uppercase tracking-wide">Unit Price</label>
                     <input
                       type="number"
-                      min={0}
+                      // Below zero only for a discount line (no part number), e.g. a package discount.
+                      min={line.partNumber ? 0 : undefined}
                       // step="any" so a sub-cent unit price can be entered, matching
                       // component costs (0402 resistors bill at R0.0871). The derived
                       // line total still rounds to 2 dp in computeLineTotals — the
@@ -441,14 +474,30 @@ export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChang
       </div>
 
       {/* Add Line Button */}
-      <button
-        type="button"
-        onClick={add}
-        className="w-full py-3 px-4 rounded-lg border-2 border-dashed border-outline-variant/40 hover:border-primary/60 hover:bg-primary/5 text-primary font-semibold text-sm transition-all flex items-center justify-center gap-2"
-      >
-        <Plus className="w-4 h-4" />
-        Add line
-      </button>
+      <div className={packages && mode === 'SALES' ? 'grid grid-cols-1 sm:grid-cols-2 gap-2' : ''}>
+        <button
+          type="button"
+          onClick={add}
+          className="w-full py-3 px-4 rounded-lg border-2 border-dashed border-outline-variant/40 hover:border-primary/60 hover:bg-primary/5 text-primary font-semibold text-sm transition-all flex items-center justify-center gap-2"
+        >
+          <Plus className="w-4 h-4" />
+          Add line
+        </button>
+        {packages && mode === 'SALES' && (
+          <button
+            type="button"
+            onClick={() => setPickingPackage((v) => !v)}
+            aria-expanded={pickingPackage}
+            className="w-full py-3 px-4 rounded-lg border-2 border-dashed border-primary/40 hover:border-primary/70 hover:bg-primary/5 text-primary font-semibold text-sm transition-all flex items-center justify-center gap-2"
+          >
+            <Package className="w-4 h-4" />
+            Add package
+          </button>
+        )}
+      </div>
+      {packages && mode === 'SALES' && pickingPackage && (
+        <PackagePicker clientId={packages.clientId} currency={currency} onAdd={addPackage} onClose={() => setPickingPackage(false)} />
+      )}
 
       {/* Summary */}
       {lines.length > 0 && (

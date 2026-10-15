@@ -472,7 +472,12 @@ const InvoiceEditorModal: React.FC<ModuleDataProps & { initial: Invoice | null; 
       </div>
 
       <ErrorBoundary>
-        <LineItemsEditor lines={lines} onChange={setLines} items={safeItems} taxRates={safeTaxRates} mode="SALES" currency={currency} isWarrantyClaim={isWarrantyClaim} />
+        <LineItemsEditor lines={lines} onChange={setLines} items={safeItems} taxRates={safeTaxRates} mode="SALES" currency={currency} isWarrantyClaim={isWarrantyClaim}
+          packages={{
+            clientId: clientId ? Number(clientId) : null,
+            onNotes: (n) => setNotes((prev: string) => (prev.includes(n) ? prev : prev.trim() ? `${prev.trim()}\n${n}` : n)),
+            notify: triggerToast,
+          }} />
       </ErrorBoundary>
 
       <div className="grid md:grid-cols-2 gap-3 mt-md">

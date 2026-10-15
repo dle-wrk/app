@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { SalesBuilderTab } from '../bookkeeping/SalesBuilderTab';
 import { canChange } from '../../lib/changeAccess';
 import { notAllowedMessage } from '../../lib/permissions';
-import { LayoutDashboard, Users, ShoppingCart, Receipt, Wallet, Truck, FileText, CreditCard, Landmark, Wrench, BarChart3, Loader2 } from 'lucide-react';
+import { LayoutDashboard, Users, ShoppingCart, Receipt, Wallet, Truck, FileText, CreditCard, Landmark, Wrench, BarChart3, Loader2, Package } from 'lucide-react';
 import {
   Client, ClientOrder, ClientOrderItem, BuildJob, BomStructure, SubAssembly, FieldedAsset, StockLedgerEntry,
   Item, Supplier, Account, TaxRate, Invoice, PaymentReceived, PurchaseOrder, Bill, PaymentMade, Expense, BookkeepingBootstrap,
@@ -55,7 +56,7 @@ interface BookkeepingViewProps {
 }
 
 type Section = 'OVERVIEW' | 'SALES' | 'PURCHASES' | 'ACCOUNTING' | 'PRODUCTION' | 'REPORTS';
-type SalesSub = 'CUSTOMERS' | 'ORDERS' | 'INVOICES' | 'CREDIT_NOTES' | 'PAYMENTS' | 'DISPATCH';
+type SalesSub = 'CUSTOMERS' | 'ORDERS' | 'BUILDER' | 'INVOICES' | 'CREDIT_NOTES' | 'PAYMENTS' | 'DISPATCH';
 type PurchasesSub = 'VENDORS' | 'ORDERS' | 'BILLS' | 'LANDED_COST' | 'PAYMENTS' | 'EXPENSES';
 
 const SECTIONS: { key: Section; label: string; icon: React.ReactNode }[] = [
@@ -70,6 +71,7 @@ const SECTIONS: { key: Section; label: string; icon: React.ReactNode }[] = [
 const SALES_SUBS: { key: SalesSub; label: string; icon: React.ReactNode }[] = [
   { key: 'CUSTOMERS', label: 'Customers', icon: <Users className="w-3.5 h-3.5" /> },
   { key: 'ORDERS', label: 'Sales Orders', icon: <FileText className="w-3.5 h-3.5" /> },
+  { key: 'BUILDER', label: 'Sales Builder', icon: <Package className="w-3.5 h-3.5" /> },
   { key: 'INVOICES', label: 'Invoices', icon: <Receipt className="w-3.5 h-3.5" /> },
   { key: 'CREDIT_NOTES', label: 'Credit Notes', icon: <Receipt className="w-3.5 h-3.5" /> },
   { key: 'PAYMENTS', label: 'Payments Received', icon: <Wallet className="w-3.5 h-3.5" /> },
@@ -216,6 +218,7 @@ export const BookkeepingView: React.FC<BookkeepingViewProps> = ({
               }}
             />
           )}
+          {salesSub === 'BUILDER' && <SalesBuilderTab {...moduleData} />}
           {salesSub === 'INVOICES' && <InvoicesTab {...moduleData} />}
           {salesSub === 'PAYMENTS' && <PaymentsReceivedTab {...moduleData} />}
           {salesSub === 'CREDIT_NOTES' && <CreditNotesTab {...moduleData} />}

@@ -57,7 +57,20 @@ const LineItemSchema = z.object({
   }, z.boolean().optional()),
 });
 
-const InvoiceCreateSchema = z.object({
+// Sales lines may be negative when they are a discount: no part number (so
+// no stock moves), e.g. a Sales Builder package's discount line. The
+// document as a whole still can't come to less than zero.
+const SalesLineItemSchema = LineItemSchema.extend({
+  unitPrice: z.preprocess((v) => v === '' || v === null || v === undefined ? v : Number(v), z.number()),
+}).refine((l) => l.unitPrice >= 0 || !String(l.partNumber ?? '').trim(), {
+  message: 'A line with a negative price (a discount) can\'t have a part number.',
+  path: ['unitPrice'],
+}).refine((l) => !(l.unitPrice < 0 && l.deductStock), { message: "A discount line can't take stock.", path: ['deductStock'] });
+
+const noNegativeTotal = (items: Array<{ quantity: number; unitPrice: number }>) =>
+  items.reduce((s, l) => s + (Number(l.quantity) || 0) * (Number(l.unitPrice) || 0), 0) >= -0.005;
+
+export const InvoiceCreateSchema = z.object({
   clientId: z.preprocess((v) => {
     if (v === null || v === undefined || v === '') return null;
     return Number(v);
@@ -77,7 +90,7 @@ const InvoiceCreateSchema = z.object({
     return v;
   }, z.boolean().optional()),
   status: z.enum(['DRAFT', 'SENT']).optional(),
-  items: z.array(LineItemSchema).min(1),
+  items: z.array(SalesLineItemSchema).min(1).refine(noNegativeTotal, { message: 'The discounts come to more than the lines.' }),
 });
 
 const BillCreateSchema = z.object({

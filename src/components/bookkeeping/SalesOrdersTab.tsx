@@ -587,6 +587,11 @@ const SalesOrderEditorModal: React.FC<ModuleDataProps & { onClose: () => void; o
           taxRates={taxRates}
           mode="SALES"
           currency={currency}
+          packages={{
+            clientId: clientId ? Number(clientId) : null,
+            onNotes: (n) => setNotes((prev) => (prev.includes(n) ? prev : prev.trim() ? `${prev.trim()}\n${n}` : n)),
+            notify: triggerToast,
+          }}
         />
       </div>
 

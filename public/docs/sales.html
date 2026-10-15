@@ -79,6 +79,18 @@
         </div>
 
         <div class="section" id="vat-on-quotes">
+            <h2 id="sales-builder">Sales Builder (packages)</h2>
+            <div class="step">
+                <p><span class="menu-path">Bookkeeping → Sales → Sales Builder</span> holds packages: a named set of lines to add to a sales order, quote or invoice in one go. Admins and managers make and change them; everyone can use them.</p>
+                <ul>
+                    <li><strong>Lines</strong> can be inventory items (by SKU), finished products (Production Costs model #), services (installation, labour, delivery: no stock) and other packages, each with a quantity, a selling price in rand set in the package, and a tax rate. The builder shows each item's cost and margin, and <em>Price items without a price at cost + %</em> fills prices from cost and a markup.</li>
+                    <li><strong>Discount %</strong> (optional) is added to the order as its own line, e.g. "Solar Kit A discount (5%)": one per tax rate when the lines use different rates, so the VAT stays right.</li>
+                    <li><strong>Category, tags and client:</strong> for finding packages; a package for one client is only offered on that client's documents, listed first.</li>
+                    <li><strong>Notes</strong> are copied into the order's notes. <strong>Retire</strong> a package to stop offering it; <strong>Duplicate</strong> makes a variant.</li>
+                </ul>
+                <p>On a sales order, quote or invoice, <strong>Add package</strong> (next to <em>Add line</em>) puts the package's lines on the document as normal lines you can still edit; packages inside are expanded, and stock reserves per item as usual. Packages are priced in rand: on a document in another currency the prices are converted at the daily rate. You're warned when a package has an item marked Inactive or Do Not Use. Changing a package later never changes documents it was already added to.</p>
+            </div>
+
             <h2>VAT on quotes &amp; orders</h2>
 
             <h3 id="line-prices-shown-excl-vat">Line prices shown Excl. VAT</h3>
