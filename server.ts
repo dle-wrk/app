@@ -22,6 +22,7 @@ import {
 import { registerUsersRoutes } from './src/lib/usersRoutes';
 import { registerDocsRoutes } from './src/lib/docsRoutes';
 import { requireWriteAccess } from './src/lib/writeAccess';
+import { auditWrites } from './src/lib/auditLog';
 import { registerSuppliersRoutes } from './src/lib/suppliersRoutes';
 import { registerPricingRoutes } from './src/lib/pricingRoutes';
 import { registerBulkPricingRoutes } from './src/lib/bulkPricingRoutes';
@@ -126,6 +127,11 @@ app.get('/healthz', (_req, res) => {
 // Populate req.user from the client's X-Session-Id header when present.
 // Scoped to /api so static asset requests don't trigger a DB lookup.
 app.use('/api', (req, res, next) => attachSessionUser(req, res, next));
+
+// Every change (POST/PUT/PATCH/DELETE), successful or not, goes to the
+// activity log (src/lib/auditLog.ts). Ahead of the sign-in and permission
+// checks so refused and unauthenticated attempts are recorded too.
+app.use('/api', auditWrites());
 
 // Every /api route below this line needs a signed-in session, except the
 // short public list in authRoutes (sign-in, session checks, password reset,

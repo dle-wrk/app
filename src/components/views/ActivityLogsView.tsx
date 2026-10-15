@@ -43,7 +43,8 @@ export const ActivityLogsView: React.FC<ActivityLogsViewProps> = ({ currentUserE
   const fetchLogs = async () => {
     setIsLoading(true);
     try {
-      const allLogs = await fetchActivityLogs(undefined, undefined, 500, 0);
+      // Every change is logged now (lib/auditLog), so look further back.
+      const allLogs = await fetchActivityLogs(undefined, undefined, 3000, 0);
       setLogs(allLogs);
 
       const actions = [...new Set(allLogs.map((l: any) => l.action))].sort();

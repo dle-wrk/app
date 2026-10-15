@@ -21,6 +21,12 @@
 
         <div class="main-col">
         <div class="section" id="accounts-access">
+            <h2 id="activity-log-everything">The activity log records every change</h2>
+            <div class="step">
+                <p><span class="menu-path">Activity Logs</span> now records every change made anywhere in the app, successful or not, automatically: who, what (e.g. <code>CREATE_INVOICES</code>, <code>INVOICES_VOID</code>, <code>UPDATE_ITEMS</code>), which record, the result (including refusals such as "your role can't", and attempts by someone not signed in), the error when it failed, how long it took, and a summary of what was sent. Passwords, tokens and API keys are shown as [hidden]; uploaded files only by their size. Sign-ins are logged as before (LOGIN / LOGOUT); reads aren't logged.</p>
+                <p>Error messages shown to someone on screen are logged too, as <code>SHOWN_ERROR</code> with the screen they were on, so a form that fails before it reaches the server (a missing client, no lines) is on record. The same message on the same screen is logged once a minute at most. Filter by <em>Status: Error</em> to see everything that went wrong.</p>
+            </div>
+
             <h2>Accounts &amp; access</h2>
 
             <h3 id="one-account-one-active-device">One account, one active device</h3>

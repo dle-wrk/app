@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { footprintOptions, itemFootprints, itemMatches } from './lib/itemSearch';
 import { matchesSourcing, sourcingCounts } from './lib/sourcing';
 import { applyDisplaySize, isDisplaySize } from './lib/displaySize';
+import { logShownError, setShownErrorScreen } from './lib/shownErrorLog';
 import { usdToZarRate } from './lib/usdToZar';
 import { classifyPartNumberBySupplier, SUPPLIER_SLOTS } from './lib/partNumbers';
 import {
@@ -318,6 +319,8 @@ export default function App() {
     setToastMessage(message);
     setShowToast(true);
     setTimeout(() => setShowToast(false), 4000);
+    // Every error shown goes to the activity log (lib/shownErrorLog).
+    if (t === 'ERROR') logShownError(message);
   }, []);
 
   // Publish triggerToast to the global singleton so utility modules and
@@ -624,6 +627,7 @@ export default function App() {
 
   // Navigation & UI State
   const [currentView, setView] = useState<ViewType>('dashboard');
+  useEffect(() => { setShownErrorScreen(currentView); }, [currentView]);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [dateTimeStr, setDateTimeStr] = useState<string>('Loading system time...');
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
