@@ -5,6 +5,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 // what the operator sees in the preview matches what they'd get if
 // they picked one of these presets as the active build quantity.
 const PRESET_QTYS = [50, 100, 250, 500, 1000] as const;
+import { confirmDialog } from '../../lib/confirmDialog';
+import { fillByTier } from '../../lib/kitTierFill';
 import { canChange } from '../../lib/changeAccess';
 import { classifyPartNumberBySupplier } from '../../lib/partNumbers';
 import { Project } from '../../types';
@@ -816,25 +818,24 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
     }
   };
 
-  // Bulk auto-allocation. Walks every non-DNF audit row, hits the
-  // batch match endpoint once, then greedy-fills each row with T1 +
-  // T2 candidates (same rule the per-row Auto-fill by tier button
-  // uses — footprint swaps stay manual). Rows the operator already
-  // allocated by hand are skipped so a partial job isn't clobbered.
+  // Bulk auto-allocation: the per-row "Auto-fill by tier" (lib/kitTierFill)
+  // on every non-DNF line, for the build quantity now chosen. Lines with
+  // picks are refilled too (after asking), so changing the build quantity
+  // and pressing it again re-sizes everything. A line with no T1/T2
+  // candidate keeps its picks: those are hand-chosen footprint swaps.
   const autoAllocateAll = async () => {
     if (autoAllocateBusy || auditResults.length === 0) return;
-    const candidates = auditResults.filter(r => !dnfOverride.has(r.component_id));
-    if (candidates.length === 0) {
+    const targets = auditResults.filter(r => !dnfOverride.has(r.component_id));
+    if (targets.length === 0) {
       triggerToast('Nothing to allocate — every line is DNF.', 'INFO');
       return;
     }
-    // Skip lines that already carry a non-empty operator allocation
-    // so a bulk-allocate never overwrites hand-tuned picks.
-    const targets = candidates.filter(r => !((allocations[r.component_id] || []).some(a => a.qty > 0)));
-    if (targets.length === 0) {
-      triggerToast('Every line already has an allocation — clear one first if you want auto-fill to redo it.', 'INFO');
-      return;
-    }
+    const withPicks = targets.filter(r => (allocations[r.component_id] || []).some(a => a.qty > 0)).length;
+    if (withPicks > 0 && !(await confirmDialog({
+      title: 'Auto-allocate',
+      message: `Fill every line by tier (T1 exact, then T2 same value and footprint) for ${buildQty} unit${buildQty === 1 ? '' : 's'}? This replaces the current picks on ${withPicks} line${withPicks === 1 ? '' : 's'}. Lines with no T1/T2 match keep their picks.`,
+      confirmLabel: 'Auto-allocate',
+    }))) return;
     setAutoAllocateBusy(true);
     setAutoAllocateProgress({ done: 0, total: targets.length });
     try {
@@ -851,23 +852,9 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
       const nextAllocations: Record<string, Array<{ allocatedCode: string; qty: number }>> = { ...allocations };
       for (let i = 0; i < targets.length; i++) {
         const row = targets[i];
-        const list = matches[row.component_id] || [];
-        // Greedy fill T1 + T2 until needed is covered. Reservations
-        // held by OTHER kits (not our own) reduce what we can take —
-        // client-side reservations map already excludes self.
-        let remaining = row.qty_required;
-        const picks: Array<{ allocatedCode: string; qty: number }> = [];
-        for (const c of list) {
-          if (remaining <= 0) break;
-          if (c.matchTier > 2) continue;
-          const reserved = reservations[c.serialNumber] || 0;
-          const avail = Math.max(0, c.stock - reserved);
-          const take = Math.min(avail, remaining);
-          if (take > 0) {
-            picks.push({ allocatedCode: c.serialNumber, qty: take });
-            remaining -= take;
-          }
-        }
+        // Reservations held by OTHER kits reduce what can be taken; the
+        // client-side map already leaves this kit's own out.
+        const { picks, remaining } = fillByTier(matches[row.component_id] || [], row.qty_required, reservations);
         if (picks.length > 0) {
           nextAllocations[row.component_id] = picks;
           if (remaining > 0) short++;
@@ -877,9 +864,9 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
       }
       setAllocations(nextAllocations);
       const skipped = targets.length - filled;
-      const parts = [`${filled} line${filled === 1 ? '' : 's'} auto-allocated`];
+      const parts = [`${filled} line${filled === 1 ? '' : 's'} filled for ${buildQty} unit${buildQty === 1 ? '' : 's'}`];
       if (short > 0) parts.push(`${short} still short after fill`);
-      if (skipped > 0) parts.push(`${skipped} had no T1/T2 candidates`);
+      if (skipped > 0) parts.push(`${skipped} had no T1/T2 candidates (left as they were)`);
       triggerToast(parts.join(' · '), short > 0 ? 'INFO' : 'SUCCESS');
     } catch (err: any) {
       triggerToast(`Auto-allocate failed: ${err.message}`, 'ERROR');
@@ -1270,7 +1257,7 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
             <button
               onClick={autoAllocateAll}
               disabled={loading || autoAllocateBusy || auditResults.length === 0}
-              title="Walk every non-DNF line and greedy-fill T1 + T2 candidates. Skips lines you already allocated by hand."
+              title="Fill every non-DNF line by tier (T1, then T2) for the build quantity chosen, as Auto-fill by tier does for one line. Replaces existing picks (asks first); lines with no T1/T2 match keep theirs."
               className="h-9 px-3 rounded-lg flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider border border-primary/40 text-primary bg-primary/10 hover:bg-primary/20 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {autoAllocateBusy ? (
@@ -2483,14 +2470,7 @@ function KitAllocationDialog({ stockCode, needed, existing, autoResolved, reserv
         // to make, not the machine.
         if (existing.length === 0 && list.length > 0) {
           const seed: Record<string, number> = {};
-          let remaining = needed;
-          for (const c of list) {
-            if (remaining <= 0) break;
-            if (c.matchTier > 2) continue; // T3 / T4 are manual-only
-            const avail = Math.max(0, c.stock - (reservations[c.serialNumber] || 0));
-            const take = Math.min(avail, remaining);
-            if (take > 0) { seed[c.serialNumber] = take; remaining -= take; }
-          }
+          for (const p of fillByTier(list, needed, reservations).picks) seed[p.allocatedCode] = p.qty;
           setPicks(seed);
         }
       })
@@ -2537,16 +2517,7 @@ function KitAllocationDialog({ stockCode, needed, existing, autoResolved, reserv
   // decides they're compatible.
   const autoFillByTier = () => {
     const next: Record<string, number> = {};
-    let remaining = needed;
-    for (const c of candidates) {
-      if (remaining <= 0) break;
-      if (c.matchTier > 2) continue; // T3 / T4 stay manual-only
-      const take = Math.min(availableFor(c), remaining);
-      if (take > 0) {
-        next[c.serialNumber] = take;
-        remaining -= take;
-      }
-    }
+    for (const p of fillByTier(candidates, needed, reservations).picks) next[p.allocatedCode] = p.qty;
     setPicks(next);
   };
 
