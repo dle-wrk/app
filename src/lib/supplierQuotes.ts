@@ -15,6 +15,10 @@ export interface Ladder {
   mult: number;              // order in multiples of this (>= 1)
   stock: number | null;      // null when the supplier doesn't say
   url?: string | null;
+  /** e.g. "Tape & Reel (TR)", "Cut Tape (CT)". */
+  packaging?: string | null;
+  /** The same part in other packagings (DigiKey): quoting may pick one. */
+  alternatives?: Ladder[];
 }
 
 export interface Priced {
@@ -28,6 +32,9 @@ export interface Priced {
   enoughStock: boolean;
   /** Why more than needed would be bought, when it is. */
   note: string | null;
+  /** The part number asked for, when another packaging of it was cheaper or could be bought at this quantity. */
+  swappedFrom?: string | null;
+  packaging?: string | null;
 }
 
 /** What a ladder charges for a quantity; null without prices. */
@@ -46,6 +53,23 @@ export function priceLadder(l: Ladder, qty: number, rateToZar: number): Priced |
     supplierPn: l.supplierPn, orderQty, unit, currency: l.currency, unitZar,
     totalZar: Math.round(unitZar * orderQty * 100) / 100, stock: l.stock, enoughStock, note,
   };
+}
+
+/**
+ * The best way to buy a quantity from a ladder that may have other
+ * packagings of the same part: in stock first, then the lowest total. A
+ * DigiKey reel number asked for 389 pieces comes back as its cut tape.
+ */
+export function bestPackaging(l: Ladder, qty: number, rateToZar: number): Priced | null {
+  const options: Priced[] = [];
+  for (const x of [l, ...(l.alternatives ?? [])]) {
+    const p = priceLadder(x, qty, rateToZar);
+    if (p) options.push({ ...p, packaging: x.packaging ?? null });
+  }
+  if (!options.length) return null;
+  const pool = options.some((p) => p.enoughStock) ? options.filter((p) => p.enoughStock) : options;
+  const best = pool.reduce((a, b) => (b.totalZar < a.totalZar || (b.totalZar === a.totalZar && b.supplierPn === l.supplierPn) ? b : a));
+  return best.supplierPn === l.supplierPn ? best : { ...best, swappedFrom: l.supplierPn };
 }
 
 export type LineQuotes = Partial<Record<SlotSupplier, Priced | { error: string }>>;

@@ -449,6 +449,9 @@ export interface LcscProduct {
   priceBreaks: Array<{ qty: number; price: number }>;
   stock: number | null;
   productUrl: string;
+  /** The least LCSC sells, and the step it sells in (0603 resistors: 100 and 100). */
+  minBuy?: number | null;
+  increment?: number | null;
 }
 
 /** Reads LCSC's product-detail answer. Null when LCSC doesn't know the part number. */
@@ -472,6 +475,8 @@ export function parseLcscProduct(data: any): LcscProduct | null {
     priceBreaks,
     stock: p.stockNumber === null || p.stockNumber === undefined || !Number.isFinite(stock) ? null : stock,
     productUrl: `https://www.lcsc.com/product-detail/${encodeURIComponent(code)}.html`,
+    minBuy: Number(p.minBuyNumber) > 0 ? Number(p.minBuyNumber) : null,
+    increment: Number(p.split) > 0 ? Number(p.split) : null,
   };
 }
 
@@ -662,23 +667,29 @@ export async function mouserLadder(mouserPn: string): Promise<Ladder | null> {
 export async function digikeyLadder(digikeyPn: string): Promise<Ladder | null> {
   const data: any = await digikeyKeywordSearch(digikeyPn, 5);
   const want = digikeyPn.trim().toUpperCase();
+  const currency = normaliseCurrency((await getPricingCredential('digikey', 'locale_currency', 'DIGIKEY_LOCALE_CURRENCY')) || 'ZAR');
   for (const product of (Array.isArray(data?.Products) ? data.Products : [])) {
-    const v = (Array.isArray(product?.ProductVariations) ? product.ProductVariations : [])
-      .find((x: any) => String(x?.DigiKeyProductNumber ?? '').toUpperCase() === want);
+    const variations: any[] = Array.isArray(product?.ProductVariations) ? product.ProductVariations : [];
+    const v = variations.find((x: any) => String(x?.DigiKeyProductNumber ?? '').toUpperCase() === want);
     if (!v) continue;
-    const breaks = (Array.isArray(v.StandardPricing) ? v.StandardPricing : [])
-      .map((b: any) => ({ qty: Number(b.BreakQuantity), price: Number(b.UnitPrice) }))
-      .filter((b: any) => b.qty > 0 && b.price > 0);
-    const stock = v.QuantityAvailableforPackageType ?? product.QuantityAvailable;
-    return {
-      supplierPn: String(v.DigiKeyProductNumber).trim(),
-      currency: normaliseCurrency((await getPricingCredential('digikey', 'locale_currency', 'DIGIKEY_LOCALE_CURRENCY')) || 'ZAR'),
-      breaks,
-      moq: Number(v.MinimumOrderQuantity) || 1,
-      mult: 1,
-      stock: stock === undefined || stock === null ? null : Number(stock) || 0,
-      url: product.ProductUrl ? String(product.ProductUrl) : null,
+    // One ladder per packaging: a reel (…-2-ND, …TR-ND) is sold by the full
+    // reel, cut tape (…-1-ND, …CT-ND) in any quantity; quoting picks one.
+    const ladderOf = (x: any): Ladder => {
+      const stock = x.QuantityAvailableforPackageType ?? product.QuantityAvailable;
+      return {
+        supplierPn: String(x.DigiKeyProductNumber).trim(),
+        currency,
+        breaks: (Array.isArray(x.StandardPricing) ? x.StandardPricing : [])
+          .map((b: any) => ({ qty: Number(b.BreakQuantity), price: Number(b.UnitPrice) }))
+          .filter((b: any) => b.qty > 0 && b.price > 0),
+        moq: Number(x.MinimumOrderQuantity) || 1,
+        mult: 1,
+        stock: stock === undefined || stock === null ? null : Number(stock) || 0,
+        url: product.ProductUrl ? String(product.ProductUrl) : null,
+        packaging: x.PackageType?.Name ? String(x.PackageType.Name) : null,
+      };
     };
+    return { ...ladderOf(v), alternatives: variations.filter((x) => x !== v && x?.DigiKeyProductNumber).map(ladderOf) };
   }
   return null;
 }
@@ -687,7 +698,10 @@ export async function digikeyLadder(digikeyPn: string): Promise<Ladder | null> {
 export async function lcscLadder(code: string): Promise<Ladder | null> {
   const p = await fetchLcscProduct(code);
   if (!p || !p.priceBreaks.length) return null;
-  return { supplierPn: p.partNumber, currency: p.currency, breaks: p.priceBreaks, moq: p.priceBreaks[0].qty, mult: 1, stock: p.stock, url: p.productUrl };
+  return {
+    supplierPn: p.partNumber, currency: p.currency, breaks: p.priceBreaks,
+    moq: Math.max(p.priceBreaks[0].qty, p.minBuy || 1), mult: p.increment || 1, stock: p.stock, url: p.productUrl,
+  };
 }
 
 /** Today's count of live calls to a supplier, and whether one more is allowed. */

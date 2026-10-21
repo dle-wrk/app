@@ -16,7 +16,7 @@ import { query, queryOne } from './db';
 import { readExchangeRate } from './exchangeRate';
 import type { SlotSupplier } from './partNumbers';
 import { ORDER_SUPPLIERS, supplierNumberFor } from './supplierBom';
-import { cheapestSupplier, priceLadder, type Ladder, type LineQuotes } from './supplierQuotes';
+import { bestPackaging, cheapestSupplier, type Ladder, type LineQuotes } from './supplierQuotes';
 import { countPricingCall, digikeyLadder, lcscLadder, mouserLadder, pricingCallAllowed } from './pricingRoutes';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -37,7 +37,7 @@ export const defaultQuoteDeps: QuoteDeps = {
   fetchLadder: (s, pn) => (s === 'mouser' ? mouserLadder(pn) : s === 'digikey' ? digikeyLadder(pn) : lcscLadder(pn)),
   cached: async (s, pn) => {
     const row = await queryOne<{ data: string; created_at: string }>(
-      `SELECT data, created_at FROM pricing_cache WHERE provider = $1 AND part_number = $2 AND qty = 0`, [`ladder:${s}`, pn.toUpperCase()]);
+      `SELECT data, created_at FROM pricing_cache WHERE provider = $1 AND part_number = $2 AND qty = 0`, [`ladder2:${s}`, pn.toUpperCase()]);
     if (!row || Date.now() - new Date(row.created_at).getTime() > DAY_MS) return null;
     try { return { ladder: JSON.parse(row.data) }; } catch { return null; }
   },
@@ -45,7 +45,7 @@ export const defaultQuoteDeps: QuoteDeps = {
     await query(
       `INSERT INTO pricing_cache (provider, part_number, qty, data, created_at) VALUES ($1, $2, 0, $3, now())
        ON CONFLICT (provider, part_number, qty) DO UPDATE SET data = EXCLUDED.data, created_at = now()`,
-      [`ladder:${s}`, pn.toUpperCase(), JSON.stringify(ladder)]);
+      [`ladder2:${s}`, pn.toUpperCase(), JSON.stringify(ladder)]);
   },
   allowed: (s) => (s === 'lcsc' ? Promise.resolve(true) : pricingCallAllowed(s)),
   counted: (s) => (s === 'lcsc' ? Promise.resolve() : countPricingCall(s)),
@@ -97,7 +97,7 @@ export async function quoteLines(lines: QuoteLineIn[], deps: QuoteDeps, progress
       if ('error' in ladder) { quotes[key] = ladder; continue; }
       const rate = rates[ladder.currency];
       if (!rate) { quotes[key] = { error: `No exchange rate for ${ladder.currency}` }; continue; }
-      quotes[key] = priceLadder(ladder, l.qty, rate) ?? { error: `${label} gave no price` };
+      quotes[key] = bestPackaging(ladder, l.qty, rate) ?? { error: `${label} gave no price` };
     }
     return { stockCode: l.stockCode, qty: l.qty, quotes, best: cheapestSupplier(quotes) };
   });

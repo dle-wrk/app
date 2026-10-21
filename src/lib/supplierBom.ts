@@ -25,10 +25,18 @@ export function toDigikeyCsv(rows: OrderRow[]): string {
   const body = rows.map(r => `${r.qty},"${r.supplierPn.replace(/"/g, '""')}"`).join('\n');
   return head + body + '\n';
 }
+/** Plain text for an upload file: ± ° Ω µ and the like spelled out, anything else non-ASCII dropped. */
+export function plainText(s: string): string {
+  return (s || '')
+    .replace(/±/g, '+/-').replace(/°/g, ' deg').replace(/[ΩΩ]/g, 'ohm').replace(/[µμ]/g, 'u')
+    .replace(/×/g, 'x').replace(/[–—]/g, '-').replace(/[‘’]/g, "'").replace(/[“”]/g, "'")
+    .normalize('NFKD').replace(/[^\x20-\x7E]/g, '').replace(/\s+/g, ' ').trim();
+}
+
 /** LCSC: Comment, Designator, Footprint, LCSC Part #, Quantity (LCSC's BOM tool). */
 export function toLcscCsv(rows: OrderRow[]): string {
   const head = 'Comment,Designator,Footprint,LCSC Part #,Quantity\n';
-  const esc = (s: string) => (s || '').replace(/,/g, ' ').replace(/"/g, "'");
+  const esc = (s: string) => plainText(s).replace(/,/g, ' ').replace(/"/g, "'");
   const body = rows.map(r => `"${esc(r.description)}","","${esc(r.footprint)}","${r.supplierPn}",${r.qty}`).join('\n');
   return head + body + '\n';
 }
@@ -61,18 +69,26 @@ export interface SupplierOrder {
  * With `assign` (a split, e.g. the cheapest supplier per line), each line goes
  * only to the supplier it is assigned, and a line not assigned goes nowhere.
  */
-export function supplierOrders(lines: OrderLine[], assign?: Record<string, SlotSupplier | null | undefined>): SupplierOrder[] {
+export function supplierOrders(
+  lines: OrderLine[],
+  assign?: Record<string, SlotSupplier | null | undefined>,
+  /** Checked with the supplier: the part number and quantity to order there instead (packaging, minimum, multiple). */
+  checked?: (stockCode: string, supplier: SlotSupplier) => { supplierPn: string; qty: number } | null,
+): SupplierOrder[] {
   const wanted = lines.filter((l) => l.qty > 0);
   return ORDER_SUPPLIERS.map(({ key, label }) => {
     const byPn = new Map<string, OrderRow>();
     const missing: string[] = [];
     for (const l of wanted) {
       if (assign && assign[l.stockCode] !== key) { missing.push(l.stockCode); continue; }
-      const pn = supplierNumberFor(l.supPns, key);
-      if (!pn) { missing.push(l.stockCode); continue; }
+      const own = supplierNumberFor(l.supPns, key);
+      if (!own) { missing.push(l.stockCode); continue; }
+      const c = checked?.(l.stockCode, key);
+      const pn = c?.supplierPn || own;
+      const qty = c?.qty ?? l.qty;
       const row = byPn.get(pn.toUpperCase());
-      if (row) row.qty += l.qty;
-      else byPn.set(pn.toUpperCase(), { supplierPn: pn, qty: l.qty, description: l.description, footprint: l.footprint });
+      if (row) row.qty += qty;
+      else byPn.set(pn.toUpperCase(), { supplierPn: pn, qty, description: l.description, footprint: l.footprint });
     }
     return { supplier: key, label, rows: [...byPn.values()], missing };
   });

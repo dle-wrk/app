@@ -65,7 +65,28 @@ export default function SupplierOrderFiles({ lines, projectName, pcbQty, onShowN
   }, [quoted, qtyLines, picks]);
 
   const splitOn = !!(quoted && split && assignment);
-  const orders = useMemo(() => supplierOrders(qtyLines, splitOn ? assignment! : undefined), [qtyLines, splitOn, assignment]);
+  // Once checked with the suppliers, each file orders what that supplier
+  // can sell: its minimum and multiple (LCSC 0603 resistors in hundreds) and,
+  // for DigiKey, cut tape instead of a reel number that needs a full reel.
+  const checked = useMemo(() => {
+    if (!quoted) return undefined;
+    const byCode = new Map(quoted.map((q) => [q.stockCode, q]));
+    return (code: string, s: SlotSupplier) => {
+      const p = byCode.get(code)?.quotes[s];
+      return isPriced(p) ? { supplierPn: p.supplierPn, qty: p.orderQty } : null;
+    };
+  }, [quoted]);
+  const orders = useMemo(() => supplierOrders(qtyLines, splitOn ? assignment! : undefined, checked), [qtyLines, splitOn, assignment, checked]);
+  const adjustments = useMemo(() => {
+    let raised = 0, swapped = 0, noStock = 0;
+    for (const q of quoted ?? []) for (const p of Object.values(q.quotes)) {
+      if (!isPriced(p)) continue;
+      if (p.orderQty > q.qty) raised++;
+      if (p.swappedFrom) swapped++;
+      if (!p.enoughStock) noStock++;
+    }
+    return { raised, swapped, noStock };
+  }, [quoted]);
   const nowhere = atNoSupplier(supplierOrders(qtyLines));
   const summary = useMemo(() => (quoted && assignment
     ? splitSummary(quoted.map((q) => ({ quotes: q.quotes, choice: assignment[q.stockCode] ?? null })))
@@ -147,6 +168,20 @@ export default function SupplierOrderFiles({ lines, projectName, pcbQty, onShowN
         </p>
       )}
       {quote.status === 'error' && <p className="text-[11px] text-error">The price check stopped: {quote.message}</p>}
+      {qtyLines.length > 0 && !quoted && quote.status !== 'running' && (
+        <p className="text-[11px] text-amber-500" data-testid="unchecked-note">
+          These files order the shortage quantities as they are, not yet checked with the suppliers. LCSC sells many parts only in steps (0603 resistors in hundreds) and a DigiKey reel number (…-2-ND, …TR-ND) needs a full reel.
+          {mayQuote ? ' Press Compare prices first: the files then use each supplier\'s minimum and pack size, and DigiKey cut tape where a reel would be needed.' : ''}
+        </p>
+      )}
+      {quoted && (adjustments.raised > 0 || adjustments.swapped > 0 || adjustments.noStock > 0) && (
+        <p className="text-[11px] text-on-surface-variant" data-testid="checked-note">
+          Checked with the suppliers: the files order what each one sells.
+          {adjustments.raised > 0 ? ` ${fmtNumber(adjustments.raised)} quantit${adjustments.raised === 1 ? 'y' : 'ies'} rounded up to a minimum or pack size.` : ''}
+          {adjustments.swapped > 0 ? ` ${fmtNumber(adjustments.swapped)} DigiKey line${adjustments.swapped === 1 ? '' : 's'} switched to a packaging sold at this quantity (e.g. cut tape instead of reel).` : ''}
+          {adjustments.noStock > 0 ? <span className="text-amber-500">{` ${fmtNumber(adjustments.noStock)} price${adjustments.noStock === 1 ? ' is' : 's are'} for stock the supplier doesn't have (shown in the table).`}</span> : ''}
+        </p>
+      )}
 
       {qtyLines.length === 0 ? (
         <p className="text-xs text-on-surface-variant">{restock ? 'Nothing needs reordering.' : basis === 'shortage' ? `Nothing is short for ${fmtNumber(pcbQty)} pcs: no order needed.` : 'This BOM has no lines to order.'}</p>
@@ -221,7 +256,8 @@ export default function SupplierOrderFiles({ lines, projectName, pcbQty, onShowN
                                   className={`w-full text-right rounded px-1 py-0.5 ${chosen ? 'bg-primary/15 ring-1 ring-primary text-on-surface font-bold' : 'hover:bg-surface-variant/40 text-on-surface-variant'}`}>
                                   <span className="font-mono">{fmtZAR(p.totalZar)}</span>
                                   <span className="block text-[9px] text-outline font-normal">
-                                    {fmtCurrency(p.unit, p.currency, 4)} each{p.note ? ` · ${p.note}` : ''}
+                                    {fmtCurrency(p.unit, p.currency, 4)} each{p.orderQty !== q.qty ? ` · buy ${fmtNumber(p.orderQty)}` : ''}{p.note ? ` · ${p.note}` : ''}
+                                    {p.swappedFrom && <span className="block text-primary">{p.supplierPn}{p.packaging ? ` (${p.packaging})` : ''}, not {p.swappedFrom}</span>}
                                   </span>
                                   {!p.enoughStock && <span className="block text-[9px] text-amber-500 font-normal">{p.stock === 0 ? 'Out of stock' : `Only ${fmtNumber(p.stock ?? 0)} in stock`}</span>}
                                 </button>

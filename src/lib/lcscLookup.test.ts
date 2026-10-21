@@ -39,6 +39,7 @@ describe('parseLcscProduct', () => {
       partNumber: 'C1591', mpn: 'CL10B104KB8NNNC', manufacturer: 'Samsung Electro-Mechanics', currency: 'USD',
       priceBreaks: [{ qty: 100, price: 0.0085 }, { qty: 1000, price: 0.0064 }, { qty: 4000, price: 0.0055 }, { qty: 100000, price: 0.0043 }],
       stock: 1175100, productUrl: 'https://www.lcsc.com/product-detail/C1591.html',
+      minBuy: null, increment: null, // the sample answer has no minimum or step
     });
   });
 
