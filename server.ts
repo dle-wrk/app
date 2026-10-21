@@ -28,6 +28,7 @@ import { registerPricingRoutes } from './src/lib/pricingRoutes';
 import { registerBulkPricingRoutes } from './src/lib/bulkPricingRoutes';
 import { registerPartNumberReviewRoutes } from './src/lib/partNumberReview';
 import { registerPartAlignRoutes, ensurePartAlignSchema } from './src/lib/partAlignRoutes';
+import { registerFootprintFillRoutes } from './src/lib/footprintFill';
 import { registerSupplierQuoteRoutes } from './src/lib/supplierQuoteRoutes';
 import { registerUserPrefsRoutes, ensureUserPrefsSchema } from './src/lib/userPrefsRoutes';
 import { registerSalesPackagesRoutes, ensureSalesPackagesSchema } from './src/lib/salesPackagesRoutes';
@@ -197,6 +198,8 @@ registerBulkPricingReviewRoutes(app);
 registerPartNumberReviewRoutes(app);
 // Lining up part numbers and links by supplier slot (/api/inventory/part-align).
 registerPartAlignRoutes(app);
+// Footprints for items with none, from their size or description (/api/inventory/footprint-fill).
+registerFootprintFillRoutes(app);
 registerSupplierQuoteRoutes(app);
 registerUserPrefsRoutes(app);
 registerSalesPackagesRoutes(app);

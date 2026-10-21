@@ -803,8 +803,11 @@ export default function App() {
             website: s.website,
             contact_email: s.contact_email,
             notes: s.notes,
-            leadTime: s.lead_time,
-            responseTime: s.response_time,
+            leadTime: s.lead_time ?? undefined,
+            responseTime: s.response_time ?? undefined,
+            measuredLeadTime: s.measured_lead_time ?? undefined,
+            measuredOrders: s.measured_orders ?? undefined,
+            measuredSlowest: s.measured_slowest ?? undefined,
           })));
         }
         // Normalize ids to numbers: the projects table stores TEXT ids, but Project.id

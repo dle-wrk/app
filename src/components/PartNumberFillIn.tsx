@@ -12,6 +12,7 @@ import { fmtNumber } from '../lib/formatMoney';
 import { currentUserCan, notAllowedMessage } from '../lib/permissions';
 import { PrimaryButton, SecondaryButton } from './bookkeeping/shared';
 import PartAlign from './PartAlign';
+import FootprintFill from './FootprintFill';
 import PartNumberReview, { ISSUE_TITLES, appliable, fixRequest, type PartNumberIssue } from './PartNumberReview';
 
 type ToastType = 'SUCCESS' | 'ERROR' | 'INFO';
@@ -118,6 +119,7 @@ export default function PartNumberFillIn({ onClose, onShowNotification, onOpenIt
               </div>
             )}
           </div>
+          <FootprintFill onShowNotification={onShowNotification} onOpenItem={onOpenItem} onChanged={onChanged} />
           {showAll && <PartNumberReview onShowNotification={onShowNotification} onOpenItem={onOpenItem} onChanged={() => { onChanged?.(); void load(); }} />}
           <PartAlign onShowNotification={onShowNotification} onOpenItem={onOpenItem} onChanged={onChanged} />
         </div>

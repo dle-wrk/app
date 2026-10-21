@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import { query, queryOne } from './db';
+import { loadMeasuredLeadTimes } from './suppliersRoutes';
+import { leadTimeForSupplierName, slowestSlotLeadTime, type MeasuredLeadTime } from './supplierLeadTime';
 import {
   computeConsumptionStats,
   forecastDemand,
@@ -19,7 +21,7 @@ async function loadInventory() {
 // Discontinued), with what a supplier order file needs.
 async function loadReorderableInventory() {
   const { rows } = await query(
-    `SELECT serial_number, name, stock, low_stock_lvl, current_cost_dollar, description, footprint,
+    `SELECT serial_number, name, stock, low_stock_lvl, current_cost_dollar, description, footprint, supplier,
             sup_pn_1, sup_pn_2, sup_pn_3, sup_pn_4, sup_pn_5
        FROM inventory
       WHERE deleted != true AND UPPER(COALESCE(TRIM(status), 'ACTIVE')) NOT IN ('INACTIVE', 'DO NOT USE', 'DISCONTINUED')`
@@ -571,8 +573,22 @@ router.get('/api/analytics/reorder-recommendations', async (req, res) => {
   try {
     const leadTimeDays = parseInt(String(req.query.leadTimeDays ?? 14), 10) || 14;
     const safetyDays = parseInt(String(req.query.safetyDays ?? 7), 10) || 7;
-    const [items, transactions] = await Promise.all([loadReorderableInventory(), loadTransactions()]);
-    const recs = computeReorderRecommendations(items, transactions, { leadTimeDays, safetyDays });
+    const [items, transactions, suppliers, measured] = await Promise.all([
+      loadReorderableInventory(), loadTransactions(),
+      query<any>(`SELECT id, name, lead_time FROM suppliers`).then((r) => r.rows),
+      loadMeasuredLeadTimes().catch(() => new Map<string, MeasuredLeadTime>()),
+    ]);
+    // Each item's lead time is its supplier's (measured from received orders, else typed):
+    // its Supplier field's, else the slowest of those it has part numbers for (../supplierLeadTime).
+    const leadTimeFor = (item: any) => {
+      const own = leadTimeForSupplierName(item.supplier, suppliers, measured);
+      const l = own ?? slowestSlotLeadTime([item.sup_pn_1, item.sup_pn_2, item.sup_pn_3], suppliers, measured);
+      if (!l) return null;
+      const m = measured.get(String(suppliers.find((s: any) => s.name === l.supplier)?.id));
+      const how = l.source === 'measured' ? `measured over ${m?.orders ?? 0} order${m?.orders === 1 ? '' : 's'}` : 'as typed';
+      return { days: l.days, note: own ? `${l.supplier}, ${how}` : `slowest of its suppliers: ${l.supplier}, ${how}` };
+    };
+    const recs = computeReorderRecommendations(items, transactions, { leadTimeDays, safetyDays, leadTimeFor });
     const byPart = new Map(items.map((i: any) => [String(i.serial_number), i]));
     res.json({
       leadTimeDays,

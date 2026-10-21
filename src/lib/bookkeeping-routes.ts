@@ -227,6 +227,28 @@ export async function returnInvoiceStock(client: any, invoiceNumber: string, why
   return returned;
 }
 
+/** The stock a still-open sales order needs reserved: its lines less what its
+ *  other live invoices booked out. Used when one of its invoices is voided,
+ *  since sending that invoice released the order's reservation. */
+export async function reReserveOrder(client: any, orderId: number, voidedInvoiceId: number): Promise<boolean> {
+  const { rows: so } = await client.query(`SELECT status FROM client_orders WHERE id = $1 FOR UPDATE`, [orderId]);
+  // Quotations never reserve; a fulfilled or closed order needs nothing kept.
+  if (!so.length || ['FULFILLED', 'CANCELLED', 'POTENTIAL', 'QUOTATION'].includes(so[0].status)) return false;
+  const { rows: lines } = await client.query(`SELECT part_number, quantity FROM client_order_items WHERE client_order_id = $1`, [orderId]);
+  const { rows: taken } = await client.query(
+    `SELECT ii.part_number, SUM(ii.quantity) AS qty FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id
+      WHERE i.client_order_id = $1 AND i.id <> $2 AND i.status NOT IN ('VOID','DRAFT') AND ii.deduct_stock AND ii.part_number IS NOT NULL
+      GROUP BY ii.part_number`, [orderId, voidedInvoiceId]);
+  const left = new Map<string, number>(taken.map((t: any) => [t.part_number, Number(t.qty) || 0]));
+  const need = lines.map((l: any) => {
+    const pn = l.part_number; let qty = Number(l.quantity) || 0;
+    if (pn && left.get(pn)) { const t = Math.min(qty, left.get(pn)!); qty -= t; left.set(pn, left.get(pn)! - t); }
+    return { partNumber: pn, quantity: qty };
+  }).filter((l: any) => l.partNumber && l.quantity > 0);
+  await rewriteReservations(client, orderId, need);
+  return true;
+}
+
 export function registerBookkeepingRoutes(app: Express) {
   // ==========================================================================
   // BOOTSTRAP — one round trip for the whole module
@@ -971,8 +993,10 @@ export function registerBookkeepingRoutes(app: Express) {
       // The stock it booked out goes back on the shelf.
       const returned = await returnInvoiceStock(client, invoice.invoice_number, '— voided, stock returned');
       await client.query(`UPDATE invoices SET status = 'VOID', balance_due = 0, updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [id]);
+      // Its sales order, if still open, gets back the reservation the invoice released.
+      const reReserved = invoice.client_order_id && invoice.status !== 'DRAFT' ? await reReserveOrder(client, invoice.client_order_id, id) : false;
       await client.query('COMMIT');
-      res.json({ ok: true, stockReturned: returned });
+      res.json({ ok: true, stockReturned: returned, orderReReserved: reReserved });
     } catch (err: any) {
       await client.query('ROLLBACK');
       res.status(400).json({ error: err.message });
@@ -1199,7 +1223,11 @@ export function registerBookkeepingRoutes(app: Express) {
     const { status } = req.body;
     if (!['DRAFT', 'SENT', 'PARTIAL', 'RECEIVED', 'CANCELLED'].includes(status)) return res.status(400).json({ error: 'invalid status' });
     try {
-      const row = await queryOne(`UPDATE purchase_orders SET status = $1 WHERE id = $2 RETURNING *`, [status, id]);
+      // Received: remember when (first time only), for measured lead times; reopened: forget it.
+      const row = await queryOne(
+        `UPDATE purchase_orders SET status = $1,
+                received_at = CASE WHEN $1 = 'RECEIVED' THEN COALESCE(received_at, now()) WHEN $1 = 'PARTIAL' THEN received_at ELSE NULL END
+          WHERE id = $2 RETURNING *`, [status, id]);
       if (!row) return res.status(404).json({ error: 'purchase order not found' });
       res.json(mapPurchaseOrder(row));
     } catch (err: any) {

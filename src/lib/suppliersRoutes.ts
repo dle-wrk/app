@@ -9,11 +9,22 @@
 
 import type { Express } from 'express';
 import { query, queryOne } from './db';
+import { RECEIVED_ORDERS_SQL, measureLeadTimes, type MeasuredLeadTime } from './supplierLeadTime';
+
+export async function loadMeasuredLeadTimes(): Promise<Map<string, MeasuredLeadTime>> {
+  const { rows } = await query<any>(RECEIVED_ORDERS_SQL);
+  return measureLeadTimes(rows.map((r: any) => ({ supplierId: r.supplier_id, orderDate: r.order_date, receivedDate: r.received_date })));
+}
 
 export function registerSuppliersRoutes(app: Express): void {
   app.get('/api/suppliers', async (_req, res) => {
     const { rows } = await query('SELECT * FROM suppliers ORDER BY id');
-    res.json(rows);
+    // With each supplier's lead time measured from its received orders (./supplierLeadTime).
+    const measured = await loadMeasuredLeadTimes().catch(() => new Map<string, MeasuredLeadTime>());
+    res.json(rows.map((r: any) => {
+      const m = measured.get(String(r.id));
+      return m ? { ...r, measured_lead_time: m.days, measured_orders: m.orders, measured_slowest: m.slowest } : r;
+    }));
   });
 
   app.put('/api/suppliers/:id', async (req, res) => {

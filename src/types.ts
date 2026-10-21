@@ -58,6 +58,10 @@ export interface Supplier {
   notes: string;
   leadTime?: number;
   responseTime?: number;
+  /** Measured from its received purchase orders (src/lib/supplierLeadTime): median days, over how many, the slowest. */
+  measuredLeadTime?: number;
+  measuredOrders?: number;
+  measuredSlowest?: number;
 }
 
 export interface ProductionKit {

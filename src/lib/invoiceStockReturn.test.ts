@@ -8,7 +8,46 @@ vi.mock('./db', () => ({
   exec: async () => {},
 }));
 
-import { returnInvoiceStock } from './bookkeeping-routes';
+import { reReserveOrder, returnInvoiceStock } from './bookkeeping-routes';
+
+/** A stand-in for a sales order, its lines, its other invoices and the stock. */
+function orderDb(status: string, lines: Array<[string, number]>, otherInvoices: Array<[string, number]>, stock: Record<string, number>) {
+  const reservations: Array<{ part: string; reserved: number; backorder: number }> = [];
+  return {
+    reservations,
+    async query(sql: string, params: any[] = []) {
+      const s = sql.replace(/\s+/g, ' ');
+      if (/FROM client_orders WHERE id/.test(s)) return { rows: [{ status }] };
+      if (/FROM client_order_items/.test(s)) return { rows: lines.map(([part_number, quantity]) => ({ part_number, quantity })) };
+      if (/FROM invoice_items ii JOIN invoices/.test(s)) return { rows: otherInvoices.map(([part_number, qty]) => ({ part_number, qty })) };
+      if (/^DELETE FROM client_order_reservations/.test(s)) { reservations.length = 0; return { rows: [] }; }
+      if (/SELECT stock FROM inventory/.test(s)) return { rows: [{ stock: stock[params[0]] ?? 0 }] };
+      if (/SUM\(reserved_qty\)/.test(s)) return { rows: [{ reserved: '0' }] };
+      if (/^INSERT INTO client_order_reservations/.test(s)) { reservations.push({ part: params[1], reserved: params[2], backorder: params[3] }); return { rows: [] }; }
+      throw new Error(`unexpected SQL: ${s}`);
+    },
+  };
+}
+
+describe('voiding an invoice gives its sales order back its reservation', () => {
+  it('reserves what the order still needs: its lines less what its other invoices took', async () => {
+    const db = orderDb('APPROVED', [['BAT-002', 4], ['PSU-002', 1], ['SOFT-001', 1]], [['BAT-002', 1]], { 'BAT-002': 10, 'PSU-002': 0, 'SOFT-001': 5 });
+    expect(await reReserveOrder(db, 12, 9)).toBe(true);
+    expect(db.reservations).toEqual([
+      { part: 'BAT-002', reserved: 3, backorder: 0 },
+      { part: 'PSU-002', reserved: 0, backorder: 1 }, // none on hand: back-ordered
+      { part: 'SOFT-001', reserved: 1, backorder: 0 },
+    ]);
+  });
+
+  it('leaves a fulfilled, cancelled or parked order, and a quotation, alone', async () => {
+    for (const status of ['FULFILLED', 'CANCELLED', 'POTENTIAL', 'QUOTATION']) {
+      const db = orderDb(status, [['BAT-002', 4]], [], { 'BAT-002': 10 });
+      expect(await reReserveOrder(db, 12, 9)).toBe(false);
+      expect(db.reservations).toEqual([]);
+    }
+  });
+});
 
 /** A stand-in for the stock tables: a ledger of transactions and the stock on hand. */
 function fakeDb(ledger: Array<{ part: string; qty: number; reference: string }>, stock: Record<string, number>) {

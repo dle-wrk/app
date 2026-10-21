@@ -156,6 +156,8 @@ export async function ensureBookkeepingSchema() {
     notes TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   )`).catch(() => {});
+  // When it was received, for measured supplier lead times (./supplierLeadTime).
+  await exec(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS received_at TIMESTAMPTZ`).catch(() => {});
 
   await exec(`CREATE TABLE IF NOT EXISTS purchase_order_items (
     id SERIAL PRIMARY KEY,

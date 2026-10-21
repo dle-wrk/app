@@ -290,6 +290,9 @@ export interface ReorderRecommendation {
   suggestedOrderQty: number;
   urgency: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
   basis: string;
+  /** The lead time it was worked out with, and where that came from. */
+  leadTimeDays: number;
+  leadTimeNote: string;
 }
 
 /**
@@ -303,9 +306,13 @@ export interface ReorderRecommendation {
 export function computeReorderRecommendations(
   items: RawItem[],
   transactions: RawTxn[],
-  opts: { leadTimeDays?: number; safetyDays?: number } = {}
+  opts: {
+    leadTimeDays?: number; safetyDays?: number;
+    /** The item's own lead time (its supplier's, ../supplierLeadTime), else leadTimeDays is used. */
+    leadTimeFor?: (item: RawItem) => { days: number; note: string } | null;
+  } = {}
 ): ReorderRecommendation[] {
-  const leadTimeDays = opts.leadTimeDays ?? 14;
+  const defaultLead = opts.leadTimeDays ?? 14;
   const safetyDays = opts.safetyDays ?? 7;
   const stats = computeConsumptionStats(transactions);
   const out: ReorderRecommendation[] = [];
@@ -317,6 +324,9 @@ export function computeReorderRecommendations(
     const low = itemLow(item);
     const stat = stats.get(part);
     const rate = stat && !stat.insufficientData ? stat.dailyRate : 0;
+    const own = opts.leadTimeFor?.(item) ?? null;
+    const leadTimeDays = own ? own.days : defaultLead;
+    const leadNote = own ? own.note : `default ${defaultLead}d lead`;
 
     const needsAttention = stock <= 0 || (low > 0 && stock < low) || (rate > 0 && stock / rate < leadTimeDays);
     if (!needsAttention) continue;
@@ -331,7 +341,7 @@ export function computeReorderRecommendations(
     if (rate > 0) {
       const target = rate * (leadTimeDays + safetyDays);
       suggestedOrderQty = Math.max(0, Math.ceil(target - stock));
-      basis = `Demand-based: ${rate.toFixed(2)} units/day x ${leadTimeDays}d lead + ${safetyDays}d safety.`;
+      basis = `Demand-based: ${rate.toFixed(2)} units/day x ${leadTimeDays}d lead (${leadNote}) + ${safetyDays}d safety.`;
     } else {
       suggestedOrderQty = Math.max(0, Math.ceil(low - stock));
       basis = stat
@@ -358,6 +368,8 @@ export function computeReorderRecommendations(
       suggestedOrderQty,
       urgency,
       basis,
+      leadTimeDays,
+      leadTimeNote: leadNote,
     });
   }
 

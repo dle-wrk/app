@@ -71,13 +71,22 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
                     </a>
                   </td>
                   <td className="px-lg py-sm text-center">
-                    <span className={`px-2 py-1 rounded-md font-bold font-mono ${
-                      (s.leadTime || 0) <= 7 ? 'text-green-400 bg-green-500/10' :
-                      (s.leadTime || 0) <= 14 ? 'text-yellow-400 bg-yellow-500/10' :
-                      'text-red-400 bg-red-500/10'
-                    }`}>
-                      {s.leadTime !== undefined ? `${s.leadTime} Days` : 'N/A'}
-                    </span>
+                    {(() => {
+                      // Measured from received purchase orders where there are any, else as typed.
+                      const measured = s.measuredLeadTime != null;
+                      const days = measured ? s.measuredLeadTime! : s.leadTime;
+                      if (days == null) return <span className="text-outline">Not set</span>;
+                      return (
+                        <span className="inline-flex flex-col items-center gap-0.5" data-testid={`lead-${s.id}`}>
+                          <span className={`px-2 py-1 rounded-md font-bold font-mono ${
+                            days <= 7 ? 'text-green-400 bg-green-500/10' : days <= 14 ? 'text-yellow-400 bg-yellow-500/10' : 'text-red-400 bg-red-500/10'
+                          }`}>{days} {days === 1 ? 'Day' : 'Days'}</span>
+                          <span className="text-[10px] text-outline" title={measured ? `Median days from order to received over ${s.measuredOrders} received purchase order(s); slowest ${s.measuredSlowest} days.` : 'Typed on the supplier: no received purchase orders to measure yet.'}>
+                            {measured ? `measured · ${s.measuredOrders} order${s.measuredOrders === 1 ? '' : 's'}${s.leadTime != null && s.leadTime !== days ? ` (typed ${s.leadTime})` : ''}` : 'typed'}
+                          </span>
+                        </span>
+                      );
+                    })()}
                   </td>
                   <td className="px-lg py-sm text-center">
                     <span className={`px-2 py-1 rounded-md font-bold font-mono ${
@@ -85,7 +94,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
                       (s.responseTime || 0) <= 24 ? 'text-yellow-400 bg-yellow-500/10' :
                       'text-red-400 bg-red-500/10'
                     }`}>
-                      {s.responseTime !== undefined ? `${s.responseTime} Hrs` : 'N/A'}
+                      {s.responseTime != null ? `${s.responseTime} Hrs` : 'N/A'}
                     </span>
                   </td>
                   <td className="px-lg py-sm font-mono">
@@ -123,30 +132,19 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
         </div>
       </div>
 
-      {/* Bottom compliance guidelines card list */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-md mt-lg">
-        <div className="bg-surface-container p-md border border-outline-variant rounded-xl flex items-start gap-md">
-          <div className="bg-primary/10 p-sm rounded text-primary shrink-0 self-center">
-            <Shield className="w-6 h-6" />
-          </div>
-          <div>
-            <h5 className="font-bold text-xs mb-1">Global compliance standard checks</h5>
-            <p className="text-on-surface-variant text-[11px] leading-relaxed">
-              Suppliers are audited against aerospace standards AS9100D and ISO 9001 quality metrics. Audit intervals scheduled next Month.
-            </p>
-          </div>
+      {/* How the lead times are worked out */}
+      <div className="bg-surface-container p-md border border-outline-variant rounded-xl flex items-start gap-md mt-lg">
+        <div className="bg-tertiary/10 p-sm rounded text-tertiary shrink-0 self-center">
+          <Clock className="w-6 h-6" />
         </div>
-
-        <div className="bg-surface-container p-md border border-outline-variant rounded-xl flex items-start gap-md">
-          <div className="bg-tertiary/10 p-sm rounded text-tertiary shrink-0 self-center">
-            <Clock className="w-6 h-6" />
-          </div>
-          <div>
-            <h5 className="font-bold text-xs mb-1">Procurement lead optimization tracker</h5>
-            <p className="text-on-surface-variant text-[11px] leading-relaxed">
-              Supplier transit times are calculated on simulated averages. Use the 'Sync stock' workflow to trigger dynamic recalculation.
-            </p>
-          </div>
+        <div>
+          <h5 className="font-bold text-xs mb-1">Lead times</h5>
+          <p className="text-on-surface-variant text-[11px] leading-relaxed">
+            Measured where a supplier has received purchase orders: the median days from the order date to the day the PO was marked
+            Received (recorded from 21 Oct 2026; a bill's date isn't used, as bills are often entered when the order is placed). Until then,
+            the lead time typed on the supplier is shown. Restock suggestions use each item's supplier's lead time: its Supplier field,
+            else the slowest of the suppliers it has part numbers for.
+          </p>
         </div>
       </div>
     </div>
