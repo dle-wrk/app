@@ -104,6 +104,18 @@ const SlotChange: React.FC<{ from: string[]; to: string[] | null }> = ({ from, t
   </table>
 );
 
+/** The issues whose fix can be sent to POST /api/inventory/part-number-review/fix. */
+export const appliable = (issues: PartNumberIssue[]) =>
+  issues.filter((i) => i.fix && i.value && (i.field || i.fix.action === 'arrange_slots' || i.fix.action === 'supplier_from_number'));
+
+/** That route's body for these issues. */
+export const fixRequest = (issues: PartNumberIssue[]) => ({
+  fixes: issues.map((i) => ({ serialNumber: i.serialNumber, ...(i.field ? { field: i.field } : {}), action: i.fix!.action, expected: i.value, ...(i.fix!.value ? { value: i.fix!.value } : {}) })),
+});
+
+/** Section titles by issue kind, for summaries elsewhere. */
+export const ISSUE_TITLES: Record<string, string> = Object.fromEntries(SECTIONS.map((s) => [s.kind, s.title]));
+
 const issueKey = (i: PartNumberIssue) => `${i.kind}|${i.serialNumber}|${i.field ?? ''}`;
 
 function toCsv(issues: PartNumberIssue[]): string {
@@ -146,7 +158,7 @@ export default function PartNumberReview({ onShowNotification, onOpenItem, onCha
   }, [data]);
 
   const apply = async (issues: PartNumberIssue[], key: string) => {
-    const fixable = issues.filter((i) => i.fix && i.value && (i.field || i.fix.action === 'arrange_slots' || i.fix.action === 'supplier_from_number'));
+    const fixable = appliable(issues);
     if (!fixable.length) return;
     if (fixable.length > 1) {
       const ok = await confirmDialog({
@@ -161,9 +173,7 @@ export default function PartNumberReview({ onShowNotification, onOpenItem, onCha
       const res = await fetch('/api/inventory/part-number-review/fix', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fixes: fixable.map((i) => ({ serialNumber: i.serialNumber, ...(i.field ? { field: i.field } : {}), action: i.fix!.action, expected: i.value, ...(i.fix!.value ? { value: i.fix!.value } : {}) })),
-        }),
+        body: JSON.stringify(fixRequest(fixable)),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) { onShowNotification(body.error || 'Could not apply the fixes.', 'ERROR'); return; }

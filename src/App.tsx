@@ -36,6 +36,7 @@ import { mapDbRowsToTransactions, formatTrxDateTime } from './lib/mapDbTransacti
 import PickPlaceManager from './components/PickPlaceManager';
 import AlternatesManager from './components/AlternatesManager';
 import BulkPricingWizard from './components/BulkPricingWizard';
+import PartNumberFillIn from './components/PartNumberFillIn';
 import { fmtUSD, fmtNumber } from './lib/formatMoney';
 import { ImportPlan, parseDelimited, planFromSheets, planFromTable, planToCsv } from './lib/inventoryImport';
 import ItemDetailModal, { deriveMetric, deriveImperial } from './components/ItemDetailModal';
@@ -723,55 +724,22 @@ export default function App() {
    * Evaluates active warehouse inventory levels against transaction ledgers
    * Aligns total counts dynamically and triggers feedback toast alerts
    */
-  const handleStockSync = () => {
+  // Sync Stock: reload stock from the server, then check every item's part
+  // numbers and offer to fix them (./components/PartNumberFillIn). (It used
+  // to add every past transaction to the stock shown again and jiggle
+  // supplier lead times at random, saving nothing.)
+  const [showPartFillIn, setShowPartFillIn] = useState(false);
+  const handleStockSync = async () => {
+    setSyncRotated(true);
     try {
-      // Create a map tracking stock deltas
-      const stockAdjustments: Record<string, number> = {};
-
-      transactions.forEach(tx => {
-        const qty = tx.qtyChange || 0;
-        if (!stockAdjustments[tx.itemPartNumber]) {
-          stockAdjustments[tx.itemPartNumber] = 0;
-        }
-        stockAdjustments[tx.itemPartNumber] += qty;
-      });
-
-      // Update structural item state elements safely
-      setItems(prevItems =>
-        prevItems.map(item => {
-          if (stockAdjustments[item.partNumber] !== undefined) {
-            // Guarantee count never drops below absolute zero
-            const calculatedStock = Math.max(0, item.stockLevel + stockAdjustments[item.partNumber]);
-            return { ...item, stockLevel: calculatedStock };
-          }
-          return item;
-        })
-      );
-
-      // Simulate dynamic recalculation of supplier lead/response times
-      setSuppliers(prevSuppliers =>
-        prevSuppliers.map(s => {
-          if (s.leadTime === undefined || s.responseTime === undefined) return s;
-          const leadVar = (Math.random() - 0.5) * 2; // -1 to +1 day variation
-          const respVar = (Math.random() - 0.5) * 4; // -2 to +2 hours variation
-          return {
-            ...s,
-            leadTime: Math.max(1, Math.round(s.leadTime + leadVar)),
-            responseTime: Math.max(1, Math.round(s.responseTime + respVar))
-          };
-        })
-      );
-
-      // Invoke state notification alerts
-      setToastMessage("Session validation successful! Material ledger quantities aligned and procurement metrics optimized.");
-      setShowToast(true);
-      setTimeout(() => setShowToast(false), 3500);
-    } catch (err) {
-      console.error("Critical cross-reference checking error: ", err);
+      await loadFromAPIRef.current?.();
+      setShowPartFillIn(true);
+    } catch (err: any) {
+      triggerToast(`Could not sync the stock: ${err?.message || err}`, 'ERROR');
+    } finally {
+      setSyncRotated(false);
     }
   };
-
-
 
   // Listen for tab deep-linking from the sidebar navigation
   useEffect(() => {
@@ -1903,9 +1871,9 @@ export default function App() {
           {/* Quick Operations Actions */}
           <div className="flex items-center gap-2 select-none shrink-0">
             <button
-              onClick={handleStockSync}
+              onClick={() => void handleStockSync()}
               className="p-1.5 text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high rounded-lg transition-all duration-200 flex items-center justify-center border border-transparent hover:border-outline-variant/40"
-              title="Sync Stock Data"
+              title="Sync stock and fix part numbers"
             >
               <RefreshCw className={`w-4 h-4 ${syncRotated ? 'animate-spin text-primary' : ''}`} />
             </button>
@@ -1921,8 +1889,8 @@ export default function App() {
             <div className="h-4 w-px bg-outline-variant mx-1 self-center hidden md:block"></div>
 
             <button
-              onClick={handleStockSync}
-              title="Sync Stock"
+              onClick={() => void handleStockSync()}
+              title="Reload stock from the server and check every item's part numbers are in the right fields"
               aria-label="Sync Stock"
               className="bg-surface-container-high border border-outline-variant text-on-surface px-3 py-1.5 rounded-lg font-bold text-xs hover:bg-surface-container-highest active:scale-95 transition-all duration-150 hidden md:inline-flex"
             >
@@ -3125,6 +3093,16 @@ if (currentView === 'alternates') {
               </form>
             </div>
           </div>
+        )}
+
+        {/* Sync Stock: part numbers in the right fields */}
+        {showPartFillIn && (
+          <PartNumberFillIn
+            onClose={() => setShowPartFillIn(false)}
+            onShowNotification={triggerToast}
+            onOpenItem={setSelectedDetailPartNumber}
+            onChanged={reloadAfterBulkPricing}
+          />
         )}
 
         {/* Item Detail & Editing Modal */}
