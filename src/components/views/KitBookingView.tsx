@@ -8,7 +8,7 @@ const PRESET_QTYS = [50, 100, 250, 500, 1000] as const;
 import { buildShortageSheets, KIT_SUPPLIER_LABEL } from '../../lib/kitShortageWorkbook';
 import { downloadWorkbook } from '../../lib/xlsxDownload';
 import { confirmDialog } from '../../lib/confirmDialog';
-import { fillByTier } from '../../lib/kitTierFill';
+import { allocateAllByTier, fillByTier, otherLinesParts, withPickedElsewhere } from '../../lib/kitTierFill';
 import { canChange } from '../../lib/changeAccess';
 import { classifyPartNumberBySupplier } from '../../lib/partNumbers';
 import { Project } from '../../types';
@@ -849,21 +849,17 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
       if (!res.ok) throw new Error(`Match batch failed (${res.status})`);
       const matches: Record<string, MatchCandidate[]> = await res.json();
 
-      let filled = 0;
-      let short = 0;
-      const nextAllocations: Record<string, Array<{ allocatedCode: string; qty: number }>> = { ...allocations };
-      for (let i = 0; i < targets.length; i++) {
-        const row = targets[i];
-        // Reservations held by OTHER kits reduce what can be taken; the
-        // client-side map already leaves this kit's own out.
-        const { picks, remaining } = fillByTier(matches[row.component_id] || [], row.qty_required, reservations);
-        if (picks.length > 0) {
-          nextAllocations[row.component_id] = picks;
-          if (remaining > 0) short++;
-          filled++;
-        }
-        setAutoAllocateProgress({ done: i + 1, total: targets.length });
-      }
+      // The whole kit at once: another line's own part is never an
+      // alternate, and what earlier lines took from a reel counts as used
+      // (lib/kitTierFill). Other kits' reservations are in `reservations`.
+      const result = allocateAllByTier(
+        targets.map(r => ({ code: r.component_id, needed: r.qty_required })),
+        matches,
+        reservations,
+      );
+      const { filled, short } = result;
+      const nextAllocations: Record<string, Array<{ allocatedCode: string; qty: number }>> = { ...allocations, ...result.allocations };
+      setAutoAllocateProgress({ done: targets.length, total: targets.length });
       setAllocations(nextAllocations);
       const skipped = targets.length - filled;
       const parts = [`${filled} line${filled === 1 ? '' : 's'} filled for ${buildQty} unit${buildQty === 1 ? '' : 's'}`];
@@ -1713,7 +1709,8 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
             needed={row.qty_required}
             existing={allocations[allocatingStockCode] || []}
             autoResolved={row.resolved_part_number}
-            reservations={reservations}
+            reservations={withPickedElsewhere(reservations, allocations, allocatingStockCode)}
+            excludeCodes={[...otherLinesParts(auditResults.map(r => r.component_id), allocatingStockCode)]}
             onClose={() => setAllocatingStockCode(null)}
             onSave={(picks) => {
               setAllocations(prev => {
@@ -2305,7 +2302,9 @@ export interface MatchCandidate {
   matchTier: number;
   matchNote: string;
 }
-export function KitAllocationDialog({ stockCode, needed, existing, autoResolved, reservations, onClose, onSave, triggerToast }: {
+export function KitAllocationDialog({ stockCode, needed, existing, autoResolved, reservations, excludeCodes = [], onClose, onSave, triggerToast }: {
+  /** Other lines' own parts on this BOM: not offered as reels for this line. */
+  excludeCodes?: string[];
   stockCode: string;
   needed: number;
   existing: Array<{ allocatedCode: string; qty: number }>;
@@ -2316,6 +2315,7 @@ export function KitAllocationDialog({ stockCode, needed, existing, autoResolved,
   triggerToast: (msg: string, type?: string) => void;
 }) {
   const [candidates, setCandidates] = useState<MatchCandidate[]>([]);
+  const [hiddenOtherLines, setHiddenOtherLines] = useState(0);
   const [loading, setLoading] = useState<boolean>(true);
   // Picks are keyed by SKU serial. qty=0 means "not selected".
   const [picks, setPicks] = useState<Record<string, number>>(() => {
@@ -2331,7 +2331,11 @@ export function KitAllocationDialog({ stockCode, needed, existing, autoResolved,
       .then(r => r.ok ? r.json() : [])
       .then(data => {
         if (cancelled) return;
-        const list: MatchCandidate[] = Array.isArray(data) ? data : [];
+        // A part that is another line on this BOM isn't an alternate for this one.
+        const excluded = new Set(excludeCodes.map(c => c.toUpperCase()));
+        const all: MatchCandidate[] = Array.isArray(data) ? data : [];
+        const list = all.filter(c => !excluded.has(String(c.serialNumber).toUpperCase()));
+        setHiddenOtherLines(all.length - list.length);
         setCandidates(list);
         // Auto-preselect on first open with no existing overrides:
         // greedy-fill T1 → T2 only. Same-name-different-footprint
@@ -2418,6 +2422,11 @@ export function KitAllocationDialog({ stockCode, needed, existing, autoResolved,
         </div>
 
         <div className="flex-1 overflow-y-auto">
+          {!loading && hiddenOtherLines > 0 && (
+            <p className="px-md pt-2 text-[10px] text-outline" data-testid="hidden-other-lines">
+              {hiddenOtherLines} match{hiddenOtherLines === 1 ? '' : 'es'} not offered: {hiddenOtherLines === 1 ? 'it is' : 'they are'} a line of {hiddenOtherLines === 1 ? 'its' : 'their'} own on this BOM. Stock other lines have already picked is counted as reserved.
+            </p>
+          )}
           {loading ? (
             <div className="flex items-center justify-center py-12 text-xs text-outline">
               <Loader2 className="w-4 h-4 animate-spin mr-2" /> Finding candidates…

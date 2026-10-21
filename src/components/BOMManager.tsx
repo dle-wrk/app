@@ -9,7 +9,8 @@ import { detectLedSwatch, ledSwatchBackground } from '../lib/ledColor';
 import BuildQtyPicker from './BuildQtyPicker';
 import SupplierOrderFiles from './SupplierOrderFiles';
 import { colorToCssBackground, KitAllocationDialog, type MatchCandidate } from './views/KitBookingView';
-import { fillByTier } from '../lib/kitTierFill';
+import { allocateAllByTier, otherLinesParts, withPickedElsewhere } from '../lib/kitTierFill';
+import { mergeBomLines } from '../lib/mergeBomLines';
 import { confirmDialog } from '../lib/confirmDialog';
 import { 
   ClipboardCheck, 
@@ -102,7 +103,9 @@ export default function BOMManager({
   }, [savedKits, selectedProjectId]);
   
   // Active Project BOM lines
-  const projectBOM = bomItems.filter(bom => bom.projectId === selectedProjectId);
+  // One line per stock code, as P&P Kit Booking's audit (lib/mergeBomLines):
+  // a part the CAD export lists twice is added together, not shown twice.
+  const projectBOM = useMemo(() => mergeBomLines(bomItems.filter(bom => bom.projectId === selectedProjectId)), [bomItems, selectedProjectId]);
   const activeProject = projects.find(p => p.id === selectedProjectId);
   // Free-text search across every practically searchable field on a
   // BOM line: stock code, substituted resolved code, description /
@@ -263,13 +266,11 @@ export default function BOMManager({
       });
       if (!res.ok) throw new Error(`Match lookup failed (${res.status})`);
       const matches: Record<string, MatchCandidate[]> = await res.json();
-      const next = { ...allocations };
-      let filled = 0, short = 0;
-      for (const r of targets) {
-        const { picks, remaining } = fillByTier(matches[r.line.stockCode] || [], r.requiredTotal, reservedByPart);
-        if (picks.length) { next[r.line.stockCode] = picks; filled++; if (remaining > 0) short++; }
-      }
-      setAllocations(next);
+      // Whole BOM at once: another line's own part is never an alternate,
+      // and what earlier lines took from a reel counts as used.
+      const result = allocateAllByTier(targets.map(r => ({ code: r.line.stockCode, needed: r.requiredTotal })), matches, reservedByPart);
+      const { filled, short } = result;
+      setAllocations({ ...allocations, ...result.allocations });
       const skipped = targets.length - filled;
       const parts = [`${filled} line${filled === 1 ? '' : 's'} filled for ${pcbQty} PCB${pcbQty === 1 ? '' : 's'}`];
       if (short) parts.push(`${short} still short after fill`);
@@ -357,7 +358,8 @@ export default function BOMManager({
             needed={row.requiredTotal}
             existing={allocations[allocatingCode] || []}
             autoResolved={allocatingCode}
-            reservations={reservedByPart}
+            reservations={withPickedElsewhere(reservedByPart, allocations, allocatingCode)}
+            excludeCodes={[...otherLinesParts(projectBOM.map(l => l.stockCode), allocatingCode)]}
             onClose={() => setAllocatingCode(null)}
             onSave={(picks) => {
               setAllocations(prev => {
@@ -635,6 +637,16 @@ export default function BOMManager({
                             <span className="mt-1 inline-flex items-center gap-1 text-[8.5px] font-bold text-primary font-mono uppercase bg-primary/10 border border-primary/20 px-1 py-0.5 rounded">
                               <ArrowRightLeft className="w-2.5 h-2.5" />
                               Uses alternates: {picks.filter(p => p.allocatedCode !== line.stockCode).map(p => p.allocatedCode).join(', ')}
+                            </span>
+                          )}
+
+                          {line.mergedFrom > 1 && (
+                            <span
+                              className="mt-1 mr-1 inline-flex items-center gap-1 text-[8.5px] font-bold text-amber-500 font-mono uppercase bg-amber-500/10 border border-amber-500/20 px-1 py-0.5 rounded"
+                              title={`The BOM lists ${line.stockCode} on ${line.mergedFrom} rows (the CAD export grouped its designators apart). Shown as one line: quantities added, designators ${line.designator}.`}
+                            >
+                              <Layers className="w-2.5 h-2.5" />
+                              Merged from {line.mergedFrom} BOM rows
                             </span>
                           )}
 

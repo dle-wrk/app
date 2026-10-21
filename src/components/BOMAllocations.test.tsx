@@ -60,4 +60,17 @@ describe('Bill of Materials allocations', () => {
     const exec = calls.find((c) => c.url === '/api/kit-booking/execute');
     expect(exec?.body).toEqual({ projectId: 1, buildQty: 1000, allocations: { 'RES-033': [{ allocatedCode: 'RES-033', qty: 4752 }, { allocatedCode: 'RES-041', qty: 13248 }] }, dnf: [] });
   });
+
+  it('shows a part the BOM lists twice as one line, with its quantities added', async () => {
+    const dup = [
+      { id: 'a', projectId: 1, stockCode: 'CAP-024', comment: '', description: '100nF', designator: 'C47, C43, C44, C49, C50', footprint: '1206', libref: '', quantity: 5 },
+      { id: 'b', projectId: 1, stockCode: 'CAP-024', comment: '', description: '100nF', designator: 'C14, C15, C16', footprint: '1206', libref: '', quantity: 11 },
+    ] as any;
+    await act(async () => { root.render(<BOMManager items={[item('CAP-024', 1800)]} setItems={() => {}} transactions={[]} setTransactions={() => {}} projects={[{ id: 1, projectName: 'TCU06 PCB' } as any]} bomItems={dup} triggerToast={() => {}} />); });
+    await act(async () => { button(/^\s*1000\s*$/).click(); });
+    await settle();
+    expect(host.querySelectorAll('tbody tr').length).toBe(1);
+    expect(host.textContent).toContain('Merged from 2 BOM rows');
+    expect(host.textContent).toContain('SHORTAGE: -14200'); // 16 000 needed, 1 800 in stock
+  });
 });
