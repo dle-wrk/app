@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import type { Item, Supplier } from '../../types';
+import AutoPoPanel from '../AutoPoPanel';
 import {
   Zap, Clock, Bell, Settings, LogIn, AlertCircle, CheckCircle2,
   Play, Pause, RefreshCw, Plus, ChevronRight, TrendingUp, Pencil, Lock
@@ -19,9 +21,12 @@ const canEditAutomation = (userRole?: string) => userRole === 'admin' || userRol
 interface DashboardProps {
   triggerToast: (msg: string, type?: string) => void;
   userRole?: string;
+  /** For the Auto-PO tab's item picker and supplier list. */
+  items?: Item[];
+  suppliers?: Supplier[];
 }
 
-export default function AutomationDashboard({ triggerToast, userRole }: DashboardProps) {
+export default function AutomationDashboard({ triggerToast, userRole, items, suppliers }: DashboardProps) {
   const [stats, setStats] = useState<AutomationStats>({
     activeRules: 0,
     scheduledJobs: 0,
@@ -151,7 +156,7 @@ export default function AutomationDashboard({ triggerToast, userRole }: Dashboar
         {selectedView === 'rules' && <AutomationRulesSection triggerToast={triggerToast} userRole={userRole} />}
         {selectedView === 'jobs' && <ScheduledJobsSection triggerToast={triggerToast} />}
         {selectedView === 'notifications' && <NotificationsSection triggerToast={triggerToast} />}
-        {selectedView === 'auto-po' && <AutoPOConfigSection triggerToast={triggerToast} />}
+        {selectedView === 'auto-po' && <AutoPoPanel triggerToast={triggerToast} items={items} suppliers={suppliers} />}
         {selectedView === 'events' && <EventLogSection triggerToast={triggerToast} />}
       </div>
     </div>
@@ -672,62 +677,6 @@ function NotificationsSection({ triggerToast }: any) {
             </div>
           ))}
         </div>
-      )}
-    </div>
-  );
-}
-
-function AutoPOConfigSection({ triggerToast }: any) {
-  const [config, setConfig] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [editing, setEditing] = useState(false);
-
-  useEffect(() => {
-    fetchConfig();
-  }, []);
-
-  const fetchConfig = async () => {
-    try {
-      const res = await fetch('/api/auto-po-config');
-      const data = await res.json();
-      setConfig(data[0] || { enabled: false, minStockLevel: 50, preferredSupplier: 'digikey', autoApprove: false });
-    } catch (err: any) {
-      triggerToast('Failed to load auto-PO config', 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  if (loading) return <div className="text-center py-4 text-outline text-xs">Loading...</div>;
-
-  return (
-    <div className="space-y-md">
-      <div className="flex items-center justify-between mb-md">
-        <h4 className="text-sm font-bold text-on-surface">Auto-PO Settings</h4>
-        <button onClick={() => setEditing(!editing)} className="text-xs text-primary hover:text-primary/80 transition">
-          {editing ? 'Done' : 'Edit'}
-        </button>
-      </div>
-      <div className="bg-surface-container-high/30 p-md rounded space-y-2">
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-on-surface-variant">Auto-PO Enabled:</span>
-          <span className="text-xs font-bold text-on-surface">{config?.enabled ? '✓ Yes' : '✗ No'}</span>
-        </div>
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-on-surface-variant">Min Stock Level:</span>
-          <span className="text-xs font-bold text-on-surface">{config?.minStockLevel || 50} units</span>
-        </div>
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-on-surface-variant">Preferred Supplier:</span>
-          <span className="text-xs font-bold text-on-surface">{config?.preferredSupplier || 'digikey'}</span>
-        </div>
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-on-surface-variant">Auto-Approve:</span>
-          <span className="text-xs font-bold text-on-surface">{config?.autoApprove ? '✓ Yes' : '✗ No'}</span>
-        </div>
-      </div>
-      {editing && (
-        <p className="text-[10px] text-outline italic">Configuration editor coming soon...</p>
       )}
     </div>
   );

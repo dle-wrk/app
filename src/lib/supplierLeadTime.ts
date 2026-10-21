@@ -46,11 +46,18 @@ export function plannedLeadTime(s: SupplierLead | undefined, measured: Map<strin
 
 const key = (v: unknown) => String(v ?? '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
 
+/** A supplier by name however it is written ("Digikey", "LCSC" for LCSC ELECTRONICS, "MICRO ROBOTICS"), or by id. */
+export function findSupplier<T extends SupplierLead>(name: unknown, suppliers: T[]): T | undefined {
+  const raw = String(name ?? '').trim();
+  const k = key(raw);
+  if (!k) return undefined;
+  return suppliers.find((x) => String(x.id) === raw) ?? suppliers.find((x) => key(x.name) === k)
+    ?? suppliers.find((x) => { const n = key(x.name); return n.length >= 4 && k.length >= 4 && (n.startsWith(k) || k.startsWith(n)); });
+}
+
 /** An item's lead time by its Supplier field ("Digikey", "LCSC ELECTRONICS", ...), or null. */
 export function leadTimeForSupplierName(name: unknown, suppliers: SupplierLead[], measured: Map<string, MeasuredLeadTime>) {
-  const k = key(name);
-  if (!k) return null;
-  const s = suppliers.find((x) => key(x.name) === k) ?? suppliers.find((x) => { const n = key(x.name); return n.length >= 4 && (n.startsWith(k) || k.startsWith(n)); });
+  const s = findSupplier(name, suppliers);
   const planned = plannedLeadTime(s, measured);
   return s && planned ? { supplier: s.name, ...planned } : null;
 }

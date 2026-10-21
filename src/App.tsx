@@ -2322,11 +2322,11 @@ if (currentView === 'alternates') {
              }
 
              if (currentView === 'automation') {
-               return <AutomationDashboard triggerToast={triggerToast} userRole={currentUser?.role || 'viewer'} />;
+               return <AutomationDashboard triggerToast={triggerToast} userRole={currentUser?.role || 'viewer'} items={items} suppliers={suppliers} />;
              }
 
              if (currentView === 'auto_po_config') {
-               return <AutoPOConfigView triggerToast={triggerToast} />;
+               return <AutoPOConfigView triggerToast={triggerToast} items={items} suppliers={suppliers} />;
              }
 
              if (currentView === 'quality_compliance') {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { packagesIn, proposeFootprint } from './footprintRules';
+import { packageKey, packagesIn, proposeFootprint, spellingGroups } from './footprintRules';
 
 const item = (serial_number: string, description: string, extra: Record<string, string> = {}) => ({ serial_number, name: serial_number, description, footprint: '', ...extra });
 const IN_USE = ['0603', '0402', 'SOT-23', 'SOT-23-5L', 'SMC(DO-214AB)', 'DO-214AA (SMB)', 'TO-252', 'DPAK', 'SOT-363'];
@@ -34,5 +34,35 @@ describe('filling a missing footprint from what the item says', () => {
   it('never replaces a footprint that is set', () => {
     expect(proposeFootprint({ ...item('X', 'CHIP LED 0402'), footprint: '0603' }, IN_USE)).toBeNull();
     expect(proposeFootprint({ ...item('X', 'CHIP LED 0402'), footprint: 'N/A' }, IN_USE)?.footprint).toBe('0402');
+  });
+});
+
+describe('one package, several spellings', () => {
+  const rows = (pairs: Array<[string, number]>) => pairs.flatMap(([fp, n]) => Array.from({ length: n }, (_, i) => ({ serial_number: `${fp}-${i}`, footprint: fp })));
+
+  it('groups the spellings in use, most-used first (your data, 21 Oct)', () => {
+    const groups = spellingGroups(rows([
+      ['DPAK', 5], ['DPAK-3 (TO-252-3)', 1], ['TO-252', 1], ['SOT-223', 2], ['SOT-223-4', 5], ['SOT-23', 5], ['SOT-23-3 (TO-236)', 2],
+      ['SOT-23-5', 1], ['SOT-23-5L', 3], ['SOT-23-6', 2], ['TSOP-6', 1], ['SOT-363', 6], ['SOT323-6L', 1], ['SMA', 5], ['SMA(DO-214AC)', 3],
+      ['SOIC-8', 4], ['SOIC8', 1], ['8SOIC', 2], ['SOIC-8-208MIL', 1], ['4-SOIC (0.173, 4.40MM WIDTH)', 2], ['0603', 80], ['SMC(DO-214AB)', 2], ['N/A', 9],
+    ]));
+    expect(groups.map((g) => [g.package, g.spellings.map((s) => `${s.footprint}:${s.count}`)])).toEqual([
+      ['DO-214AC', ['SMA:5', 'SMA(DO-214AC):3']],
+      ['SOIC-8', ['SOIC-8:4', '8SOIC:2', 'SOIC8:1']], // not the 208 mil one: it's wider
+      ['SOT-223', ['SOT-223-4:5', 'SOT-223:2']],
+      ['SOT-23', ['SOT-23:5', 'SOT-23-3 (TO-236):2']],
+      ['SOT-23-5', ['SOT-23-5L:3', 'SOT-23-5:1']],
+      ['SOT-23-6', ['SOT-23-6:2', 'TSOP-6:1']],
+      ['SOT-363', ['SOT-363:6', 'SOT323-6L:1']],
+      ['TO-252', ['DPAK:5', 'DPAK-3 (TO-252-3):1', 'TO-252:1']],
+    ]);
+  });
+
+  it('never puts different packages together', () => {
+    expect(packageKey('SOIC-8-208MIL')).toBeNull();
+    expect(packageKey('SOT-23-5')).not.toBe(packageKey('SOT-23'));
+    expect(packageKey('SOT-23-6')).not.toBe(packageKey('SOT-363'));
+    expect(packageKey('TO-263-2')).not.toBe(packageKey('TO-252'));
+    expect(packageKey('SMB')).not.toBe(packageKey('SMA'));
   });
 });

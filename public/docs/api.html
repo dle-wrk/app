@@ -805,15 +805,18 @@
                         <tr><td><span class="m m-get">GET</span></td><td>/api/notifications</td><td>List notifications. Optional <code>status</code>, <code>userId</code>.</td></tr>
                         <tr><td><span class="m m-post">POST</span></td><td>/api/notifications</td><td>Create a notification.</td></tr>
                         <tr><td><span class="m m-put">PUT</span></td><td>/api/notifications/:id/mark-read</td><td>Mark a notification as read.</td></tr>
-                        <tr><td><span class="m m-get">GET</span></td><td>/api/auto-po-config</td><td>List auto-PO settings per component.</td></tr>
-                        <tr><td><span class="m m-post">POST</span></td><td>/api/auto-po-config</td><td>Create an auto-PO setting.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/auto-po-config</td><td>Every watched item, with its stock and whether it is due.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/auto-po-config</td><td>Watch items: <code>{componentIds, minStockLevel, autoPOThreshold, preferredSupplier?, autoApprove?}</code>. Watching an item again replaces its setting.</td></tr>
                         <tr><td><span class="m m-put">PUT</span></td><td>/api/auto-po-config/:id</td><td>Update an auto-PO setting.</td></tr>
+                    <tr><td><span class="m m-delete">DELETE</span></td><td>/api/auto-po-config/:id</td><td>Stop watching an item.</td></tr>
+                    <tr><td><span class="m m-get">GET</span></td><td>/api/auto-po-config/preview</td><td>What a check would draft now, one purchase order per supplier, and what it skips (changes nothing).</td></tr>
+                    <tr><td><span class="m m-post">POST</span></td><td>/api/automation/run-auto-po</td><td>Draft those purchase orders.</td></tr>
                         <tr><td><span class="m m-get">GET</span></td><td>/api/alert-subscriptions</td><td>List alert subscriptions.</td></tr>
                         <tr><td><span class="m m-post">POST</span></td><td>/api/alert-subscriptions</td><td>Create an alert subscription.</td></tr>
                         <tr><td><span class="m m-put">PUT</span></td><td>/api/alert-subscriptions/:id</td><td>Update an alert subscription.</td></tr>
                         <tr><td><span class="m m-get">GET</span></td><td>/api/event-log</td><td>Automation event log. Optional <code>eventType</code>, <code>limit</code>.</td></tr>
                         <tr><td><span class="m m-post">POST</span></td><td>/api/event-log</td><td>Write an event-log entry.</td></tr>
-                        <tr><td><span class="m m-post">POST</span></td><td>/api/automation/trigger-auto-po</td><td>Run the auto-PO check for a component now.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/automation/trigger-auto-po</td><td>Draft the purchase order for one watched item now, if it is due: <code>{componentId}</code>.</td></tr>
                         <tr><td><span class="m m-post">POST</span></td><td>/api/automation/send-alert</td><td>Send an alert to everyone subscribed to it.</td></tr>
                     </tbody>
                 </table>

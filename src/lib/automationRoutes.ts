@@ -3,10 +3,9 @@
 //   - automation_rules            (rule engine: trigger events → actions)
 //   - scheduled_jobs              (cron-driven jobs w/ retry counters)
 //   - notifications               (per-user inbox)
-//   - auto_po_config              (per-component thresholds for auto-PO)
+//   - auto_po_config              (moved: ./autoPoRoutes)
 //   - event_log                   (append-only audit trail)
 //   - alert_subscriptions         (user opt-in for alert channels)
-//   - /api/automation/trigger-auto-po     (creates a PO from a component's config)
 //   - /api/automation/send-alert          (fans out notifications for a subscription)
 //   - /api/automation/enrich-missing-suppliers   (stub MPN enrichment; logs to event_log)
 //
@@ -271,84 +270,7 @@ export function registerAutomationRoutes(app: Express): void {
     }
   });
 
-  // ---------------------------------------------------------------------------
-  // Auto-PO Configuration
-  // ---------------------------------------------------------------------------
-  app.get('/api/auto-po-config', async (req, res) => {
-    const isEnabled = req.query.enabled as string | undefined;
-    try {
-      let sql = 'SELECT * FROM auto_po_config';
-      const params: any[] = [];
-      if (isEnabled !== undefined) {
-        sql += ' WHERE enabled = $1';
-        params.push(isEnabled === 'true');
-      }
-      sql += ' ORDER BY component_id ASC';
-      const { rows } = await query(sql, params);
-      res.json(rows.map((row: any) => ({
-        id: row.id,
-        componentId: row.component_id,
-        minStockLevel: row.min_stock_level,
-        autoPOThreshold: row.auto_po_threshold,
-        preferredSupplier: row.preferred_supplier,
-        autoSupplierSelect: row.auto_supplier_select,
-        autoApprove: row.auto_approve,
-        enabled: row.enabled,
-        createdAt: row.created_at,
-      })));
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.post('/api/auto-po-config', async (req, res) => {
-    const { componentId, minStockLevel, autoPOThreshold, preferredSupplier, autoSupplierSelect, autoApprove } = req.body;
-    if (!componentId || !minStockLevel || !autoPOThreshold) {
-      return res.status(400).json({ error: 'componentId, minStockLevel, and autoPOThreshold are required' });
-    }
-
-    try {
-      const row = await queryOne(
-        `INSERT INTO auto_po_config (component_id, min_stock_level, auto_po_threshold, preferred_supplier, auto_supplier_select, auto_approve)
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-        [componentId, minStockLevel, autoPOThreshold, preferredSupplier || null, autoSupplierSelect ?? true, autoApprove ?? false]
-      );
-      res.status(201).json({
-        id: row?.id,
-        componentId: row?.component_id,
-        minStockLevel: row?.min_stock_level,
-        autoPOThreshold: row?.auto_po_threshold,
-        enabled: row?.enabled,
-        createdAt: row?.created_at,
-      });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.put('/api/auto-po-config/:id', async (req, res) => {
-    const id = parseInt(req.params.id);
-    const { minStockLevel, autoPOThreshold, preferredSupplier, autoSupplierSelect, autoApprove, enabled } = req.body;
-    try {
-      const row = await queryOne(
-        `UPDATE auto_po_config SET min_stock_level = COALESCE($1, min_stock_level),
-         auto_po_threshold = COALESCE($2, auto_po_threshold), preferred_supplier = COALESCE($3, preferred_supplier),
-         auto_supplier_select = COALESCE($4, auto_supplier_select), auto_approve = COALESCE($5, auto_approve),
-         enabled = COALESCE($6, enabled), updated_at = now()
-         WHERE id = $7 RETURNING *`,
-        [minStockLevel ?? null, autoPOThreshold ?? null, preferredSupplier || null, autoSupplierSelect ?? null, autoApprove ?? null, enabled ?? null, id]
-      );
-      if (!row) return res.status(404).json({ error: 'Auto-PO config not found' });
-      res.json({
-        id: row.id,
-        componentId: row.component_id,
-        enabled: row.enabled,
-        updatedAt: row.updated_at,
-      });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
+  // Auto-PO settings and checks: ./autoPoRoutes.
 
   // ---------------------------------------------------------------------------
   // Event Log (Audit Trail)
@@ -476,69 +398,6 @@ export function registerAutomationRoutes(app: Express): void {
   // ---------------------------------------------------------------------------
   // Trigger Actions
   // ---------------------------------------------------------------------------
-  // Auto-PO Creation. Walks the auto_po_config for a component, checks the
-  // stock is below threshold, picks a supplier, creates a PO + one line item,
-  // and appends an event_log row so the audit trail shows an auto-generated
-  // PO alongside human ones.
-  app.post('/api/automation/trigger-auto-po', async (req, res) => {
-    const { componentId } = req.body;
-    if (!componentId) return res.status(400).json({ error: 'componentId is required' });
-
-    try {
-      const config = await queryOne(
-        `SELECT * FROM auto_po_config WHERE component_id = $1 AND enabled = true`,
-        [componentId]
-      );
-      if (!config) return res.status(404).json({ error: 'Auto-PO config not found or disabled' });
-
-      const item = await queryOne(`SELECT * FROM inventory WHERE serial_number = $1`, [componentId]);
-      if (!item) return res.status(404).json({ error: 'Component not found' });
-
-      if (item.stock > config.auto_po_threshold) {
-        return res.json({ message: 'Stock level above threshold, no PO created' });
-      }
-
-      // Auto-select supplier or use preferred. Falls back to 'digikey' when
-      // neither is available so the PO can still get written and reviewed
-      // rather than 500-ing on a missing supplier.
-      let supplierId = config.preferred_supplier;
-      if (config.auto_supplier_select && !supplierId) {
-        const bestSupplier = await queryOne(
-          `SELECT supplier FROM supplier_performance WHERE stock_availability_pct > 50 ORDER BY avg_lead_time_days ASC LIMIT 1`
-        );
-        supplierId = bestSupplier?.supplier || 'digikey';
-      }
-
-      const poNumber = `PO-AUTO-${Date.now()}`;
-      const po = await queryOne(
-        `INSERT INTO purchase_orders (po_number, supplier_id, order_date, status, notes)
-         VALUES ($1, $2, now(), $3, $4) RETURNING *`,
-        [poNumber, supplierId || null, config.auto_approve ? 'APPROVED' : 'DRAFT', `Auto-generated for ${componentId}`]
-      );
-
-      await query(
-        `INSERT INTO purchase_order_items (purchase_order_id, component_id, quantity_ordered)
-         VALUES ($1, $2, $3)`,
-        [po?.id, componentId, Math.max(config.min_stock_level - item.stock, 10)]
-      );
-
-      await query(
-        `INSERT INTO event_log (event_type, entity_type, entity_id, action, status, details)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        ['AUTO_PO_CREATED', 'PURCHASE_ORDER', po?.id, 'AUTO_TRIGGER', 'SUCCESS', JSON.stringify({ componentId, supplierId })]
-      );
-
-      res.status(201).json({
-        poId: po?.id,
-        poNumber: po?.po_number,
-        status: po?.status,
-        createdAt: po?.created_at,
-      });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
   // Send Alert Notification. Fans a single alert out to every active
   // subscription for the recipient/alertType pair, creating one notification
   // row per subscription so a user with e.g. both email + in-app subscriptions

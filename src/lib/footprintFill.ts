@@ -11,11 +11,13 @@
 //
 //   GET  /api/inventory/footprint-fill         the items it would fill
 //   POST /api/inventory/footprint-fill/apply   {items: [{serialNumber, footprint}]} (inventory.update)
+//   GET  /api/inventory/footprint-spellings    packages spelled more than one way
+//   POST /api/inventory/footprint-spellings/apply  {to, from: [spellings]}: one spelling (inventory.update)
 
 import type { Express } from 'express';
 import { pool, query } from './db';
 import { requirePermission } from './authRoutes';
-import { hasNoFootprint, proposeFootprint, type FootprintProposal } from './footprintRules';
+import { hasNoFootprint, packageKey, proposeFootprint, spellingGroups, type FootprintProposal } from './footprintRules';
 
 const COLUMNS = 'serial_number, name, description, size, package, footprint';
 
@@ -55,6 +57,41 @@ export function registerFootprintFillRoutes(app: Express): void {
       }
       await client.query('COMMIT');
       res.json({ applied, skipped });
+    } catch (err: any) {
+      await client.query('ROLLBACK').catch(() => {});
+      res.status(500).json({ error: err.message });
+    } finally {
+      client.release();
+    }
+  });
+
+  app.get('/api/inventory/footprint-spellings', async (_req, res) => {
+    try {
+      const { rows } = await query<any>(`SELECT serial_number, footprint FROM inventory WHERE deleted IS NOT TRUE`);
+      res.json({ groups: spellingGroups(rows) });
+    } catch (err: any) { res.status(500).json({ error: err.message }); }
+  });
+
+  // Every item spelled one of `from` gets `to`; all must be the same package.
+  app.post('/api/inventory/footprint-spellings/apply', requirePermission('inventory.update'), async (req: any, res) => {
+    const to = typeof req.body?.to === 'string' ? req.body.to.trim() : '';
+    const from: string[] = Array.isArray(req.body?.from) ? [...new Set<string>(req.body.from.filter((f: unknown) => typeof f === 'string').map((f: string) => f.trim()))].filter((f) => f && f !== to) : [];
+    if (!to || !from.length) return res.status(400).json({ error: 'Say which spelling to use (to) and which to replace (from).' });
+    const key = packageKey(to);
+    const other = from.find((f) => packageKey(f) !== key);
+    if (!key || other) return res.status(400).json({ error: `"${other ?? to}" isn't the same package as "${to}".` });
+    const who = req.user?.email || 'unknown';
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const { rows } = await client.query(
+        `UPDATE inventory SET footprint = $1 WHERE deleted IS NOT TRUE AND TRIM(footprint) = ANY($2::text[]) RETURNING serial_number`, [to, from]);
+      await client.query(
+        `INSERT INTO user_activity_logs (user_email, action, entity_type, entity_id, details, status) VALUES ((SELECT email FROM users WHERE email = $1), 'FOOTPRINT_SPELLING', 'Item', $2, $3, 'SUCCESS')`,
+        [who, key, JSON.stringify({ to, from, items: rows.map((r: any) => r.serial_number), by: who })]
+      );
+      await client.query('COMMIT');
+      res.json({ renamed: rows.map((r: any) => r.serial_number) });
     } catch (err: any) {
       await client.query('ROLLBACK').catch(() => {});
       res.status(500).json({ error: err.message });

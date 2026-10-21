@@ -60,19 +60,19 @@
 
             <h3 id="auto-po-configuration">Auto-PO Configuration</h3>
             <div class="step">
-                <h4>Automatically Create Purchase Orders</h4>
+                <h4>Reorder the items you choose</h4>
                 <ol>
-                    <li>Click <strong>Auto-PO Config</strong> in sidebar</li>
-                    <li>For each component, configure:
+                    <li>Open <strong>Auto-PO Config</strong> in the sidebar (or the <strong>Auto-PO</strong> tab of the Automation dashboard).</li>
+                    <li>Press <strong>Watch items</strong>, search for and pick the items, and set:
                         <ul>
-                            <li>Minimum stock level threshold</li>
-                            <li>Automatic PO quantity (how many to order)</li>
-                            <li>Preferred supplier</li>
-                            <li>Auto-approval option</li>
+                            <li><strong>Reorder point</strong>: reorder when stock is at or below this.</li>
+                            <li><strong>Minimum level</strong>: order enough to bring stock back up to this.</li>
+                            <li><strong>Supplier</strong>: one you choose, or Automatic (the item's Supplier field, else the fastest of the suppliers it has part numbers for).</li>
+                            <li>Optionally, mark its purchase orders as Sent instead of Draft. You still place the order with the supplier.</li>
                         </ul>
                     </li>
-                    <li>Toggle component on/off for auto-PO</li>
-                    <li>System will create POs automatically when stock drops below minimum</li>
+                    <li>Press <strong>Check now</strong>. It shows what it would draft, one purchase order per supplier, and anything it skips (an item with a purchase order already open, or paused). Press <strong>Draft</strong> to create them.</li>
+                    <li>Nothing is ordered on its own. Prices on the drafts are each item's last cost; check them before sending.</li>
                 </ol>
             </div>
 

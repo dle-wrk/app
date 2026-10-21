@@ -42,6 +42,7 @@ import { registerProductionRoutes, ensureProductionCostsSchema } from './src/lib
 import { registerKitsRoutes, ensureKitsSchema } from './src/lib/kitsRoutes';
 import { registerProcurementRoutes, ensureProcurementSchema } from './src/lib/procurementRoutes';
 import { registerAutomationRoutes } from './src/lib/automationRoutes';
+import { registerAutoPoRoutes } from './src/lib/autoPoRoutes';
 import { registerProjectsRoutes } from './src/lib/projectsRoutes';
 import { registerProjectProgressRoutes, ensureProjectProgressSchema } from './src/lib/projectProgress';
 import { registerClientsRoutes } from './src/lib/clientsRoutes';
@@ -229,6 +230,8 @@ registerProcurementRoutes(app);
 // that stitch them together. Assumes the Phase 4 tables already exist
 // (bootstrap earlier in this file / phase5-db handle the schema).
 registerAutomationRoutes(app);
+// Auto-PO settings and checks (/api/auto-po-config, /api/automation/run-auto-po).
+registerAutoPoRoutes(app);
 
 // Projects surface: project CRUD (including MAX(id)+1 allocation and
 // upsert-by-name), the per-project BOM / P&P tables (db_bom_project_<id>,
