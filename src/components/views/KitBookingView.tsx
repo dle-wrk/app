@@ -13,7 +13,7 @@ import { canChange } from '../../lib/changeAccess';
 import { classifyPartNumberBySupplier } from '../../lib/partNumbers';
 import { Project } from '../../types';
 import { fmtNumber } from '../../lib/formatMoney';
-import { detectLedSwatch, ledSwatchBackground } from '../../lib/ledColor';
+import { detectLedSwatch, ledSwatchBackground, swatchForColour } from '../../lib/ledColor';
 import ShortageToPOModal from '../ShortageToPOModal';
 import BomLineEditorModal from '../BomLineEditorModal';
 import BuildQtyPicker from '../BuildQtyPicker';
@@ -2301,6 +2301,8 @@ export interface MatchCandidate {
   status: string;
   matchTier: number;
   matchNote: string;
+  /** The colour the tier was decided on (the item's Colour field, else read from its name). */
+  colour?: string | null;
 }
 export function KitAllocationDialog({ stockCode, needed, existing, autoResolved, reservations, excludeCodes = [], onClose, onSave, triggerToast }: {
   /** Other lines' own parts on this BOM: not offered as reels for this line. */
@@ -2413,7 +2415,7 @@ export function KitAllocationDialog({ stockCode, needed, existing, autoResolved,
           <div className="flex-1">
             <h4 className="font-bold text-sm text-on-surface">Allocate for {stockCode}</h4>
             <p className="text-[10px] text-outline mt-0.5">
-              Pick one or more SKUs to fulfil this line — the picked qtys add up against Needed. Auto-fill only uses T1 (exact primary) and T2 (same Name + Footprint) so footprint swaps stay manual. T3 (same Name, footprint differs) and T4 (fuzzy) are shown here for reference — Fill them yourself only after you've verified they're a valid substitute. Reserved qty from other locked kits is shown so what you allocate is honest.
+              Pick one or more SKUs to fulfil this line — the picked qtys add up against Needed. Auto-fill only uses T1 (exact primary) and T2 (same Name + Footprint + Colour) so footprint and colour swaps stay manual. T3 (same Name, footprint or colour differs) and T4 (fuzzy) are shown here for reference — Fill them yourself only after you've verified they're a valid substitute. Reserved qty from other locked kits is shown so what you allocate is honest.
             </p>
           </div>
           <button type="button" onClick={onClose} className="p-1 rounded hover:bg-surface-variant/40 text-outline hover:text-on-surface">
@@ -2489,7 +2491,8 @@ export function KitAllocationDialog({ stockCode, needed, existing, autoResolved,
                       </td>
                       <td className="px-md py-2 max-w-[280px]">
                         {(() => {
-                          const led = detectLedSwatch({
+                          // The colour the tier was decided on (server), else read here.
+                          const led = (c.colour ? swatchForColour(c.colour) ?? { label: c.colour, colors: ['#9ca3af'] } : null) ?? detectLedSwatch({
                             name: c.name,
                             description: c.description,
                             partNumber: c.serialNumber,

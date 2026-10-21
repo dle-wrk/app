@@ -14,6 +14,7 @@
 // serials. Multi-tier alternative matching still applies — it just
 // returns candidate SKUs instead of candidate reels.
 
+import { itemColour, matchTier } from './kitMatch';
 import type { Express } from 'express';
 import { z } from 'zod';
 import { pool, query, queryOne, exec } from './db';
@@ -562,12 +563,10 @@ export function registerKitsRoutes(app: Express): void {
     if (!code) return res.status(400).json({ error: 'invalid stockCode' });
     try {
       const anchor = await queryOne<any>(
-        `SELECT serial_number, name, description, footprint, stock, status FROM inventory WHERE serial_number = $1`,
+        `SELECT serial_number, name, description, footprint, color, stock, status FROM inventory WHERE serial_number = $1`,
         [code]
       );
       if (!anchor) return res.json([]);
-      const anchorName = String(anchor.name || '').trim();
-      const anchorFp = String(anchor.footprint || '').trim();
 
       // Bring in the operator's manually-declared alternatives first —
       // they always outrank fuzzy name/footprint hits below.
@@ -578,36 +577,23 @@ export function registerKitsRoutes(app: Express): void {
       const manualAlts = new Set(manualAltRows.map(r => r.alternative_part_number));
 
       const { rows: all } = await query<any>(
-        `SELECT serial_number, name, description, footprint, stock, status FROM inventory`
+        `SELECT serial_number, name, description, footprint, color, stock, status FROM inventory WHERE deleted IS NOT TRUE`
       );
       const results: any[] = [];
       const seen = new Set<string>();
       for (const r of all) {
         const sn = r.serial_number;
         if (!sn || seen.has(sn)) continue;
-        const name = String(r.name || '').trim();
-        const fp = String(r.footprint || '').trim();
-        let tier = 0;
-        let note = '';
-        if (sn === code) {
-          tier = 1; note = 'Exact match (primary SKU)';
-        } else if (manualAlts.has(sn)) {
-          tier = 2; note = 'Approved alternative (from alternates table)';
-        } else if (name && anchorName && name === anchorName && fp && anchorFp && fp === anchorFp) {
-          tier = 2; note = 'Equivalent — same Name + Footprint';
-        } else if (name && anchorName && name === anchorName) {
-          tier = 3; note = 'Same Name, footprint differs — verify';
-        } else if (name && anchorName && (name.includes(anchorName) || anchorName.includes(name))) {
-          const fpOk = !fp || !anchorFp || fp === anchorFp;
-          if (fpOk) { tier = 4; note = 'Similar Name — verify carefully'; }
-        }
+        // Tiers, colour included for T2 (./kitMatch).
+        const { tier, note } = matchTier(anchor, r, manualAlts);
         if (tier > 0) {
           seen.add(sn);
           results.push({
             serialNumber: sn,
-            name,
+            name: String(r.name || '').trim(),
             description: r.description || '',
-            footprint: fp,
+            footprint: String(r.footprint || '').trim(),
+            colour: itemColour(r),
             stock: parseInt(r.stock || '0') || 0,
             status: r.status || 'ACTIVE',
             matchTier: tier,
@@ -640,7 +626,7 @@ export function registerKitsRoutes(app: Express): void {
     const capped = codes.slice(0, 500);
     try {
       const { rows: allRows } = await query<any>(
-        `SELECT serial_number, name, description, footprint, stock, status FROM inventory`
+        `SELECT serial_number, name, description, footprint, color, stock, status FROM inventory WHERE deleted IS NOT TRUE`
       );
       // Load every approved-alt pair for the requested anchors in a
       // single query, then index by primary code so the per-anchor
@@ -661,33 +647,21 @@ export function registerKitsRoutes(app: Express): void {
       for (const code of capped) {
         const anchor = inventoryByCode[code];
         if (!anchor) { out[code] = []; continue; }
-        const anchorName = String(anchor.name || '').trim();
-        const anchorFp = String(anchor.footprint || '').trim();
         const manualAlts = manualAltsByAnchor[code] || new Set<string>();
         const results: any[] = [];
         const seen = new Set<string>();
         for (const r of allRows) {
           const sn = r.serial_number;
           if (!sn || seen.has(sn)) continue;
-          const name = String(r.name || '').trim();
-          const fp = String(r.footprint || '').trim();
-          let tier = 0;
-          let note = '';
-          if (sn === code) { tier = 1; note = 'Exact match (primary SKU)'; }
-          else if (manualAlts.has(sn)) { tier = 2; note = 'Approved alternative (from alternates table)'; }
-          else if (name && anchorName && name === anchorName && fp && anchorFp && fp === anchorFp) { tier = 2; note = 'Equivalent — same Name + Footprint'; }
-          else if (name && anchorName && name === anchorName) { tier = 3; note = 'Same Name, footprint differs — verify'; }
-          else if (name && anchorName && (name.includes(anchorName) || anchorName.includes(name))) {
-            const fpOk = !fp || !anchorFp || fp === anchorFp;
-            if (fpOk) { tier = 4; note = 'Similar Name — verify carefully'; }
-          }
+          const { tier, note } = matchTier(anchor, r, manualAlts);
           if (tier > 0) {
             seen.add(sn);
             results.push({
               serialNumber: sn,
-              name,
+              name: String(r.name || '').trim(),
               description: r.description || '',
-              footprint: fp,
+              footprint: String(r.footprint || '').trim(),
+              colour: itemColour(r),
               stock: parseInt(r.stock || '0') || 0,
               status: r.status || 'ACTIVE',
               matchTier: tier,

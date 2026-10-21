@@ -33,12 +33,23 @@ const LED_COLOR_TABLE: Array<{ match: RegExp; label: string; colors: string[] }>
   { match: /\bYELLOW\b/i, label: 'Yellow', colors: ['#eab308'] },
   { match: /\bGREEN\b/i, label: 'Green', colors: ['#22c55e'] },
   { match: /\bBLUE\b/i, label: 'Blue', colors: ['#3b82f6'] },
-  { match: /\bWHITE\b|\bCOLORLESS\b|\bCOLOURLESS\b/i, label: 'White', colors: ['#f8fafc'] },
+  { match: /\bWHITE\b/i, label: 'White', colors: ['#f8fafc'] },
   { match: /\bRED\b/i, label: 'Red', colors: ['#ef4444'] },
   { match: /\bPURPLE\b|\bVIOLET\b/i, label: 'Purple', colors: ['#a855f7'] },
   { match: /\bPINK\b/i, label: 'Pink', colors: ['#f472b6'] },
   { match: /\bUV\b|\bULTRAVIOLET\b/i, label: 'UV', colors: ['#c084fc'] },
+  // Last: "COLORLESS TRANSPARENT LENS" is the lens of a red/blue/... LED, so
+  // it only means white when no colour is named.
+  { match: /\bCOLOU?RLESS\b/i, label: 'White', colors: ['#f8fafc'] },
 ];
+
+/** The swatch for a colour name ("orange", "Yellow-green"), or null if it isn't one. */
+export function swatchForColour(colour: string): LedSwatch | null {
+  for (const row of LED_COLOR_TABLE) {
+    if (row.match.test(colour)) return { label: row.label, colors: row.colors };
+  }
+  return null;
+}
 
 // The bar for "this row is an LED". Callers pass whichever of these
 // fields they have; missing fields are treated as empty strings.
