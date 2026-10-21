@@ -988,10 +988,11 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
     setShowConfirmBooking(false);
     setExecuting(true);
     try {
+      // The reels picked per line are booked out as picked; DNF lines are left out.
       const res = await fetch('/api/kit-booking/execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId: selectedProjectId, buildQty })
+        body: JSON.stringify({ projectId: selectedProjectId, buildQty, allocations, dnf: [...dnfOverride] })
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
@@ -2294,7 +2295,7 @@ function KitBrowserDialog({ kits, busy, projects, defaultProjectId, onLoad, onDe
 // per candidate so a "500 in stock, 400 reserved" row is honest about
 // what's actually free.
 // -----------------------------------------------------------------------
-interface MatchCandidate {
+export interface MatchCandidate {
   serialNumber: string;
   name: string;
   description: string;
@@ -2304,7 +2305,7 @@ interface MatchCandidate {
   matchTier: number;
   matchNote: string;
 }
-function KitAllocationDialog({ stockCode, needed, existing, autoResolved, reservations, onClose, onSave, triggerToast }: {
+export function KitAllocationDialog({ stockCode, needed, existing, autoResolved, reservations, onClose, onSave, triggerToast }: {
   stockCode: string;
   needed: number;
   existing: Array<{ allocatedCode: string; qty: number }>;

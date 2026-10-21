@@ -8,7 +8,9 @@ import { fmtNumber } from '../lib/formatMoney';
 import { detectLedSwatch, ledSwatchBackground } from '../lib/ledColor';
 import BuildQtyPicker from './BuildQtyPicker';
 import SupplierOrderFiles from './SupplierOrderFiles';
-import { colorToCssBackground } from './views/KitBookingView';
+import { colorToCssBackground, KitAllocationDialog, type MatchCandidate } from './views/KitBookingView';
+import { fillByTier } from '../lib/kitTierFill';
+import { confirmDialog } from '../lib/confirmDialog';
 import { 
   ClipboardCheck, 
   Layers, 
@@ -65,8 +67,12 @@ export default function BOMManager({
   }, [projects]);
   const [pcbQty, setPcbQty] = useState<number>(50); // Default to 50 PCBs
   
-  // Custom substitutions mapped as: { stockCode: substitutedAlternateStockCode }
-  const [substitutions, setSubstitutions] = useState<Record<string, string>>({});
+  // Allocations, as in P&P Kit Booking: a BOM line can be covered by several
+  // reels (its own SKU and alternates), each with a quantity. Book-out takes
+  // each pick from its own SKU.
+  const [allocations, setAllocations] = useState<Record<string, Array<{ allocatedCode: string; qty: number }>>>({});
+  const [allocatingCode, setAllocatingCode] = useState<string | null>(null);
+  const [autoAllocateBusy, setAutoAllocateBusy] = useState(false);
 
   // Reverse lookup: stockCode → names of saved kits that reference it,
   // so each row can advertise "in use by kits X, Y". One aggregate fetch
@@ -183,22 +189,26 @@ export default function BOMManager({
   // Perform a live, reactive inventory audit
   const auditResults = projectBOM.map(line => {
     const isVoided = isVoidedBomLine(line.stockCode, line.quantity);
-    const isSubstituted = substitutions[line.stockCode];
-    const resolvedCode = isSubstituted || line.stockCode;
+    const picks = (allocations[line.stockCode] || []).filter(p => p.qty > 0);
+    const picked = picks.reduce((sum, p) => sum + p.qty, 0);
+    const resolvedCode = line.stockCode;
     const inventoryItem = items.find(i => i.partNumber === resolvedCode);
 
     const requiredTotal = line.quantity * pcbQty;
     const currentStock = inventoryItem ? inventoryItem.stockLevel : 0;
-    const remainingStock = currentStock - requiredTotal;
+    // With picks, the line is covered by what's picked across its reels;
+    // without, by its own stock (as before).
+    const remainingStock = picks.length ? picked - requiredTotal : currentStock - requiredTotal;
     // Voided lines never count as shortages, regardless of what stock math
     // says. There's no part to source and no PCB position to fill.
     const isShortage = !isVoided && remainingStock < 0;
-    const isPrimaryReplenished = line.stockCode !== resolvedCode;
+    const isPrimaryReplenished = picks.some(p => p.allocatedCode !== line.stockCode);
 
     return {
       line,
       isVoided,
-      isSubstituted,
+      picks,
+      picked,
       resolvedCode,
       inventoryItem,
       requiredTotal,
@@ -233,6 +243,45 @@ export default function BOMManager({
     });
   }, [auditResults, bomSearch]);
 
+  // Auto-allocate: the per-line "Auto-fill by tier" (lib/kitTierFill) on
+  // every line, for the PCB quantity chosen, the same as P&P Kit Booking.
+  // A line with no T1/T2 candidate keeps its picks (hand-chosen swaps).
+  const autoAllocateAll = async () => {
+    const targets = auditResults.filter(r => !r.isVoided);
+    if (!targets.length) { triggerToast('Nothing to allocate: every line is voided.', 'INFO'); return; }
+    const withPicks = targets.filter(r => r.picks.length > 0).length;
+    if (withPicks > 0 && !(await confirmDialog({
+      title: 'Auto-allocate',
+      message: `Fill every line by tier (T1 exact, then T2 same value and footprint) for ${pcbQty} PCB${pcbQty === 1 ? '' : 's'}, across as many reels as needed? This replaces the picks on ${withPicks} line${withPicks === 1 ? '' : 's'}. Lines with no T1/T2 match keep theirs.`,
+      confirmLabel: 'Auto-allocate',
+    }))) return;
+    setAutoAllocateBusy(true);
+    try {
+      const res = await fetch('/api/kits/match/batch', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stockCodes: targets.map(r => r.line.stockCode) }),
+      });
+      if (!res.ok) throw new Error(`Match lookup failed (${res.status})`);
+      const matches: Record<string, MatchCandidate[]> = await res.json();
+      const next = { ...allocations };
+      let filled = 0, short = 0;
+      for (const r of targets) {
+        const { picks, remaining } = fillByTier(matches[r.line.stockCode] || [], r.requiredTotal, reservedByPart);
+        if (picks.length) { next[r.line.stockCode] = picks; filled++; if (remaining > 0) short++; }
+      }
+      setAllocations(next);
+      const skipped = targets.length - filled;
+      const parts = [`${filled} line${filled === 1 ? '' : 's'} filled for ${pcbQty} PCB${pcbQty === 1 ? '' : 's'}`];
+      if (short) parts.push(`${short} still short after fill`);
+      if (skipped) parts.push(`${skipped} had no T1/T2 candidates (left as they were)`);
+      triggerToast(parts.join(' · '), short ? 'INFO' : 'SUCCESS');
+    } catch (err: any) {
+      triggerToast(`Auto-allocate failed: ${err.message}`, 'ERROR');
+    } finally {
+      setAutoAllocateBusy(false);
+    }
+  };
+
   const [showBookOutConfirm, setShowBookOutConfirm] = useState(false);
   useEscapeKey(() => setShowBookOutConfirm(false), showBookOutConfirm);
 
@@ -256,9 +305,12 @@ export default function BOMManager({
       const res = await fetch('/api/kit-booking/execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        // Each line's picks are taken from their own reels; voided lines are left out.
         body: JSON.stringify({
           projectId: selectedProjectId,
-          buildQty: pcbQty
+          buildQty: pcbQty,
+          allocations,
+          dnf: auditResults.filter(r => r.isVoided).map(r => r.line.stockCode),
         })
       });
 
@@ -285,7 +337,7 @@ export default function BOMManager({
 
       if (mappedItems.length > 0) setItems(mappedItems);
       setTransactions(newTrx);
-      setSubstitutions({});
+      setAllocations({});
       triggerToast(`Unified Workflow: Successfully booked out stock for ${pcbQty} x ${activeProject?.projectName}.`);
     } catch (err: any) {
       console.error('Failed to persist BOM book-out:', err);
@@ -296,6 +348,30 @@ export default function BOMManager({
   return (
     <div className="p-container-margin space-y-lg max-w-[1600px] mx-auto w-full select-none">
       
+      {allocatingCode && (() => {
+        const row = auditResults.find(r => r.line.stockCode === allocatingCode);
+        if (!row) return null;
+        return (
+          <KitAllocationDialog
+            stockCode={allocatingCode}
+            needed={row.requiredTotal}
+            existing={allocations[allocatingCode] || []}
+            autoResolved={allocatingCode}
+            reservations={reservedByPart}
+            onClose={() => setAllocatingCode(null)}
+            onSave={(picks) => {
+              setAllocations(prev => {
+                const next = { ...prev };
+                if (picks.length) next[allocatingCode] = picks; else delete next[allocatingCode];
+                return next;
+              });
+              setAllocatingCode(null);
+            }}
+            triggerToast={(m, t) => triggerToast(m, t === 'ERROR' ? 'ERROR' : t === 'INFO' ? 'INFO' : 'SUCCESS')}
+          />
+        );
+      })()}
+
       {/* Title Header summary banner */}
       <div className="bg-surface-container border border-outline-variant p-lg rounded-xl flex flex-wrap lg:items-center justify-between gap-md relative overflow-hidden">
         <div className="space-y-1 flex-1 min-w-[300px]">
@@ -317,7 +393,7 @@ export default function BOMManager({
             value={selectedProjectId}
             onChange={(e) => {
               setSelectedProjectId(Number(e.target.value));
-              setSubstitutions({});
+              setAllocations({});
             }}
           >
             {projects.map(p => (
@@ -327,7 +403,7 @@ export default function BOMManager({
         </div>
       </div>
 
-      {/* One upload file per supplier, from the audit (substitutions included) */}
+      {/* One upload file per supplier, from the audit (allocations included) */}
       <SupplierOrderFiles
         projectName={activeProject?.projectName || 'project'}
         pcbQty={pcbQty}
@@ -402,10 +478,10 @@ export default function BOMManager({
                 </span>
               </div>
 
-              <div className="bg-surface-container-high/40 p-sm rounded-lg border border-outline-variant/60 flex flex-col justify-between" title="Substitute parts you've swapped in for shortages.">
-                <span className="text-[9px] text-outline font-label-caps uppercase leading-none block mb-1">Subs Active</span>
+              <div className="bg-surface-container-high/40 p-sm rounded-lg border border-outline-variant/60 flex flex-col justify-between" title="Lines with reels allocated to them (their own SKU and/or alternates).">
+                <span className="text-[9px] text-outline font-label-caps uppercase leading-none block mb-1">Allocated</span>
                 <span className="text-xl font-black font-mono leading-none text-primary">
-                  {Object.keys(substitutions).length}
+                  {auditResults.filter(r => r.picks.length > 0).length}
                 </span>
               </div>
 
@@ -480,6 +556,16 @@ export default function BOMManager({
                     className="bg-surface-container-high border border-outline-variant rounded pl-2 pr-2 py-1 text-xs text-on-surface outline-none focus:border-primary w-[260px] placeholder:text-outline/60 font-mono"
                   />
                 </div>
+                <button
+                  type="button"
+                  onClick={() => void autoAllocateAll()}
+                  disabled={autoAllocateBusy || auditResults.length === 0}
+                  title="Fill every line by tier (T1 exact, then T2 same value and footprint) for this PCB quantity, across as many reels as needed, as P&P Kit Booking does. Replaces existing picks (asks first); lines with no T1/T2 match keep theirs."
+                  className="h-7 px-2 rounded flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider border border-primary/40 text-primary bg-primary/10 hover:bg-primary/20 disabled:opacity-40"
+                >
+                  <ArrowRightLeft className="w-3 h-3" />
+                  {autoAllocateBusy ? 'Allocating…' : 'Auto-allocate'}
+                </button>
                 <span className="font-mono text-[10px] text-outline">Multiplier: {pcbQty} PCBs</span>
               </div>
             </div>
@@ -497,7 +583,7 @@ export default function BOMManager({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-outline-variant/30 text-xs">
-                  {displayedAudit.map(({ line, isVoided, isSubstituted, resolvedCode, inventoryItem, requiredTotal, currentStock, remainingStock, isShortage, isPrimaryReplenished, shortageAmount }) => {
+                  {displayedAudit.map(({ line, isVoided, picks, picked, resolvedCode, inventoryItem, requiredTotal, currentStock, remainingStock, isShortage, isPrimaryReplenished, shortageAmount }) => {
                     // Check if alternates are available for substitution
                     const altOptions = getAlternatesFor(line.stockCode);
 
@@ -548,7 +634,7 @@ export default function BOMManager({
                           {isPrimaryReplenished && (
                             <span className="mt-1 inline-flex items-center gap-1 text-[8.5px] font-bold text-primary font-mono uppercase bg-primary/10 border border-primary/20 px-1 py-0.5 rounded">
                               <ArrowRightLeft className="w-2.5 h-2.5" />
-                              Subbed: {line.stockCode} → {resolvedCode}
+                              Uses alternates: {picks.filter(p => p.allocatedCode !== line.stockCode).map(p => p.allocatedCode).join(', ')}
                             </span>
                           )}
 
@@ -629,41 +715,35 @@ export default function BOMManager({
                           )}
                         </td>
 
-                        {/* Alternates prompt portal dropdown */}
-                        <td className="px-lg py-3 text-center" data-label="Alternates">
-                          {altOptions.length > 0 ? (
+                        {/* Allocations across reels, as in P&P Kit Booking */}
+                        <td className="px-lg py-3 text-center" data-label="Allocations">
+                          {isVoided ? (
+                            <span className="text-[10px] text-outline italic">Not needed</span>
+                          ) : (
                             <div className="flex flex-col items-center gap-1">
-                              <select
-                                className="bg-surface-container border border-outline-variant p-1 rounded font-mono text-[10px] text-on-surface outline-none focus:border-primary max-w-140px"
-                                aria-label={`Select alternate for ${line.stockCode}`}
-                                value={isSubstituted || ""}
-                                onChange={(e) => {
-                                  const val = e.target.value;
-                                  if (val === "") {
-                                    const { [line.stockCode]: removed, ...rest } = substitutions;
-                                    setSubstitutions(rest);
-                                    triggerToast(`Restored primary specification: ${line.stockCode}`);
-                                  } else {
-                                    setSubstitutions({ ...substitutions, [line.stockCode]: val });
-                                    triggerToast(`Substituted with alternative stock: ${val}`);
-                                  }
-                                }}
+                              {picks.length > 0 && (
+                                <div className="flex flex-wrap justify-center gap-1 max-w-[220px]">
+                                  {picks.map(p => (
+                                    <span key={p.allocatedCode} className={`text-[9px] font-mono px-1 py-0.5 rounded border ${p.allocatedCode === line.stockCode ? 'border-outline-variant text-on-surface-variant' : 'border-primary/30 text-primary bg-primary/5'}`}>
+                                      {p.allocatedCode} ×{fmtNumber(p.qty)}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => setAllocatingCode(line.stockCode)}
+                                aria-label={`Allocate reels for ${line.stockCode}`}
+                                className="text-[10px] font-bold px-2 py-0.5 rounded border border-primary/40 text-primary hover:bg-primary/10"
                               >
-                                <option value="">Primary Spec ({line.stockCode})</option>
-                                {altOptions.map(alt => (
-                                  <option key={alt.partNumber} value={alt.partNumber}>
-                                    {alt.partNumber} (Stock: {alt.stockLevel})
-                                  </option>
-                                ))}
-                              </select>
-                              <span className="text-[9px] text-[#8c909f] font-mono">
-                                {altOptions.length} alternates found
+                                {picks.length ? 'Edit allocation' : 'Allocate'}
+                              </button>
+                              <span className={`text-[9px] font-mono ${picks.length ? (picked >= requiredTotal ? 'text-green-400' : 'text-red-400') : 'text-[#8c909f]'}`}>
+                                {picks.length
+                                  ? `${fmtNumber(picked)}/${fmtNumber(requiredTotal)} from ${picks.length} reel${picks.length === 1 ? '' : 's'}`
+                                  : (() => { const n = getAlternatesFor(line.stockCode).length; return n ? `${n} alternate${n === 1 ? '' : 's'} in stock` : 'Own stock only'; })()}
                               </span>
                             </div>
-                          ) : (
-                            <span className="text-[10px] text-outline italic">
-                              No compatible alternates
-                            </span>
                           )}
                         </td>
 

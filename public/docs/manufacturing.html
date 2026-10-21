@@ -64,6 +64,8 @@
             <h3 id="kit-auto-allocate-and-presets">Auto-allocate and preset shortages</h3>
             <div class="step">
                 <p><strong>Auto-allocate</strong> fills every line (except DNF) by tier for the build quantity chosen, as <em>Auto-fill by tier</em> does for one line: T1 exact matches first, then T2 (same value and footprint), using what's free after other kits' reservations. Change the build quantity and press it again to re-size every line; it asks before replacing existing picks. A line with no T1/T2 match keeps its picks (footprint swaps are chosen by hand).</p>
+                <p><strong>Booking out uses the allocations.</strong> <em>Process Booking</em> (Kit Booking) and <em>Book out entire BOM</em> (Bill of Materials) take each line's picks from their own reels, so a line covered by two reels books out of both; DNF and voided lines take nothing; a line with no picks takes its own part as before. Nothing is booked when a line isn't covered or a reel hasn't the stock for every line using it; the message says which.</p>
+                <p><strong>Bill of Materials</strong> works the same way: <em>Allocate</em> on a line opens the same reel picker as Kit Booking (T1 exact to T4 fuzzy, with a quantity per reel), and <em>Auto-allocate</em> above the table fills every line by tier for the PCB quantity chosen.</p>
                 <p><strong>Save presets (Excel)</strong>, in the "Shortages at build qty" column, downloads one workbook: a Summary sheet, then for each selected build quantity a shortages sheet ("Qty 50") followed by a sheet per ticked supplier ("Qty 50 LCSC", "Qty 50 Mouser", "Qty 50 DigiKey") with what to order in that supplier's upload columns and the lines it has no part number for.</p>
             </div>
 

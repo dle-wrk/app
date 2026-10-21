@@ -21,6 +21,7 @@
 //     boot bootstrap in server.ts. Do not move that call into this module's
 //     register step: schema creation runs once, before any router is wired.
 
+import { planKitBookOut } from './kitBookOut';
 import type { Express } from 'express';
 import { z } from 'zod';
 import { pool, query, queryOne, exec } from './db';
@@ -1110,35 +1111,43 @@ export function registerProductionRoutes(app: Express): void {
     }
   });
 
+  // Book a build out of stock. With `allocations` (stockCode -> the reels
+  // picked for it, as Kit Booking and the BOM audit make them) each pick is
+  // taken from its own SKU; `dnf` lines are left out; any other line takes
+  // its resolved part as before. Blocked, with nothing changed, when a line
+  // isn't covered or a picked SKU hasn't the stock (counting every line that
+  // uses it). The rules: planKitBookOut in ./kitBookOut.
   app.post('/api/kit-booking/execute', async (req, res) => {
     const { projectId, buildQty } = req.body;
     if (!projectId || !buildQty) {
       return res.status(400).json({ error: 'projectId and buildQty are required' });
     }
+    const allocations = req.body?.allocations && typeof req.body.allocations === 'object' ? req.body.allocations : {};
+    const dnf: string[] = Array.isArray(req.body?.dnf) ? req.body.dnf.map(String) : [];
 
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
       const auditResults = await auditKitStock(Number(projectId), Number(buildQty));
-      const shortages = auditResults.filter(r => r.shortage_qty > 0);
-
-      if (shortages.length > 0) {
+      const codes = new Set<string>();
+      for (const r of auditResults) codes.add(r.resolved_part_number);
+      for (const picks of Object.values(allocations) as any[]) for (const p of Array.isArray(picks) ? picks : []) codes.add(String(p?.allocatedCode ?? ''));
+      const { rows: stockRows } = await client.query(
+        `SELECT serial_number, name, stock FROM inventory WHERE serial_number = ANY($1::text[]) AND deleted IS NOT TRUE FOR UPDATE`, [[...codes].filter(Boolean)]);
+      const stock = new Map<string, { name: string; stock: number }>(stockRows.map((r: any) => [r.serial_number, { name: r.name, stock: Number(r.stock) || 0 }]));
+      const plan = planKitBookOut(auditResults, allocations, dnf, stock);
+      if (plan.problems.length > 0) {
         await client.query('ROLLBACK');
-        return res.status(400).json({ error: `Insufficient stock for ${shortages.length} items. Booking blocked.` });
+        return res.status(400).json({ error: `Booking blocked: ${plan.problems.length} problem${plan.problems.length === 1 ? '' : 's'}. ${plan.problems.slice(0, 5).join(' ')}${plan.problems.length > 5 ? ' …' : ''}`, problems: plan.problems });
       }
 
       const now = new Date().toISOString();
-
-      for (const result of auditResults) {
-        const partToDeduct = result.resolved_part_number;
-        const qtyToDeduct = result.qty_required;
-        await client.query('UPDATE inventory SET stock = stock - $1 WHERE serial_number = $2', [qtyToDeduct, partToDeduct]);
-
-        const item = await queryOne(`SELECT name FROM inventory WHERE serial_number = $1`, [partToDeduct]);
-        const trxId = `TRX-KIT-${partToDeduct}-${Date.now()}`;
+      for (const [i, d] of plan.deductions.entries()) {
+        await client.query('UPDATE inventory SET stock = stock - $1 WHERE serial_number = $2', [d.qty, d.code]);
+        const trxId = `TRX-KIT-${d.code}-${Date.now()}-${i}`;
         await client.query(`INSERT INTO transactions (trxId, itemPartNumber, itemName, type, qtyChange, reference, performedBy, dateTime)
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-          [trxId, partToDeduct, item?.name || 'Unknown', 'BOOK-OUT', -qtyToDeduct, `Kit Booking: Project ${projectId}`, 'System', now]);
+          [trxId, d.code, stock.get(d.code)?.name || 'Unknown', 'BOOK-OUT', -d.qty, `Kit Booking: Project ${projectId}${d.forLine !== d.code ? ` (for ${d.forLine})` : ''}`, 'System', now]);
       }
 
       const project = await queryOne(`SELECT assigned_team FROM projects WHERE id = $1`, [projectId]);
@@ -1146,7 +1155,7 @@ export function registerProductionRoutes(app: Express): void {
         [projectId, buildQty, 'In Progress', now, project?.assigned_team || '']);
 
       await client.query('COMMIT');
-      res.json({ ok: true, auditResults });
+      res.json({ ok: true, auditResults, deductions: plan.deductions, skipped: plan.skipped });
     } catch (err: any) {
       await client.query('ROLLBACK');
       res.status(400).json({ error: err.message });
