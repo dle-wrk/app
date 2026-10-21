@@ -76,13 +76,14 @@ export const InvoicesTab: React.FC<ModuleDataProps> = (props) => {
   // the reversing journal entry the server posts). If the void fails, the
   // snapshot restores the row and an error toast surfaces.
   const handleVoid = async (id: number) => {
-    if (!(await confirmDialog({ title: 'Void invoice', message: 'Void this invoice? This posts a reversing journal entry and cannot be undone.', confirmLabel: 'Void', destructive: true }))) return;
+    if (!(await confirmDialog({ title: 'Void invoice', message: 'Void this invoice? This posts a reversing journal entry, and any stock it booked out goes back into stock. It cannot be undone.', confirmLabel: 'Void', destructive: true }))) return;
     const snap = invoices;
     setInvoices?.(prev => prev.map(i => i.id === id ? { ...i, status: 'VOID', balanceDue: 0 } : i));
     setViewingInvoice(null);
     try {
-      await apiPost(`/api/invoices/${id}/void`);
-      triggerToast('Invoice voided.');
+      const done: any = await apiPost(`/api/invoices/${id}/void`);
+      const back: Array<{ partNumber: string; qty: number }> = done?.stockReturned ?? [];
+      triggerToast(back.length ? `Invoice voided; stock returned: ${back.map((b) => `${b.qty} × ${b.partNumber}`).join(', ')}.` : 'Invoice voided.');
       // Fire and forget — refresh reconciles totals but we already gave the
       // user their visual feedback.
       void refresh();

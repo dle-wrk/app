@@ -19,7 +19,7 @@ import type { PoolClient } from 'pg';
 import { z } from 'zod';
 import { exec, pool, query, queryOne } from './db';
 import { computeDocumentTotals, computeLineTotals, nextDocNumber, reverseJournalEntry, rewriteReservations } from './bookkeeping-db';
-import { adjustStock, resolveTaxPercent } from './bookkeeping-routes';
+import { resolveTaxPercent, returnInvoiceStock } from './bookkeeping-routes';
 import { LIKELIHOODS, NOTE_KINDS, WIN_TARGETS, sortHistory, type HistoryEntry, type PotentialLine } from './potentialOrders';
 
 export async function ensurePotentialOrdersSchema(run: (sql: string) => Promise<void> = exec): Promise<void> {
@@ -221,9 +221,8 @@ export function registerPotentialOrdersRoutes(app: Express): void {
         if (inv.journal_entry_id) {
           await reverseJournalEntry(db, inv.journal_entry_id, { sourceType: 'REVERSAL', sourceId: id, memo: `Invoice ${inv.invoice_number} moved to Potential Order ${pot.number}` });
         }
-        for (const i of items) {
-          if (i.deduct_stock && i.part_number) await adjustStock(db, i.part_number, Number(i.quantity) || 0, 'INBOUND', `Invoice ${inv.invoice_number} moved to Potential Order ${pot.number}`);
-        }
+        // What it booked out, from the stock ledger (a sent invoice can have been edited).
+        await returnInvoiceStock(db, inv.invoice_number, `moved to Potential Order ${pot.number}`);
         await db.query(`UPDATE invoices SET status = 'VOID', balance_due = 0, notes = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
           [id, `${inv.notes ? `${inv.notes}\n` : ''}Moved to Potential Order ${pot.number}: taken out of the books.`]);
       }

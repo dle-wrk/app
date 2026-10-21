@@ -625,7 +625,7 @@
                         <tr><td><span class="m m-post">POST</span></td><td>/api/invoices</td><td>Create an invoice.</td></tr>
                         <tr><td><span class="m m-put">PUT</span></td><td>/api/invoices/:id</td><td>Update an invoice.</td></tr>
                         <tr><td><span class="m m-post">POST</span></td><td>/api/invoices/:id/finalize</td><td>Finalise (send) an invoice: posts it to the ledger and books stock out.</td></tr>
-                        <tr><td><span class="m m-post">POST</span></td><td>/api/invoices/:id/void</td><td>Void an invoice.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/invoices/:id/void</td><td>Void an invoice: reverses its journal and returns the stock it booked out (from the stock ledger). Refused with payments or an issued credit note. Returns <code>stockReturned</code>.</td></tr>
                         <tr><td><span class="m m-delete">DELETE</span></td><td>/api/invoices/:id</td><td>Delete an invoice.</td></tr>
                         <tr><td><span class="m m-get">GET</span></td><td>/api/payments-received</td><td>List payments received.</td></tr>
                         <tr><td><span class="m m-get">GET</span></td><td>/api/payments-received/:id</td><td>Get one payment with its allocations.</td></tr>

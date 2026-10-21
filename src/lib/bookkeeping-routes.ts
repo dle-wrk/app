@@ -205,6 +205,28 @@ export async function adjustStock(client: any, partNumber: string, delta: number
   );
 }
 
+/** Puts back the stock an invoice still has out, as its stock transactions
+ *  say ('Invoice INV-1' out, 'Invoice INV-1 …' back), not as its lines say
+ *  now: a sent invoice can be edited. Used when it is voided, revised, or
+ *  moved to a Potential Order; running it twice returns nothing the second
+ *  time. Returns what was put back. */
+export async function returnInvoiceStock(client: any, invoiceNumber: string, why: string): Promise<Array<{ partNumber: string; qty: number }>> {
+  const { rows } = await client.query(
+    `SELECT itempartnumber AS part, SUM(qtychange) AS net FROM transactions
+      WHERE reference = $1 OR reference LIKE $2 GROUP BY itempartnumber ORDER BY itempartnumber`,
+    [`Invoice ${invoiceNumber}`, `Invoice ${invoiceNumber.replace(/[\\%_]/g, (m) => `\\${m}`)} %`]
+  );
+  const returned: Array<{ partNumber: string; qty: number }> = [];
+  for (const r of rows) {
+    const out = -(Number(r.net) || 0);
+    if (r.part && out > 0) {
+      await adjustStock(client, r.part, out, 'INBOUND', `Invoice ${invoiceNumber} ${why}`);
+      returned.push({ partNumber: r.part, qty: out });
+    }
+  }
+  return returned;
+}
+
 export function registerBookkeepingRoutes(app: Express) {
   // ==========================================================================
   // BOOTSTRAP — one round trip for the whole module
@@ -854,6 +876,11 @@ export function registerBookkeepingRoutes(app: Express) {
         // overwriting the field non-atomically.
         await client.query(`UPDATE invoices SET journal_entry_id = NULL WHERE id = $1`, [id]);
       }
+      // And its stock back: sending it again books out the revised lines,
+      // so without this an edited invoice took its stock twice.
+      if (priorStatus !== 'DRAFT') {
+        await returnInvoiceStock(client, priorInvoiceNumber, '— revised, stock returned');
+      }
 
       const computedLines = await Promise.all(body.items.map(async (item) => {
         const taxPct = await resolveTaxPercent(item.taxRateId);
@@ -934,13 +961,18 @@ export function registerBookkeepingRoutes(app: Express) {
       const invoice = inv.rows[0];
       if (invoice.status === 'VOID') { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Invoice is already void.' }); }
       if (parseFloat(invoice.amount_paid) > 0) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Cannot void an invoice with payments applied. Void the payment(s) first.' }); }
+      // A credit note may have restocked some of it already: voiding too would count that stock twice.
+      const credits = await client.query(`SELECT credit_note_number FROM credit_notes WHERE invoice_id = $1 AND status NOT IN ('VOID','DRAFT')`, [id]);
+      if (credits.rows.length) { await client.query('ROLLBACK'); return res.status(400).json({ error: `It has a credit note (${credits.rows.map((c: any) => c.credit_note_number).join(', ')}): void the credit note first.` }); }
 
       if (invoice.journal_entry_id) {
         await reverseJournalEntry(client, invoice.journal_entry_id, { sourceType: 'REVERSAL', sourceId: id, memo: `Void invoice ${invoice.invoice_number}` });
       }
+      // The stock it booked out goes back on the shelf.
+      const returned = await returnInvoiceStock(client, invoice.invoice_number, '— voided, stock returned');
       await client.query(`UPDATE invoices SET status = 'VOID', balance_due = 0, updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [id]);
       await client.query('COMMIT');
-      res.json({ ok: true });
+      res.json({ ok: true, stockReturned: returned });
     } catch (err: any) {
       await client.query('ROLLBACK');
       res.status(400).json({ error: err.message });

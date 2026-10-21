@@ -37,7 +37,7 @@ vi.mock('./bookkeeping-db', async () => {
   };
 });
 vi.mock('./bookkeeping-routes', () => ({
-  adjustStock: async (_db: any, part: string, qty: number, type: string) => { stock.push({ part, qty, type }); },
+  returnInvoiceStock: async (_db: any, invoiceNumber: string, why: string) => { stock.push({ invoiceNumber, why }); return []; },
   resolveTaxPercent: async (id: number | null) => (id === 1 ? 15 : 0),
 }));
 
@@ -70,7 +70,7 @@ describe('moving an invoice to Potential Orders', () => {
     expect(r.statusCode).toBe(201);
     expect(r.body).toMatchObject({ number: 'POT-2026-0001', sourceType: 'invoice', sourceNumber: 'INV-2026-0005', total: 46451.1 }); // R40 392.26 + 15% VAT
     expect(reversed).toEqual([{ id: 41, memo: 'Invoice INV-2026-0005 moved to Potential Order POT-2026-0001' }]);
-    expect(stock).toEqual([{ part: 'NCU-SYS-001', qty: 1, type: 'INBOUND' }]); // only the line that took stock
+    expect(stock).toEqual([{ invoiceNumber: 'INV-2026-0005', why: 'moved to Potential Order POT-2026-0001' }]); // what the stock ledger says it took
     expect(state.sql.some((s) => s.startsWith("UPDATE invoices SET status = 'VOID'"))).toBe(true);
     expect(state.sql.some((s) => s.startsWith("INSERT INTO client_events") )).toBe(true);
     expect(state.sql.at(-1)).toBe('COMMIT');
