@@ -23,9 +23,9 @@ describe('fillByTier', () => {
 // Kit Booking with a one-line BOM: 2 per board of CAP-001 (T1, 400 free) or CAP-009 (T2, 300 free).
 let host: HTMLDivElement;
 let root: Root;
-let toast: ReturnType<typeof vi.fn>;
+let toast: ReturnType<typeof vi.fn<(msg: string, type?: string) => void>>;
 beforeEach(() => {
-  toast = vi.fn();
+  toast = vi.fn<(msg: string, type?: string) => void>();
   localStorage.setItem('currentUser', JSON.stringify({ role: 'admin' }));
   setConfirmHandler(async () => true);
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
