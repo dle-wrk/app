@@ -61,6 +61,12 @@
                 </ol>
             </div>
 
+            <h3 id="kit-auto-allocate-and-presets">Auto-allocate and preset shortages</h3>
+            <div class="step">
+                <p><strong>Auto-allocate</strong> fills every line (except DNF) by tier for the build quantity chosen, as <em>Auto-fill by tier</em> does for one line: T1 exact matches first, then T2 (same value and footprint), using what's free after other kits' reservations. Change the build quantity and press it again to re-size every line; it asks before replacing existing picks. A line with no T1/T2 match keeps its picks (footprint swaps are chosen by hand).</p>
+                <p><strong>Save presets (Excel)</strong>, in the "Shortages at build qty" column, downloads one workbook: a Summary sheet, then for each selected build quantity a shortages sheet ("Qty 50") followed by a sheet per ticked supplier ("Qty 50 LCSC", "Qty 50 Mouser", "Qty 50 DigiKey") with what to order in that supplier's upload columns and the lines it has no part number for.</p>
+            </div>
+
             <h3 id="pick-and-place-operations">Pick & Place Operations</h3>
             <div class="step">
                 <h4>Manage Pick & Place Components</h4>
