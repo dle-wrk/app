@@ -74,7 +74,7 @@ export default function PartAlign({ onShowNotification, onOpenItem, onChanged }:
   const start = async () => {
     const ok = await confirmDialog({
       title: 'Check every item with the suppliers',
-      message: 'Asks LCSC, Mouser and DigiKey for each item\'s manufacturer part number and lines up the three lists by slot (1 Mouser, 2 DigiKey, 3 LCSC, 4-5 other). Where Mouser or DigiKey is N/A, it searches them for the same part number and fills in their number and link (exact matches only). It takes about half an hour (Mouser allows 30 calls a minute) and changes nothing: you see each item\'s changes and apply them.',
+      message: 'Asks LCSC, Mouser and DigiKey for each item\'s manufacturer part number and lines up the three lists by slot (1 Mouser, 2 DigiKey, 3 LCSC, 4-5 other). Where Mouser, DigiKey or LCSC is N/A, it searches them for the same part number and fills in their number and link (exact matches only). It takes about half an hour (Mouser allows 30 calls a minute) and changes nothing: you see each item\'s changes and apply them.',
       confirmLabel: 'Start the check',
     });
     if (!ok) return;
@@ -109,7 +109,7 @@ export default function PartAlign({ onShowNotification, onOpenItem, onChanged }:
         <div className="max-w-[760px]">
           <h4 className="text-base font-bold text-on-surface flex items-center gap-2"><ListChecks className="w-4 h-4 text-primary" /> Line up by supplier</h4>
           <p className="text-xs text-on-surface-variant mt-1 leading-relaxed">
-            Manufacturer part numbers, supplier part numbers and web links each have five slots, and slot 1 is Mouser in all three, 2 DigiKey, 3 LCSC, 4-5 other. Mfr PN 2 is the manufacturer part number as DigiKey lists it, and so on. The check asks the suppliers and shows what would change. Where an item has nothing at Mouser or DigiKey, it searches them for the same part number and fills in their number and link (exact matches only; LCSC can't be searched, so its slot fills from an LCSC number or link). A slot with nothing for its supplier says N/A, and nothing is thrown away (anything that doesn't fit goes to 4-5).
+            Manufacturer part numbers, supplier part numbers and web links each have five slots, and slot 1 is Mouser in all three, 2 DigiKey, 3 LCSC, 4-5 other. Mfr PN 2 is the manufacturer part number as DigiKey lists it, and so on. The check asks the suppliers and shows what would change. Where an item has nothing at Mouser, DigiKey or LCSC, it searches them for the same part number and fills in their number and link (exact matches only; LCSC is found through JLCPCB's parts search and confirmed with LCSC). A slot with nothing for its supplier says N/A, and nothing is thrown away (anything that doesn't fit goes to 4-5).
           </p>
         </div>
         {may && (

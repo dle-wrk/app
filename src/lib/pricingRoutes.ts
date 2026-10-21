@@ -615,6 +615,36 @@ export async function mouserFind(mpn: string): Promise<SupplierMatch | null> {
   return p ? { mpn: String(p.ManufacturerPartNumber).trim(), supplierPn: String(p.MouserPartNumber).trim(), url: p.ProductDetailUrl ? String(p.ProductDetailUrl) : null } : null;
 }
 
+/** From JLCPCB's parts search, the LCSC part for exactly this manufacturer part
+ *  number: not a lookalike (TPTLV70233DBVR for TLV70233DBVT) and not one of
+ *  JLCPCB's own assembly entries (C99…, brand "JLCPCB Assembly"); in stock first. */
+export function pickLcscMatch(list: any[], mpn: string): string | null {
+  const hits = (Array.isArray(list) ? list : []).filter((c) =>
+    sameMpn(c?.componentModelEn, mpn) && /^C\d+$/i.test(String(c?.componentCode ?? '')) && !/jlcpcb/i.test(String(c?.componentBrandEn ?? '')));
+  hits.sort((a, b) => (Number(b.stockCount) || 0) - (Number(a.stockCount) || 0));
+  return hits[0] ? String(hits[0].componentCode).toUpperCase() : null;
+}
+
+/** LCSC's part for exactly this manufacturer part number, or null. LCSC's own
+ *  search refuses servers, so JLCPCB's parts search (LCSC's stock) finds the
+ *  number, and LCSC's product page confirms it is that part. */
+export async function lcscFind(mpn: string): Promise<SupplierMatch | null> {
+  const res = await fetch('https://jlcpcb.com/api/overseas-pcb-order/v1/shoppingCart/smtGood/selectSmtComponentList', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'User-Agent': 'TrackLab-IM (inventory part-number lookup)' },
+    body: JSON.stringify({ keyword: mpn, currentPage: 1, pageSize: 20 }),
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!res.ok) throw new Error(`LCSC search (via JLCPCB) failed: ${res.status}`);
+  const data: any = await res.json().catch(() => null);
+  const code = pickLcscMatch(data?.data?.componentPageInfo?.list ?? [], mpn);
+  if (!code) return null;
+  const detail = await fetchLcscDetail(code);
+  const model = String(detail?.result?.productModel ?? '').trim();
+  if (!sameMpn(model, mpn)) return null;
+  return { mpn: model, supplierPn: code, url: `https://www.lcsc.com/product-detail/${encodeURIComponent(code)}.html` };
+}
+
 /** DigiKey's part for exactly this manufacturer part number (cut tape first), or null. */
 export async function digikeyFind(mpn: string): Promise<SupplierMatch | null> {
   const data: any = await digikeyKeywordSearch(mpn, 10);

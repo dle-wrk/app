@@ -9,10 +9,10 @@
 // The check asks LCSC (by its part number), Mouser (by its part number, or
 // the one in a Mouser link) and DigiKey (the part number in a DigiKey link,
 // else by DigiKey's number) what the manufacturer part number is. Then, for
-// Mouser and DigiKey where the item has nothing of theirs, it searches them
-// for that manufacturer part number and takes their number and product page
-// on an exact match only (LCSC can't be searched from a server: its slot
-// fills from an LCSC number or link). One item at a time with pauses
+// Mouser, DigiKey and LCSC where the item has nothing of theirs, it searches
+// them for that manufacturer part number and takes their number and product
+// page on an exact match only (LCSC through JLCPCB's parts search, confirmed
+// by LCSC; see lcscFind). One item at a time with pauses
 // between calls; it keeps a proposal for each item whose slots would change. Nothing changes until the proposals are applied;
 // applying skips an item that changed since it was checked.
 
@@ -22,7 +22,7 @@ import { requirePermission } from './authRoutes';
 import { NA, alignItem, linkSupplier, sameSlots, type ItemSlots, type SupplierFind } from './partAlign';
 import { classifyPartNumberBySupplier, isUsablePartNumber, type SlotSupplier } from './partNumbers';
 import { parseProductLink } from './productLink';
-import { digikeyFind, fetchLcscDetail, mouserFind, mouserLookup, searchDigikey, type SupplierMatch } from './pricingRoutes';
+import { digikeyFind, fetchLcscDetail, lcscFind, mouserFind, mouserLookup, searchDigikey, type SupplierMatch } from './pricingRoutes';
 
 const MAN = ['man_pn_1', 'man_pn_2', 'man_pn_3', 'man_pn_4', 'man_pn_5'];
 const SUP = ['sup_pn_1', 'sup_pn_2', 'sup_pn_3', 'sup_pn_4', 'sup_pn_5'];
@@ -51,6 +51,7 @@ export interface AlignDeps {
   /** Exact-match searches by manufacturer part number, for a supplier the item has nothing of. */
   mouserFind: (mpn: string) => Promise<SupplierMatch | null>;
   digikeyFind: (mpn: string) => Promise<SupplierMatch | null>;
+  lcscFind: (mpn: string) => Promise<SupplierMatch | null>;
   pause: (ms: number) => Promise<void>;
 }
 
@@ -60,6 +61,7 @@ export const defaultAlignDeps: AlignDeps = {
   digikey: async (pn) => (await searchDigikey(pn))?.partNumber ?? null,
   mouserFind,
   digikeyFind,
+  lcscFind,
   pause: (ms) => new Promise((r) => setTimeout(r, ms)),
 };
 
@@ -119,7 +121,7 @@ export async function findForItem(slots: ItemSlots, deps: AlignDeps): Promise<Pa
     .concat(slots.man.map((v) => v.trim()).filter((v) => isUsablePartNumber(v) && !classifyPartNumberBySupplier(v)))
     .find((v) => !!v);
   if (mpn) {
-    const search = async (s: 'mouser' | 'digikey', find: (m: string) => Promise<SupplierMatch | null>, pauseMs: number) => {
+    const search = async (s: 'mouser' | 'digikey' | 'lcsc', find: (m: string) => Promise<SupplierMatch | null>, pauseMs: number) => {
       if (found[s]?.status !== 'none') return;
       try {
         const m = await find(mpn);
@@ -129,6 +131,7 @@ export async function findForItem(slots: ItemSlots, deps: AlignDeps): Promise<Pa
     };
     await search('mouser', deps.mouserFind, 2100);
     await search('digikey', deps.digikeyFind, 600);
+    await search('lcsc', deps.lcscFind, 1000);
   }
   return found;
 }

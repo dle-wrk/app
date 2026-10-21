@@ -10,6 +10,7 @@ vi.mock('./db', () => ({
 
 import { findForItem, type AlignDeps } from './partAlignRoutes';
 import { alignItem } from './partAlign';
+import { pickLcscMatch } from './pricingRoutes';
 
 const DK = 'https://www.digikey.co.za/en/products/detail/fremont-micro-devices-ltd/FT24C08A-ELR-T/7795347';
 const LC = 'https://www.lcsc.com/product-detail/EEPROM_FMD-Fremont-Micro-Devices-FT24C08A-ELR-T_C232869.html';
@@ -22,6 +23,7 @@ const fakes = (over: Partial<AlignDeps> = {}) => {
     digikey: async (pn) => { asked.push(`digikey ${pn}`); return 'FROM-API'; },
     mouserFind: async (m) => { asked.push(`mouserFind ${m}`); return null; },
     digikeyFind: async (m) => { asked.push(`digikeyFind ${m}`); return null; },
+    lcscFind: async (m) => { asked.push(`lcscFind ${m}`); return null; },
     pause: async () => {},
     ...over,
   };
@@ -49,7 +51,7 @@ describe('filling a supplier the item has nothing of', () => {
     const slots = { man: ['C107096', 'CL10B104KB8NNNC', '', '', ''], sup: ['', '', '', '', ''], web: ['', '', '', '', ''] };
     const { deps, asked } = fakes({ lcsc: async (c) => { asked.push(`lcsc ${c}`); return null; } });
     await findForItem(slots, deps);
-    expect(asked).toEqual(['lcsc C107096', 'mouserFind CL10B104KB8NNNC', 'digikeyFind CL10B104KB8NNNC']);
+    expect(asked).toEqual(['lcsc C107096', 'mouserFind CL10B104KB8NNNC', 'digikeyFind CL10B104KB8NNNC', 'lcscFind CL10B104KB8NNNC']);
   });
 
   it('keeps the slot as it is when the search fails, and searches nothing without a part number', async () => {
@@ -61,6 +63,30 @@ describe('filling a supplier the item has nothing of', () => {
     const none = fakes();
     await findForItem({ man: ['', '', '', '', ''], sup: ['', '', '', '', ''], web: ['', '', '', '', ''] }, none.deps);
     expect(none.asked).toEqual([]);
+  });
+});
+
+describe('finding an item at LCSC', () => {
+  it('CHP-032: searches LCSC for the part when the item has no LCSC number, and fills slot 3', async () => {
+    const slots = { man: ['TLV70233DBVT', '', '', '', ''], sup: ['', '', '', '', ''], web: ['', '', '', '', ''] };
+    const { deps, asked } = fakes({ lcscFind: async (m) => { asked.push(`lcscFind ${m}`); return { mpn: 'TLV70233DBVT', supplierPn: 'C110287', url: 'https://www.lcsc.com/product-detail/C110287.html' }; } });
+    const found = await findForItem(slots, deps);
+    expect(asked).toEqual(['mouserFind TLV70233DBVT', 'digikeyFind TLV70233DBVT', 'lcscFind TLV70233DBVT']);
+    expect(found.lcsc).toEqual({ status: 'found', mpn: 'TLV70233DBVT', supplierPn: 'C110287', link: 'https://www.lcsc.com/product-detail/C110287.html', discovered: true });
+    const { slots: after } = alignItem(slots, found);
+    expect([after.man[2], after.sup[2], after.web[2]]).toEqual(['TLV70233DBVT', 'C110287', 'https://www.lcsc.com/product-detail/C110287.html']);
+  });
+
+  it('takes only the exact part from a real maker, in stock first', () => {
+    const list = [
+      { componentCode: 'C2937041', componentModelEn: 'TPTLV70233DBVR', componentBrandEn: 'TECH PUBLIC', stockCount: 1136 },
+      { componentCode: 'C9900008356', componentModelEn: 'TLV70233DBVT', componentBrandEn: 'JLCPCB Assembly', stockCount: 9999 },
+      { componentCode: 'C110287', componentModelEn: 'TLV70233DBVT', componentBrandEn: 'Texas Instruments', stockCount: 210 },
+      { componentCode: 'C5', componentModelEn: 'tlv70233dbvt ', componentBrandEn: 'Texas Instruments', stockCount: 0 },
+    ];
+    expect(pickLcscMatch(list, 'TLV70233DBVT')).toBe('C110287');
+    expect(pickLcscMatch(list.slice(0, 2), 'TLV70233DBVT')).toBeNull();
+    expect(pickLcscMatch(null as any, 'X')).toBeNull();
   });
 });
 
