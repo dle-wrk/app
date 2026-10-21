@@ -22,10 +22,10 @@ describe('supplierOrders', () => {
 
   it('one order per supplier, adding up the same number, listing what each lacks', () => {
     const [mouser, digikey, lcsc] = supplierOrders(lines);
-    expect(mouser.rows).toEqual([{ supplierPn: '187-CL10B104', qty: 50, description: '100nF, X7R', footprint: '0603' }]);
+    expect(mouser.rows).toEqual([{ supplierPn: '187-CL10B104', qty: 50, description: '100nF, X7R', footprint: '0603', stockCodes: ['CAP-001'] }]);
     expect(mouser.missing).toEqual(['CAP-002', 'CHP-027', 'MEC-001']);
     expect(digikey.rows.map((r) => r.supplierPn)).toEqual(['1276-1000-1-ND']);
-    expect(lcsc.rows.map((r) => [r.supplierPn, r.qty])).toEqual([['C1591', 70], ['C626667', 5]]);
+    expect(lcsc.rows.map((r) => [r.supplierPn, r.qty, r.stockCodes])).toEqual([['C1591', 70, ['CAP-001', 'CAP-002']], ['C626667', 5, ['CHP-027']]]);
     expect(atNoSupplier([mouser, digikey, lcsc])).toEqual(['MEC-001']);
   });
 

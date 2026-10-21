@@ -5,6 +5,8 @@
 // goes to its cheapest supplier; a price can be clicked to choose another.
 // Formats: ../lib/supplierBom; the cheapest choice: ../lib/supplierQuotes.
 
+import { buildOrderSheets } from '../lib/orderWorkbook';
+import { downloadWorkbook } from '../lib/xlsxDownload';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Download, ShoppingCart, AlertTriangle, Scale, Loader2 } from 'lucide-react';
 import { fmtCurrency, fmtNumber, fmtZAR } from '../lib/formatMoney';
@@ -138,6 +140,26 @@ export default function SupplierOrderFiles({ lines, projectName, pcbQty, onShowN
 
   const mayQuote = canChange('/api/supplier-quotes', 'POST');
 
+  // Everything in one Excel file: Summary, a sheet per supplier, All lines, Not listed.
+  const downloadAll = async () => {
+    const stamp = new Date().toISOString().slice(0, 10);
+    const what = restock ? 'restock' : basis === 'shortage' ? `shortages for ${pcbQty} pcs` : `whole build of ${pcbQty} pcs`;
+    try {
+      const sheets = buildOrderSheets({
+        title: `${projectName}: ${what}`, date: stamp, lines: qtyLines, orders,
+        quotes: quoted ? new Map(quoted.map((q) => [q.stockCode, q.quotes])) : null,
+        assignment: splitOn ? assignment : null,
+      });
+      const name = restock
+        ? `${fileSafe(projectName)}_orders${splitOn ? '_cheapest' : ''}_${stamp}.xlsx`
+        : `${fileSafe(projectName)}_orders${splitOn ? '_cheapest' : ''}_${basis === 'shortage' ? 'shortages' : 'build'}_${pcbQty}pcs.xlsx`;
+      await downloadWorkbook(sheets, name);
+      onShowNotification(`Saved one workbook with ${sheets.length} sheets.`, 'SUCCESS');
+    } catch (err: any) {
+      onShowNotification(`Could not make the workbook: ${err?.message || err}`, 'ERROR');
+    }
+  };
+
   return (
     <div className="bg-surface-container border border-outline-variant rounded-xl p-md space-y-sm" data-testid="order-files">
       <div className="flex flex-wrap items-center justify-between gap-sm">
@@ -222,6 +244,13 @@ export default function SupplierOrderFiles({ lines, projectName, pcbQty, onShowN
                 </button>
               </div>
             ))}
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-sm">
+            <span className="text-[10px] text-outline">The CSVs are for each supplier's upload; the workbook has everything in one file.</span>
+            <button type="button" onClick={() => void downloadAll()} aria-label="Download everything as one workbook"
+              className="inline-flex items-center gap-1 px-sm py-1 rounded-lg bg-primary text-white text-[11px] font-bold hover:brightness-110">
+              <Download className="w-3.5 h-3.5" /> Download workbook (Excel)
+            </button>
           </div>
 
           {quoted && (

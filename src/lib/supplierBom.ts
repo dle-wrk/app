@@ -13,7 +13,7 @@ export const ORDER_SUPPLIERS: Array<{ key: SlotSupplier; label: string; slot: nu
   { key: 'lcsc', label: 'LCSC', slot: 2 },
 ];
 
-export interface OrderRow { supplierPn: string; qty: number; description: string; footprint: string }
+export interface OrderRow { supplierPn: string; qty: number; description: string; footprint: string; stockCodes?: string[] }
 
 /** Mouser: one "part number|quantity" per line (Mouser's BOM tool / cart paste). */
 export function toMouserCsv(rows: OrderRow[]): string {
@@ -87,8 +87,8 @@ export function supplierOrders(
       const pn = c?.supplierPn || own;
       const qty = c?.qty ?? l.qty;
       const row = byPn.get(pn.toUpperCase());
-      if (row) row.qty += qty;
-      else byPn.set(pn.toUpperCase(), { supplierPn: pn, qty, description: l.description, footprint: l.footprint });
+      if (row) { row.qty += qty; row.stockCodes = [...(row.stockCodes ?? []), l.stockCode]; }
+      else byPn.set(pn.toUpperCase(), { supplierPn: pn, qty, description: l.description, footprint: l.footprint, stockCodes: [l.stockCode] });
     }
     return { supplier: key, label, rows: [...byPn.values()], missing };
   });

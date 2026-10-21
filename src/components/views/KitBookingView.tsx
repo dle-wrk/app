@@ -5,7 +5,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 // what the operator sees in the preview matches what they'd get if
 // they picked one of these presets as the active build quantity.
 const PRESET_QTYS = [50, 100, 250, 500, 1000] as const;
-import { buildShortageSheets, safeSheetNames, KIT_SUPPLIER_LABEL } from '../../lib/kitShortageWorkbook';
+import { buildShortageSheets, KIT_SUPPLIER_LABEL } from '../../lib/kitShortageWorkbook';
+import { downloadWorkbook } from '../../lib/xlsxDownload';
 import { confirmDialog } from '../../lib/confirmDialog';
 import { fillByTier } from '../../lib/kitTierFill';
 import { canChange } from '../../lib/changeAccess';
@@ -974,24 +975,7 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
         supplierPn: (r, sup) => pickSupplierPn(r, sup),
         projectName: project, date: stamp,
       });
-      const XLSX = await import('xlsx');
-      const wb = XLSX.utils.book_new();
-      const names = safeSheetNames(sheets.map(sh => sh.name));
-      sheets.forEach((sh, i) => {
-        const ws = XLSX.utils.aoa_to_sheet(sh.rows);
-        ws['!cols'] = sh.widths.map(w => ({ wch: w }));
-        XLSX.utils.book_append_sheet(wb, ws, names[i]);
-      });
-      const data = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-      const blob = new Blob([data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${project.replace(/[^a-zA-Z0-9_-]/g, '_')}_${stamp}_shortages${includeDnf ? '_with_dnf' : ''}.xlsx`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      await downloadWorkbook(sheets, `${project.replace(/[^a-zA-Z0-9_-]/g, '_')}_${stamp}_shortages${includeDnf ? '_with_dnf' : ''}.xlsx`);
       const supMsg = suppliers.length > 0 ? ` (incl. ${suppliers.map(sup => KIT_SUPPLIER_LABEL[sup]).join(', ')})` : '';
       triggerToast(`Saved one workbook with ${sheets.length} sheets${supMsg}.`, 'SUCCESS');
       setShowPresetCsvs(false);
