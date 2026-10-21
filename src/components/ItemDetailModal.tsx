@@ -25,11 +25,66 @@ import {
   HelpCircle,
   Trash2,
   Truck,
+  Store,
 } from 'lucide-react';
+
+const isNone = (v?: string | null) => /^(|N\/?A|-|none)$/i.test(String(v ?? '').trim());
+const shopOf = (url: string) => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return null; } };
+
+/** The Suppliers tab: each supplier slot (1 Mouser, 2 DigiKey, 3 LCSC, 4-5 other)
+ *  with its manufacturer part number, supplier part number and product page. */
+export const ItemSuppliers: React.FC<{ item: Item }> = ({ item }) => {
+  const rows = SUPPLIER_SLOTS.map((slot, i) => {
+    const mfr = item.manPns?.[i] ?? ''; const sup = item.supPns?.[i] ?? ''; const link = item.weblinks?.[i] ?? '';
+    const has = !isNone(mfr) || !isNone(sup) || !isNone(link);
+    const name = slot.supplier ? slot.label : (!isNone(link) && shopOf(link)) || `Other (${i + 1})`;
+    return { i, name, mfr, sup, link, has, fixed: !!slot.supplier };
+  }).filter((r) => r.fixed || r.has);
+  const count = rows.filter((r) => r.has).length;
+  return (
+    <div className="space-y-sm" data-testid="item-suppliers">
+      <div className="flex flex-wrap items-center justify-between gap-sm text-xs">
+        <span className="text-on-surface-variant">
+          {count ? `Sold by ${count} supplier${count === 1 ? '' : 's'}` : 'No supplier part numbers yet'}
+          {!isNone(item.supplier) && <> · Preferred supplier: <span className="font-bold text-on-surface">{item.supplier}</span></>}
+        </span>
+        <span className="text-[10px] text-outline">Slots: 1 Mouser, 2 DigiKey, 3 LCSC, 4-5 other. Fix or fill them with Sync Stock.</span>
+      </div>
+      <div className="rounded-xl border border-outline-variant/60 overflow-x-auto">
+        <table className="w-full text-left text-xs">
+          <thead>
+            <tr className="text-[10px] text-outline uppercase tracking-wider bg-surface-container-high/30">
+              <th className="px-md py-2">Supplier</th>
+              <th className="px-md py-2">Mfr PN</th>
+              <th className="px-md py-2">Supplier PN</th>
+              <th className="px-md py-2">Product page</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-outline-variant/30">
+            {rows.map((r) => (
+              <tr key={r.i} className={r.has ? '' : 'opacity-50'} data-slot={r.i + 1}>
+                <td className="px-md py-2 font-bold text-on-surface whitespace-nowrap">{r.i + 1}. {r.name}</td>
+                <td className="px-md py-2 font-mono break-all">{isNone(r.mfr) ? <span className="text-outline">N/A</span> : r.mfr}</td>
+                <td className="px-md py-2 font-mono break-all">{isNone(r.sup) ? <span className="text-outline">N/A</span> : r.sup}</td>
+                <td className="px-md py-2">
+                  {isNone(r.link) ? <span className="text-outline">N/A</span> : (
+                    <a href={r.link} target="_blank" rel="noreferrer" referrerPolicy="no-referrer" className="text-primary hover:underline inline-flex items-center gap-1 font-bold">
+                      <ExternalLink className="w-3.5 h-3.5 shrink-0" /> Open
+                    </a>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
 
 // View-mode tab identifiers. Keeping the enum tiny so a new tab is a
 // deliberate addition rather than something a copy-paste stumbles into.
-type ViewTab = 'OVERVIEW' | 'PARAMETERS' | 'SOURCING';
+type ViewTab = 'OVERVIEW' | 'PARAMETERS' | 'SOURCING' | 'SUPPLIERS';
 
 // Component costs run to sub-cent values (0402 resistors at $0.006, R0.0871),
 // so prices carry up to 7 decimal places. The inputs use step="any" to accept
@@ -537,6 +592,7 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete, reser
                     { key: 'OVERVIEW' as const, label: 'Overview', icon: <FileText className="w-3.5 h-3.5" /> },
                     { key: 'PARAMETERS' as const, label: 'Parameters', icon: <Layers className="w-3.5 h-3.5" /> },
                     { key: 'SOURCING' as const, label: 'Sourcing', icon: <Truck className="w-3.5 h-3.5" /> },
+                    { key: 'SUPPLIERS' as const, label: 'Suppliers', icon: <Store className="w-3.5 h-3.5" /> },
                   ]).map(t => (
                     <button
                       key={t.key}
@@ -697,6 +753,8 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete, reser
                   </div>
                 </div>
                 </>)}
+
+                {viewTab === 'SUPPLIERS' && <ItemSuppliers item={item} />}
               </div>
             ) : (
               /* 编辑模式 */
