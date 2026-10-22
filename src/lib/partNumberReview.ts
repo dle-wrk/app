@@ -20,7 +20,7 @@ import { requirePermission } from './authRoutes';
 import { roleCan } from './permissions';
 import {
   NONE_MARKERS, PART_NUMBER_FIELDS, PLACEHOLDER_PART_NUMBERS, SUPPLIER_SLOTS, arrangeSupplierSlots,
-  classifyPartNumberBySupplier, looksLikeName, pickPartNumbers,
+  classifyPartNumberBySupplier, looksLikeName, normalSlot, pickPartNumbers,
   type PartNumberField,
 } from './partNumbers';
 
@@ -48,20 +48,12 @@ const OWN_SLOT: Record<string, number> = { mouser: 0, digikey: 1, lcsc: 2 };
 const SUPPLIER_LABEL: Record<string, string> = { mouser: 'Mouser', digikey: 'DigiKey', lcsc: 'LCSC' };
 
 /**
- * Whose supplier number a manufacturer field holds, if it is one for sure:
- * LCSC (C123456) and DigiKey (…-ND) numbers always; a Mouser-looking one
- * (581-…) only when the rest of it is the item's own manufacturer part
- * number (603-CC0603KR… next to CC0603KR…), since real manufacturer part
- * numbers can start with digits and a hyphen too.
+ * Whose supplier number a manufacturer field holds: LCSC (C123456), DigiKey
+ * (…-ND) and Mouser (three digits and a hyphen: 652-SRR1210-100M), per
+ * classifyPartNumberBySupplier.
  */
-function supplierNumberIn(value: string, otherNumbers: string[]): string | null {
-  const whose = classifyPartNumberBySupplier(value);
-  if (whose === 'lcsc' || whose === 'digikey') return whose;
-  if (whose === 'mouser') {
-    const rest = value.slice(value.indexOf('-') + 1).toUpperCase();
-    return otherNumbers.some((o) => o.toUpperCase() === rest) ? 'mouser' : null;
-  }
-  return null;
+function supplierNumberIn(value: string): string | null {
+  return classifyPartNumberBySupplier(value);
 }
 const slotName = (i: number) => `SupPN${i + 1} (${SUPPLIER_SLOTS[i].label})`;
 
@@ -146,7 +138,11 @@ export function reviewItems(rows: ReviewRow[]): PartNumberIssue[] {
     // when the item has them in a supplier slot already.
     const supNow = SUP_FIELDS.map((f) => String(r[f] ?? '').trim());
     const manNow = MAN_FIELDS.map((f) => String(r[f] ?? '').trim());
-    const taken = new Set(supNow.map((v, i) => (v ? i : -1)).filter((i) => i >= 0));
+    // A slot is free when it is empty or N/A; a supplier's own slot (1-3) is
+    // also free when all it holds is a copy of the item's manufacturer part
+    // number (SRR1210-100M in Mouser's slot): that is kept in Mfr PN anyway.
+    const isMfrCopy = (v: string) => !classifyPartNumberBySupplier(v) && manNow.some((m) => m && m.toUpperCase() === v.toUpperCase());
+    const taken = new Set(supNow.map((v, i) => (normalSlot(v) && !(i < 3 && isMfrCopy(v)) ? i : -1)).filter((i) => i >= 0));
     const adding: string[] = [];
     const inSupplierSlots = (v: string) => [...supNow, ...adding].some((x) => x && x.toUpperCase() === v.toUpperCase());
     const claim = (whose: string): number | null => {
@@ -166,7 +162,7 @@ export function reviewItems(rows: ReviewRow[]): PartNumberIssue[] {
     MAN_FIELDS.forEach((field, n) => {
       const value = manNow[n];
       if (!value) return;
-      const whose = supplierNumberIn(value, manNow.filter((v, j) => j !== n && v));
+      const whose = supplierNumberIn(value);
       if (!whose) return;
       const name = SUPPLIER_LABEL[whose];
       if (inSupplierSlots(value)) {
@@ -190,7 +186,7 @@ export function reviewItems(rows: ReviewRow[]): PartNumberIssue[] {
     // other supplier-field fixes are done, so two fixes never touch one field.
     const from = SUP_FIELDS.map((f) => String(r[f] ?? '').trim());
     const to = arrangeSupplierSlots(from);
-    if (to === null || to.some((v, i) => v !== from[i])) {
+    if (to === null || to.some((v, i) => v !== normalSlot(from[i]))) {
       const pending = issues.some((i) => i.serialNumber === r.serial_number && i.fix
         && (i.field?.startsWith('sup_pn_') || i.fix.action === 'move_to_slot' || i.fix.action === 'supplier_from_number'));
       if (!to) {
@@ -332,7 +328,7 @@ export function registerPartNumberReviewRoutes(app: Express, deps: ReviewDeps = 
         );
         if (f.action === 'move_to_slot') {
           // value and field are from the fixed lists checked above.
-          await client.query(`UPDATE inventory SET "${f.value}" = $2, "${f.field}" = NULL WHERE serial_number = $1`, [f.serialNumber, f.expected]);
+          await client.query(`UPDATE inventory SET "${f.value}" = $2, "${f.field}" = 'N/A' WHERE serial_number = $1`, [f.serialNumber, f.expected]);
           await logFix({ field: f.field, action: f.action, from: f.expected, to: f.value });
           applied.push({ serialNumber: f.serialNumber, field: f.field, action: f.action, from: f.expected, to: f.value! });
           continue;
@@ -351,7 +347,7 @@ export function registerPartNumberReviewRoutes(app: Express, deps: ReviewDeps = 
           const to: string[] = JSON.parse(f.value!);
           await client.query(
             `UPDATE inventory SET ${SUP_FIELDS.map((c, i) => `"${c}" = $${i + 2}`).join(', ')} WHERE serial_number = $1`,
-            [f.serialNumber, ...to.map((v) => v || null)]
+            [f.serialNumber, ...to.map((v) => v || 'N/A')]
           );
           await client.query(
             `INSERT INTO user_activity_logs (user_email, action, entity_type, entity_id, details, status)

@@ -49,7 +49,7 @@ const SECTIONS: Array<{ kind: IssueKind; title: string; blurb: string; collapsed
   { kind: 'number_in_supplier_field', title: 'Part numbers in the Supplier field',
     blurb: 'The Supplier field should say who you buy from. The fix sets it to that supplier\'s name, and puts the number in its supplier slot if the item doesn\'t have it there.' },
   { kind: 'supplier_number_in_mfr', title: 'Supplier numbers in manufacturer part-number fields',
-    blurb: 'A DigiKey (…-ND), LCSC (C123456) or Mouser (603-… followed by the item\'s manufacturer number) part number in a Mfr PN field. The fix moves it to its supplier slot (1 Mouser, 2 DigiKey, 3 LCSC, else a free 4-5), or clears the copy when the item has it there already.' },
+    blurb: 'A DigiKey (…-ND), LCSC (C123456) or Mouser (three digits and a hyphen: 652-SRR1210-100M) part number in a Mfr PN field. The fix moves it to its supplier slot (1 Mouser, 2 DigiKey, 3 LCSC, else a free 4-5), or clears the copy when the item has it there already.' },
   { kind: 'lcsc_extra_text', title: 'LCSC numbers with extra text',
     blurb: 'LCSC can only be asked by its part number on its own.' },
   { kind: 'wrong_slot', title: 'Supplier numbers in the wrong slot',

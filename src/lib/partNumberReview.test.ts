@@ -15,7 +15,7 @@ vi.mock('./db', () => ({
 }));
 
 import { registerPartNumberReviewRoutes, reviewItems, type ReviewDeps } from './partNumberReview';
-import { arrangeSupplierSlots, preferredSupplier } from './partNumbers';
+import { arrangeSupplierSlots, classifyPartNumberBySupplier, preferredSupplier } from './partNumbers';
 import { mapDbRowToItem, mapItemToPayload } from './mapDbItem';
 
 const FIELDS = ['man_pn_1', 'man_pn_2', 'man_pn_3', 'man_pn_4', 'man_pn_5', 'sup_pn_1', 'sup_pn_2', 'sup_pn_3', 'sup_pn_4', 'sup_pn_5'];
@@ -131,8 +131,8 @@ function fakeClient() {
     }
     m = sql.match(/^UPDATE inventory SET "(\w+)" = NULL WHERE serial_number = \$1$/);
     if (m) { if (failOnUpdate) throw new Error('connection reset'); inventory.get(p[0])![m[1]] = null; return { rows: [], rowCount: 1 }; }
-    let mv = sql.match(/^UPDATE inventory SET "(sup_pn_\d)" = \$2, "(man_pn_\d)" = NULL WHERE serial_number = \$1$/);
-    if (mv) { const r = inventory.get(p[0])!; r[mv[1]] = p[1]; r[mv[2]] = null; return { rows: [], rowCount: 1 }; }
+    let mv = sql.match(/^UPDATE inventory SET "(sup_pn_\d)" = \$2, "(man_pn_\d)" = 'N\/A' WHERE serial_number = \$1$/);
+    if (mv) { const r = inventory.get(p[0])!; r[mv[1]] = p[1]; r[mv[2]] = 'N/A'; return { rows: [], rowCount: 1 }; }
     mv = sql.match(/^UPDATE inventory SET supplier = \$2(?:, "(sup_pn_\d)" = \$3)? WHERE serial_number = \$1$/);
     if (mv) { const r = inventory.get(p[0])!; r.supplier = p[1]; if (mv[1]) r[mv[1]] = p[2]; return { rows: [], rowCount: 1 }; }
     if (sql === 'UPDATE inventory SET "sup_pn_1" = $2, "sup_pn_2" = $3, "sup_pn_3" = $4, "sup_pn_4" = $5, "sup_pn_5" = $6 WHERE serial_number = $1') {
@@ -328,7 +328,7 @@ describe('supplier numbers in the wrong slot', () => {
 
     const res = await call('POST', '/api/inventory/part-number-review/fix', { fixes: [request] });
     expect(res.body.skipped).toEqual([]);
-    expect(inventory.get('CAP-024')).toMatchObject({ sup_pn_1: null, sup_pn_2: '5440-FM31X104K251EEGTR-ND', sup_pn_3: 'C365814', sup_pn_4: null, sup_pn_5: null });
+    expect(inventory.get('CAP-024')).toMatchObject({ sup_pn_1: 'N/A', sup_pn_2: '5440-FM31X104K251EEGTR-ND', sup_pn_3: 'C365814', sup_pn_4: 'N/A', sup_pn_5: 'N/A' }); // empty slots say N/A
     expect(activity.at(-1)).toMatchObject({ serial: 'CAP-024', details: { action: 'arrange_slots', from: ['5440-FM31X104K251EEGTR-ND', 'C365814', '', '', ''] } });
     expect(statements.filter((q) => q.startsWith('UPDATE inventory'))).toHaveLength(1);
     // Nothing left to move.
@@ -377,11 +377,36 @@ describe('supplier numbers in manufacturer fields and in the Supplier field', ()
     const res = await call('POST', '/api/inventory/part-number-review/fix', { fixes: listed.map((i: any) => ({
       serialNumber: i.serialNumber, ...(i.field ? { field: i.field } : {}), action: i.fix.action, expected: i.value, value: i.fix.value })) });
     expect(res.body.skipped).toEqual([]);
-    expect(inventory.get('CAP-024')).toMatchObject({ supplier: 'DigiKey', sup_pn_2: '5440-FM31X104K251EEGTR-ND', sup_pn_3: 'C365814', man_pn_2: null, man_pn_1: 'FM31X104K251EEG' });
+    expect(inventory.get('CAP-024')).toMatchObject({ supplier: 'DigiKey', sup_pn_2: '5440-FM31X104K251EEGTR-ND', sup_pn_3: 'C365814', man_pn_2: 'N/A', man_pn_1: 'FM31X104K251EEG' });
     // A changed request is refused.
     inventory.set('CAP-031', item('CAP-031', { man_pn_1: 'X1', man_pn_2: 'C42' }));
     const bad = await call('POST', '/api/inventory/part-number-review/fix', { fixes: [{ serialNumber: 'CAP-031', field: 'man_pn_2', action: 'move_to_slot', expected: 'C42', value: 'sup_pn_1' }] });
     expect(bad.body.applied).toEqual([]);
     expect((await call('POST', '/api/inventory/part-number-review/fix', { fixes: [{ serialNumber: 'CAP-031', field: 'man_pn_2', action: 'move_to_slot', expected: 'C42', value: 'name' }] })).status).toBe(400);
+  });
+});
+
+describe('Mouser numbers are three digits and a hyphen (22 Oct 2026)', () => {
+  it('tells Mouser numbers from manufacturer numbers that start with digits', () => {
+    const c = (v: string) => classifyPartNumberBySupplier(v);
+    expect([c('652-SRR1210-100M'), c('581-AEF1012101M080R'), c('603-CC603KRX7R0BB103')]).toEqual(['mouser', 'mouser', 'mouser']);
+    expect([c('SRR1210-100M'), c('SRR1210A-100M'), c('2036-09-SM-RPLF'), c('3220-10-0300-00'), c('26-01-3114'), c('0603-123'), c('534-2993')]).toEqual([null, null, null, null, null, null, null]); // 534-2993: RS Components
+    expect([c('81-GRM188R71H104KA3D'), c('80-C0603C106M9P'), c('78-4N35')]).toEqual(['mouser', 'mouser', 'mouser']); // Mouser's two-digit codes
+    expect([c('296-27895-1-ND'), c('C2042619')]).toEqual(['digikey', 'lcsc']);
+  });
+
+  it("IND-004: moves 652-SRR1210-100M from Mfr PN 4 into Mouser's slot, over the copy of the manufacturer number there", () => {
+    const issues = reviewItems([item('IND-004', {
+      man_pn_1: 'SRR1210-100M', man_pn_2: 'SRR1210-100M', man_pn_3: 'SRR1210A-100M', man_pn_4: '652-SRR1210-100M', man_pn_5: 'N/A',
+      sup_pn_1: 'SRR1210-100M', sup_pn_2: 'SRR1210-100MTR-ND', sup_pn_3: 'C2042619', sup_pn_4: 'SRR1210-100M', sup_pn_5: 'SRR1210-100M',
+    })]).filter((i) => i.kind === 'supplier_number_in_mfr');
+    expect(issues.map((i) => [i.field, i.value, i.fix])).toEqual([['man_pn_4', '652-SRR1210-100M', { action: 'move_to_slot', value: 'sup_pn_1' }]]);
+  });
+
+  it('an N/A slot is room to move into', () => {
+    const issues = reviewItems([item('X', { man_pn_1: 'ABC123', man_pn_2: 'C42', sup_pn_1: 'N/A', sup_pn_2: 'N/A', sup_pn_3: 'N/A', sup_pn_4: 'N/A', sup_pn_5: 'N/A' })])
+      .filter((i) => i.kind === 'supplier_number_in_mfr');
+    expect(issues.map((i) => i.fix)).toEqual([{ action: 'move_to_slot', value: 'sup_pn_3' }]);
+    expect(reviewItems([item('Y', { man_pn_1: 'ABC123', sup_pn_1: 'N/A', sup_pn_2: 'N/A', sup_pn_3: 'C1', sup_pn_4: 'N/A', sup_pn_5: 'N/A' })]).some((i) => i.kind === 'wrong_slot')).toBe(false);
   });
 });

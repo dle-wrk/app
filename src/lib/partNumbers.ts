@@ -112,13 +112,20 @@ export const SUPPLIER_SLOTS: Array<{ supplier: SlotSupplier | null; label: strin
 ];
 
 // LCSC: C followed by digits (C123456). DigiKey: ends with -ND (283-…-ND).
-// Mouser: a numeric prefix and a hyphen (504-…, 683-…).
+// Mouser: exactly three digits and a hyphen, then the rest (652-SRR1210-100M,
+// 581-…); SRR1210-100M, 05-… and 1234-… are not. A few manufacturers have a
+// two-digit Mouser code (71- Vishay, 78- Vishay/Isocom, 80- Kemet, 81- Murata:
+// 81-GRM188R71H104KA3D); any other two-digit start is a manufacturer's own
+// number (Molex 26-01-3114). Three digits, a hyphen and four digits only
+// (534-2993) is an RS Components stock number. DigiKey's -ND is checked
+// first, so 296-27895-1-ND stays DigiKey's.
 export function classifyPartNumberBySupplier(pn: string): SlotSupplier | null {
   const s = String(pn || '').trim();
   if (!s) return null;
   if (/^C\d+$/i.test(s)) return 'lcsc';
   if (/-ND$/i.test(s)) return 'digikey';
-  if (/^\d{2,4}-\S+/.test(s)) return 'mouser';
+  if (/^\d{3}-\d{4}$/.test(s)) return null; // an RS Components stock number (534-2993), not Mouser's
+  if (/^\d{3}-\S/.test(s) || /^(71|78|80|81)-\S/.test(s)) return 'mouser';
   return null;
 }
 
@@ -138,8 +145,12 @@ export function rightSlotFor(pn: string, slot: number): number | null {
  * is dropped. Returns null when they don't fit, or the slots unchanged when
  * nothing is out of place.
  */
+/** A slot's value, '' for an empty one or a "none" marker (N/A, -, Generic). */
+export const normalSlot = (v: unknown) => { const t = String(v ?? '').trim(); return NONE_MARKERS.includes(t.toUpperCase()) ? '' : t; };
+
 export function arrangeSupplierSlots(slots: string[]): string[] | null {
-  const values = Array.from({ length: SUPPLIER_SLOTS.length }, (_, i) => String(slots[i] ?? '').trim());
+  // "N/A" and the like mean an empty slot: room to move into, not a value to keep.
+  const values = Array.from({ length: SUPPLIER_SLOTS.length }, (_, i) => normalSlot(slots[i]));
   const target: Array<string | null> = values.map(() => null);
   const placed = new Set<number>();
   // Each supplier's number: the one already in its slot, else its first.
