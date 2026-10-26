@@ -71,6 +71,12 @@
                 <p><strong>Save presets (Excel)</strong>, in the "Shortages at build qty" column, downloads one workbook: a Summary sheet, then for each selected build quantity a shortages sheet ("Qty 50") followed by a sheet per ticked supplier ("Qty 50 LCSC", "Qty 50 Mouser", "Qty 50 DigiKey") with what to order in that supplier's upload columns and the lines it has no part number for.</p>
             </div>
 
+            <h3 id="material-planning">Material planning</h3>
+            <div class="step">
+                <p><strong>Manufacturing &gt; Material Planning</strong> adds up what is needed: open sales orders (what isn't invoiced yet), planned production jobs, and, if ticked, quotes and saved kits. A product on a sales order is broken down through the boards it is made of (set them under <em>What products are made of</em>) and those boards' BOMs; DNF lines are left out. Against that: stock on hand and open purchase-order lines by the date they are due.</p>
+                <p>Each part shows when it first runs short, how many to buy to cover every demand, and the <strong>order-by date</strong>: that date less its supplier's lead time (measured, else typed). Past order-by dates are flagged. Tick parts and <strong>Draft POs</strong> makes draft purchase orders, one per supplier, to check and send. <em>Keep low-stock levels as safety stock</em> plans to stay above each item's low-stock level.</p>
+            </div>
+
             <h3 id="pick-and-place-operations">Pick & Place Operations</h3>
             <div class="step">
                 <h4>Manage Pick & Place Components</h4>

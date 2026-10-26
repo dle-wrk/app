@@ -59,6 +59,24 @@
                 </ul>
             </div>
 
+            <h3 id="v29-locations-counts-and-lots">Stock locations, counts and lots</h3>
+            <div class="step">
+                <ul>
+                    <li><strong>Locations</strong> (Stock &gt; Locations &amp; Counts): the stores, shelves, bins and reel racks stock is kept in. Put stock away or move it from an item's new <strong>Places</strong> tab, optionally with a lot and date code. Stock not yet put away shows as <em>No location</em>.</li>
+                    <li>Whenever stock goes down (an invoice, a kit book-out, an edit), what has no location is used first, then the places, oldest first, and each use is recorded against the movement that caused it.</li>
+                    <li><strong>Stock counts</strong>: count one location, the stock with no location, or everything; add what you find that wasn't listed; <em>Post</em> sets the places to the counts and changes stock by the difference, as one recorded stock count.</li>
+                    <li><strong>Lot tracing</strong>: where a lot or date code is now and which builds and invoices used it, or which lots went into a build or invoice.</li>
+                </ul>
+            </div>
+
+            <h3 id="v29-material-planning">Material planning</h3>
+            <div class="step">
+                <ul>
+                    <li><strong>Manufacturing &gt; Material Planning</strong>: everything open sales orders and planned production jobs need (optionally quotes and saved kits too), against stock and open purchase orders, by date. Each part shows when it first runs short, how many to buy and the date to order by, its supplier's lead time before that; late ones are flagged. Draft purchase orders per supplier from the parts you tick.</li>
+                    <li><strong>What products are made of</strong>: say which boards each product is built from (a TCU might be 1 × TCU06 PCB and 1 × POWER PACK), so a product on a sales order is broken down into its boards' BOM parts.</li>
+                </ul>
+            </div>
+
             <h3 id="v29-pricing">Pricing</h3>
             <div class="step">
                 <ul>
@@ -96,6 +114,8 @@
                     <li><strong>Potential Orders</strong>: park an invoice, sales order or quote out of the books with an expected date and likelihood; each client has a history of events and follow-ups.</li>
                     <li>Voiding an invoice returns the stock it booked out and gives an open sales order its reservation back. Editing a sent invoice takes its stock only once.</li>
                     <li>A delivery note created from an order opens with the order's lines.</li>
+                    <li><strong>Recurring invoices</strong> (Sales &gt; Recurring): a template that becomes a draft invoice on each due date, weekly, monthly, quarterly or yearly, every so many periods, until an end date; missed dates are caught up.</li>
+                    <li><strong>Returns</strong> (Sales &gt; Returns): open a return from an invoice, mark it received, decide each line (restock, scrap, repair, replace, credit only) and close it: restocked lines go back into stock and a draft credit note can be raised for what is credited.</li>
                 </ul>
             </div>
 
@@ -104,6 +124,13 @@
                 <ul>
                     <li><strong>Project Progress</strong> board: every project's stage at a glance, with Mark inactive / Make active. Project Manager cards show the stage.</li>
                     <li>Production costs: import from Excel or CSV with a preview, export as CSV, search, sorted by model number.</li>
+                </ul>
+            </div>
+
+            <h3 id="v29-planned">Planned</h3>
+            <div class="step">
+                <ul>
+                    <li><strong>Barcode scanning</strong>: scan to book in, book out, put away and count, and print reel and bin labels with the stock code, lot and location. Builds on the locations and lots above.</li>
                 </ul>
             </div>
 

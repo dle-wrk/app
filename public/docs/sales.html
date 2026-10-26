@@ -208,6 +208,16 @@
                 </ul>
             </div>
 
+            <h3 id="recurring-invoices">Recurring invoices</h3>
+            <div class="step">
+                <p><strong>Sales &gt; Recurring</strong>: an invoice template (customer, lines, how often: weekly, monthly, quarterly or yearly, every so many periods, optionally until an end date). On each due date it becomes a <strong>draft</strong> invoice (checked daily, or press <em>Run now</em>), to check and Finalize &amp; Send as usual; drafts aren't in the books. A date missed while the server was down is caught up. A monthly invoice on the 31st falls on the last day of shorter months. Pause, edit or delete a template at any time; invoices it already made stay.</p>
+            </div>
+
+            <h3 id="returns">Returns</h3>
+            <div class="step">
+                <p><strong>Sales &gt; Returns</strong> handles goods coming back. Open a return, from the invoice to pick its lines, with quantities, serial numbers and the fault. <em>Mark received</em> when it arrives, give each line an outcome (restock, scrap, repair and send back, replace, credit only), then <em>Close</em>: restocked lines go back into stock (no location yet, to put away), and with <em>Draft a credit note</em> a draft credit note is raised for the restocked, scrapped and credit-only lines at their invoiced price, to check and issue as usual. It isn't marked to restock, because the return already did.</p>
+            </div>
+
             <h3 id="credit-notes">Credit Notes</h3>
             <div class="step">
                 <p>New tab under Bookkeeping → Sales → <strong>Credit Notes</strong>. Refunds / returns / write-offs now have a proper primitive:</p>

@@ -33,6 +33,8 @@ import { registerLinkCleanupRoutes } from './src/lib/linkCleanupRoutes';
 import { ensureStockPlacesSchema, registerStockPlacesRoutes } from './src/lib/stockPlaces';
 import { ensureStockCountsSchema, registerStockCountsRoutes } from './src/lib/stockCounts';
 import { ensureMaterialPlanningSchema, registerMaterialPlanningRoutes } from './src/lib/materialPlanningRoutes';
+import { ensureReturnsSchema, registerReturnsRoutes } from './src/lib/returnsRoutes';
+import { ensureRecurringInvoicesSchema, registerRecurringInvoiceRoutes, runDueRecurring } from './src/lib/recurringInvoices';
 import { registerSupplierQuoteRoutes } from './src/lib/supplierQuoteRoutes';
 import { registerUserPrefsRoutes, ensureUserPrefsSchema } from './src/lib/userPrefsRoutes';
 import { registerSalesPackagesRoutes, ensureSalesPackagesSchema } from './src/lib/salesPackagesRoutes';
@@ -213,6 +215,9 @@ registerStockPlacesRoutes(app);
 registerStockCountsRoutes(app);
 // Material planning (/api/material-planning).
 registerMaterialPlanningRoutes(app);
+// Customer returns (/api/returns) and recurring invoices (/api/recurring-invoices).
+registerReturnsRoutes(app);
+registerRecurringInvoiceRoutes(app);
 registerSupplierQuoteRoutes(app);
 registerUserPrefsRoutes(app);
 registerSalesPackagesRoutes(app);
@@ -1185,6 +1190,8 @@ async function runSchemaBootstrap() {
   await ensureStockPlacesSchema().catch((e) => console.error('Failed to bootstrap stock places schema:', e));
   await ensureStockCountsSchema().catch((e) => console.error('Failed to bootstrap stock counts schema:', e));
   await ensureMaterialPlanningSchema().catch((e) => console.error('Failed to bootstrap material planning schema:', e));
+  await ensureReturnsSchema().catch((e) => console.error('Failed to bootstrap returns schema:', e));
+  await ensureRecurringInvoicesSchema().catch((e) => console.error('Failed to bootstrap recurring invoices schema:', e));
     await ensureUserPrefsSchema().catch((e) => console.error('Failed to bootstrap user preferences schema:', e));
     await ensureSalesPackagesSchema().catch((e) => console.error('Failed to bootstrap sales packages schema:', e));
     await ensurePotentialOrdersSchema().catch((e) => console.error('Failed to bootstrap potential orders schema:', e));
@@ -1300,6 +1307,20 @@ async function bootstrap() {
     // happened in the last 20 hours.
     setTimeout(() => { void runAuto('start-up catch-up', { onlyIfNoneSinceHours: 20 }); }, 10 * 60_000).unref();
     console.log(`[BULK PRICING] automatic runs scheduled daily (cron "${AUTO_RUN_CRON}", UTC).`);
+  }
+
+  // Recurring invoices: each due template becomes a DRAFT invoice. Daily at
+  // 03:00 UTC on the deployed server, and 5 minutes after start-up to catch
+  // up on a day the machine was down (RECURRING_INVOICES_AUTO=on|off overrides).
+  const autoRecurring = process.env.RECURRING_INVOICES_AUTO
+    ? process.env.RECURRING_INVOICES_AUTO === 'on'
+    : Boolean(process.env.FLY_APP_NAME);
+  if (autoRecurring) {
+    const runRecurring = (label: string) => runDueRecurring()
+      .then((made) => { if (made.length) console.log(`[RECURRING] ${label}: drafted ${made.map((m) => m.invoiceNumber).join(', ')}`); })
+      .catch((err) => console.error(`[RECURRING] ${label} failed:`, err?.message || err));
+    cron.schedule('0 3 * * *', () => { void runRecurring('daily run'); }, { timezone: 'UTC' });
+    setTimeout(() => { void runRecurring('start-up catch-up'); }, 5 * 60_000).unref();
   }
 
   return server;
