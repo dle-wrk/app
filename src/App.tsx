@@ -2324,7 +2324,7 @@ if (currentView === 'alternates') {
              }
 
              if (currentView === 'stock_places') {
-               return <StockPlacesView triggerToast={triggerToast} onOpenItem={setSelectedDetailPartNumber} />;
+               return <StockPlacesView triggerToast={triggerToast} onOpenItem={setSelectedDetailPartNumber} items={items} />;
              }
 
              if (currentView === 'material_planning') {

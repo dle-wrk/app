@@ -8,6 +8,7 @@ import { confirmDialog } from '../../lib/confirmDialog';
 import { fmtNumber } from '../../lib/formatMoney';
 import { PrimaryButton, SecondaryButton } from '../bookkeeping/shared';
 import LotTrace from '../LotTrace';
+import type { Item } from '../../types';
 
 type Toast = (msg: string, type?: string) => void;
 interface Location { id: number; code: string; name: string | null; notes: string | null; active: boolean; items: number; units: number }
@@ -24,7 +25,9 @@ async function api<T = any>(url: string, init?: RequestInit): Promise<T> {
   return body;
 }
 
-function Locations({ triggerToast, onOpenItem }: { triggerToast: Toast; onOpenItem?: (s: string) => void }) {
+function Locations({ triggerToast, onOpenItem, items = [] }: { triggerToast: Toast; onOpenItem?: (s: string) => void; items?: Item[] }) {
+  // The Code box offers the stock codes (a bin can be named after the part it holds), and takes anything typed.
+  const itemByCode = useMemo(() => new Map(items.map((it) => [it.partNumber.toUpperCase(), it])), [items]);
   const may = canChange('/api/stock-locations');
   const [data, setData] = useState<{ locations: Location[]; unplaced: { units: number; items: number } } | null>(null);
   const [form, setForm] = useState<{ id?: number; code: string; name: string; notes: string } | null>(null);
@@ -64,7 +67,7 @@ function Locations({ triggerToast, onOpenItem }: { triggerToast: Toast; onOpenIt
       </div>
       {form && (
         <div className="rounded-xl border border-outline-variant bg-surface-container-high p-md grid grid-cols-1 md:grid-cols-4 gap-sm items-end" data-testid="location-form">
-          <label className="text-xs text-outline">Code<input className={`${input} w-full mt-1 font-mono`} value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} placeholder="A1-03" aria-label="Location code" /></label>
+          <label className="text-xs text-outline">Code<input className={`${input} w-full mt-1 font-mono`} list="location-code-options" value={form.code} onChange={(e) => { const code = e.target.value; const it = itemByCode.get(code.trim().toUpperCase()); setForm({ ...form, code, name: form.name || !it ? form.name : String(it.name ?? '') }); }} placeholder="A1-03, or pick a stock code" aria-label="Location code" /><datalist id="location-code-options">{items.map((it) => <option key={it.partNumber} value={it.partNumber}>{it.name}</option>)}</datalist></label>
           <label className="text-xs text-outline">Name<input className={`${input} w-full mt-1`} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Reel rack 1, shelf 3" aria-label="Location name" /></label>
           <label className="text-xs text-outline">Notes<input className={`${input} w-full mt-1`} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} aria-label="Location notes" /></label>
           <div className="flex gap-sm justify-end"><SecondaryButton type="button" onClick={() => setForm(null)}>Cancel</SecondaryButton><PrimaryButton type="button" onClick={() => void save()}>{form.id ? 'Save' : 'Add'}</PrimaryButton></div>
@@ -267,7 +270,7 @@ function Counts({ triggerToast, onOpenItem }: { triggerToast: Toast; onOpenItem?
   );
 }
 
-export default function StockPlacesView({ triggerToast, onOpenItem }: { triggerToast: Toast; onOpenItem?: (s: string) => void }) {
+export default function StockPlacesView({ triggerToast, onOpenItem, items }: { triggerToast: Toast; onOpenItem?: (s: string) => void; items?: Item[] }) {
   const [tab, setTab] = useState<'locations' | 'counts' | 'lots'>('locations');
   const tabs = [
     { key: 'locations' as const, label: 'Locations', icon: <MapPin className="w-3.5 h-3.5" /> },
@@ -287,7 +290,7 @@ export default function StockPlacesView({ triggerToast, onOpenItem }: { triggerT
         ))}
       </div>
       <div className="bg-surface-container border border-outline-variant rounded-xl p-lg">
-        {tab === 'locations' && <Locations triggerToast={triggerToast} onOpenItem={onOpenItem} />}
+        {tab === 'locations' && <Locations triggerToast={triggerToast} onOpenItem={onOpenItem} items={items} />}
         {tab === 'counts' && <Counts triggerToast={triggerToast} onOpenItem={onOpenItem} />}
         {tab === 'lots' && <LotTrace triggerToast={triggerToast} onOpenItem={onOpenItem} />}
       </div>
