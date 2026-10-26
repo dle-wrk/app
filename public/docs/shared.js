@@ -17,7 +17,7 @@
     { slug: 'automation-quality', nav: 'Automation',      title: 'Automation & Quality',     icon: '⚡', blurb: 'Automation rules, auto-PO, scheduled jobs, QA inspections, defects and NCRs.' },
     { slug: 'admin-tips',         nav: 'Admin',           title: 'Admin & Pro Tips',         icon: '🛡️', blurb: 'Accounts and devices, API keys, routines, best practices and troubleshooting.' },
     { slug: 'api',                nav: 'API',             title: 'API Reference',            icon: '🔌', blurb: 'Sign-in, conventions and every endpoint, for scripts and integrations.' },
-    { slug: 'release-notes',      nav: "What's new",      title: 'Release Notes',            icon: '🆕', blurb: 'Everything that changed in v2.8, v2.7 and v2.6.' },
+    { slug: 'release-notes',      nav: "What's new",      title: 'Release Notes',            icon: '🆕', blurb: 'Everything that changed in v2.9, v2.8, v2.7 and v2.6.' },
   ].map((p) => ({ ...p, file: `${p.slug}.html` }));
 
   const current = document.body.dataset.page || 'index';

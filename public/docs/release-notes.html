@@ -10,7 +10,7 @@
 <body data-page="release-notes">
     <div class="header compact">
         <h1>🆕 Release Notes</h1>
-        <p>Everything that changed in v2.8, v2.7 and v2.6.</p>
+        <p>Everything that changed in v2.9, v2.8, v2.7 and v2.6.</p>
     </div>
     <nav class="docs-nav" id="docs-nav" aria-label="Documentation">
         <noscript><div class="docs-nav-bar"><div class="docs-nav-links"><a href="index.html">← All docs</a></div></div></noscript>
@@ -20,6 +20,102 @@
         <aside class="toc" id="page-toc" aria-label="On this page"></aside>
 
         <div class="main-col">
+        <div class="section" id="whats-new-v29">
+            <h2>🆕 What's New (v2.9, October 2026)</h2>
+            <p style="margin-bottom: 20px;">A data-quality and purchasing release. Every item's part numbers, links and footprints can be put right in one place (Sync Stock); Kit Booking and the Bill of Materials allocate across several reels and only offer true equivalents; order files come per supplier with each supplier's rules; and Auto-PO, lead times and invoice voids now do what they say.</p>
+
+            <h3 id="v29-sign-in-roles-and-the-activity-log">Sign-in, roles and the activity log</h3>
+            <div class="step">
+                <ul>
+                    <li>Every API route needs a signed-in session, and every change is checked against the user's role on the server. Buttons for changes your role can't make are hidden.</li>
+                    <li>The activity log records every change automatically, failed ones too, and every error shown on screen; attempts with an unknown email are logged as well. Its CSV export shows details as readable text.</li>
+                    <li>A password reset says plainly when no reset email can be sent, and admins are warned in Settings &gt; Users. There's no current-password box straight after a reset.</li>
+                    <li><strong>Display size</strong> per person (Auto, 85%, 100%, 115%, 130%), saved to the account, so the app looks the same on any screen.</li>
+                </ul>
+            </div>
+
+            <h3 id="v29-items-and-inventory">Items &amp; inventory</h3>
+            <div class="step">
+                <ul>
+                    <li>Supplier part numbers, manufacturer part numbers and web links each have a slot per supplier: <strong>1 Mouser, 2 DigiKey, 3 LCSC</strong>, 4-5 other. An empty slot says N/A. Items have a real <strong>Supplier</strong> field.</li>
+                    <li>A new <strong>Suppliers</strong> tab on the item view shows each supplier's Mfr PN, part number and product page.</li>
+                    <li><strong>Fill from a link</strong>: paste any shop's product link (LCSC, Mouser, DigiKey or others) and choose what to fill from a checklist. DigiKey links ask DigiKey; JLCPCB links count as LCSC.</li>
+                    <li>Filters for <strong>price</strong> ($ or R, min and/or max), <strong>footprint</strong> and <strong>sourcing</strong> (which suppliers an item has a number for). Searches look in every field.</li>
+                    <li>A <strong>DO NOT USE</strong> status; inactive and do-not-use stock are valued separately.</li>
+                    <li>Inventory import reads the sheet by column name and writes only what the file has.</li>
+                </ul>
+            </div>
+
+            <h3 id="v29-sync-stock">Sync Stock</h3>
+            <div class="step">
+                <p>Sync Stock used to add past transactions onto the stock shown and change supplier lead times at random, saving nothing. It now reloads the stock from the server and opens one panel for putting item data right:</p>
+                <ul>
+                    <li><strong>Fix all now</strong>: supplier names out of part-number fields, supplier numbers out of Mfr PN fields, each number in its supplier's slot, placeholders cleared, in rounds until none is left.</li>
+                    <li><strong>Line up by supplier</strong>: asks LCSC, Mouser and DigiKey about every item and fills empty supplier slots by exact search (LCSC through JLCPCB's parts search, confirmed by LCSC).</li>
+                    <li><strong>Footprints</strong>: fills a missing footprint from the item's size or description. <strong>Footprint spellings</strong>: one spelling per package (DPAK / TO-252, SOT-23-5 / SOT-23-5L, …), never merging a different body width.</li>
+                    <li><strong>Web links that aren't links</strong>: page titles, part numbers or names in a link slot become the supplier's real page, or are cleared.</li>
+                    <li><strong>Check by hand</strong>: values that disagree between name, description and Yageo part number; LCSC numbers and links for different parts; near-identical supplier numbers; other numbers in a supplier's slot.</li>
+                    <li>A Mouser number is recognised as three digits and a hyphen (<code>652-SRR1210-100M</code>), plus Mouser's 71-, 78-, 80- and 81- codes; <code>534-2993</code>-style numbers are RS Components'.</li>
+                </ul>
+            </div>
+
+            <h3 id="v29-pricing">Pricing</h3>
+            <div class="step">
+                <ul>
+                    <li>Bulk pricing runs on the server with a price history, a last-priced log and daily re-pricing; problems are reviewed side by side.</li>
+                    <li>LCSC lookups work again, and supplier names are no longer sent to suppliers as part numbers. Pricing &gt; Part Numbers reviews part-number problems, with fixes for roles that may change inventory.</li>
+                    <li>Rand prices use the daily exchange rate.</li>
+                </ul>
+            </div>
+
+            <h3 id="v29-kit-booking-and-the-bill-of-materials">Kit Booking &amp; the Bill of Materials</h3>
+            <div class="step">
+                <ul>
+                    <li>The Bill of Materials allocates a line across several reels, with <strong>Auto-allocate</strong> by tier, as Kit Booking does. Book-out takes each line from the reels picked.</li>
+                    <li>Auto-allocate fills by tier for whatever build quantity is chosen. A reel that is already a line of its own isn't offered as an alternative, and a part listed twice in a BOM is one line.</li>
+                    <li>An LED's equivalent (T2) must be the same colour as well as the same name and footprint.</li>
+                    <li><strong>DNF</strong> lines (<code>DNF-013</code>, <code>DNP_2</code>, DO NOT FIT…) are voided: never a shortage, never ordered, never booked out.</li>
+                    <li>Preset shortages download as one Excel workbook, a sheet per build quantity and supplier. BOM Sync actually saves the BOM.</li>
+                </ul>
+            </div>
+
+            <h3 id="v29-purchasing-and-suppliers">Purchasing &amp; suppliers</h3>
+            <div class="step">
+                <ul>
+                    <li><strong>Order files</strong> per supplier from a project's BOM and for restocking, in each supplier's upload format, or all in one Excel workbook. Each line goes to the cheapest supplier, ordering what that supplier sells (LCSC's order steps, DigiKey cut tape).</li>
+                    <li><strong>Measured lead times</strong>: a PO marked Received records when, and each supplier's lead time is measured from its received orders (typed figures until there are some). Restock suggestions use each item's supplier's lead time instead of a flat 14 days.</li>
+                    <li><strong>Auto-PO</strong> rebuilt: watch chosen items with a reorder point and a minimum level; <em>Check now</em> shows the purchase orders it would draft, one per supplier, then drafts them. Nothing orders on its own.</li>
+                    <li>Admins can delete a purchase order or a bill in any status.</li>
+                </ul>
+            </div>
+
+            <h3 id="v29-sales-and-bookkeeping">Sales &amp; bookkeeping</h3>
+            <div class="step">
+                <ul>
+                    <li><strong>Sales Builder</strong> packages: build a kit of lines once and add it to sales orders, quotes and invoices.</li>
+                    <li><strong>Potential Orders</strong>: park an invoice, sales order or quote out of the books with an expected date and likelihood; each client has a history of events and follow-ups.</li>
+                    <li>Voiding an invoice returns the stock it booked out and gives an open sales order its reservation back. Editing a sent invoice takes its stock only once.</li>
+                    <li>A delivery note created from an order opens with the order's lines.</li>
+                </ul>
+            </div>
+
+            <h3 id="v29-projects-and-production">Projects &amp; production</h3>
+            <div class="step">
+                <ul>
+                    <li><strong>Project Progress</strong> board: every project's stage at a glance, with Mark inactive / Make active. Project Manager cards show the stage.</li>
+                    <li>Production costs: import from Excel or CSV with a preview, export as CSV, search, sorted by model number.</li>
+                </ul>
+            </div>
+
+            <h3 id="v29-under-the-hood">Under the hood</h3>
+            <div class="step">
+                <ul>
+                    <li>Node 24; end-to-end tests run on a throwaway database, never production. <code>/healthz</code> says when the server is ready, and a new empty database can be set up again.</li>
+                    <li>Ctrl+K opens the command palette with Caps Lock on. The docs gained an API Reference page.</li>
+                </ul>
+            </div>
+        </div>
+
         <div class="section" id="whats-new-v28">
             <h2>🆕 What's New (v2.8)</h2>
             <p style="margin-bottom: 20px;">A flow-first release. Where v2.7 shipped brand-new pro-ERP features (quotations, bank rec, credit notes, landed cost, VAT201), v2.8 collapses the daily journey between them: a "Needs attention today" strip on the dashboard, Cmd+K jumps to any doc number, unified Customer / Vendor 360 drawers, a slimmed-down Item Detail with tabs, PDF exports on every financial report, and a rebuild of how VAT is presented on quotes so mixed-rate lines can never look like a double-charge.</p>
