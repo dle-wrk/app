@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { isDnfCode } from '../lib/dnf';
 import { useEscapeKey } from '../lib/useEscapeKey';
 import { AlertTriangle, X } from 'lucide-react';
 import SupplierComparisonModal from './SupplierComparisonModal';
@@ -32,8 +33,8 @@ export default function ShortageToPOModal({ shortages, onClose, onSuccess, trigg
   useEscapeKey(onClose, !showComparison);
 
   const shortageList = shortages.filter(s => s.shortage_qty > 0);
-  const poItems = shortageList.filter(s => !s.component_id.toUpperCase().includes('DNF'));
-  const dnfItems = shortageList.filter(s => s.component_id.toUpperCase().includes('DNF'));
+  const poItems = shortageList.filter(s => !isDnfCode(s.component_id));
+  const dnfItems = shortageList.filter(s => isDnfCode(s.component_id));
   const useCustom = selectedSupplier === 'custom';
 
   const handleSubmit = async () => {

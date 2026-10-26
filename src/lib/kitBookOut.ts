@@ -5,6 +5,8 @@
 // refused, as a whole, when a line isn't covered or a SKU hasn't the stock
 // for everything asked of it across all lines.
 
+import { isDnfCode } from './dnf';
+
 export interface BookOutLine { component_id: string; resolved_part_number: string; qty_required: number; /** The audit's shortage (after other kits' reservations), for a line with no picks. */ shortage_qty?: number }
 export interface Pick { allocatedCode: string; qty: number }
 export interface Deduction { code: string; qty: number; forLine: string }
@@ -18,9 +20,10 @@ export function planKitBookOut(
   const deductions: Deduction[] = [];
   const skipped: string[] = [];
   const problems: string[] = [];
+  // What the operator marked DNF, and every DNF stock code whatever they sent (./dnf).
   const dnfSet = new Set(dnf);
   for (const l of lines) {
-    if (dnfSet.has(l.component_id) || !(l.qty_required > 0)) { skipped.push(l.component_id); continue; }
+    if (dnfSet.has(l.component_id) || isDnfCode(l.component_id) || !(l.qty_required > 0)) { skipped.push(l.component_id); continue; }
     const picks = (allocations[l.component_id] ?? []).filter((p) => p && Number(p.qty) > 0);
     if (picks.length) {
       for (const p of picks) {

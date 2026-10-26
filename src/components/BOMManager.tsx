@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { isDnfCode } from '../lib/dnf';
 import { searchFields, searchWords } from '../lib/itemSearch';
 import { canChange } from '../lib/changeAccess';
 import { useEscapeKey } from '../lib/useEscapeKey';
@@ -185,6 +186,7 @@ export default function BOMManager({
     if (quantity <= 0) return true;
     const upper = trimmed.toUpperCase();
     if (VOIDED_STOCK_CODES.has(upper)) return true;
+    if (isDnfCode(trimmed)) return true; // DNF-013, DNP_2, … (../lib/dnf)
     if (/^(TEST|PLACEHOLDER|TBD|XXX)[-_ ]?\d*$/i.test(trimmed)) return true;
     return false;
   };

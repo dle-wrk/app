@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { isDnfCode } from '../../lib/dnf';
 
 // Preset build quantities used by the "shortages at preset qtys"
 // grid on the audit table. Same list the BuildQtyPicker offers, so
@@ -464,7 +465,7 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
       setDnfOverride(prev => {
         const next = new Set(prev);
         for (const r of data as AuditResult[]) {
-          if (/^DNF(-|$)/i.test(String(r.component_id || ''))) next.add(r.component_id);
+          if (isDnfCode(r.component_id)) next.add(r.component_id);
         }
         return next;
       });
@@ -875,6 +876,11 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
   };
 
   const toggleDnfOverride = (stockCode: string) => {
+    // A DNF stock code is never fitted, so it stays DNF (and book-out skips it anyway).
+    if (isDnfCode(stockCode) && dnfOverride.has(stockCode)) {
+      triggerToast(`${stockCode} is a do-not-fit line: it is never short, ordered or booked out.`, 'INFO');
+      return;
+    }
     setDnfOverride(prev => {
       const next = new Set(prev);
       if (next.has(stockCode)) next.delete(stockCode); else next.add(stockCode);
@@ -1318,7 +1324,7 @@ export default function KitBookingView({ projects, triggerToast, currentUser, on
                 <tr
                   key={res.component_id}
                   onDoubleClick={isAdmin ? () => setEditorStockCode(res.component_id) : undefined}
-                  className={`transition-all ${res.shortage_qty > 0 ? 'bg-red-500/5' : ''} ${isAdmin ? 'hover:bg-primary/10 cursor-pointer' : 'hover:bg-surface-variant/20'}`}
+                  className={`transition-all ${res.shortage_qty > 0 && !dnfOverride.has(res.component_id) ? 'bg-red-500/5' : ''} ${isAdmin ? 'hover:bg-primary/10 cursor-pointer' : 'hover:bg-surface-variant/20'}`}
                   title={isAdmin ? 'Double-click to edit this BOM line' : undefined}
                 >
                   <td className="px-lg py-3" data-label="Part">

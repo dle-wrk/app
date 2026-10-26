@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { isDnfCode } from '../lib/dnf';
 import { useEscapeKey } from '../lib/useEscapeKey';
 import { AlertTriangle, X, Loader2, TrendingDown, Package, Clock, RefreshCw } from 'lucide-react';
 import { fmtUSD } from '../lib/formatMoney';
@@ -56,7 +57,7 @@ export default function SupplierComparisonModal({
 
   const fetchComparisons = async (forceRefresh = false) => {
     const partNumbers = shortages
-      .filter(s => s.shortage_qty > 0 && !s.component_id.toUpperCase().includes('DNF'))
+      .filter(s => s.shortage_qty > 0 && !isDnfCode(s.component_id))
       .map(s => s.resolved_part_number);
 
     if (partNumbers.length === 0) {
@@ -126,7 +127,7 @@ export default function SupplierComparisonModal({
     );
   }
 
-  const shortageCount = shortages.filter(s => s.shortage_qty > 0 && !s.component_id.toUpperCase().includes('DNF')).length;
+  const shortageCount = shortages.filter(s => s.shortage_qty > 0 && !isDnfCode(s.component_id)).length;
 
   return (
     <div className="fixed inset-0 bg-background/80 backdrop-blur-xs flex items-center justify-center z-100 p-md">
