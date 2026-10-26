@@ -198,6 +198,16 @@
                 </ul>
             </div>
 
+            <div class="step" id="voiding-an-invoice">
+                <h4>Voiding or changing a sent invoice</h4>
+                <ul>
+                    <li><strong>Void</strong> reverses the invoice's journal entry and puts back the stock it booked out. What goes back is what the stock ledger shows the invoice took, so voiding never returns stock twice. The confirmation message lists what came back.</li>
+                    <li>If the invoice came from a sales order that is still open, the order gets its reservation back: its lines less what its other invoices already took. Fulfilled or cancelled orders and quotations are left alone.</li>
+                    <li>An invoice with payments can't be voided (void the payments first), and neither can one with an issued credit note, which may already have restocked some of it.</li>
+                    <li><strong>Editing a sent invoice</strong> first returns the stock it took, then books out the revised lines when it is sent again, so the stock is only taken once.</li>
+                </ul>
+            </div>
+
             <h3 id="credit-notes">Credit Notes</h3>
             <div class="step">
                 <p>New tab under Bookkeeping → Sales → <strong>Credit Notes</strong>. Refunds / returns / write-offs now have a proper primitive:</p>
