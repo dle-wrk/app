@@ -29,6 +29,7 @@ import { registerBulkPricingRoutes } from './src/lib/bulkPricingRoutes';
 import { registerPartNumberReviewRoutes } from './src/lib/partNumberReview';
 import { registerPartAlignRoutes, ensurePartAlignSchema } from './src/lib/partAlignRoutes';
 import { registerFootprintFillRoutes } from './src/lib/footprintFill';
+import { registerLinkCleanupRoutes } from './src/lib/linkCleanupRoutes';
 import { registerSupplierQuoteRoutes } from './src/lib/supplierQuoteRoutes';
 import { registerUserPrefsRoutes, ensureUserPrefsSchema } from './src/lib/userPrefsRoutes';
 import { registerSalesPackagesRoutes, ensureSalesPackagesSchema } from './src/lib/salesPackagesRoutes';
@@ -201,6 +202,8 @@ registerPartNumberReviewRoutes(app);
 registerPartAlignRoutes(app);
 // Footprints for items with none, from their size or description (/api/inventory/footprint-fill).
 registerFootprintFillRoutes(app);
+// Web links that aren't links, and item data that disagrees (/api/inventory/link-cleanup, /api/inventory/data-checks).
+registerLinkCleanupRoutes(app);
 registerSupplierQuoteRoutes(app);
 registerUserPrefsRoutes(app);
 registerSalesPackagesRoutes(app);

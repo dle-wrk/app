@@ -14,6 +14,7 @@ import { PrimaryButton, SecondaryButton } from './bookkeeping/shared';
 import PartAlign from './PartAlign';
 import FootprintFill from './FootprintFill';
 import FootprintSpellings from './FootprintSpellings';
+import { DataChecks, WebLinkCleanup } from './WebLinkCleanup';
 import PartNumberReview, { ISSUE_TITLES, appliable, fixRequest, type PartNumberIssue } from './PartNumberReview';
 
 type ToastType = 'SUCCESS' | 'ERROR' | 'INFO';
@@ -122,6 +123,8 @@ export default function PartNumberFillIn({ onClose, onShowNotification, onOpenIt
           </div>
           <FootprintFill onShowNotification={onShowNotification} onOpenItem={onOpenItem} onChanged={onChanged} />
           <FootprintSpellings onShowNotification={onShowNotification} onChanged={onChanged} />
+          <WebLinkCleanup onShowNotification={onShowNotification} onOpenItem={onOpenItem} onChanged={onChanged} />
+          <DataChecks onOpenItem={onOpenItem} />
           {showAll && <PartNumberReview onShowNotification={onShowNotification} onOpenItem={onOpenItem} onChanged={() => { onChanged?.(); void load(); }} />}
           <PartAlign onShowNotification={onShowNotification} onOpenItem={onOpenItem} onChanged={onChanged} />
         </div>
