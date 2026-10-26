@@ -14,6 +14,8 @@ import {
   Workflow,
   ClipboardList,
   Calculator,
+  MapPin,
+  CalendarClock,
   Zap,
   Brain,
   Shield,
@@ -97,11 +99,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const stockItems = [
     { id: 'items', label: 'Items & Inventory', icon: Boxes },
     { id: 'production_costs', label: 'Production Costs', icon: Calculator },
+    { id: 'stock_places', label: 'Locations & Counts', icon: MapPin },
   ] as const;
 
   const manufacturingItems = [
     { id: 'kit_booking', label: 'P&P Kit Booking', icon: Boxes },
     { id: 'bom_manager', label: 'Bill of Materials', icon: Boxes },
+    { id: 'material_planning', label: 'Material Planning', icon: CalendarClock },
     { id: 'pick_place', label: 'Pick & Place', icon: Database },
     { id: 'alternates', label: 'Component Alternates', icon: ArrowLeftRight },
     { id: 'supplier_bom', label: 'Supplier BOM Generator', icon: Database },

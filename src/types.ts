@@ -578,6 +578,8 @@ export interface SystemConfig {
 export type ViewType =
   | 'dashboard'
   | 'items'
+  | 'stock_places'
+  | 'material_planning'
   | 'stock_kits'
   | 'reports_ledger'
   | 'pricing'

@@ -27,6 +27,7 @@ export const AREAS: Record<string, Area> = {
   kits: INVENTORY, 'kit-booking': INVENTORY, 'production-kits': INVENTORY, 'production-products': INVENTORY,
   'bom-structures': INVENTORY, 'sub-assemblies': INVENTORY, 'fielded-assets': INVENTORY,
   shortages: INVENTORY, 'procurement-projects': INVENTORY, 'exchange-rate': INVENTORY,
+  'stock-locations': INVENTORY, 'stock-counts': INVENTORY, 'material-planning': INVENTORY,
   // Bookkeeping: customers, sales, purchases, payments, accounts
   clients: ORDERS, 'client-orders': ORDERS, 'client-order-items': ORDERS, invoices: ORDERS, bills: ORDERS,
   'credit-notes': ORDERS, 'purchase-orders': ORDERS, 'payments-received': ORDERS, 'payments-made': ORDERS,

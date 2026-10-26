@@ -60,6 +60,8 @@ import { ProjectsView } from './components/views/ProjectsView';
 import ProjectProgressView from './components/views/ProjectProgressView';
 import { BookkeepingView } from './components/views/BookkeepingView';
 import { ProductionCostsView } from './components/views/ProductionCostsView';
+import StockPlacesView from './components/views/StockPlacesView';
+import MaterialPlanningView from './components/views/MaterialPlanningView';
 import AutomationDashboard from './components/views/AutomationDashboard';
 import AutoPOConfigView from './components/views/AutoPOConfigView';
 import QualityComplianceDashboard from './components/views/QualityComplianceDashboard';
@@ -2319,6 +2321,14 @@ if (currentView === 'alternates') {
 
              if (currentView === 'production_costs') {
                return <ProductionCostsView triggerToast={triggerToast} />;
+             }
+
+             if (currentView === 'stock_places') {
+               return <StockPlacesView triggerToast={triggerToast} onOpenItem={setSelectedDetailPartNumber} />;
+             }
+
+             if (currentView === 'material_planning') {
+               return <MaterialPlanningView triggerToast={triggerToast} onOpenItem={setSelectedDetailPartNumber} />;
              }
 
              if (currentView === 'automation') {

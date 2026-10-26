@@ -30,6 +30,9 @@ import { registerPartNumberReviewRoutes } from './src/lib/partNumberReview';
 import { registerPartAlignRoutes, ensurePartAlignSchema } from './src/lib/partAlignRoutes';
 import { registerFootprintFillRoutes } from './src/lib/footprintFill';
 import { registerLinkCleanupRoutes } from './src/lib/linkCleanupRoutes';
+import { ensureStockPlacesSchema, registerStockPlacesRoutes } from './src/lib/stockPlaces';
+import { ensureStockCountsSchema, registerStockCountsRoutes } from './src/lib/stockCounts';
+import { ensureMaterialPlanningSchema, registerMaterialPlanningRoutes } from './src/lib/materialPlanningRoutes';
 import { registerSupplierQuoteRoutes } from './src/lib/supplierQuoteRoutes';
 import { registerUserPrefsRoutes, ensureUserPrefsSchema } from './src/lib/userPrefsRoutes';
 import { registerSalesPackagesRoutes, ensureSalesPackagesSchema } from './src/lib/salesPackagesRoutes';
@@ -204,6 +207,12 @@ registerPartAlignRoutes(app);
 registerFootprintFillRoutes(app);
 // Web links that aren't links, and item data that disagrees (/api/inventory/link-cleanup, /api/inventory/data-checks).
 registerLinkCleanupRoutes(app);
+// Stock locations, and where each item's stock is (/api/stock-locations, /api/inventory/:serial/places).
+registerStockPlacesRoutes(app);
+// Stock counts (/api/stock-counts).
+registerStockCountsRoutes(app);
+// Material planning (/api/material-planning).
+registerMaterialPlanningRoutes(app);
 registerSupplierQuoteRoutes(app);
 registerUserPrefsRoutes(app);
 registerSalesPackagesRoutes(app);
@@ -1173,6 +1182,9 @@ async function runSchemaBootstrap() {
     await ensureProcurementSchema().catch((e) => console.error('Failed to bootstrap procurement schema:', e));
     await ensureBulkPricingSchema().catch((e) => console.error('Failed to bootstrap bulk pricing schema:', e));
     await ensurePartAlignSchema().catch((e) => console.error('Failed to bootstrap part-align schema:', e));
+  await ensureStockPlacesSchema().catch((e) => console.error('Failed to bootstrap stock places schema:', e));
+  await ensureStockCountsSchema().catch((e) => console.error('Failed to bootstrap stock counts schema:', e));
+  await ensureMaterialPlanningSchema().catch((e) => console.error('Failed to bootstrap material planning schema:', e));
     await ensureUserPrefsSchema().catch((e) => console.error('Failed to bootstrap user preferences schema:', e));
     await ensureSalesPackagesSchema().catch((e) => console.error('Failed to bootstrap sales packages schema:', e));
     await ensurePotentialOrdersSchema().catch((e) => console.error('Failed to bootstrap potential orders schema:', e));

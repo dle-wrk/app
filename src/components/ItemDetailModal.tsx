@@ -26,7 +26,9 @@ import {
   Trash2,
   Truck,
   Store,
+  MapPin,
 } from 'lucide-react';
+import ItemPlaces from './ItemPlaces';
 
 const isNone = (v?: string | null) => /^(|N\/?A|-|none)$/i.test(String(v ?? '').trim());
 const shopOf = (url: string) => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return null; } };
@@ -84,7 +86,7 @@ export const ItemSuppliers: React.FC<{ item: Item }> = ({ item }) => {
 
 // View-mode tab identifiers. Keeping the enum tiny so a new tab is a
 // deliberate addition rather than something a copy-paste stumbles into.
-type ViewTab = 'OVERVIEW' | 'PARAMETERS' | 'SOURCING' | 'SUPPLIERS';
+type ViewTab = 'OVERVIEW' | 'PARAMETERS' | 'SOURCING' | 'SUPPLIERS' | 'PLACES';
 
 // Component costs run to sub-cent values (0402 resistors at $0.006, R0.0871),
 // so prices carry up to 7 decimal places. The inputs use step="any" to accept
@@ -593,6 +595,7 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete, reser
                     { key: 'PARAMETERS' as const, label: 'Parameters', icon: <Layers className="w-3.5 h-3.5" /> },
                     { key: 'SOURCING' as const, label: 'Sourcing', icon: <Truck className="w-3.5 h-3.5" /> },
                     { key: 'SUPPLIERS' as const, label: 'Suppliers', icon: <Store className="w-3.5 h-3.5" /> },
+                    { key: 'PLACES' as const, label: 'Places', icon: <MapPin className="w-3.5 h-3.5" /> },
                   ]).map(t => (
                     <button
                       key={t.key}
@@ -755,6 +758,8 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete, reser
                 </>)}
 
                 {viewTab === 'SUPPLIERS' && <ItemSuppliers item={item} />}
+
+                {viewTab === 'PLACES' && <ItemPlaces serialNumber={item.partNumber} />}
               </div>
             ) : (
               /* 编辑模式 */
