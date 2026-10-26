@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('./db', () => ({ pool: { connect: async () => { throw new Error('no database in tests'); } }, query: async () => ({ rows: [] }), queryOne: async () => null, exec: async () => {} }));
 
-import { locationCode, placesOf } from './stockPlaces';
+import { locationCode, placesOf, putHerePlan } from './stockPlaces';
 import { countDifferences, nowFor, type CountLine } from './stockCounts';
 import { explode, planParts, type PartInfo } from './materialPlan';
 
@@ -12,6 +12,14 @@ describe('stock places', () => {
     expect(placesOf(4020, bins)).toEqual({ placed: 1500, unplaced: 2520, over: 0 });
     expect(placesOf(1200, bins)).toEqual({ placed: 1500, unplaced: 0, over: 300 }); // places hold more than stock: count it
     expect(locationCode(' reel rack 2 ')).toBe('REEL-RACK-2');
+  });
+
+  it('puts an item away in the location named after it, after counting it there (ANT-001: 200 with no location)', () => {
+    expect(putHerePlan(200, 200, 'elsewhere')).toEqual({ move: 200, stockChange: 0 }); // matches
+    expect(putHerePlan(200, 195, 'elsewhere')).toEqual({ move: 195, stockChange: 0 }); // 5 somewhere else: stay with no location
+    expect(putHerePlan(200, 195, 'missing')).toEqual({ move: 195, stockChange: -5 }); // 5 not there: off stock
+    expect(putHerePlan(200, 210, 'elsewhere')).toEqual({ move: 210, stockChange: 10 }); // 10 found: added
+    expect(putHerePlan(0, 0, 'elsewhere')).toEqual({ move: 0, stockChange: 0 });
   });
 });
 

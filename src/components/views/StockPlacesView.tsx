@@ -11,7 +11,9 @@ import LotTrace from '../LotTrace';
 import type { Item } from '../../types';
 
 type Toast = (msg: string, type?: string) => void;
-interface Location { id: number; code: string; name: string | null; notes: string | null; active: boolean; items: number; units: number }
+interface Location { id: number; code: string; name: string | null; notes: string | null; active: boolean; items: number; units: number;
+  /** The stock item this location is named after, if any (ANT-001). */
+  item_serial: string | null; item_name: string | null; item_stock: number | null; item_unplaced: number | null }
 interface Count { id: number; number: string; scope: string; location_code: string | null; prefix: string | null; status: string; created_by: string | null; created_at: string; posted_at: string | null; lines: number; counted: number; summary?: any }
 interface CountLine { id: number; serial_number: string; name: string | null; location_code: string | null; lot: string | null; expected: number; now: number; counted: number | null; note: string | null; added: boolean; bin_id: number | null }
 
@@ -25,6 +27,45 @@ async function api<T = any>(url: string, init?: RequestInit): Promise<T> {
   return body;
 }
 
+/** Count an item's stock in the location named after it, and put it away there (POST /api/stock-locations/:id/put-here). */
+function PutHere({ l, triggerToast, onDone, onCancel }: { l: Location; triggerToast: Toast; onDone: () => void; onCancel: () => void }) {
+  const have = l.item_unplaced ?? 0;
+  const [counted, setCounted] = useState(String(have));
+  const [rest, setRest] = useState<'elsewhere' | 'missing'>('elsewhere');
+  const [busy, setBusy] = useState(false);
+  const c = counted === '' ? null : Number(counted);
+  const fewer = c !== null && c < have; const more = c !== null && c > have;
+  const confirm = async () => {
+    setBusy(true);
+    try {
+      const r = await api(`/api/stock-locations/${l.id}/put-here`, { method: 'POST', body: JSON.stringify({ serialNumber: l.item_serial, counted: c, rest }) });
+      triggerToast(`${fmtNumber(r.move)} of ${l.item_serial} put away in ${l.code}${r.stockChange ? `; stock ${r.stockChange > 0 ? '+' : ''}${fmtNumber(r.stockChange)} (recorded as a count)` : ''}.`, 'SUCCESS');
+      onDone();
+    } catch (e: any) { triggerToast(e.message, 'ERROR'); } finally { setBusy(false); }
+  };
+  return (
+    <div className="rounded-lg border border-primary/40 bg-primary/5 p-sm space-y-sm text-xs" data-testid={`put-here-${l.code}`}>
+      <p className="text-on-surface"><strong>{l.item_serial}</strong> {l.item_name ? `(${l.item_name}) ` : ''}has {fmtNumber(l.item_stock ?? 0)} in stock, {fmtNumber(have)} of it with no location. How many are in {l.code}?</p>
+      <div className="flex flex-wrap items-center gap-sm">
+        <input className={`${input} w-28 py-1.5 font-mono text-right`} inputMode="numeric" value={counted} onChange={(e) => setCounted(e.target.value.replace(/[^0-9]/g, ''))} aria-label={`Counted in ${l.code}`} />
+        {c === have && <span className="text-green-500">Matches the system.</span>}
+        {more && <span className="text-amber-500">{fmtNumber(c! - have)} more than the system: they are added to stock as a count.</span>}
+        {fewer && (
+          <span className="flex flex-wrap items-center gap-sm">
+            <span className="text-amber-500">The other {fmtNumber(have - c!)}:</span>
+            <label className="flex items-center gap-1"><input type="radio" checked={rest === 'elsewhere'} onChange={() => setRest('elsewhere')} /> are somewhere else (stay with no location)</label>
+            <label className="flex items-center gap-1"><input type="radio" checked={rest === 'missing'} onChange={() => setRest('missing')} /> aren't there (take them off stock)</label>
+          </span>
+        )}
+      </div>
+      <div className="flex gap-sm justify-end">
+        <SecondaryButton type="button" onClick={onCancel}>Not now</SecondaryButton>
+        <PrimaryButton type="button" disabled={busy || c === null || (c === 0 && !fewer)} onClick={() => void confirm()}>{busy ? 'Putting away…' : 'Confirm'}</PrimaryButton>
+      </div>
+    </div>
+  );
+}
+
 function Locations({ triggerToast, onOpenItem, items = [] }: { triggerToast: Toast; onOpenItem?: (s: string) => void; items?: Item[] }) {
   // The Code box offers the stock codes (a bin can be named after the part it holds), and takes anything typed.
   const itemByCode = useMemo(() => new Map(items.map((it) => [it.partNumber.toUpperCase(), it])), [items]);
@@ -33,6 +74,7 @@ function Locations({ triggerToast, onOpenItem, items = [] }: { triggerToast: Toa
   const [form, setForm] = useState<{ id?: number; code: string; name: string; notes: string } | null>(null);
   const [open, setOpen] = useState<number | null>(null);
   const [contents, setContents] = useState<any[] | null>(null);
+  const [putting, setPutting] = useState<number | null>(null);
 
   const load = useCallback(async () => { try { setData(await api('/api/stock-locations')); } catch (e: any) { triggerToast(e.message, 'ERROR'); } }, [triggerToast]);
   useEffect(() => { void load(); }, [load]);
@@ -45,8 +87,10 @@ function Locations({ triggerToast, onOpenItem, items = [] }: { triggerToast: Toa
     if (!form) return;
     try {
       const body = JSON.stringify({ code: form.code, name: form.name, notes: form.notes });
-      if (form.id) await api(`/api/stock-locations/${form.id}`, { method: 'PUT', body }); else await api('/api/stock-locations', { method: 'POST', body });
+      const saved = form.id ? await api(`/api/stock-locations/${form.id}`, { method: 'PUT', body }) : await api('/api/stock-locations', { method: 'POST', body });
       setForm(null); await load();
+      // Named after a stock code with stock to put away: ask straight away.
+      if (!form.id && itemByCode.has(String(saved.code ?? '').toUpperCase())) setPutting(saved.id);
     } catch (e: any) { triggerToast(e.message, 'ERROR'); }
   };
   const toggle = async (l: Location) => { try { await api(`/api/stock-locations/${l.id}`, { method: 'PUT', body: JSON.stringify({ active: !l.active }) }); await load(); } catch (e: any) { triggerToast(e.message, 'ERROR'); } };
@@ -93,6 +137,13 @@ function Locations({ triggerToast, onOpenItem, items = [] }: { triggerToast: Toa
                       {canChange('/api/stock-locations/1', 'DELETE') && l.units === 0 && <button type="button" aria-label={`Delete ${l.code}`} className="p-1.5 rounded hover:bg-error/10 text-error" onClick={() => void remove(l)}><Trash2 className="w-3.5 h-3.5" /></button>}
                     </>}</td>
                   </tr>
+                  {l.item_serial && (l.item_unplaced ?? 0) > 0 && (
+                    <tr><td colSpan={5} className="px-md pb-2">
+                      {putting === l.id
+                        ? <PutHere l={l} triggerToast={triggerToast} onCancel={() => setPutting(null)} onDone={() => { setPutting(null); void load(); if (open === l.id) setOpen(null); }} />
+                        : <span className="text-[11px] text-on-surface-variant">{l.item_serial} has {fmtNumber(l.item_unplaced ?? 0)} with no location.{may && <> <button type="button" className="text-primary font-bold hover:underline" onClick={() => setPutting(l.id)}>Put away here</button></>}</span>}
+                    </td></tr>
+                  )}
                   {open === l.id && (
                     <tr><td colSpan={5} className="px-md py-2 bg-surface-container-high/30">
                       {!contents ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : contents.length === 0 ? <span className="text-[11px] text-outline">Empty.</span> : (

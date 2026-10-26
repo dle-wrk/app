@@ -94,6 +94,20 @@ export function placesOf(stock: number, bins: Bin[]): { unplaced: number; placed
   return { placed, unplaced: Math.max(0, total - placed), over: Math.max(0, placed - total) };
 }
 
+/**
+ * Putting an item's stock away into a location after counting it there
+ * (POST /api/stock-locations/:id/put-here). `unplaced` is what the system
+ * says has no location; `counted` what is really there. Counted the same:
+ * it all moves. Fewer: that many move, and the rest is either elsewhere (it
+ * stays with no location) or not there (it comes off stock). More: it all
+ * moves and the extra is added to stock. Returns what moves and the stock change.
+ */
+export function putHerePlan(unplaced: number, counted: number, rest: 'elsewhere' | 'missing'): { move: number; stockChange: number } {
+  const have = Math.max(0, Math.floor(unplaced)); const c = Math.max(0, Math.floor(counted));
+  if (c >= have) return { move: c, stockChange: c - have };
+  return { move: c, stockChange: rest === 'missing' ? c - have : 0 };
+}
+
 const clean = (v: unknown) => { const t = String(v ?? '').trim(); return t || null; };
 export const locationCode = (v: unknown) => String(v ?? '').trim().toUpperCase().replace(/\s+/g, '-');
 
@@ -104,6 +118,7 @@ export const locationCode = (v: unknown) => String(v ?? '').trim().toUpperCase()
 //   PUT    /api/stock-locations/:id                {code?, name?, notes?, active?}
 //   DELETE /api/stock-locations/:id                only an empty one (else mark it inactive)
 //   GET    /api/stock-locations/:id/contents       what is in it
+//   POST   /api/stock-locations/:id/put-here       {serialNumber, counted, rest}: put an item's stock away here after counting it
 //   GET    /api/inventory/:serial/places           an item's places, its No location quantity and recent moves
 //   POST   /api/inventory/:serial/places/move      {qty, fromBinId|null, toLocationId|null, lot?, dateCode?}: put away or move
 //   GET    /api/lots?q= | ?ref=                    lot tracing: where a lot is and was used; the lots a build or invoice used
@@ -154,13 +169,42 @@ export async function moveStock(db: Db, serial: string, m: { qty: number; fromBi
     [serial, m.fromBinId, m.toLocationId ?? fromLocation, lot, qty, m.reason ?? (m.fromBinId === null ? 'put away' : 'moved'), m.reference ?? null, m.by ?? null]);
 }
 
+/** Counts an item's stock in a location and puts it away there, in the caller's transaction (see putHerePlan). */
+export async function putItemHere(client: Db, locationId: number, serial: string, counted: number, rest: 'elsewhere' | 'missing', who: string) {
+  const { rows: [loc] } = await client.query(`SELECT id, code FROM stock_locations WHERE id = $1`, [locationId]);
+  if (!loc) throw Object.assign(new Error('Location not found.'), { status: 404 });
+  await client.query(`SELECT 1 FROM inventory WHERE serial_number = $1 FOR UPDATE`, [serial]);
+  const now = await itemPlaces(client, serial);
+  if (!now) throw Object.assign(new Error(`${serial} isn't in inventory.`), { status: 400 });
+  const plan = putHerePlan(now.unplaced, counted, rest);
+  const ref = `Location ${loc.code} check`;
+  if (plan.stockChange) {
+    // The count's difference, as a recorded stock count; the places are set by the move below.
+    await client.query(`SET LOCAL tracklab.places_manual = 'on'`);
+    await client.query(`UPDATE inventory SET stock = stock + $2 WHERE serial_number = $1`, [serial, plan.stockChange]);
+    await client.query(`INSERT INTO transactions (trxId, itemPartNumber, itemName, type, qtyChange, reference, performedBy, dateTime) VALUES ($1, $2, $3, 'STOCK-COUNT', $4, $5, $6, $7)`,
+      [`TRX-LOC-${loc.code}-${serial}-${Date.now()}`, serial, now.item.name || serial, plan.stockChange, ref, who, new Date().toISOString()]);
+    await client.query(`INSERT INTO stock_bin_moves (serial_number, location_id, qty, reason, reference, by_user) VALUES ($1, $2, $3, 'counted', $4, $5)`,
+      [serial, locationId, plan.stockChange, ref, who]);
+  }
+  if (plan.move > 0) await moveStock(client, serial, { qty: plan.move, fromBinId: null, toLocationId: locationId, reference: ref, by: who });
+  await client.query(`INSERT INTO user_activity_logs (user_email, action, entity_type, entity_id, details, status) VALUES ((SELECT email FROM users WHERE email = $1), 'PUT_AWAY', 'Item', $2, $3, 'SUCCESS')`,
+    [who, serial, JSON.stringify({ location: loc.code, systemHad: now.unplaced, counted, rest, ...plan, by: who })]);
+  return { location: loc.code as string, ...plan };
+}
+
 const httpError = (res: any, err: any) => res.status(err.status || 500).json({ error: err.message });
 
 export function registerStockPlacesRoutes(app: Express): void {
   app.get('/api/stock-locations', async (_req, res) => {
     try {
-      const { rows } = await query(`SELECT l.*, COUNT(DISTINCT b.serial_number)::int AS items, COALESCE(SUM(b.qty), 0)::int AS units
-        FROM stock_locations l LEFT JOIN stock_bins b ON b.location_id = l.id GROUP BY l.id ORDER BY l.active DESC, l.code`);
+      // A location named after a stock code (ANT-001) also says that item's stock and how much has no location.
+      const { rows } = await query(`SELECT l.*, COUNT(DISTINCT b.serial_number)::int AS items, COALESCE(SUM(b.qty), 0)::int AS units,
+          i.serial_number AS item_serial, i.name AS item_name, i.stock AS item_stock,
+          GREATEST(i.stock - COALESCE((SELECT SUM(x.qty) FROM stock_bins x WHERE x.serial_number = i.serial_number), 0), 0)::int AS item_unplaced
+        FROM stock_locations l LEFT JOIN stock_bins b ON b.location_id = l.id
+        LEFT JOIN inventory i ON UPPER(i.serial_number) = l.code AND i.deleted IS NOT TRUE
+        GROUP BY l.id, i.serial_number ORDER BY l.active DESC, l.code`);
       const { rows: [u] } = await query(`SELECT COALESCE(SUM(GREATEST(i.stock - COALESCE(p.placed, 0), 0)), 0)::int AS units,
           COUNT(*) FILTER (WHERE i.stock - COALESCE(p.placed, 0) > 0)::int AS items
         FROM inventory i LEFT JOIN (SELECT serial_number, SUM(qty) AS placed FROM stock_bins GROUP BY 1) p USING (serial_number) WHERE i.deleted IS NOT TRUE`);
@@ -208,6 +252,26 @@ export function registerStockPlacesRoutes(app: Express): void {
       if (!rowCount) return res.status(404).json({ error: 'Location not found.' });
       res.json({ ok: true });
     } catch (err) { httpError(res, err); }
+  });
+
+  // Put an item's stock away here after counting it: {serialNumber, counted, rest: 'elsewhere' | 'missing'}.
+  app.post('/api/stock-locations/:id/put-here', requirePermission('inventory.update'), async (req: any, res) => {
+    const locationId = parseInt(req.params.id);
+    const serial = String(req.body?.serialNumber ?? '').trim();
+    const counted = Math.floor(Number(req.body?.counted));
+    const rest = req.body?.rest === 'missing' ? 'missing' : 'elsewhere';
+    if (!serial || !(counted >= 0)) return res.status(400).json({ error: 'Say the item and how many are there.' });
+    const who = req.user?.email ?? 'unknown';
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const out = await putItemHere(client, locationId, serial, counted, rest, who);
+      await client.query('COMMIT');
+      res.json(out);
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      httpError(res, err);
+    } finally { client.release(); }
   });
 
   app.get('/api/stock-locations/:id/contents', async (req, res) => {
