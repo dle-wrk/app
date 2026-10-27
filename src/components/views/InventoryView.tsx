@@ -1,7 +1,7 @@
 import React from 'react';
 import { SOURCING_FILTERS } from '../../lib/sourcing';
 import { canChange } from '../../lib/changeAccess';
-import { Upload, Plus, Search, Download, X } from 'lucide-react';
+import { Upload, Plus, Search, Download, X, MapPin } from 'lucide-react';
 import { Item } from '../../types';
 import { fmtUSD, fmtZAR, fmtNumber } from '../../lib/formatMoney';
 import { CSV_HEADER, itemToCsvRow } from '../../mockData';
@@ -81,6 +81,12 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   reservedByPart = {},
 }) => {
   const zar = usdToZarRate(usdToZar);
+
+  // Where each item is kept (src/lib/stockPlaces.ts), shown on its card.
+  const [whereKept, setWhereKept] = React.useState<Record<string, Array<{ code: string; qty: number }>>>({});
+  React.useEffect(() => {
+    fetch('/api/stock-locations/by-item').then((r) => (r.ok ? r.json() : {})).then(setWhereKept).catch(() => {});
+  }, [items]);
 
   // Price range on top of the filters above (kept here: only this list has it).
   const [priceRange, setPriceRange] = React.useState<PriceRange>(NO_PRICE_RANGE);
@@ -354,6 +360,12 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               })()}
               <p className="text-xs text-on-surface-variant line-clamp-2 mt-1">{item.description}</p>
               <span className="text-[10px] text-outline font-sans block mt-1">Manufacturer: {item.manufacturer}</span>
+              {whereKept[item.partNumber]?.length ? (
+                <span className="text-[10px] text-primary font-mono flex items-center gap-1 mt-1" title="Where it's kept" data-testid={`kept-${item.partNumber}`}>
+                  <MapPin className="w-3 h-3 shrink-0" />
+                  {whereKept[item.partNumber].slice(0, 3).map((w) => `${w.code} (${fmtNumber(w.qty)})`).join(', ')}{whereKept[item.partNumber].length > 3 ? ', …' : ''}
+                </span>
+              ) : null}
             </div>
             <div className="mt-md pt-sm border-t border-outline-variant/50 flex justify-between items-center bg-surface-container-high/20 px-1 py-1 rounded">
               <div>

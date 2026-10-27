@@ -51,6 +51,9 @@ export async function ensureStockCountsSchema(run: (sql: string) => Promise<void
     added BOOLEAN NOT NULL DEFAULT false
   )`);
   await run(`CREATE INDEX IF NOT EXISTS stock_count_lines_count ON stock_count_lines (count_id)`);
+  // Checking chosen items (Check stock) as well as a location, the stock with no location, or everything.
+  await run(`ALTER TABLE stock_counts DROP CONSTRAINT IF EXISTS stock_counts_scope_check`);
+  await run(`ALTER TABLE stock_counts ADD CONSTRAINT stock_counts_scope_check CHECK (scope IN ('location', 'unplaced', 'all', 'items'))`);
 }
 
 // ---------------------------------------------------------------------------
@@ -99,8 +102,9 @@ async function loadCount(db: Db, id: number) {
 }
 
 /** Starts a count: its lines are the places (and stock with no location) in scope, with what the system says now. */
-export async function createCount(client: Db, o: { scope: 'location' | 'unplaced' | 'all'; locationId: number | null; prefix: string | null; notes: string | null; by: string | null }) {
+export async function createCount(client: Db, o: { scope: 'location' | 'unplaced' | 'all' | 'items'; locationId: number | null; prefix: string | null; notes: string | null; by: string | null; serials?: string[] }) {
   const { scope, locationId, prefix } = o;
+  const serials = o.serials ?? [];
   const number = await nextDocNumber(client as any, 'SC', 'stock_count_seq');
   const { rows: [count] } = await client.query(
     `INSERT INTO stock_counts (number, scope, location_id, prefix, notes, created_by) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
@@ -111,8 +115,8 @@ export async function createCount(client: Db, o: { scope: 'location' | 'unplaced
     await client.query(
   `INSERT INTO stock_count_lines (count_id, serial_number, bin_id, location_id, lot, date_code, expected)
    SELECT $1, b.serial_number, b.id, b.location_id, b.lot, b.date_code, b.qty FROM stock_bins b JOIN inventory i USING (serial_number)
-    WHERE i.deleted IS NOT TRUE AND b.serial_number LIKE $2 AND ($3::int IS NULL OR b.location_id = $3)`,
-  [count.id, like, locationId]);
+    WHERE i.deleted IS NOT TRUE AND b.serial_number LIKE $2 AND ($3::int IS NULL OR b.location_id = $3) AND (cardinality($4::text[]) = 0 OR b.serial_number = ANY($4::text[]))`,
+  [count.id, like, locationId, serials]);
   }
   // Stock with no location: every item that has some (and, counting everything, every item, so nothing is missed).
   if (scope !== 'location') {
@@ -120,8 +124,9 @@ export async function createCount(client: Db, o: { scope: 'location' | 'unplaced
   `INSERT INTO stock_count_lines (count_id, serial_number, expected)
    SELECT $1, i.serial_number, GREATEST(i.stock - COALESCE(p.placed, 0), 0) FROM inventory i
      LEFT JOIN (SELECT serial_number, SUM(qty) AS placed FROM stock_bins GROUP BY 1) p USING (serial_number)
-    WHERE i.deleted IS NOT TRUE AND i.serial_number LIKE $2 AND ($3 = 'all' OR i.stock - COALESCE(p.placed, 0) > 0)`,
-  [count.id, like, scope]);
+    WHERE i.deleted IS NOT TRUE AND i.serial_number LIKE $2 AND ($3 = 'all' OR i.stock - COALESCE(p.placed, 0) > 0 OR ($3 = 'items' AND COALESCE(p.placed, 0) = 0))
+      AND (cardinality($4::text[]) = 0 OR i.serial_number = ANY($4::text[]))`,
+  [count.id, like, scope, serials]);
   }
   return { id: count.id as number, number };
 }
@@ -194,15 +199,17 @@ export function registerStockCountsRoutes(app: Express): void {
 
   app.post('/api/stock-counts', requirePermission('inventory.update'), async (req: any, res) => {
     const b = req.body ?? {};
-    const scope = ['location', 'unplaced', 'all'].includes(b.scope) ? b.scope : null;
-    if (!scope) return res.status(400).json({ error: 'Count one location, the stock with no location, or everything.' });
+    const scope = ['location', 'unplaced', 'all', 'items'].includes(b.scope) ? b.scope : null;
+    if (!scope) return res.status(400).json({ error: 'Count one location, the stock with no location, chosen items, or everything.' });
+    const serials: string[] = scope === 'items' && Array.isArray(b.serials) ? b.serials.map((x: unknown) => String(x).trim()).filter(Boolean).slice(0, 2000) : [];
+    if (scope === 'items' && !serials.length) return res.status(400).json({ error: 'Choose the items to check.' });
     const locationId = scope === 'location' ? Number(b.locationId) : null;
     if (scope === 'location' && !(locationId! > 0)) return res.status(400).json({ error: 'Choose the location to count.' });
     const prefix = String(b.prefix ?? '').trim().toUpperCase() || null;
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      const { id: countId, number } = await createCount(client, { scope, locationId, prefix, notes: String(b.notes ?? '').trim() || null, by: req.user?.email ?? null });
+      const { id: countId, number } = await createCount(client, { scope, locationId, prefix, notes: String(b.notes ?? '').trim() || null, by: req.user?.email ?? null, serials });
       await client.query('COMMIT');
       res.status(201).json({ id: countId, number });
     } catch (err) {

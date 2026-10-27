@@ -595,7 +595,7 @@ export default function ItemDetailModal({ item, onClose, onSave, onDelete, reser
                     { key: 'PARAMETERS' as const, label: 'Parameters', icon: <Layers className="w-3.5 h-3.5" /> },
                     { key: 'SOURCING' as const, label: 'Sourcing', icon: <Truck className="w-3.5 h-3.5" /> },
                     { key: 'SUPPLIERS' as const, label: 'Suppliers', icon: <Store className="w-3.5 h-3.5" /> },
-                    { key: 'PLACES' as const, label: 'Places', icon: <MapPin className="w-3.5 h-3.5" /> },
+                    { key: 'PLACES' as const, label: 'Location', icon: <MapPin className="w-3.5 h-3.5" /> },
                   ]).map(t => (
                     <button
                       key={t.key}

@@ -119,6 +119,9 @@ export const locationCode = (v: unknown) => String(v ?? '').trim().toUpperCase()
 //   DELETE /api/stock-locations/:id                only an empty one (else mark it inactive)
 //   GET    /api/stock-locations/:id/contents       what is in it
 //   POST   /api/stock-locations/:id/put-here       {serialNumber, counted, rest}: put an item's stock away here after counting it
+//   GET    /api/stock-locations/one-per-item       items with stock not put away and no location named after them (prefix?)
+//   POST   /api/stock-locations/one-per-item       {serials}: a location named after each, its stock put away there
+//   GET    /api/stock-locations/by-item            where each item is: {serial: [{code, qty}]}
 //   GET    /api/inventory/:serial/places           an item's places, its No location quantity and recent moves
 //   POST   /api/inventory/:serial/places/move      {qty, fromBinId|null, toLocationId|null, lot?, dateCode?}: put away or move
 //   GET    /api/lots?q= | ?ref=                    lot tracing: where a lot is and was used; the lots a build or invoice used
@@ -272,6 +275,57 @@ export function registerStockPlacesRoutes(app: Express): void {
       await client.query('ROLLBACK').catch(() => {});
       httpError(res, err);
     } finally { client.release(); }
+  });
+
+  // One bin per item: for items with stock not put away yet, a location named
+  // after the stock code, holding all of it. What the system says is taken as
+  // what is there; Check stock is how a difference is put right later.
+  app.get('/api/stock-locations/one-per-item', async (req, res) => {
+    const prefix = String(req.query.prefix ?? '').trim().toUpperCase();
+    try {
+      const { rows } = await query(
+        `SELECT i.serial_number, i.name, i.stock, GREATEST(i.stock - COALESCE(p.placed, 0), 0)::int AS unplaced, l.id AS location_id
+           FROM inventory i LEFT JOIN (SELECT serial_number, SUM(qty) AS placed FROM stock_bins GROUP BY 1) p USING (serial_number)
+           LEFT JOIN stock_locations l ON l.code = UPPER(i.serial_number)
+          WHERE i.deleted IS NOT TRUE AND i.stock - COALESCE(p.placed, 0) > 0 AND i.serial_number ILIKE $1 ORDER BY i.serial_number`, [`${prefix}%`]);
+      res.json({ items: rows });
+    } catch (err) { httpError(res, err); }
+  });
+
+  app.post('/api/stock-locations/one-per-item', requirePermission('inventory.update'), async (req: any, res) => {
+    const serials: string[] = Array.isArray(req.body?.serials) ? [...new Set<string>(req.body.serials.map((x: unknown) => String(x).trim()).filter(Boolean))].slice(0, 2000) : [];
+    if (!serials.length) return res.status(400).json({ error: 'Choose the items.' });
+    const who = req.user?.email ?? 'unknown';
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const done: Array<{ serialNumber: string; location: string; qty: number }> = [];
+      for (const serial of serials) {
+        const now = await itemPlaces(client, serial);
+        if (!now || now.unplaced <= 0) continue;
+        const code = locationCode(serial);
+        const { rows: [loc] } = await client.query(
+          `INSERT INTO stock_locations (code, name) VALUES ($1, $2) ON CONFLICT (code) DO UPDATE SET active = true RETURNING id, code`, [code, now.item.name || null]);
+        await moveStock(client, serial, { qty: now.unplaced, fromBinId: null, toLocationId: loc.id, reference: 'One bin per item', by: who });
+        done.push({ serialNumber: serial, location: loc.code, qty: now.unplaced });
+      }
+      await client.query(`INSERT INTO user_activity_logs (user_email, action, entity_type, entity_id, details, status) VALUES ((SELECT email FROM users WHERE email = $1), 'ONE_BIN_PER_ITEM', 'StockLocation', $2, $3, 'SUCCESS')`,
+        [who, `${done.length} items`, JSON.stringify({ items: done, by: who })]);
+      await client.query('COMMIT');
+      res.json({ done });
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      httpError(res, err);
+    } finally { client.release(); }
+  });
+
+  app.get('/api/stock-locations/by-item', async (_req, res) => {
+    try {
+      const { rows } = await query(`SELECT b.serial_number, l.code, SUM(b.qty)::int AS qty FROM stock_bins b JOIN stock_locations l ON l.id = b.location_id GROUP BY 1, 2 ORDER BY 1, 3 DESC`);
+      const out: Record<string, Array<{ code: string; qty: number }>> = {};
+      for (const r of rows) (out[r.serial_number] ??= []).push({ code: r.code, qty: r.qty });
+      res.json(out);
+    } catch (err) { httpError(res, err); }
   });
 
   app.get('/api/stock-locations/:id/contents', async (req, res) => {
