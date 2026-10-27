@@ -25,37 +25,35 @@
 
             <h3 id="accessing-automation">Accessing Automation</h3>
             <div class="step">
-                <h4>Step 1: Navigate to Automation</h4>
                 <ol>
-                    <li>Click <span class="menu-path">AUTOMATION → Automation Dashboard</span></li>
-                    <li>View real-time statistics:
-                        <ul>
-                            <li>Active Rules count</li>
-                            <li>Scheduled Jobs</li>
-                            <li>Pending Notifications</li>
-                            <li>Auto-POs Created</li>
-                        </ul>
-                    </li>
+                    <li>Click <span class="menu-path">AUTOMATION → Automation Dashboard</span>.</li>
+                    <li>The four counts at the top (active rules, jobs on, unread notifications, Auto-POs drafted) each open their tab.</li>
+                    <li><strong>Overview</strong> shows each active rule's last run and each background job's last result. Anything that failed is listed first under <em>Needs a look</em>.</li>
                 </ol>
             </div>
 
-            <h3 id="creating-automation-rules">Creating Automation Rules</h3>
+            <h3 id="creating-automation-rules">Automation Rules</h3>
             <div class="step">
-                <h4>Set Up an Automation Rule</h4>
+                <h4>When something is true, tell people (or draft purchase orders)</h4>
                 <ol>
-                    <li>Click <strong>Automation Dashboard</strong> tab</li>
-                    <li>Click <strong>Create Rule</strong> button</li>
-                    <li>Define rule:
+                    <li>Open the <strong>Automation Rules</strong> tab and press <strong>New rule</strong>, or one of the ready-made rules next to it (out of stock, low stock, overdue invoices, late purchase orders, Auto-PO drafts).</li>
+                    <li>Choose <strong>When</strong>:
                         <ul>
-                            <li>Rule name and description</li>
-                            <li>Trigger type (Manual, Scheduled, Event-Based)</li>
-                            <li>Conditions (e.g., stock level < 50)</li>
-                            <li>Actions to perform (Create PO, Send Email, etc.)</li>
+                            <li>An item is low on stock (at or below its low stock level; blank means 50)</li>
+                            <li>An item is out of stock</li>
+                            <li>An item has no supplier part number</li>
+                            <li>A watched Auto-PO item is at its reorder point</li>
+                            <li>A purchase order is late (still open past its expected date)</li>
+                            <li>An invoice is overdue (sent, unpaid and past its due date)</li>
                         </ul>
+                        For items, you can limit it to stock codes starting with something, such as <code>CAP-</code>. Discontinued, inactive and do-not-use items are left out.
                     </li>
-                    <li>Set execution order if multiple actions</li>
-                    <li>Enable the rule</li>
+                    <li>Choose <strong>Then</strong>: tell everyone, the admins, the managers or one person (by email address), in the app's <strong>Notifications</strong> tab; or, for Auto-PO items, <strong>draft purchase orders</strong> (what Auto-PO's Draft does: one per supplier, nothing sent).</li>
+                    <li>Choose <strong>How often</strong>: every hour, day or week, or only when you press <strong>Run now</strong>.</li>
+                    <li><strong>What it finds</strong> shows what the rule matches right now and how many would be new, without changing anything.</li>
                 </ol>
+                <p>People are told only about what's new since the rule last ran. An item that is still out of stock tomorrow isn't announced again; one that comes back into stock and runs out again is. Nothing is emailed: no email sender is set up.</p>
+                <p>Only admins and managers can add, change, run or delete rules; everyone can see them.</p>
             </div>
 
             <h3 id="auto-po-configuration">Auto-PO Configuration</h3>
@@ -78,40 +76,28 @@
 
             <h3 id="scheduled-jobs">Scheduled Jobs</h3>
             <div class="step">
-                <h4>Set Up Recurring Tasks</h4>
-                <ol>
-                    <li>Navigate to <strong>Automation Dashboard</strong></li>
-                    <li>Click <strong>Scheduled Jobs</strong> tab</li>
-                    <li>Create new job:
-                        <ul>
-                            <li>Job name and description</li>
-                            <li>Cron schedule (e.g., daily at 2 AM)</li>
-                            <li>Action to perform</li>
-                        </ul>
-                    </li>
-                    <li>Enable and monitor execution</li>
-                </ol>
+                <h4>The work the app does on its own</h4>
+                <ul>
+                    <li><strong>Exchange rates</strong>: daily at 08:00, the day's USD and other rates to rand.</li>
+                    <li><strong>Recurring invoices</strong>: daily at 05:00, each one due becomes a draft invoice.</li>
+                    <li><strong>Bulk pricing</strong>: daily at 04:30, re-prices items whose bulk price is too old. Run it by hand from Pricing.</li>
+                    <li><strong>Automation rules</strong>: every hour at a quarter past, runs each active rule that is due.</li>
+                </ul>
+                <p>Each shows when it last ran, whether it worked and what it did. <strong>Turn off</strong> skips a job when its time comes; <strong>Run now</strong> runs it straight away (admins and managers). Times are South African time.</p>
             </div>
 
-            <h3 id="event-logging">Event Logging</h3>
+            <h3 id="notifications">Notifications</h3>
             <div class="step">
-                <h4>Monitor Automation Events</h4>
-                <ol>
-                    <li>Click <strong>Event Log</strong> tab in Automation Dashboard</li>
-                    <li>View all automation activity:
-                        <ul>
-                            <li>Triggered rules</li>
-                            <li>Completed actions</li>
-                            <li>Failed operations</li>
-                            <li>Performance metrics</li>
-                        </ul>
-                    </li>
-                    <li>Export logs for analysis</li>
-                </ol>
+                <p>The inbox for what rules tell people: yours, your role's and everyone's. <strong>Unread</strong> or <strong>All</strong>, <strong>Mark read</strong> one at a time or <strong>Mark all read</strong>. The unread count shows on the tab.</p>
+            </div>
+
+            <h3 id="event-logging">Event Log</h3>
+            <div class="step">
+                <p>Everything automation does, newest first, in words: each rule and job run (on schedule or by whom), Auto-PO drafts, and failures with the reason. Filter by kind or result, search, <strong>Show older</strong>, and <strong>Export CSV</strong> what's shown.</p>
             </div>
 
             <div class="success">
-                <strong>✅ Best Practice:</strong> Start with simple automation rules and gradually add complexity as you become comfortable with the system.
+                <strong>✅ Start small:</strong> add the ready-made <em>Out of stock</em> rule, press <strong>What it finds</strong>, then <strong>Run now</strong>. The first run tells people about everything it finds; after that only what's new.
             </div>
         </div>
 

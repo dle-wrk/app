@@ -288,7 +288,7 @@ export const PricingView: React.FC<PricingViewProps> = ({
   const [supplierFilter, setSupplierFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [enriching, setEnriching] = useState(false);
-  const [enrichmentStatus, setEnrichmentStatus] = useState<{itemsProcessed: number; lastRun: string | null}>({itemsProcessed: 0, lastRun: null});
+  const [enrichmentStatus, setEnrichmentStatus] = useState<{missing: number; lastRun: string | null}>({missing: 0, lastRun: null});
   const ITEMS_PER_PAGE = 50;
 
   const triggerEnrichment = async () => {
@@ -297,10 +297,11 @@ export const PricingView: React.FC<PricingViewProps> = ({
       const res = await fetch('/api/automation/enrich-missing-suppliers', { method: 'POST' });
       const result = await res.json();
       setEnrichmentStatus({
-        itemsProcessed: result.itemsProcessed || 0,
+        missing: result.missing || 0,
         lastRun: new Date().toLocaleString()
       });
-      triggerToast(`✓ Enriched ${result.itemsProcessed} items with supplier data`, 'success');
+      // It finds the items; the Part numbers tab and the supplier lookups fill them in.
+      triggerToast(result.missing ? `${result.missing} items have no supplier part number. Fill them in from the Part numbers tab.` : 'Every item has a supplier part number.', result.missing ? 'INFO' : 'SUCCESS');
     } catch (err: any) {
       triggerToast(`Error: ${err.message}`, 'error');
     } finally {
@@ -537,7 +538,7 @@ export const PricingView: React.FC<PricingViewProps> = ({
               <div className="flex items-center gap-1 bg-green-500/10 border border-green-500/20 rounded px-2 py-1">
                 <span className="w-1.5 h-1.5 rounded-full bg-green-400"></span>
                 <span className="text-[10px] font-mono text-green-400">
-                  {enrichmentStatus.itemsProcessed} enriched • {enrichmentStatus.lastRun}
+                  {enrichmentStatus.missing} without a supplier part number • {enrichmentStatus.lastRun}
                 </span>
               </div>
             )}
@@ -555,10 +556,10 @@ export const PricingView: React.FC<PricingViewProps> = ({
               {enriching ? (
                 <>
                   <div className="w-3 h-3 border-2 border-on-primary/30 border-t-on-primary rounded-full animate-spin"></div>
-                  Enriching...
+                  Checking...
                 </>
               ) : (
-                '🔍 Enrich N/A Suppliers'
+                '🔍 Find items with no supplier'
               )}
             </button>
           </div>

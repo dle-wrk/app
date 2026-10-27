@@ -87,6 +87,11 @@ async function runAutoPo(who: string, dryRun: boolean, only?: string) {
   }
 }
 
+/** Drafts what is due (an automation rule's action); the purchase order numbers made. */
+export async function draftAutoPos(who: string): Promise<string[]> {
+  return (await runAutoPo(who, false)).created.map((c) => c.poNumber);
+}
+
 export function registerAutoPoRoutes(app: Express): void {
   app.get('/api/auto-po-config', async (_req, res) => {
     try {

@@ -48,7 +48,9 @@ import { registerProductionRoutes, ensureProductionCostsSchema } from './src/lib
 import { registerKitsRoutes, ensureKitsSchema } from './src/lib/kitsRoutes';
 import { registerProcurementRoutes, ensureProcurementSchema } from './src/lib/procurementRoutes';
 import { registerAutomationRoutes } from './src/lib/automationRoutes';
-import { registerAutoPoRoutes } from './src/lib/autoPoRoutes';
+import { registerAutoPoRoutes, draftAutoPos } from './src/lib/autoPoRoutes';
+import { ensureAutomationEngineSchema, runDueRules } from './src/lib/automationEngine';
+import { ensureScheduledJobsSchema, registerJob, runJob } from './src/lib/scheduledJobs';
 import { registerProjectsRoutes } from './src/lib/projectsRoutes';
 import { registerProjectProgressRoutes, ensureProjectProgressSchema } from './src/lib/projectProgress';
 import { registerClientsRoutes } from './src/lib/clientsRoutes';
@@ -1192,6 +1194,8 @@ async function runSchemaBootstrap() {
   await ensureMaterialPlanningSchema().catch((e) => console.error('Failed to bootstrap material planning schema:', e));
   await ensureReturnsSchema().catch((e) => console.error('Failed to bootstrap returns schema:', e));
   await ensureRecurringInvoicesSchema().catch((e) => console.error('Failed to bootstrap recurring invoices schema:', e));
+  await ensureAutomationEngineSchema().catch((e) => console.error('Failed to bootstrap automation engine schema:', e));
+  await ensureScheduledJobsSchema().catch((e) => console.error('Failed to bootstrap scheduled jobs schema:', e));
     await ensureUserPrefsSchema().catch((e) => console.error('Failed to bootstrap user preferences schema:', e));
     await ensureSalesPackagesSchema().catch((e) => console.error('Failed to bootstrap sales packages schema:', e));
     await ensurePotentialOrdersSchema().catch((e) => console.error('Failed to bootstrap potential orders schema:', e));
@@ -1252,10 +1256,20 @@ async function bootstrap() {
     console.log(`Tracklab API listening on http://localhost:${PORT}`);
   });
 
-  // Schedule exchange rate update every day at 06:00 (UTC)
+  // The background jobs (./src/lib/scheduledJobs): each is listed under
+  // Automation > Scheduled Jobs with its last run, can be turned off there
+  // (its timed run is then skipped) and, but for bulk pricing, run by hand.
+  // The deployed server runs them on time; a local `npm run dev` points at the
+  // same database and runs only the exchange rate.
+  const deployed = Boolean(process.env.FLY_APP_NAME);
+  const autoOn = (env: string | undefined) => (env ? env === 'on' : deployed);
+
+  // Exchange rate update every day at 06:00 (UTC)
+  registerJob({ key: 'exchange-rate', name: 'Exchange rates', description: 'Fetches the daily USD and other currency rates to rand.', schedule: 'Daily at 08:00 SA time', cron: '0 6 * * *', runNow: true, scheduled: true },
+    async () => { if (!(await updateExchangeRate())) throw new Error('The exchange rate service gave no usable rate; the last rates are kept.'); return 'Rates updated.'; });
   cron.schedule('0 6 * * *', () => {
     console.log('[CRON] Updating exchange rate at 06:00...');
-    updateExchangeRate();
+    void runJob('exchange-rate', 'schedule');
   });
 
   // Also update on startup
@@ -1291,16 +1305,21 @@ async function bootstrap() {
   // BULK_PRICING_AUTO=on|off overrides. Overlapping runs (several machines, or
   // a manual run in progress) are refused by the engine's one-run-at-a-time
   // guard, and the run is skipped with a log line.
-  const autoBulkPricing = process.env.BULK_PRICING_AUTO
-    ? process.env.BULK_PRICING_AUTO === 'on'
-    : Boolean(process.env.FLY_APP_NAME);
+  const autoBulkPricing = autoOn(process.env.BULK_PRICING_AUTO);
+  let bulkOptions: { onlyIfNoneSinceHours?: number } = {};
+  registerJob({ key: 'bulk-pricing', name: 'Bulk pricing', description: 'Re-prices items whose last bulk price is over the age limit, and removes expired price history. Run it by hand from Pricing > Bulk pricing.', schedule: 'Daily at 04:30 SA time', cron: AUTO_RUN_CRON, runNow: false, scheduled: autoBulkPricing },
+    async () => {
+      const outcome = await runAutoBulkPricing(bulkOptions);
+      const purged = outcome.purged ? ` ${outcome.purged} expired history rows removed.` : '';
+      return outcome.ran ? `Ran.${purged}` : `Skipped: ${outcome.reason}.${purged}`;
+    });
   if (autoBulkPricing) {
-    const runAuto = (label: string, options: { onlyIfNoneSinceHours?: number } = {}) =>
-      runAutoBulkPricing(options)
-        .then((outcome) => {
-          if (!outcome.ran) console.log(`[BULK PRICING] ${label} skipped: ${outcome.reason}${outcome.purged ? ` (${outcome.purged} expired history rows removed)` : ''}`);
-        })
-        .catch((err) => console.error(`[BULK PRICING] ${label} failed:`, err?.message || err));
+    const runAuto = (label: string, options: { onlyIfNoneSinceHours?: number } = {}) => {
+      bulkOptions = options;
+      return runJob('bulk-pricing', 'schedule')
+        .then((r) => { if (r.status !== 'SUCCESS' || r.message.startsWith('Skipped')) console.log(`[BULK PRICING] ${label}: ${r.message}`); })
+        .finally(() => { bulkOptions = {}; });
+    };
     cron.schedule(AUTO_RUN_CRON, () => { void runAuto('daily run'); }, { timezone: 'UTC' });
     // The machine may have been stopped or redeployed at the scheduled time,
     // so catch up 10 minutes after start-up, unless an automatic run already
@@ -1312,16 +1331,24 @@ async function bootstrap() {
   // Recurring invoices: each due template becomes a DRAFT invoice. Daily at
   // 03:00 UTC on the deployed server, and 5 minutes after start-up to catch
   // up on a day the machine was down (RECURRING_INVOICES_AUTO=on|off overrides).
-  const autoRecurring = process.env.RECURRING_INVOICES_AUTO
-    ? process.env.RECURRING_INVOICES_AUTO === 'on'
-    : Boolean(process.env.FLY_APP_NAME);
+  const autoRecurring = autoOn(process.env.RECURRING_INVOICES_AUTO);
+  registerJob({ key: 'recurring-invoices', name: 'Recurring invoices', description: 'Each recurring invoice that is due becomes a draft invoice.', schedule: 'Daily at 05:00 SA time', cron: '0 3 * * *', runNow: true, scheduled: autoRecurring },
+    async () => {
+      const made = await runDueRecurring();
+      if (made.length) console.log(`[RECURRING] drafted ${made.map((m) => m.invoiceNumber).join(', ')}`);
+      return made.length ? `Drafted ${made.map((m) => m.invoiceNumber).join(', ')}.` : 'None were due.';
+    });
   if (autoRecurring) {
-    const runRecurring = (label: string) => runDueRecurring()
-      .then((made) => { if (made.length) console.log(`[RECURRING] ${label}: drafted ${made.map((m) => m.invoiceNumber).join(', ')}`); })
-      .catch((err) => console.error(`[RECURRING] ${label} failed:`, err?.message || err));
-    cron.schedule('0 3 * * *', () => { void runRecurring('daily run'); }, { timezone: 'UTC' });
-    setTimeout(() => { void runRecurring('start-up catch-up'); }, 5 * 60_000).unref();
+    cron.schedule('0 3 * * *', () => { void runJob('recurring-invoices', 'schedule'); }, { timezone: 'UTC' });
+    setTimeout(() => { void runJob('recurring-invoices', 'schedule'); }, 5 * 60_000).unref();
   }
+
+  // Automation rules (./src/lib/automationEngine): each active rule runs when
+  // it is due (hourly, daily or weekly), checked at a quarter past every hour.
+  const autoRules = autoOn(process.env.AUTOMATION_RULES_AUTO);
+  registerJob({ key: 'automation-rules', name: 'Automation rules', description: 'Runs each active rule that is due (every hour, day or week), telling people about anything new or drafting purchase orders.', schedule: 'Every hour, at a quarter past', cron: '15 * * * *', runNow: true, scheduled: autoRules },
+    () => runDueRules(draftAutoPos));
+  if (autoRules) cron.schedule('15 * * * *', () => { void runJob('automation-rules', 'schedule'); }, { timezone: 'UTC' });
 
   return server;
 }

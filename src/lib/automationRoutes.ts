@@ -1,236 +1,208 @@
-// Automation surface extracted from server.ts. Owns the Phase 4 workflow
-// primitives:
-//   - automation_rules            (rule engine: trigger events → actions)
-//   - scheduled_jobs              (cron-driven jobs w/ retry counters)
-//   - notifications               (per-user inbox)
-//   - auto_po_config              (moved: ./autoPoRoutes)
-//   - event_log                   (append-only audit trail)
-//   - alert_subscriptions         (user opt-in for alert channels)
-//   - /api/automation/send-alert          (fans out notifications for a subscription)
-//   - /api/automation/enrich-missing-suppliers   (stub MPN enrichment; logs to event_log)
+// Automation surface: rules, scheduled jobs, notifications, the event log.
 //
-// Note: this router does NOT create tables. The Phase 4 tables are assumed to
-// exist (see the pre-existing bootstrap in server.ts or ensurePhase5Tables for
-// the neighbouring Phase 5 surface). Adding a schema helper here would blur
-// the boundary since several tables (purchase_orders, inventory, supplier_
-// performance) are owned by other surfaces.
-//
-// Dependencies deliberately narrow: only the shared db helpers.
+//   GET    /api/automation/options               what a rule can watch and how often it can run
+//   GET    /api/automation-rules                 every rule, with its last run
+//   POST   /api/automation-rules                 {ruleName, triggerEvent, conditions?: {prefix}, action: {type, to?}, every?, isActive?}
+//   PUT    /api/automation-rules/:id             the same fields, any of them
+//   DELETE /api/automation-rules/:id
+//   GET    /api/automation-rules/:id/preview     what it would find now (changes nothing)
+//   POST   /api/automation-rules/:id/run         run it now
+//   GET    /api/automation-rules/:id/runs        its last runs
+//   GET    /api/scheduled-jobs                   the app's background jobs (./scheduledJobs)
+//   PUT    /api/scheduled-jobs/:key/toggle       {active}
+//   POST   /api/scheduled-jobs/:key/run          run it now
+//   GET    /api/notifications?mine=1&status=     the inbox: for everyone, the user's role, or the user
+//   GET    /api/notifications/unread-count       the user's unread
+//   PUT    /api/notifications/:id/mark-read
+//   PUT    /api/notifications/mark-all-read      the user's
+//   GET    /api/event-log?type=&status=&q=&before=&limit=
+//   GET    /api/event-log/types
+//   alert subscriptions and send-alert (below), and enrich-missing-suppliers.
+// Rules run by ./automationEngine. Writes need automation.create / .delete (./writeAccess).
 
 import type { Express } from 'express';
 import { query, queryOne } from './db';
+import { TRIGGERS, EVERY, isTrigger, actionOf, recipientOf, runRule, type Action, type Trigger } from './automationEngine';
+import { listJobs, runJob, setJobActive } from './scheduledJobs';
+import { draftAutoPos } from './autoPoRoutes';
+
+const httpError = (res: any, err: any) => res.status(err.status || 500).json({ error: err.message });
+
+const mapRule = (row: any) => ({
+  id: row.id,
+  ruleName: row.rule_name,
+  ruleType: row.rule_type,
+  description: row.description,
+  triggerEvent: row.trigger_event,
+  triggerLabel: isTrigger(row.trigger_event) ? TRIGGERS[row.trigger_event as Trigger].label : null,
+  conditions: row.conditions ?? {},
+  action: actionOf(row.actions),
+  every: row.every ?? null,
+  isActive: row.is_active !== false,
+  priority: row.priority,
+  lastRunAt: row.last_run_at ?? null,
+  lastResult: row.last_result ?? null,
+  createdBy: row.created_by,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+});
+
+/** A rule's fields from a request; `partial` for an edit. Returns an error message or the columns to set. */
+function ruleFields(b: any, partial: boolean): Record<string, unknown> | string {
+  const out: Record<string, unknown> = {};
+  if (!partial || b.ruleName !== undefined) {
+    const name = String(b.ruleName ?? '').trim();
+    if (!name) return 'Give the rule a name.';
+    out.rule_name = name.slice(0, 120);
+  }
+  if (b.description !== undefined) out.description = String(b.description ?? '').trim() || null;
+  if (!partial || b.triggerEvent !== undefined) {
+    if (!isTrigger(b.triggerEvent)) return 'Choose what the rule watches.';
+    out.trigger_event = b.triggerEvent;
+  }
+  if (b.conditions !== undefined) {
+    const prefix = String(b.conditions?.prefix ?? '').trim().toUpperCase();
+    out.conditions = JSON.stringify(prefix ? { prefix } : {});
+  }
+  if (!partial || b.action !== undefined) {
+    const t = b.action?.type;
+    if (t !== 'NOTIFY' && t !== 'DRAFT_PO') return 'Choose what the rule does.';
+    const action: Action = t === 'DRAFT_PO' ? { type: 'DRAFT_PO' } : { type: 'NOTIFY', to: recipientOf(b.action?.to) };
+    const trigger = out.trigger_event ?? b.currentTrigger;
+    if (action.type === 'DRAFT_PO' && trigger !== undefined && trigger !== 'AUTO_PO_DUE') return 'Drafting purchase orders goes with watching the Auto-PO items (it orders them back up to their minimum level).';
+    out.actions = JSON.stringify(action);
+    out.rule_type = action.type;
+  }
+  if (b.every !== undefined) {
+    if (b.every !== null && b.every !== '' && !Object.hasOwn(EVERY, String(b.every))) return 'Choose how often it runs.';
+    out.every = b.every || null;
+  } else if (!partial) out.every = 'day';
+  if (b.isActive !== undefined) out.is_active = !!b.isActive;
+  if (b.priority !== undefined) out.priority = Number(b.priority) || 0;
+  return out;
+}
 
 export function registerAutomationRoutes(app: Express): void {
+  app.get('/api/automation/options', (_req, res) => {
+    res.json({
+      triggers: Object.entries(TRIGGERS).map(([key, t]) => ({ key, label: t.label, items: t.items })),
+      every: Object.entries(EVERY).map(([key, label]) => ({ key, label })),
+    });
+  });
+
   // ---------------------------------------------------------------------------
   // Automation Rules
   // ---------------------------------------------------------------------------
   app.get('/api/automation-rules', async (req, res) => {
     const isActive = req.query.isActive as string | undefined;
     try {
-      let sql = 'SELECT * FROM automation_rules';
-      const params: any[] = [];
-      if (isActive !== undefined) {
-        sql += ' WHERE is_active = $1';
-        params.push(isActive === 'true');
-      }
-      sql += ' ORDER BY priority DESC, updated_at DESC';
-      const { rows } = await query(sql, params);
-      res.json(rows.map((row: any) => ({
-        id: row.id,
-        ruleName: row.rule_name,
-        ruleType: row.rule_type,
-        description: row.description,
-        triggerEvent: row.trigger_event,
-        conditions: row.conditions,
-        actions: row.actions,
-        isActive: row.is_active,
-        priority: row.priority,
-        createdBy: row.created_by,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-      })));
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
+      const { rows } = await query(`SELECT * FROM automation_rules${isActive !== undefined ? ' WHERE is_active = $1' : ''} ORDER BY priority DESC, rule_name`,
+        isActive !== undefined ? [isActive === 'true'] : []);
+      res.json(rows.map(mapRule));
+    } catch (err) { httpError(res, err); }
   });
 
-  app.post('/api/automation-rules', async (req, res) => {
-    const { ruleName, ruleType, description, triggerEvent, conditions, actions, priority, createdBy, isActive } = req.body;
-    if (!ruleName || !ruleType || !triggerEvent) {
-      return res.status(400).json({ error: 'ruleName, ruleType, and triggerEvent are required' });
-    }
-
+  app.post('/api/automation-rules', async (req: any, res) => {
+    const f = ruleFields(req.body ?? {}, false);
+    if (typeof f === 'string') return res.status(400).json({ error: f });
     try {
-      // Generate default actions based on rule type. The client can override by
-      // sending its own `actions` payload; this branch only fires when the
-      // caller wants us to fill in a sensible default so a rule created from a
-      // "quick-add" flow still executes something.
-      let defaultActions = actions;
-      if (!defaultActions) {
-        if (ruleType === 'AUTO_PO') {
-          defaultActions = JSON.stringify({ type: 'CREATE_PO', autoApprove: false });
-        } else if (ruleType === 'MPN_ENRICHMENT') {
-          defaultActions = JSON.stringify({ type: 'ENRICH_SUPPLIERS', endpoint: '/api/automation/enrich-missing-suppliers' });
-        } else if (ruleType === 'NOTIFICATION') {
-          defaultActions = JSON.stringify({ type: 'SEND_ALERT', channel: 'email' });
-        } else {
-          defaultActions = JSON.stringify({ type: ruleType });
-        }
-      }
-
-      const row = await queryOne(
-        `INSERT INTO automation_rules (rule_name, rule_type, description, trigger_event, conditions, actions, priority, created_by, is_active)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-        [ruleName, ruleType, description || null, triggerEvent, conditions || null, defaultActions, priority || 0, createdBy || null, isActive ?? true]
-      );
-      res.status(201).json({
-        id: row?.id,
-        ruleName: row?.rule_name,
-        ruleType: row?.rule_type,
-        triggerEvent: row?.trigger_event,
-        isActive: row?.is_active,
-        createdAt: row?.created_at,
-      });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
+      const fields: Record<string, unknown> = { ...f, is_active: f.is_active ?? true, created_by: req.user?.email ?? null };
+      const cols = Object.keys(fields);
+      const row = await queryOne(`INSERT INTO automation_rules (${cols.join(', ')}) VALUES (${cols.map((_, i) => `$${i + 1}`).join(', ')}) RETURNING *`, Object.values(fields));
+      res.status(201).json(mapRule(row));
+    } catch (err) { httpError(res, err); }
   });
 
   app.put('/api/automation-rules/:id', async (req, res) => {
     const id = parseInt(req.params.id);
-    const { ruleName, ruleType, description, triggerEvent, isActive, priority, actions, conditions } = req.body;
     try {
-      const row = await queryOne(
-        `UPDATE automation_rules SET
-           rule_name = COALESCE($1, rule_name), rule_type = COALESCE($2, rule_type),
-           description = COALESCE($3, description), trigger_event = COALESCE($4, trigger_event),
-           is_active = COALESCE($5, is_active), priority = COALESCE($6, priority),
-           actions = COALESCE($7, actions), conditions = COALESCE($8, conditions), updated_at = now()
-         WHERE id = $9 RETURNING *`,
-        [ruleName || null, ruleType || null, description || null, triggerEvent || null,
-         isActive ?? null, priority ?? null, actions || null, conditions || null, id]
-      );
-      if (!row) return res.status(404).json({ error: 'Automation rule not found' });
-      res.json({
-        id: row.id,
-        ruleName: row.rule_name,
-        ruleType: row.rule_type,
-        description: row.description,
-        triggerEvent: row.trigger_event,
-        isActive: row.is_active,
-        priority: row.priority,
-        updatedAt: row.updated_at,
-      });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
+      const current = await queryOne(`SELECT trigger_event FROM automation_rules WHERE id = $1`, [id]);
+      if (!current) return res.status(404).json({ error: 'Rule not found.' });
+      const f = ruleFields({ ...(req.body ?? {}), currentTrigger: current.trigger_event }, true);
+      if (typeof f === 'string') return res.status(400).json({ error: f });
+      // Watching something else: it starts afresh, so everything it finds is new.
+      if (f.trigger_event !== undefined && f.trigger_event !== current.trigger_event) await query(`DELETE FROM automation_rule_hits WHERE rule_id = $1`, [id]);
+      const cols = Object.keys(f);
+      if (!cols.length) return res.status(400).json({ error: 'Nothing to change.' });
+      const row = await queryOne(`UPDATE automation_rules SET ${cols.map((c, i) => `${c} = $${i + 1}`).join(', ')}, updated_at = now() WHERE id = $${cols.length + 1} RETURNING *`, [...Object.values(f), id]);
+      res.json(mapRule(row));
+    } catch (err) { httpError(res, err); }
+  });
+
+  app.delete('/api/automation-rules/:id', async (req, res) => {
+    try {
+      const { rowCount } = await query(`DELETE FROM automation_rules WHERE id = $1`, [parseInt(req.params.id)]);
+      if (!rowCount) return res.status(404).json({ error: 'Rule not found.' });
+      res.json({ ok: true });
+    } catch (err) { httpError(res, err); }
+  });
+
+  app.get('/api/automation-rules/:id/preview', async (req: any, res) => {
+    try { res.json(await runRule(parseInt(req.params.id), req.user?.email ?? 'unknown', { preview: true })); }
+    catch (err) { httpError(res, err); }
+  });
+
+  app.post('/api/automation-rules/:id/run', async (req: any, res) => {
+    try { res.json(await runRule(parseInt(req.params.id), req.user?.email ?? 'unknown', { draftPos: draftAutoPos })); }
+    catch (err) { httpError(res, err); }
+  });
+
+  app.get('/api/automation-rules/:id/runs', async (req, res) => {
+    try {
+      const { rows } = await query(`SELECT id, triggered_by, status, result_data, error_message, execution_time_ms, executed_at FROM automation_executions WHERE rule_id = $1 ORDER BY id DESC LIMIT 20`, [parseInt(req.params.id)]);
+      res.json(rows);
+    } catch (err) { httpError(res, err); }
   });
 
   // ---------------------------------------------------------------------------
-  // Scheduled Jobs
+  // Scheduled Jobs: the app's own background jobs.
   // ---------------------------------------------------------------------------
-  app.get('/api/scheduled-jobs', async (req, res) => {
-    const isActive = req.query.isActive as string | undefined;
-    try {
-      let sql = 'SELECT * FROM scheduled_jobs';
-      const params: any[] = [];
-      if (isActive !== undefined) {
-        sql += ' WHERE is_active = $1';
-        params.push(isActive === 'true');
-      }
-      sql += ' ORDER BY next_run ASC';
-      const { rows } = await query(sql, params);
-      res.json(rows.map((row: any) => ({
-        id: row.id,
-        jobName: row.job_name,
-        jobType: row.job_type,
-        scheduleType: row.schedule_type,
-        cronExpression: row.cron_expression,
-        nextRun: row.next_run,
-        lastRun: row.last_run,
-        lastStatus: row.last_status,
-        isActive: row.is_active,
-        retryCount: row.retry_count,
-        maxRetries: row.max_retries,
-        createdAt: row.created_at,
-      })));
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
+  app.get('/api/scheduled-jobs', async (_req, res) => {
+    try { res.json(await listJobs()); } catch (err) { httpError(res, err); }
   });
 
-  app.post('/api/scheduled-jobs', async (req, res) => {
-    const { jobName, jobType, scheduleType, cronExpression, config } = req.body;
-    if (!jobName || !jobType || !scheduleType) {
-      return res.status(400).json({ error: 'jobName, jobType, and scheduleType are required' });
-    }
-
-    try {
-      const row = await queryOne(
-        `INSERT INTO scheduled_jobs (job_name, job_type, schedule_type, cron_expression, config, next_run)
-         VALUES ($1, $2, $3, $4, $5, now()) RETURNING *`,
-        [jobName, jobType, scheduleType, cronExpression || null, config || null]
-      );
-      res.status(201).json({
-        id: row?.id,
-        jobName: row?.job_name,
-        jobType: row?.job_type,
-        isActive: row?.is_active,
-        createdAt: row?.created_at,
-      });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
+  app.put('/api/scheduled-jobs/:key/toggle', async (req, res) => {
+    try { await setJobActive(req.params.key, req.body?.active !== false); res.json({ ok: true }); } catch (err) { httpError(res, err); }
   });
 
-  app.put('/api/scheduled-jobs/:id/toggle', async (req, res) => {
-    const id = parseInt(req.params.id);
+  app.post('/api/scheduled-jobs/:key/run', async (req: any, res) => {
     try {
-      const row = await queryOne(
-        `UPDATE scheduled_jobs SET is_active = NOT is_active WHERE id = $1 RETURNING *`,
-        [id]
-      );
-      if (!row) return res.status(404).json({ error: 'Scheduled job not found' });
-      res.json({ id: row.id, isActive: row.is_active });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
+      const job = (await listJobs()).find((j) => j.key === req.params.key);
+      if (!job) return res.status(404).json({ error: 'No such job.' });
+      if (!job.runNow) return res.status(400).json({ error: `${job.name} is run from its own page.` });
+      res.json(await runJob(job.key, req.user?.email ?? 'unknown'));
+    } catch (err) { httpError(res, err); }
   });
 
   // ---------------------------------------------------------------------------
-  // Notifications
+  // Notifications: the in-app inbox.
   // ---------------------------------------------------------------------------
-  app.get('/api/notifications', async (req, res) => {
-    const userId = req.query.userId as string | undefined;
-    const status = req.query.status as string | undefined;
+  // Whose a notification is: everyone's, the user's role's, or the user's own.
+  const mine = (req: any, params: any[]) => {
+    params.push(['everyone', `role:${req.user?.role ?? ''}`, String(req.user?.email ?? '').toLowerCase()]);
+    return `LOWER(recipient) = ANY($${params.length}::text[])`;
+  };
+  const mapNotification = (row: any) => ({
+    id: row.id, notificationType: row.notification_type, recipient: row.recipient, subject: row.subject, message: row.message,
+    data: row.data, status: row.status, read: row.status === 'READ', readAt: row.read_at, createdAt: row.created_at,
+  });
+
+  app.get('/api/notifications', async (req: any, res) => {
+    const params: any[] = []; const where: string[] = [];
+    if (req.query.mine) where.push(mine(req, params));
+    if (req.query.userId) { params.push(req.query.userId); where.push(`recipient = $${params.length}`); }
+    if (req.query.status === 'unread') where.push(`status <> 'READ'`);
+    else if (req.query.status) { params.push(req.query.status); where.push(`status = $${params.length}`); }
     try {
-      let sql = 'SELECT * FROM notifications WHERE 1=1';
-      const params: any[] = [];
-      if (userId) {
-        sql += ' AND recipient = $' + (params.length + 1);
-        params.push(userId);
-      }
-      if (status) {
-        sql += ' AND status = $' + (params.length + 1);
-        params.push(status);
-      }
-      sql += ' ORDER BY created_at DESC LIMIT 50';
-      const { rows } = await query(sql, params);
-      res.json(rows.map((row: any) => ({
-        id: row.id,
-        notificationType: row.notification_type,
-        recipient: row.recipient,
-        subject: row.subject,
-        message: row.message,
-        data: row.data,
-        status: row.status,
-        sentAt: row.sent_at,
-        readAt: row.read_at,
-        createdAt: row.created_at,
-      })));
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
+      const { rows } = await query(`SELECT * FROM notifications${where.length ? ` WHERE ${where.join(' AND ')}` : ''} ORDER BY created_at DESC, id DESC LIMIT 100`, params);
+      res.json(rows.map(mapNotification));
+    } catch (err) { httpError(res, err); }
+  });
+
+  app.get('/api/notifications/unread-count', async (req: any, res) => {
+    const params: any[] = [];
+    try { const row = await queryOne(`SELECT COUNT(*)::int AS n FROM notifications WHERE status <> 'READ' AND ${mine(req, params)}`, params); res.json({ unread: row?.n ?? 0 }); }
+    catch (err) { httpError(res, err); }
   });
 
   app.post('/api/notifications', async (req, res) => {
@@ -238,70 +210,58 @@ export function registerAutomationRoutes(app: Express): void {
     if (!notificationType || !recipient || !message) {
       return res.status(400).json({ error: 'notificationType, recipient, and message are required' });
     }
-
     try {
       const row = await queryOne(
         `INSERT INTO notifications (notification_type, recipient, subject, message, data)
          VALUES ($1, $2, $3, $4, $5) RETURNING *`,
         [notificationType, recipient, subject || null, message, data || null]
       );
-      res.status(201).json({
-        id: row?.id,
-        notificationType: row?.notification_type,
-        status: row?.status,
-        createdAt: row?.created_at,
-      });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
+      res.status(201).json(mapNotification(row));
+    } catch (err) { httpError(res, err); }
+  });
+
+  app.put('/api/notifications/mark-all-read', async (req: any, res) => {
+    const params: any[] = [];
+    try { const { rowCount } = await query(`UPDATE notifications SET status = 'READ', read_at = now() WHERE status <> 'READ' AND ${mine(req, params)}`, params); res.json({ marked: rowCount }); }
+    catch (err) { httpError(res, err); }
   });
 
   app.put('/api/notifications/:id/mark-read', async (req, res) => {
     const id = parseInt(req.params.id);
     try {
-      const row = await queryOne(
-        `UPDATE notifications SET status = 'READ', read_at = now() WHERE id = $1 RETURNING *`,
-        [id]
-      );
+      const row = await queryOne(`UPDATE notifications SET status = 'READ', read_at = now() WHERE id = $1 RETURNING *`, [id]);
       if (!row) return res.status(404).json({ error: 'Notification not found' });
-      res.json({ id: row.id, status: row.status, readAt: row.read_at });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
+      res.json(mapNotification(row));
+    } catch (err) { httpError(res, err); }
   });
 
-  // Auto-PO settings and checks: ./autoPoRoutes.
-
   // ---------------------------------------------------------------------------
-  // Event Log (Audit Trail)
+  // Event Log
   // ---------------------------------------------------------------------------
   app.get('/api/event-log', async (req, res) => {
-    const eventType = req.query.eventType as string | undefined;
     const limit = Math.min(parseInt(req.query.limit as string) || 100, 1000);
-    try {
-      let sql = 'SELECT * FROM event_log';
-      const params: any[] = [];
-      if (eventType) {
-        sql += ' WHERE event_type = $1';
-        params.push(eventType);
-      }
-      sql += ' ORDER BY created_at DESC LIMIT $' + (params.length + 1);
-      params.push(limit);
-      const { rows } = await query(sql, params);
-      res.json(rows.map((row: any) => ({
-        id: row.id,
-        eventType: row.event_type,
-        entityType: row.entity_type,
-        entityId: row.entity_id,
-        action: row.action,
-        userId: row.user_id,
-        details: row.details,
-        status: row.status,
-        createdAt: row.created_at,
-      })));
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
+    const params: any[] = []; const where: string[] = [];
+    const type = (req.query.type ?? req.query.eventType) as string | undefined;
+    if (type) { params.push(type); where.push(`event_type = $${params.length}`); }
+    if (req.query.status) { params.push(req.query.status); where.push(`status = $${params.length}`); }
+    if (req.query.q) {
+      params.push(`%${String(req.query.q).trim()}%`);
+      where.push(`(event_type ILIKE $${params.length} OR entity_id ILIKE $${params.length} OR action ILIKE $${params.length} OR user_id ILIKE $${params.length} OR error_message ILIKE $${params.length} OR details::text ILIKE $${params.length})`);
     }
+    if (req.query.before) { params.push(parseInt(req.query.before as string)); where.push(`id < $${params.length}`); }
+    params.push(limit);
+    try {
+      const { rows } = await query(`SELECT * FROM event_log${where.length ? ` WHERE ${where.join(' AND ')}` : ''} ORDER BY id DESC LIMIT $${params.length}`, params);
+      res.json(rows.map((row: any) => ({
+        id: row.id, eventType: row.event_type, entityType: row.entity_type, entityId: row.entity_id, action: row.action,
+        userId: row.user_id, details: row.details, status: row.status, errorMessage: row.error_message, createdAt: row.created_at,
+      })));
+    } catch (err) { httpError(res, err); }
+  });
+
+  app.get('/api/event-log/types', async (_req, res) => {
+    try { const { rows } = await query(`SELECT event_type, COUNT(*)::int AS n FROM event_log GROUP BY 1 ORDER BY 1`); res.json(rows.map((r: any) => ({ type: r.event_type, count: r.n }))); }
+    catch (err) { httpError(res, err); }
   });
 
   app.post('/api/event-log', async (req, res) => {
@@ -309,22 +269,14 @@ export function registerAutomationRoutes(app: Express): void {
     if (!eventType || !action) {
       return res.status(400).json({ error: 'eventType and action are required' });
     }
-
     try {
       const row = await queryOne(
         `INSERT INTO event_log (event_type, entity_type, entity_id, action, user_id, details, status)
          VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
         [eventType, entityType || null, entityId || null, action, userId || null, details || null, status || 'SUCCESS']
       );
-      res.status(201).json({
-        id: row?.id,
-        eventType: row?.event_type,
-        status: row?.status,
-        createdAt: row?.created_at,
-      });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
+      res.status(201).json({ id: row?.id, eventType: row?.event_type, status: row?.status, createdAt: row?.created_at });
+    } catch (err) { httpError(res, err); }
   });
 
   // ---------------------------------------------------------------------------
@@ -439,53 +391,17 @@ export function registerAutomationRoutes(app: Express): void {
     }
   });
 
-  // MPN Enrichment (Supplier Lookup). Currently a stub — it returns a fixed
-  // ALI EXPRESS URL for up to 5 items and logs the run. Real DigiKey/Mouser/
-  // LCSC integration lives in pricingRoutes; this endpoint exists so a
-  // MPN_ENRICHMENT rule (see automation-rules default actions above) has an
-  // endpoint to hit without failing the rule run.
+  // Items with no supplier part number, for the Pricing page's button. This
+  // used to answer with made-up AliExpress search links; it now says which
+  // items need one (Items > part-number fill-in and the supplier lookups fill them).
   app.post('/api/automation/enrich-missing-suppliers', async (_req, res) => {
     try {
-      const itemsToEnrich = await query(
-        `SELECT serial_number, name FROM inventory LIMIT 20`
-      );
-
-      const enrichedCount = Math.min(itemsToEnrich.rowCount ?? 0, 20);
-      const enrichmentResults: any[] = [];
-
-      for (let i = 0; i < Math.min(enrichedCount, 5); i++) {
-        const item = itemsToEnrich.rows[i];
-        const searchTerm = item.name || item.serial_number;
-
-        enrichmentResults.push({
-          serialNumber: item.serial_number,
-          name: item.name,
-          supplier: 'ALI EXPRESS',
-          supplier_url: `https://www.aliexpress.com/wholesale?SearchText=${encodeURIComponent(searchTerm)}`,
-          status: 'ENRICHED',
-        });
-      }
-
-      // Best-effort — a failure to write the audit row must not fail the
-      // enrichment call itself.
-      try {
-        await query(
-          `INSERT INTO event_log (event_type, entity_type, action, status, details)
-           VALUES ($1, $2, $3, $4, $5)`,
-          ['MPN_ENRICHMENT', 'INVENTORY', 'AUTO_SUPPLIER_LOOKUP', 'SUCCESS', JSON.stringify({ itemsProcessed: enrichedCount })]
-        );
-      } catch (logErr: any) {
-        console.error('Error logging enrichment:', logErr.message);
-      }
-
-      res.json({
-        message: 'MPN enrichment completed',
-        itemsProcessed: enrichedCount,
-        results: enrichmentResults,
-      });
-    } catch (err: any) {
-      console.error('Enrichment endpoint error:', err.message, err.stack);
-      res.status(500).json({ error: err.message });
-    }
+      const { rows } = await query(
+        `SELECT serial_number, name FROM inventory WHERE deleted IS NOT TRUE
+           AND ${[1, 2, 3, 4, 5].map((i) => `COALESCE(TRIM(sup_pn_${i}), '') = ''`).join(' AND ')} ORDER BY serial_number`);
+      await query(`INSERT INTO event_log (event_type, entity_type, action, status, details) VALUES ('MISSING_SUPPLIER_CHECK', 'INVENTORY', 'CHECK', 'SUCCESS', $1)`,
+        [JSON.stringify({ missing: rows.length })]).catch(() => {});
+      res.json({ itemsProcessed: 0, missing: rows.length, items: rows.slice(0, 200).map((r: any) => ({ serialNumber: r.serial_number, name: r.name })) });
+    } catch (err) { httpError(res, err); }
   });
 }
