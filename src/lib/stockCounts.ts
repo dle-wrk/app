@@ -8,6 +8,7 @@
 //   POST /api/stock-counts/:id/lines      {serialNumber, locationId?, lot?}: something found that wasn't listed
 //   POST /api/stock-counts/:id/post       post it: each counted place set to its count, stock changed by the difference
 //   POST /api/stock-counts/:id/cancel
+//   DELETE /api/stock-counts/:id           an open or cancelled count (a posted one is the record of a stock change: kept)
 //
 // A line is one place (an item at a location, by lot) or an item's stock with
 // no location. Its expected quantity is what the system said when the count
@@ -242,6 +243,16 @@ export function registerStockCountsRoutes(app: Express): void {
         `INSERT INTO stock_count_lines (count_id, serial_number, location_id, lot, expected, added) VALUES ($1, $2, $3, $4, 0, true) RETURNING id`,
         [id, serial, locationId, lot]);
       res.status(201).json(rows[0]);
+    } catch (err) { httpError(res, err); }
+  });
+
+  app.delete('/api/stock-counts/:id', async (req, res) => {
+    try {
+      const { rows: [c] } = await query(`SELECT status FROM stock_counts WHERE id = $1`, [parseInt(req.params.id)]);
+      if (!c) return res.status(404).json({ error: 'Count not found.' });
+      if (c.status === 'POSTED') return res.status(409).json({ error: 'A posted count is the record of a stock change, so it stays.' });
+      await query(`DELETE FROM stock_counts WHERE id = $1`, [parseInt(req.params.id)]); // its lines go with it
+      res.json({ ok: true });
     } catch (err) { httpError(res, err); }
   });
 

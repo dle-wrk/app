@@ -278,6 +278,10 @@ function Counts({ triggerToast, onOpenItem }: { triggerToast: Toast; onOpenItem?
     try { setCounts(await api('/api/stock-counts')); setLocations((await api('/api/stock-locations')).locations); } catch (e: any) { triggerToast(e.message, 'ERROR'); }
   }, [triggerToast]);
   useEffect(() => { void load(); }, [load]);
+  const remove = async (c: Count) => {
+    if (!(await confirmDialog({ title: `Delete ${c.number}`, message: `Delete this ${c.status.toLowerCase()} count? It never changed any stock.`, confirmLabel: 'Delete', destructive: true }))) return;
+    try { await api(`/api/stock-counts/${c.id}`, { method: 'DELETE' }); await load(); } catch (e: any) { triggerToast(e.message, 'ERROR'); }
+  };
   const start = async () => {
     try {
       const r = await api('/api/stock-counts', { method: 'POST', body: JSON.stringify({ scope: form!.scope, locationId: form!.locationId, prefix: form!.prefix }) });
@@ -307,13 +311,16 @@ function Counts({ triggerToast, onOpenItem }: { triggerToast: Toast; onOpenItem?
       {counts.length === 0 ? <p className="text-xs text-on-surface-variant italic">No counts yet.</p> : (
         <div className="rounded-xl border border-outline-variant overflow-x-auto">
           <table className="w-full text-left text-xs"><thead><tr className="text-[10px] text-outline uppercase tracking-wider bg-surface-container-high/30">
-            <th className="px-md py-2">Count</th><th className="px-md py-2">What</th><th className="px-md py-2">Progress</th><th className="px-md py-2">Status</th><th className="px-md py-2">Started</th></tr></thead>
+            <th className="px-md py-2">Count</th><th className="px-md py-2">What</th><th className="px-md py-2">Progress</th><th className="px-md py-2">Status</th><th className="px-md py-2">Started</th><th className="px-md py-2"><span className="sr-only">Actions</span></th></tr></thead>
             <tbody className="divide-y divide-outline-variant/30">{counts.map((c) => (
               <tr key={c.id}><td className="px-md py-2"><button type="button" className="font-mono font-bold text-primary hover:underline" onClick={() => setOpen(c.id)}>{c.number}</button></td>
-                <td className="px-md py-2">{c.scope === 'location' ? c.location_code : c.scope === 'unplaced' ? 'No location' : 'Everything'}{c.prefix ? ` · ${c.prefix}…` : ''}</td>
+                <td className="px-md py-2">{c.scope === 'location' ? (c.location_code ?? <span className="text-outline">a deleted location</span>) : c.scope === 'unplaced' ? 'No location' : 'Everything'}{c.prefix ? ` · ${c.prefix}…` : ''}</td>
                 <td className="px-md py-2 font-mono">{fmtNumber(c.counted)} / {fmtNumber(c.lines)}</td>
                 <td className="px-md py-2"><span className={`px-2 py-0.5 rounded text-[10px] font-bold ${c.status === 'POSTED' ? 'bg-green-500/10 text-green-400' : c.status === 'OPEN' ? 'bg-primary/10 text-primary' : 'bg-surface-container-highest text-outline'}`}>{c.status}</span></td>
-                <td className="px-md py-2 text-outline">{when(c.created_at)}{c.created_by ? ` · ${c.created_by}` : ''}</td></tr>
+                <td className="px-md py-2 text-outline">{when(c.created_at)}{c.created_by ? ` · ${c.created_by}` : ''}</td>
+                <td className="px-md py-2 text-right">{c.status !== 'POSTED' && canChange('/api/stock-counts/1', 'DELETE') && (
+                  <button type="button" aria-label={`Delete ${c.number}`} title="Delete (it never changed any stock)" className="p-1.5 rounded hover:bg-error/10 text-error" onClick={() => void remove(c)}><Trash2 className="w-3.5 h-3.5" /></button>
+                )}</td></tr>
             ))}</tbody></table>
         </div>
       )}
