@@ -1,13 +1,15 @@
 // Stock > Locations & Counts: the places stock is kept, what each holds, and
 // stock counts (server: src/lib/stockPlaces.ts, src/lib/stockCounts.ts).
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Loader2, MapPin, ClipboardList, Plus, Pencil, Trash2, CheckCircle2, Search } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Loader2, MapPin, ClipboardList, Plus, Pencil, Trash2, CheckCircle2, Search, ScanLine } from 'lucide-react';
 import { canChange } from '../../lib/changeAccess';
 import { confirmDialog } from '../../lib/confirmDialog';
 import { fmtNumber } from '../../lib/formatMoney';
 import { PrimaryButton, SecondaryButton } from '../bookkeeping/shared';
 import LotTrace from '../LotTrace';
+import StockScan from '../StockScan';
+import { readScan } from '../../lib/stockLabels';
 import type { Item } from '../../types';
 
 type Toast = (msg: string, type?: string) => void;
@@ -225,6 +227,9 @@ function CountSheet({ id, triggerToast, onClose, onOpenItem }: { id: number; tri
   const [filter, setFilter] = useState('');
   const [add, setAdd] = useState({ serial: '', lot: '' });
   const [busy, setBusy] = useState<string | null>(null);
+  const [scan, setScan] = useState('');
+  const [scanNote, setScanNote] = useState<string | null>(null);
+  const sheet = useRef<HTMLDivElement>(null);
   const load = useCallback(async () => {
     try {
       const d = await api(`/api/stock-counts/${id}`);
@@ -244,6 +249,26 @@ function CountSheet({ id, triggerToast, onClose, onOpenItem }: { id: number; tri
     setBusy('add');
     try { await saveAll(); await api(`/api/stock-counts/${id}/lines`, { method: 'POST', body: JSON.stringify({ serialNumber: add.serial.trim(), lot: add.lot }) }); setAdd({ serial: '', lot: '' }); await load(); }
     catch (e: any) { triggerToast(e.message, 'ERROR'); } finally { setBusy(null); }
+  };
+  // A scanned (or typed) item goes to its line, ready for the amount; one not listed is added.
+  const focusLine = (serial: string) => setTimeout(() => {
+    const el = [...(sheet.current?.querySelectorAll<HTMLInputElement>('input[aria-label^="Actually there "]') ?? [])].find((i) => i.getAttribute('aria-label') === `Actually there ${serial}`);
+    el?.scrollIntoView?.({ block: 'center' }); el?.focus(); el?.select();
+  }, 0);
+  const onScan = async () => {
+    const s = readScan(scan); setScan(''); setScanNote(null);
+    if (!s) return;
+    if (s.kind === 'bin') { setScanNote(`That's the label of bin ${s.code}: scan the items in it.`); return; }
+    const line = data!.lines.find((l) => l.serial_number.toUpperCase() === s.code.toUpperCase());
+    setFilter('');
+    if (line) { focusLine(line.serial_number); return; }
+    setBusy('add');
+    try {
+      await saveAll();
+      const r = await api(`/api/stock-counts/${id}/lines`, { method: 'POST', body: JSON.stringify({ serialNumber: s.code }) });
+      await load(); setScanNote(`${s.code} wasn't listed: added.`);
+      focusLine(r?.serial_number ?? s.code);
+    } catch (e: any) { setScanNote(e.message); } finally { setBusy(null); }
   };
   const confirm = async () => {
     const diffs = data!.lines.filter((l) => entered[l.id] !== '' && Number(entered[l.id]) !== l.now);
@@ -275,7 +300,7 @@ function CountSheet({ id, triggerToast, onClose, onOpenItem }: { id: number; tri
   const differ = data.lines.filter((l) => entered[l.id] !== '' && Number(entered[l.id]) !== l.now).length;
 
   return (
-    <div className="space-y-md" data-testid="count-sheet">
+    <div className="space-y-md" data-testid="count-sheet" ref={sheet}>
       <div className="flex flex-wrap items-center justify-between gap-sm">
         <div>
           <p className="text-sm font-bold text-on-surface">Checking {WHAT(data.count, new Set(data.lines.map((l) => l.serial_number)).size)} <span className="text-outline font-normal text-xs">· {data.count.number} · {data.count.status.toLowerCase()}</span></p>
@@ -290,6 +315,14 @@ function CountSheet({ id, triggerToast, onClose, onOpenItem }: { id: number; tri
           </>}
         </div>
       </div>
+      {open && (
+        <div className="flex flex-wrap items-center gap-sm">
+          <div className="relative w-full sm:w-72"><ScanLine className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-outline" />
+            <input className={`${input} w-full pl-8 py-1.5 text-xs font-mono`} placeholder="Scan an item (or type its code, Enter)" value={scan} onChange={(e) => setScan(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void onScan(); } }} aria-label="Scan an item to check" /></div>
+          {scanNote && <span className="text-[11px] text-on-surface-variant" role="status">{scanNote}</span>}
+        </div>
+      )}
       {data.lines.length > 8 && <div className="relative w-full sm:w-72"><Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-outline" /><input className={`${input} w-full pl-8 py-1.5 text-xs`} placeholder="Find an item…" value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Find a line" /></div>}
       <div className="rounded-xl border border-outline-variant overflow-x-auto max-h-[60vh] overflow-y-auto custom-scrollbar">
         <table className="w-full text-left text-xs">
@@ -330,11 +363,11 @@ function CountSheet({ id, triggerToast, onClose, onOpenItem }: { id: number; tri
   );
 }
 
-function Counts({ triggerToast, onOpenItem, items = [] }: { triggerToast: Toast; onOpenItem?: (s: string) => void; items?: Item[] }) {
+function Counts({ triggerToast, onOpenItem, items = [], initialOpen = null }: { triggerToast: Toast; onOpenItem?: (s: string) => void; items?: Item[]; initialOpen?: number | null }) {
   const may = canChange('/api/stock-counts');
   const [counts, setCounts] = useState<Count[] | null>(null);
   const [locations, setLocations] = useState<Location[]>([]);
-  const [open, setOpen] = useState<number | null>(null);
+  const [open, setOpen] = useState<number | null>(initialOpen);
   const [what, setWhat] = useState<'location' | 'items' | 'all'>('location');
   const [locationId, setLocationId] = useState('');
   const [picked, setPicked] = useState<string[]>([]);
@@ -414,9 +447,11 @@ function Counts({ triggerToast, onOpenItem, items = [] }: { triggerToast: Toast;
 }
 
 export default function StockPlacesView({ triggerToast, onOpenItem, items }: { triggerToast: Toast; onOpenItem?: (s: string) => void; items?: Item[] }) {
-  const [tab, setTab] = useState<'locations' | 'counts' | 'lots'>('locations');
+  const [tab, setTab] = useState<'locations' | 'scan' | 'counts' | 'lots'>('locations');
+  const [countToOpen, setCountToOpen] = useState<number | null>(null);
   const tabs = [
     { key: 'locations' as const, label: 'Locations', icon: <MapPin className="w-3.5 h-3.5" /> },
+    { key: 'scan' as const, label: 'Scan', icon: <ScanLine className="w-3.5 h-3.5" /> },
     { key: 'counts' as const, label: 'Check stock', icon: <ClipboardList className="w-3.5 h-3.5" /> },
     { key: 'lots' as const, label: 'Lot tracing', icon: <Search className="w-3.5 h-3.5" /> },
   ];
@@ -424,17 +459,18 @@ export default function StockPlacesView({ triggerToast, onOpenItem, items }: { t
     <div className="p-container-margin space-y-md max-w-7xl mx-auto w-full">
       <div>
         <h3 className="font-headline-sm text-lg text-on-surface">Locations &amp; counts</h3>
-        <p className="text-on-surface-variant text-xs">Where stock is kept, checking it, and which lots went where.</p>
+        <p className="text-on-surface-variant text-xs">Where stock is kept, scanning it in, checking it, and which lots went where.</p>
       </div>
       <div className="flex gap-1 border-b border-outline-variant/30">
         {tabs.map((t) => (
-          <button key={t.key} type="button" onClick={() => setTab(t.key)}
+          <button key={t.key} type="button" onClick={() => { setTab(t.key); setCountToOpen(null); }}
             className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold border-b-2 ${tab === t.key ? 'text-primary border-primary' : 'text-on-surface-variant border-transparent hover:text-on-surface'}`}>{t.icon}{t.label}</button>
         ))}
       </div>
       <div className="bg-surface-container border border-outline-variant rounded-xl p-lg">
         {tab === 'locations' && <Locations triggerToast={triggerToast} onOpenItem={onOpenItem} items={items} />}
-        {tab === 'counts' && <Counts triggerToast={triggerToast} onOpenItem={onOpenItem} items={items} />}
+        {tab === 'scan' && <StockScan triggerToast={triggerToast} onOpenItem={onOpenItem} items={items} onOpenCount={(id) => { setCountToOpen(id); setTab('counts'); }} />}
+        {tab === 'counts' && <Counts triggerToast={triggerToast} onOpenItem={onOpenItem} items={items} initialOpen={countToOpen} />}
         {tab === 'lots' && <LotTrace triggerToast={triggerToast} onOpenItem={onOpenItem} />}
       </div>
     </div>

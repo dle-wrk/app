@@ -57,4 +57,24 @@ describe('Check stock', () => {
     expect(saved).toEqual([{ id: 1, counted: '200' }, { id: 2, counted: '1780' }]); // every line, so a match counts as checked
     expect(calls.some((c) => c.url === '/api/stock-counts/7/post')).toBe(true);
   });
+
+  it('scanning an item goes to its line; one not listed is added', async () => {
+    await act(async () => { root.render(<StockPlacesView triggerToast={() => {}} items={[]} />); });
+    await act(async () => { button('Check stock').click(); });
+    await act(async () => { button('Everything').click(); });
+    await act(async () => { button('Check').click(); });
+    const box = host.querySelector('input[aria-label="Scan an item to check"]') as HTMLInputElement;
+    const scan = async (code: string) => {
+      type(box, code);
+      await act(async () => { box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+      await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    };
+    await scan('cap-024');
+    expect(document.activeElement).toBe(host.querySelector('input[aria-label="Actually there CAP-024"]'));
+    expect(calls.some((c) => c.method === 'POST' && c.url === '/api/stock-counts/7/lines')).toBe(false);
+    await scan('RES-020');
+    expect(calls.find((c) => c.method === 'POST' && c.url === '/api/stock-counts/7/lines')!.body).toEqual({ serialNumber: 'RES-020' });
+    await scan('LOC:A1-03');
+    expect(host.textContent).toContain("That's the label of bin A1-03");
+  });
 });

@@ -242,13 +242,14 @@ export function registerStockCountsRoutes(app: Express): void {
       const { rows: [c] } = await query(`SELECT status, location_id FROM stock_counts WHERE id = $1`, [id]);
       if (!c) return res.status(404).json({ error: 'Count not found.' });
       if (c.status !== 'OPEN') return res.status(409).json({ error: `This count is ${c.status.toLowerCase()}.` });
-      const { rows: [item] } = await query(`SELECT serial_number FROM inventory WHERE serial_number = $1 AND deleted IS NOT TRUE`, [serial]);
+      // Any case, as a scanner or a person types it.
+      const { rows: [item] } = await query(`SELECT serial_number FROM inventory WHERE UPPER(serial_number) = UPPER($1) AND deleted IS NOT TRUE ORDER BY serial_number = $1 DESC LIMIT 1`, [serial]);
       if (!item) return res.status(400).json({ error: `${serial || 'That item'} isn't in inventory.` });
       const locationId = req.body?.locationId ? Number(req.body.locationId) : c.location_id;
       const lot = String(req.body?.lot ?? '').trim() || null;
       const { rows } = await query(
-        `INSERT INTO stock_count_lines (count_id, serial_number, location_id, lot, expected, added) VALUES ($1, $2, $3, $4, 0, true) RETURNING id`,
-        [id, serial, locationId, lot]);
+        `INSERT INTO stock_count_lines (count_id, serial_number, location_id, lot, expected, added) VALUES ($1, $2, $3, $4, 0, true) RETURNING id, serial_number`,
+        [id, item.serial_number, locationId, lot]);
       res.status(201).json(rows[0]);
     } catch (err) { httpError(res, err); }
   });

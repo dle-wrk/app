@@ -66,6 +66,8 @@
                     <li>Whenever stock goes down (an invoice, a kit book-out, an edit), what has no location is used first, then the places, oldest first, and each use is recorded against the movement that caused it.</li>
                     <li><strong>Check stock</strong>: choose a bin, some items or everything; each line starts at the system's amount, change only what's different, then <em>Confirm</em>: stock is corrected and the change recorded.</li>
                     <li><strong>Lot tracing</strong>: where a lot or date code is now and which builds and invoices used it, or which lots went into a build or invoice.</li>
+                    <li><strong>Barcode scanning</strong> (the new <em>Scan</em> tab): scan a bin label, then each item going in it, to put it away or move it there; scan an item on its own to see where it's kept; <em>Check this bin</em> starts a check of it. In <em>Check stock</em>, scanning an item jumps to its line, and adds it if it wasn't listed. Any ordinary USB or Bluetooth scanner works (it types the code and Enter), and so does the keyboard.</li>
+                    <li><strong>Labels</strong>: print bin or item labels with a Code 128 barcode, the code and its name, on A4 sheets of 21 (63.5 × 38.1 mm). A bin label's barcode starts with <code>LOC:</code>, so a scan tells bin ANT-001 from item ANT-001.</li>
                 </ul>
             </div>
 
@@ -130,7 +132,7 @@
             <h3 id="v29-planned">Planned</h3>
             <div class="step">
                 <ul>
-                    <li><strong>Barcode scanning</strong>: scan to book in, book out, put away and count, and print reel and bin labels with the stock code, lot and location. Builds on the locations and lots above.</li>
+                    <li><strong>More scanning</strong>: scan to book in a purchase order and to book out a kit, and reel labels with the lot and date code.</li>
                 </ul>
             </div>
 
