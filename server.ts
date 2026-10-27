@@ -70,7 +70,8 @@ const DIST_DIR = existsSync(distPath) ? distPath : altDistPath;
 import { ensureBookkeepingSchema } from './src/lib/bookkeeping-db';
 import { registerBookkeepingRoutes } from './src/lib/bookkeeping-routes';
 import { ensurePhase5Tables } from './src/lib/phase5-db';
-import phase5Routes from './src/lib/phase5-routes';
+import phase5Routes, { scanAnomalies, generateForecasts, assessSuppliers } from './src/lib/phase5-routes';
+import { ensureQualitySchema, registerQualityRoutes } from './src/lib/qualityRoutes';
 
 const app = express();
 // Request ID first — everything downstream should log with req.id so log
@@ -170,6 +171,7 @@ app.use(express.static(DIST_DIR));
 registerBookkeepingRoutes(app);
 
 // Phase 5: Quality & Compliance + Advanced Automation
+registerQualityRoutes(app);
 app.use(phase5Routes);
 
 // Auth (/api/login, /api/session/*, /api/auth/*). attachSessionUser is applied
@@ -1219,6 +1221,7 @@ async function runSchemaBootstrap() {
 
     // Phase 5: Quality & Compliance + Advanced Automation
     await ensurePhase5Tables().catch((e) => console.error('Failed to bootstrap Phase 5 schema:', e));
+    await ensureQualitySchema().catch((e) => console.error('Failed to bootstrap quality schema:', e));
 
     // Seed the primary admin account if none exists. Password is bcrypt-hashed;
     // in production, override via SEED_ADMIN_PASSWORD env var so nothing
@@ -1349,6 +1352,18 @@ async function bootstrap() {
   registerJob({ key: 'automation-rules', name: 'Automation rules', description: 'Runs each active rule that is due (every hour, day or week), telling people about anything new or drafting purchase orders.', schedule: 'Every hour, at a quarter past', cron: '15 * * * *', runNow: true, scheduled: autoRules },
     () => runDueRules(draftAutoPos));
   if (autoRules) cron.schedule('15 * * * *', () => { void runJob('automation-rules', 'schedule'); }, { timezone: 'UTC' });
+
+  // Advanced Automation's analysis (./src/lib/phase5-routes): the stock
+  // anomaly scan, demand forecasts and supplier scores, refreshed daily.
+  const autoAnalysis = autoOn(process.env.ANALYSIS_AUTO);
+  registerJob({ key: 'analysis', name: 'Stock analysis', description: 'Scans stock for anomalies, makes the demand forecasts the history supports, and scores suppliers from their orders and NCRs.', schedule: 'Daily at 08:30 SA time', cron: '30 6 * * *', runNow: true, scheduled: autoAnalysis },
+    async () => {
+      const scan = await scanAnomalies(true);
+      const f = await generateForecasts(30);
+      const s = await assessSuppliers();
+      return `${scan.found} anomalies found; ${f.generated} forecasts made (${f.skipped} items without enough history); ${s.scored} of ${s.assessed} suppliers scored.`;
+    });
+  if (autoAnalysis) cron.schedule('30 6 * * *', () => { void runJob('analysis', 'schedule'); }, { timezone: 'UTC' });
 
   return server;
 }

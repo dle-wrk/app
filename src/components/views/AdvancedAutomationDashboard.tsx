@@ -1,15 +1,29 @@
 import React, { useState, useEffect } from 'react';
 import { Brain, AlertCircle, TrendingUp, Zap, Plus, Loader2, BarChart3, Activity } from 'lucide-react';
 import RestockOrderFiles from '../RestockOrderFiles';
+import { canChange } from '../../lib/changeAccess';
 
 interface Props {
   triggerToast: (msg: string, type?: string) => void;
+  onOpenItem?: (serial: string) => void;
 }
 
-export default function AdvancedAutomationDashboard({ triggerToast }: Props) {
+// What each kind of model does, and whether it has an accuracy to measure.
+export const MODEL_KINDS: Record<string, string> = {
+  DEMAND_FORECAST: 'Forecasts each part\'s use from the stock ledger; Train backtests it for a measured accuracy.',
+  ANOMALY_DETECTION: 'Rule checks over stock and the ledger (negative stock, stock-outs, spikes, dead stock); Train runs a scan. No accuracy to measure.',
+  SUPPLIER_RANKING: 'Scores suppliers from their purchase orders (on time) and NCRs; Train scores them.',
+  DEFECT_PREDICTION: 'Would learn from inspection results; needs a history of recorded inspections first.',
+};
+const ANOMALY_ACTIONS: Array<[string, string]> = [['ACKNOWLEDGED', 'Acknowledge'], ['INVESTIGATING', 'Investigating'], ['RESOLVED', 'Resolved'], ['FALSE_POSITIVE', 'Not a problem']];
+
+export default function AdvancedAutomationDashboard({ triggerToast, onOpenItem }: Props) {
+  const may = canChange('/api/analytics/scan-anomalies');
   const [activeTab, setActiveTab] = useState<'overview' | 'ml_models' | 'predictive' | 'anomalies' | 'reorder' | 'supplier_intel'>('overview');
   const [models, setModels] = useState<any[]>([]);
   const [predictions, setPredictions] = useState<any[]>([]);
+  const [anomalyShow, setAnomalyShow] = useState<'open' | 'all'>('open');
+  const [anomalySeverity, setAnomalySeverity] = useState('');
   const [anomalies, setAnomalies] = useState<any[]>([]);
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -23,20 +37,20 @@ export default function AdvancedAutomationDashboard({ triggerToast }: Props) {
     model_name: '',
     model_type: 'DEMAND_FORECAST',
     model_version: '1.0.0',
-    accuracy: 0.85,
   });
 
   useEffect(() => {
     fetchAutomationData();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anomalyShow, anomalySeverity]);
 
   const fetchAutomationData = async () => {
     setLoading(true);
     try {
       const [modelRes, predRes, anomRes, supplRes, consRes, reorderRes, anomSumRes] = await Promise.all([
         fetch('/api/ml-models'),
-        fetch('/api/predictive-orders'),
-        fetch('/api/anomalies'),
+        fetch('/api/analytics/forecasts'),
+        fetch(`/api/anomalies?${new URLSearchParams({ ...(anomalyShow === 'open' ? { status: 'open' } : {}), ...(anomalySeverity ? { severity: anomalySeverity } : {}) })}`),
         fetch('/api/supplier-intelligence'),
         fetch('/api/analytics/consumption-summary'),
         fetch('/api/analytics/reorder-recommendations'),
@@ -99,6 +113,27 @@ export default function AdvancedAutomationDashboard({ triggerToast }: Props) {
     }
   };
 
+  // Score each supplier from its orders and NCRs.
+  const assessSuppliers = async () => {
+    setBusy('assess');
+    try {
+      const res = await fetch('/api/analytics/assess-suppliers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Scoring failed');
+      triggerToast(data.scored ? `${data.scored} of ${data.assessed} suppliers scored.` : `None scored yet: a supplier needs 3 received orders (${data.assessed} have orders).`, data.scored ? 'SUCCESS' : 'INFO');
+      await fetchAutomationData();
+    } catch (err: any) { triggerToast(err.message, 'ERROR'); } finally { setBusy(null); }
+  };
+
+  const setAnomaly = async (id: number, status: string) => {
+    try {
+      const res = await fetch(`/api/anomalies/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not change it');
+      await fetchAutomationData();
+    } catch (err: any) { triggerToast(err.message, 'ERROR'); }
+  };
+
   // Backtest a model against the ledger and record the measured accuracy.
   const trainModel = async (id: number, name: string) => {
     setBusy(`train-${id}`);
@@ -159,7 +194,6 @@ export default function AdvancedAutomationDashboard({ triggerToast }: Props) {
         model_name: '',
         model_type: 'DEMAND_FORECAST',
         model_version: '1.0.0',
-        accuracy: 0.85,
       });
       fetchAutomationData();
     } catch (err: any) {
@@ -198,8 +232,8 @@ export default function AdvancedAutomationDashboard({ triggerToast }: Props) {
             />
             <StatCard
               icon={TrendingUp}
-              label="Pending Predictions"
-              value={predictions.filter(p => p.status === 'PENDING').length}
+              label="Forecasts"
+              value={predictions.length}
               color="text-cyan-500"
             />
             <StatCard
@@ -210,8 +244,8 @@ export default function AdvancedAutomationDashboard({ triggerToast }: Props) {
             />
             <StatCard
               icon={Activity}
-              label="Supplier Score"
-              value={suppliers.length > 0 ? Math.round(suppliers[0].performance_score) : 'N/A'}
+              label="Suppliers scored"
+              value={`${suppliers.filter(s => s.performance_score !== null).length} of ${suppliers.length}`}
               color="text-green-500"
             />
           </div>
@@ -235,6 +269,15 @@ export default function AdvancedAutomationDashboard({ triggerToast }: Props) {
               {busy === 'forecast' ? <Loader2 className="w-4 h-4 animate-spin" /> : <TrendingUp className="w-4 h-4" />}
               {busy === 'forecast' ? 'Forecasting...' : 'Generate Forecasts'}
             </button>
+            <button
+              onClick={assessSuppliers}
+              disabled={!!busy}
+              className="px-lg py-2 border border-primary text-primary text-xs font-bold rounded-lg hover:bg-primary hover:text-on-primary disabled:opacity-50 flex items-center gap-2 transition-colors"
+            >
+              {busy === 'assess' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Activity className="w-4 h-4" />}
+              {busy === 'assess' ? 'Scoring...' : 'Score Suppliers'}
+            </button>
+            <span className="basis-full text-[11px] text-outline">These also run on their own every day at 08:30 (Automation &gt; Scheduled Jobs: Stock analysis).</span>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-md">
@@ -321,7 +364,7 @@ export default function AdvancedAutomationDashboard({ triggerToast }: Props) {
             }`}
           >
             {tab === 'ml_models' ? 'ML Models'
-              : tab === 'predictive' ? 'Predictions'
+              : tab === 'predictive' ? 'Forecasts'
               : tab === 'supplier_intel' ? 'Supplier Intel'
               : tab === 'reorder' ? 'Reorder'
               : tab === 'overview' ? 'Overview'
@@ -382,18 +425,7 @@ export default function AdvancedAutomationDashboard({ triggerToast }: Props) {
                     className="w-full bg-surface-container border border-outline-variant rounded px-3 py-2 text-sm text-on-surface"
                   />
                 </div>
-                <div>
-                  <label className="text-xs font-bold text-outline uppercase block mb-2">Expected Accuracy</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={modelForm.accuracy}
-                    onChange={(e) => setModelForm({ ...modelForm, accuracy: parseFloat(e.target.value) })}
-                    min="0"
-                    max="1"
-                    className="w-full bg-surface-container border border-outline-variant rounded px-3 py-2 text-sm text-on-surface"
-                  />
-                </div>
+                <p className="text-[11px] text-on-surface-variant md:col-span-2">{MODEL_KINDS[modelForm.model_type]} Accuracy is only ever measured, by Train.</p>
               </div>
               <div className="flex justify-end gap-2 pt-md border-t border-outline-variant">
                 <button
@@ -428,6 +460,7 @@ export default function AdvancedAutomationDashboard({ triggerToast }: Props) {
                     <div>
                       <p className="font-bold text-on-surface text-sm">{model.model_name}</p>
                       <p className="text-xs text-on-surface-variant">{model.model_type} • v{model.model_version}</p>
+                      <p className="text-[11px] text-outline max-w-[620px]">{model.model_metadata?.note ?? MODEL_KINDS[model.model_type] ?? ''}</p>
                     </div>
                     <div className="flex items-center gap-3">
                       <div className="text-right">
@@ -435,7 +468,7 @@ export default function AdvancedAutomationDashboard({ triggerToast }: Props) {
                             arithmetic or this renders NaN%. */}
                         <p className="text-sm font-bold text-cyan-500">
                           {model.accuracy === null || model.accuracy === undefined
-                            ? <span className="text-outline">Unmeasured</span>
+                            ? <span className="text-outline">{model.model_type === 'DEMAND_FORECAST' ? 'Unmeasured' : 'No accuracy'}</span>
                             : `${(Number(model.accuracy) * 100).toFixed(1)}%`}
                         </p>
                         <span className={`px-2 py-1 text-xs font-bold rounded ${
@@ -473,36 +506,33 @@ export default function AdvancedAutomationDashboard({ triggerToast }: Props) {
       {/* Predictive Orders Tab */}
       {activeTab === 'predictive' && (
         <div className="bg-surface-container border border-outline-variant rounded-lg p-lg space-y-md">
-          <h3 className="text-lg font-bold text-on-surface">Demand Forecasts & Predictive Orders</h3>
+          <div>
+            <h3 className="text-lg font-bold text-on-surface">Demand Forecasts</h3>
+            <p className="text-sm text-on-surface-variant">How many of each part are expected to be used by the date shown, from its use in the stock ledger. Parts without enough history get none rather than a guess.</p>
+          </div>
           {loading ? (
-            <div className="flex items-center gap-2 text-outline py-8">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Loading predictions...
-            </div>
+            <div className="flex items-center gap-2 text-outline py-8"><Loader2 className="w-4 h-4 animate-spin" /> Loading forecasts...</div>
           ) : predictions.length === 0 ? (
-            <div className="text-center py-12 text-outline">No predictions generated</div>
+            <div className="text-center py-12 text-outline text-sm">
+              No forecasts yet. {consumption ? `${consumption.partsForecastable} part${consumption.partsForecastable === 1 ? ' has' : 's have'} enough history (3+ uses over 7+ days); ${consumption.partsWithHistory} have some.` : ''}
+            </div>
           ) : (
-            <div className="space-y-2">
-              {predictions.slice(0, 10).map(pred => (
-                <div key={pred.id} className="bg-surface-container-high border border-outline-variant rounded p-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <p className="font-bold text-on-surface text-sm">{pred.component_id}</p>
-                      <p className="text-xs text-on-surface-variant">Predicted: {pred.predicted_quantity} units</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-sm text-cyan-500">Confidence: {(pred.confidence_score * 100).toFixed(0)}%</p>
-                      <span className={`px-2 py-1 text-xs font-bold rounded ${
-                        pred.status === 'CREATED' ? 'bg-green-500/10 text-green-400' :
-                        pred.status === 'RECOMMENDED' ? 'bg-blue-500/10 text-blue-400' :
-                        'bg-yellow-500/10 text-yellow-400'
-                      }`}>
-                        {pred.status}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              ))}
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead><tr className="bg-surface-container-high text-[10px] uppercase text-outline border-b border-outline-variant">
+                  <th className="px-3 py-2">Part</th><th className="px-3 py-2">By</th><th className="px-3 py-2 text-right">Expected use</th><th className="px-3 py-2 text-right">Confidence</th><th className="px-3 py-2">Method</th></tr></thead>
+                <tbody className="divide-y divide-outline-variant/30">
+                  {predictions.map((f: any) => (
+                    <tr key={`${f.component_id}-${f.forecast_date}`}>
+                      <td className="px-3 py-2"><span className="font-mono font-bold text-primary">{f.component_id}</span><span className="block text-[10px] text-outline">{f.name}</span></td>
+                      <td className="px-3 py-2">{f.forecast_date}</td>
+                      <td className="px-3 py-2 text-right font-mono">{f.forecast_quantity}</td>
+                      <td className="px-3 py-2 text-right font-mono">{f.confidence_level === null ? '—' : `${Math.round(Number(f.confidence_level) * 100)}%`}</td>
+                      <td className="px-3 py-2 text-[10px] text-outline">{f.forecast_method}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
@@ -588,33 +618,57 @@ export default function AdvancedAutomationDashboard({ triggerToast }: Props) {
       {/* Anomalies Tab */}
       {activeTab === 'anomalies' && (
         <div className="bg-surface-container border border-outline-variant rounded-lg p-lg space-y-md">
-          <h3 className="text-lg font-bold text-on-surface">Detected Anomalies</h3>
-          {loading ? (
-            <div className="flex items-center gap-2 text-outline py-8">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Loading anomalies...
+          <div className="flex flex-wrap items-center justify-between gap-sm">
+            <h3 className="text-lg font-bold text-on-surface">Detected Anomalies</h3>
+            <div className="flex flex-wrap items-center gap-sm">
+              <div className="flex gap-1" role="radiogroup" aria-label="Show anomalies">
+                {([['open', 'Open'], ['all', 'All']] as const).map(([k, l]) => (
+                  <button key={k} type="button" role="radio" aria-checked={anomalyShow === k} onClick={() => setAnomalyShow(k)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${anomalyShow === k ? 'bg-primary text-on-primary border-primary' : 'border-outline-variant text-on-surface-variant'}`}>{l}</button>
+                ))}
+              </div>
+              <select value={anomalySeverity} onChange={(e) => setAnomalySeverity(e.target.value)} aria-label="Severity"
+                className="bg-surface-container-high border border-outline-variant rounded px-2 py-1.5 text-xs text-on-surface">
+                <option value="">Any severity</option><option value="CRITICAL">Critical</option><option value="HIGH">High</option><option value="MEDIUM">Medium</option><option value="LOW">Low</option>
+              </select>
             </div>
+          </div>
+          <p className="text-[11px] text-outline">A rescan replaces what is still open; anything acknowledged, being investigated or marked not a problem isn't raised again.</p>
+          {loading ? (
+            <div className="flex items-center gap-2 text-outline py-8"><Loader2 className="w-4 h-4 animate-spin" /> Loading anomalies...</div>
           ) : anomalies.length === 0 ? (
-            <div className="text-center py-12 text-outline">No anomalies detected</div>
+            <div className="text-center py-12 text-outline">{anomalyShow === 'open' ? 'Nothing open.' : 'No anomalies detected'}</div>
           ) : (
-            <div className="space-y-2">
-              {anomalies.slice(0, 10).map(anom => (
-                <div key={anom.id} className="bg-surface-container-high border border-outline-variant rounded p-3">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <p className="font-bold text-on-surface text-sm">{anom.entity_type}: {anom.entity_id}</p>
-                      <p className="text-xs text-on-surface-variant">{anom.description || 'Anomaly detected'}</p>
+            <div className="space-y-2 max-h-[65vh] overflow-y-auto custom-scrollbar pr-1">
+              {anomalies.map(anom => {
+                const kind = String(anom.description ?? '').match(/^\[([A-Z_]+)\]\s*/);
+                return (
+                  <div key={anom.id} className="bg-surface-container-high border border-outline-variant rounded p-3" data-anomaly={anom.id}>
+                    <div className="flex flex-wrap items-start justify-between gap-sm">
+                      <div className="flex-1 min-w-[240px]">
+                        <p className="text-sm text-on-surface">
+                          {onOpenItem && anom.entity_type === 'INVENTORY' ? <button type="button" className="font-mono font-bold text-primary hover:underline" onClick={() => onOpenItem(anom.entity_id)}>{anom.entity_id}</button> : <strong className="font-mono">{anom.entity_id}</strong>}
+                          {anom.item_name ? <span className="text-xs text-on-surface-variant"> {anom.item_name}</span> : null}
+                          {kind ? <span className="text-[10px] text-outline"> · {kind[1].toLowerCase().replace(/_/g, ' ')}</span> : null}
+                        </p>
+                        <p className="text-xs text-on-surface-variant">{kind ? anom.description.slice(kind[0].length) : anom.description || 'Anomaly detected'}</p>
+                        {anom.status !== 'DETECTED' && <p className="text-[10px] text-outline">{anom.status.toLowerCase().replace('_', ' ')}{anom.acknowledged_by ? ` · ${anom.acknowledged_by}` : ''}</p>}
+                      </div>
+                      <div className="flex items-center gap-1 flex-wrap">
+                        <span className={`px-2 py-1 text-xs font-bold rounded whitespace-nowrap ${
+                          anom.severity === 'CRITICAL' ? 'bg-red-500/10 text-red-400' :
+                          anom.severity === 'HIGH' ? 'bg-orange-500/10 text-orange-400' :
+                          'bg-yellow-500/10 text-yellow-400'
+                        }`}>{anom.severity}</span>
+                        {may && ANOMALY_ACTIONS.filter(([st]) => st !== anom.status).map(([st, l]) => (
+                          <button key={st} type="button" className="px-2 py-1 text-[11px] rounded hover:bg-surface-container text-on-surface-variant" onClick={() => void setAnomaly(anom.id, st)}>{l}</button>
+                        ))}
+                      </div>
                     </div>
-                    <span className={`px-2 py-1 text-xs font-bold rounded whitespace-nowrap ${
-                      anom.severity === 'CRITICAL' ? 'bg-red-500/10 text-red-400' :
-                      anom.severity === 'HIGH' ? 'bg-orange-500/10 text-orange-400' :
-                      'bg-yellow-500/10 text-yellow-400'
-                    }`}>
-                      {anom.severity}
-                    </span>
                   </div>
-                </div>
-              ))}
+                );
+              })}
+              {anomalies.length === 500 && <p className="text-[10px] text-outline italic">Showing the first 500; narrow it by severity.</p>}
             </div>
           )}
         </div>
@@ -623,29 +677,34 @@ export default function AdvancedAutomationDashboard({ triggerToast }: Props) {
       {/* Supplier Intelligence Tab */}
       {activeTab === 'supplier_intel' && (
         <div className="bg-surface-container border border-outline-variant rounded-lg p-lg space-y-md">
-          <h3 className="text-lg font-bold text-on-surface">Supplier Intelligence & Rankings</h3>
-          {loading ? (
-            <div className="flex items-center gap-2 text-outline py-8">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Loading supplier data...
+          <div className="flex flex-wrap items-center justify-between gap-sm">
+            <div>
+              <h3 className="text-lg font-bold text-on-surface">Supplier Intelligence & Rankings</h3>
+              <p className="text-sm text-on-surface-variant">Scored from what happened: on time (60%, where expected and received dates are both known) and orders without an NCR (40%). A supplier needs 3 received orders to be scored.</p>
             </div>
+            {may && <button onClick={assessSuppliers} disabled={!!busy} className="px-lg py-2 bg-primary text-on-primary text-xs font-bold rounded-lg hover:brightness-110 disabled:opacity-50 flex items-center gap-2">
+              {busy === 'assess' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Activity className="w-4 h-4" />} Score suppliers</button>}
+          </div>
+          {loading ? (
+            <div className="flex items-center gap-2 text-outline py-8"><Loader2 className="w-4 h-4 animate-spin" /> Loading supplier data...</div>
           ) : suppliers.length === 0 ? (
-            <div className="text-center py-12 text-outline">No supplier data available</div>
+            <div className="text-center py-12 text-outline">Not scored yet: press Score suppliers.</div>
           ) : (
             <div className="space-y-2">
               {suppliers.map(supplier => (
-                <div key={supplier.id} className="bg-surface-container-high border border-outline-variant rounded p-3">
-                  <div className="flex items-center justify-between">
+                <div key={supplier.id} className="bg-surface-container-high border border-outline-variant rounded p-3" data-supplier={supplier.supplier_name ?? supplier.supplier_id}>
+                  <div className="flex items-center justify-between gap-sm">
                     <div className="flex-1">
-                      <p className="font-bold text-on-surface text-sm">{supplier.supplier_id}</p>
+                      <p className="font-bold text-on-surface text-sm">{supplier.supplier_name ?? `Supplier ${supplier.supplier_id}`}</p>
                       <div className="flex gap-md mt-1 text-xs">
-                        <span className="text-on-surface-variant">OTD: <strong className="text-on-surface">{supplier.on_time_delivery_pct}%</strong></span>
-                        <span className="text-on-surface-variant">Quality: <strong className="text-on-surface">{supplier.quality_score}</strong></span>
-                        <span className="text-on-surface-variant">Response: <strong className="text-on-surface">{supplier.responsiveness_score}</strong></span>
+                        <span className="text-on-surface-variant">On time: <strong className="text-on-surface">{supplier.on_time_delivery_pct === null ? '—' : `${Number(supplier.on_time_delivery_pct)}%`}</strong></span>
+                        <span className="text-on-surface-variant">Quality: <strong className="text-on-surface">{supplier.quality_score === null ? '—' : Number(supplier.quality_score)}</strong></span>
+                        {supplier.last_assessed_date && <span className="text-outline">scored {new Date(supplier.last_assessed_date).toLocaleDateString('en-ZA')}</span>}
                       </div>
+                      {supplier.notes && <p className="text-[11px] text-outline mt-1">{supplier.notes}</p>}
                     </div>
                     <div className="text-right">
-                      <p className="text-lg font-bold text-cyan-500">{supplier.performance_score.toFixed(1)}</p>
+                      <p className={`text-lg font-bold ${supplier.performance_score === null ? 'text-outline text-xs' : 'text-cyan-500'}`}>{supplier.performance_score === null ? 'Not enough orders' : Number(supplier.performance_score).toFixed(1)}</p>
                       {supplier.is_preferred && <p className="text-xs text-green-400 font-bold">PREFERRED</p>}
                     </div>
                   </div>

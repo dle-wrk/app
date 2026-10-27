@@ -104,112 +104,67 @@
         <div class="section" id="quality">
             <h2>Quality & Compliance Management</h2>
 
-            <h3 id="accessing-quality-module">Accessing Quality Module</h3>
+            <h3 id="accessing-quality-module">Accessing Quality</h3>
             <div class="step">
-                <h4>Step 1: Navigate to Quality Management</h4>
                 <ol>
-                    <li>Click <span class="menu-path">QUALITY & ANALYTICS → Quality & Compliance</span></li>
-                    <li>View quality metrics dashboard with:
-                        <ul>
-                            <li>Passed inspections count</li>
-                            <li>Failed inspections count</li>
-                            <li>Open NCRs (Non-Conformance Reports)</li>
-                            <li>Defect rate percentage</li>
-                        </ul>
-                    </li>
+                    <li>Click <span class="menu-path">QUALITY → Quality &amp; Compliance</span>.</li>
+                    <li>The overview is worked out from what has been recorded: the share of inspections passed, the defect rate (defects found per unit sampled), open defects by severity, open and overdue NCRs and how long NCRs take to resolve, and how many compliance checkpoints were compliant at their last check.</li>
+                    <li><strong>Needs attention</strong> lists inspections past their date, open critical defects, overdue NCRs, and checkpoints that failed or were never checked. Each opens its tab.</li>
                 </ol>
             </div>
 
-            <h3 id="quality-assurance-inspections">Quality Assurance Inspections</h3>
+            <h3 id="quality-assurance-inspections">Inspections</h3>
             <div class="step">
-                <h4>Schedule and Conduct QA Inspections</h4>
                 <ol>
-                    <li>Click <strong>QA Inspections</strong> tab</li>
-                    <li>Click <strong>Schedule Inspection</strong></li>
-                    <li>Define inspection:
-                        <ul>
-                            <li>Component/product to inspect</li>
-                            <li>Inspection type (incoming, in-process, final)</li>
-                            <li>Sample size</li>
-                            <li>Criteria and standards</li>
-                        </ul>
-                    </li>
-                    <li>Record results:
-                        <ul>
-                            <li>Accept/reject decision</li>
-                            <li>Defects found (if any)</li>
-                            <li>Inspector notes</li>
-                        </ul>
-                    </li>
-                    <li>System tracks pass/fail rates</li>
+                    <li>On <strong>Inspections</strong>, press <strong>New inspection</strong>: the item, the kind (incoming for goods received, in-process during a build, final before dispatch), the sample size, the date, optionally the batch, lot or PO, the inspector (blank: you) and what to check.</li>
+                    <li><strong>Start</strong> marks it in progress. <strong>Record result</strong>: passed, failed or on hold, with the defects found and notes. A failed inspection needs the defects found or a note saying why.</li>
+                    <li>When one fails, it offers to <strong>Log the defect</strong> or <strong>Raise an NCR</strong>, filled in from the inspection.</li>
+                    <li>An inspection that hasn't started can be deleted. <em>To do</em>, <em>Done</em> or <em>All</em> above the list.</li>
                 </ol>
             </div>
 
-            <h3 id="defect-tracking">Defect Tracking</h3>
+            <h3 id="defect-tracking">Defects</h3>
             <div class="step">
-                <h4>Log and Manage Defects</h4>
                 <ol>
-                    <li>Click <strong>Defects</strong> tab</li>
-                    <li>Click <strong>Report Defect</strong></li>
-                    <li>Enter defect details:
-                        <ul>
-                            <li>Component/product affected</li>
-                            <li>Defect description</li>
-                            <li>Severity (CRITICAL, MAJOR, MINOR)</li>
-                            <li>Root cause (if known)</li>
-                            <li>Assigned to (person responsible for fix)</li>
-                        </ul>
-                    </li>
-                    <li>Track defect through resolution</li>
-                    <li>Close defect with closure notes</li>
+                    <li><strong>Report defect</strong>: the item, how serious (critical: unsafe or unusable; major: fails a requirement; minor: cosmetic), an optional code such as BENT-PIN, what's wrong and who it's assigned to.</li>
+                    <li>Move it on: <strong>Investigate</strong>, <strong>Resolve</strong>, <strong>Close</strong>, or <strong>Reopen</strong>. Resolving or closing asks how it was fixed; the root cause can be recorded too.</li>
                 </ol>
             </div>
 
             <h3 id="non-conformance-reports-ncr">Non-Conformance Reports (NCR)</h3>
             <div class="step">
-                <h4>Create and Manage NCRs</h4>
                 <ol>
-                    <li>Click <strong>NCRs</strong> tab</li>
-                    <li>Click <strong>Create NCR</strong></li>
-                    <li>Document non-conformance:
-                        <ul>
-                            <li>NCR number (auto-generated)</li>
-                            <li>Issue description</li>
-                            <li>Item/process affected</li>
-                            <li>Date discovered</li>
-                            <li>Immediate action taken</li>
-                        </ul>
-                    </li>
-                    <li>Assign corrective actions</li>
-                    <li>Set follow-up review date</li>
-                    <li>Close NCR after verification</li>
+                    <li><strong>Raise NCR</strong>: the item, the supplier (if it is theirs), how serious, what doesn't conform, when it was found, the immediate action taken (e.g. stock quarantined), who it's assigned to and a review-by date. It is numbered NCR-2026-0001, and so on.</li>
+                    <li>Move it on: <strong>Assign</strong> (asks who), <strong>Start work</strong>, <strong>Resolve</strong> (asks for the corrective action and how it was verified), then <strong>Close (verified)</strong>.</li>
+                    <li>One past its review-by date is marked overdue. An automation rule can tell people about overdue NCRs and inspections (Automation &gt; Automation Rules).</li>
+                    <li>A supplier's NCRs count against its score under Advanced Automation.</li>
                 </ol>
             </div>
 
-            <div class="tip">
-                <strong>💡 Tip:</strong> Use the Quality module to maintain compliance records for ISO 9001, AS9100, or other standards your organization follows.
+            <h3 id="compliance">Compliance</h3>
+            <div class="step">
+                <ol>
+                    <li>Add a <strong>checkpoint</strong> for each check your standard asks for (ISO 9001, IPC-A-610, RoHS, AS9100, …): what is checked, the standard, the stage (receiving, production, final inspection, dispatch, supplier, company-wide) and the documents it needs.</li>
+                    <li>Each time it is checked, <strong>Record a check</strong>: compliant, not compliant or waived, what it was for (a batch, PO or job) and notes. Not compliant or waived needs a note.</li>
+                    <li>The last check is the checkpoint's status; <strong>History</strong> shows every check. <strong>Retire</strong> a checkpoint no longer needed.</li>
+                </ol>
             </div>
         </div>
 
         <div class="section" id="advanced-automation">
             <h2>Advanced automation</h2>
 
-            <h3 id="advanced-automation-dashboard">Advanced Automation Dashboard</h3>
+            <h3 id="advanced-automation-dashboard">Advanced Automation</h3>
             <div class="step">
-                <h4>ML Models and Predictive Analytics</h4>
-                <ol>
-                    <li>Navigate to <span class="menu-path">QUALITY & ANALYTICS → Advanced Automation</span></li>
-                    <li>Available ML features:
-                        <ul>
-                            <li><strong>Demand Forecasting:</strong> Predict future component needs</li>
-                            <li><strong>Anomaly Detection:</strong> Identify unusual patterns</li>
-                            <li><strong>Supplier Ranking:</strong> Rank suppliers by performance</li>
-                            <li><strong>Defect Prediction:</strong> Forecast quality issues</li>
-                        </ul>
-                    </li>
-                    <li>Train models on historical data</li>
-                    <li>Act on predictions to prevent issues</li>
-                </ol>
+                <p>Open <span class="menu-path">QUALITY → Advanced Automation</span>. Everything here is worked out from your stock, the stock ledger, purchase orders and NCRs; where there isn't enough history it says so rather than show a made-up number.</p>
+                <ul>
+                    <li><strong>Scan for Anomalies</strong>: negative stock, stock-outs with demand, stock below its reorder level, dead stock and spikes in use. On the <em>Anomalies</em> tab, mark each <em>Acknowledge</em>, <em>Investigating</em>, <em>Resolved</em> or <em>Not a problem</em>; a rescan doesn't raise again what has been acknowledged, is being investigated or isn't a problem.</li>
+                    <li><strong>Generate Forecasts</strong>: each part's expected use over the next 30 days, from its history (it needs 3 or more uses over 7 or more days). The <em>Forecasts</em> tab lists them.</li>
+                    <li><strong>Score Suppliers</strong>: on time (60%, where both the expected and received dates are known) and orders without an NCR (40%). A supplier needs 3 received orders to be scored.</li>
+                    <li><strong>Reorder</strong>: what to order, from stock, use and lead times, with the supplier order files.</li>
+                    <li><strong>ML Models</strong>: <em>Train</em> does what the model is for. A demand forecast is backtested for a measured accuracy; anomaly detection runs a scan; supplier ranking scores the suppliers; defect prediction waits for a history of inspection results. Accuracy is never typed in.</li>
+                </ul>
+                <p>The scan, forecasts and supplier scores also run on their own every day at 08:30 (Automation &gt; Scheduled Jobs: <em>Stock analysis</em>).</p>
             </div>
         </div>
 

@@ -43,6 +43,8 @@ export const TRIGGERS = {
   AUTO_PO_DUE: { label: 'A watched Auto-PO item is at its reorder point', items: true },
   PO_LATE: { label: 'A purchase order is late', items: false },
   INVOICE_OVERDUE: { label: 'An invoice is overdue', items: false },
+  NCR_OVERDUE: { label: 'A non-conformance report is past its due date', items: false },
+  INSPECTION_OVERDUE: { label: 'A QA inspection is past its date and not done', items: true },
 } as const;
 export type Trigger = keyof typeof TRIGGERS;
 export const isTrigger = (t: unknown): t is Trigger => typeof t === 'string' && Object.hasOwn(TRIGGERS, t);
@@ -91,6 +93,8 @@ const NOUN: Record<Trigger, [string, string]> = {
   AUTO_PO_DUE: ['watched item is at its reorder point', 'watched items are at their reorder point'],
   PO_LATE: ['purchase order is late', 'purchase orders are late'],
   INVOICE_OVERDUE: ['invoice is overdue', 'invoices are overdue'],
+  NCR_OVERDUE: ['NCR is past its due date', 'NCRs are past their due date'],
+  INSPECTION_OVERDUE: ['inspection is overdue', 'inspections are overdue'],
 };
 
 /** The notification for a run: the new hits, the first 15 by name. */
@@ -137,6 +141,18 @@ export async function findHits(db: Db, trigger: Trigger, conditions: any): Promi
          FROM purchase_orders po LEFT JOIN suppliers s ON s.id::text = po.supplier_id::text
         WHERE po.status IN ('DRAFT', 'SENT', 'PARTIAL') AND po.expected_date < CURRENT_DATE ORDER BY po.expected_date`));
     return rows.map((r) => ({ id: r.id, label: r.po_number, detail: `${r.supplier ? `${r.supplier}, ` : ''}expected ${r.expected}` }));
+  }
+  if (trigger === 'NCR_OVERDUE') {
+    ({ rows } = await db.query(
+      `SELECT id::text id, ncr_number, component_id, to_char(due_date, 'YYYY-MM-DD') due, assigned_to FROM non_conformance_reports
+        WHERE status NOT IN ('RESOLVED', 'CLOSED') AND due_date < CURRENT_DATE ORDER BY due_date`));
+    return rows.map((r) => ({ id: r.id, label: r.ncr_number, detail: `${r.component_id}, due ${r.due}${r.assigned_to ? `, ${r.assigned_to}` : ''}` }));
+  }
+  if (trigger === 'INSPECTION_OVERDUE') {
+    ({ rows } = await db.query(
+      `SELECT id::text id, component_id, inspection_type, to_char(scheduled_date, 'YYYY-MM-DD') due FROM qa_inspections
+        WHERE status IN ('SCHEDULED', 'IN_PROGRESS') AND scheduled_date < CURRENT_DATE AND component_id ILIKE $1 ORDER BY scheduled_date`, [prefix]));
+    return rows.map((r) => ({ id: r.id, label: r.component_id, detail: `${String(r.inspection_type).toLowerCase().replace('_', '-')} inspection, due ${r.due}` }));
   }
   ({ rows } = await db.query(
     `SELECT i.id::text id, i.invoice_number, to_char(i.due_date, 'YYYY-MM-DD') due, i.balance_due, i.currency, c.client_name

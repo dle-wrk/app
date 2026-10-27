@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { query, queryOne } from './db';
 import { loadMeasuredLeadTimes } from './suppliersRoutes';
 import { leadTimeForSupplierName, slowestSlotLeadTime, type MeasuredLeadTime } from './supplierLeadTime';
+import { scoreSupplier, MIN_RECEIVED } from './supplierScore';
 import {
   computeConsumptionStats,
   forecastDemand,
@@ -33,224 +34,14 @@ async function loadTransactions() {
   return rows;
 }
 
-// ============================================================================
-// QUALITY & COMPLIANCE ENDPOINTS
-// ============================================================================
-
-// QA Inspections
-router.get('/api/qa-inspections', async (req, res) => {
-  try {
-    const status = req.query.status as string;
-    let sql = 'SELECT * FROM qa_inspections ORDER BY created_at DESC LIMIT 100';
-    if (status) {
-      sql = `SELECT * FROM qa_inspections WHERE status = $1 ORDER BY created_at DESC LIMIT 100`;
-      const result = await query(sql, [status]);
-      return res.json(result.rows);
-    }
-    const result = await query(sql);
-    res.json(result.rows);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.post('/api/qa-inspections', async (req, res) => {
-  try {
-    const {
-      inspection_type,
-      component_id,
-      batch_id,
-      inspector_id,
-      scheduled_date,
-      sample_size,
-      notes
-    } = req.body;
-
-    const result = await queryOne(
-      `INSERT INTO qa_inspections (inspection_type, component_id, batch_id, inspector_id, scheduled_date, sample_size, notes, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'SCHEDULED')
-       RETURNING *`,
-      [inspection_type, component_id, batch_id, inspector_id, scheduled_date, sample_size, notes]
-    );
-    res.status(201).json(result);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.put('/api/qa-inspections/:id', async (req, res) => {
-  try {
-    const { status, defects_found, notes, completed_date } = req.body;
-    const result = await queryOne(
-      `UPDATE qa_inspections SET status = $1, defects_found = $2, notes = $3, completed_date = $4, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $5 RETURNING *`,
-      [status, defects_found, notes, completed_date, req.params.id]
-    );
-    res.json(result);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Defects
-router.get('/api/defects', async (req, res) => {
-  try {
-    const result = await query(`SELECT * FROM defects ORDER BY created_at DESC LIMIT 100`);
-    res.json(result.rows);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.post('/api/defects', async (req, res) => {
-  try {
-    const { qa_inspection_id, defect_code, severity, description } = req.body;
-    const result = await queryOne(
-      `INSERT INTO defects (qa_inspection_id, defect_code, severity, description, status)
-       VALUES ($1, $2, $3, $4, 'OPEN')
-       RETURNING *`,
-      [qa_inspection_id, defect_code, severity, description]
-    );
-    res.status(201).json(result);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.put('/api/defects/:id', async (req, res) => {
-  try {
-    const { status, root_cause, resolution_notes, resolved_at } = req.body;
-    const result = await queryOne(
-      `UPDATE defects SET status = $1, root_cause = $2, resolution_notes = $3, resolved_at = $4
-       WHERE id = $5 RETURNING *`,
-      [status, root_cause, resolution_notes, resolved_at, req.params.id]
-    );
-    res.json(result);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Non-Conformance Reports
-router.get('/api/ncr', async (req, res) => {
-  try {
-    const status = req.query.status as string;
-    let sql = 'SELECT * FROM non_conformance_reports ORDER BY created_at DESC LIMIT 100';
-    if (status) {
-      sql = `SELECT * FROM non_conformance_reports WHERE status = $1 ORDER BY created_at DESC LIMIT 100`;
-      const result = await query(sql, [status]);
-      return res.json(result.rows);
-    }
-    const result = await query(sql);
-    res.json(result.rows);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.post('/api/ncr', async (req, res) => {
-  try {
-    const { component_id, supplier_id, issue_description, severity, reported_by } = req.body;
-    const ncr_number = `NCR-${Date.now()}`;
-
-    const result = await queryOne(
-      `INSERT INTO non_conformance_reports (ncr_number, component_id, supplier_id, issue_description, severity, reported_by, status)
-       VALUES ($1, $2, $3, $4, $5, $6, 'OPEN')
-       RETURNING *`,
-      [ncr_number, component_id, supplier_id, issue_description, severity, reported_by]
-    );
-    res.status(201).json(result);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.put('/api/ncr/:id', async (req, res) => {
-  try {
-    const { status, assigned_to, due_date, resolution_notes } = req.body;
-    const result = await queryOne(
-      `UPDATE non_conformance_reports SET status = $1, assigned_to = $2, due_date = $3, resolution_notes = $4, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $5 RETURNING *`,
-      [status, assigned_to, due_date, resolution_notes, req.params.id]
-    );
-    res.json(result);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Compliance Checkpoints
-router.get('/api/compliance-checkpoints', async (req, res) => {
-  try {
-    const result = await query(`SELECT * FROM compliance_checkpoints WHERE is_active = true ORDER BY created_at DESC`);
-    res.json(result.rows);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.post('/api/compliance-checkpoints', async (req, res) => {
-  try {
-    const { checkpoint_name, compliance_standard, stage, required_documentation } = req.body;
-    const result = await queryOne(
-      `INSERT INTO compliance_checkpoints (checkpoint_name, compliance_standard, stage, required_documentation)
-       VALUES ($1, $2, $3, $4)
-       RETURNING *`,
-      [checkpoint_name, compliance_standard, stage, JSON.stringify(required_documentation || [])]
-    );
-    res.status(201).json(result);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Compliance Records
-router.get('/api/compliance-records', async (req, res) => {
-  try {
-    const result = await query(`SELECT * FROM compliance_records ORDER BY created_at DESC LIMIT 100`);
-    res.json(result.rows);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.post('/api/compliance-records', async (req, res) => {
-  try {
-    const { compliance_checkpoint_id, project_id, batch_id, status, verified_by, notes } = req.body;
-    const result = await queryOne(
-      `INSERT INTO compliance_records (compliance_checkpoint_id, project_id, batch_id, status, verified_by, notes)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING *`,
-      [compliance_checkpoint_id, project_id, batch_id, status, verified_by, notes]
-    );
-    res.status(201).json(result);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Quality Metrics
-router.get('/api/quality-metrics', async (req, res) => {
-  try {
-    const component_id = req.query.component_id as string;
-    let sql = 'SELECT * FROM quality_metrics ORDER BY metric_date DESC LIMIT 100';
-    if (component_id) {
-      sql = `SELECT * FROM quality_metrics WHERE component_id = $1 ORDER BY metric_date DESC LIMIT 100`;
-      const result = await query(sql, [component_id]);
-      return res.json(result.rows);
-    }
-    const result = await query(sql);
-    res.json(result.rows);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
+// Quality & compliance endpoints: ./qualityRoutes.
 
 // ============================================================================
 // ADVANCED AUTOMATION ENDPOINTS
 // ============================================================================
 
 // ML Models
+const MODEL_TYPES = ['DEMAND_FORECAST', 'ANOMALY_DETECTION', 'SUPPLIER_RANKING', 'DEFECT_PREDICTION'];
 router.get('/api/ml-models', async (req, res) => {
   try {
     const result = await query(`SELECT * FROM ml_models ORDER BY created_at DESC`);
@@ -262,12 +53,15 @@ router.get('/api/ml-models', async (req, res) => {
 
 router.post('/api/ml-models', async (req, res) => {
   try {
-    const { model_name, model_type, model_version, accuracy, model_metadata } = req.body;
+    // Accuracy is only ever measured (Train), never typed in.
+    const { model_name, model_type, model_version } = req.body;
+    if (!String(model_name ?? '').trim()) return res.status(400).json({ error: 'Give the model a name.' });
+    if (!MODEL_TYPES.includes(model_type)) return res.status(400).json({ error: 'Choose what the model does.' });
     const result = await queryOne(
       `INSERT INTO ml_models (model_name, model_type, model_version, status, accuracy, model_metadata)
-       VALUES ($1, $2, $3, 'TRAINING', $4, $5)
+       VALUES ($1, $2, $3, 'NEEDS_DATA', NULL, '{"note":"Not trained yet."}')
        RETURNING *`,
-      [model_name, model_type, model_version, accuracy, JSON.stringify(model_metadata || {})]
+      [String(model_name).trim(), model_type, String(model_version ?? '1.0.0').trim() || '1.0.0']
     );
     res.status(201).json(result);
   } catch (err: any) {
@@ -347,30 +141,37 @@ router.post('/api/anomaly-rules', async (req, res) => {
 });
 
 // Detected Anomalies
+// ?status=open (DETECTED, ACKNOWLEDGED, INVESTIGATING) | a status; ?severity=; ?type= (the [TYPE] its description starts with).
 router.get('/api/anomalies', async (req, res) => {
   try {
-    const status = req.query.status as string;
-    let sql = 'SELECT * FROM detected_anomalies ORDER BY detected_at DESC LIMIT 100';
-    if (status) {
-      sql = `SELECT * FROM detected_anomalies WHERE status = $1 ORDER BY detected_at DESC LIMIT 100`;
-      const result = await query(sql, [status]);
-      return res.json(result.rows);
-    }
-    const result = await query(sql);
+    const params: any[] = []; const where: string[] = [];
+    const status = String(req.query.status ?? '');
+    if (status === 'open') where.push(`status IN ('DETECTED', 'ACKNOWLEDGED', 'INVESTIGATING')`);
+    else if (status) { params.push(status); where.push(`status = $${params.length}`); }
+    if (req.query.severity) { params.push(req.query.severity); where.push(`severity = $${params.length}`); }
+    if (req.query.type) { params.push(`[${req.query.type}]%`); where.push(`description LIKE $${params.length}`); }
+    const result = await query(
+      `SELECT a.*, i.name AS item_name FROM detected_anomalies a LEFT JOIN inventory i ON a.entity_type = 'INVENTORY' AND i.serial_number = a.entity_id
+        ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+        ORDER BY CASE severity WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END, detected_at DESC LIMIT 500`, params);
     res.json(result.rows);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-router.put('/api/anomalies/:id', async (req, res) => {
+const ANOMALY_STATUSES = ['DETECTED', 'ACKNOWLEDGED', 'INVESTIGATING', 'RESOLVED', 'FALSE_POSITIVE'];
+router.put('/api/anomalies/:id', async (req: any, res) => {
   try {
-    const { status, acknowledged_by, resolution_notes } = req.body;
+    const { status, resolution_notes } = req.body;
+    if (!ANOMALY_STATUSES.includes(status)) return res.status(400).json({ error: "That isn't an anomaly status." });
     const result = await queryOne(
-      `UPDATE detected_anomalies SET status = $1, acknowledged_by = $2, acknowledged_at = CURRENT_TIMESTAMP, resolution_notes = $3
+      `UPDATE detected_anomalies SET status = $1, acknowledged_by = COALESCE(acknowledged_by, $2), acknowledged_at = COALESCE(acknowledged_at, CURRENT_TIMESTAMP),
+         resolution_notes = COALESCE($3, resolution_notes), resolved_at = CASE WHEN $1 IN ('RESOLVED', 'FALSE_POSITIVE') THEN CURRENT_TIMESTAMP ELSE NULL END
        WHERE id = $4 RETURNING *`,
-      [status, acknowledged_by, resolution_notes, req.params.id]
+      [status, req.user?.email ?? null, resolution_notes ? String(resolution_notes).trim() : null, req.params.id]
     );
+    if (!result) return res.status(404).json({ error: 'Anomaly not found.' });
     res.json(result);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -380,7 +181,8 @@ router.put('/api/anomalies/:id', async (req, res) => {
 // Supplier Intelligence
 router.get('/api/supplier-intelligence', async (req, res) => {
   try {
-    const result = await query(`SELECT * FROM supplier_intelligence ORDER BY performance_score DESC`);
+    const result = await query(`SELECT si.*, s.name AS supplier_name FROM supplier_intelligence si LEFT JOIN suppliers s ON s.id::text = si.supplier_id
+      ORDER BY si.performance_score DESC NULLS LAST, s.name`);
     res.json(result.rows);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -475,96 +277,115 @@ router.post('/api/quality-gates', async (req, res) => {
 // explicitly instead of emitting a fabricated number.
 // ============================================================================
 
-// Anomaly scan — writes findings to detected_anomalies and returns them.
-router.post('/api/analytics/scan-anomalies', async (req, res) => {
-  try {
-    const persist = req.body?.persist !== false;
-    const [items, transactions] = await Promise.all([loadInventory(), loadTransactions()]);
-    const findings = detectAnomalies(items, transactions);
-
-    let persisted = 0;
-    if (persist && findings.length) {
-      // Clear prior open machine-generated findings so a rescan reflects
-      // current state rather than stacking duplicates. Anything a human has
-      // acknowledged or resolved is preserved.
-      await query(`DELETE FROM detected_anomalies WHERE status = 'DETECTED' AND rule_id IS NULL`);
-      for (const f of findings) {
-        await query(
-          `INSERT INTO detected_anomalies (entity_type, entity_id, anomaly_value, severity, status, description)
-           VALUES ($1, $2, $3, $4, 'DETECTED', $5)`,
-          [f.entityType, f.entityId, f.value, f.severity, `[${f.anomalyType}] ${f.description}`]
-        );
-        persisted++;
-      }
+// Anomaly scan: writes findings to detected_anomalies. A rescan replaces the
+// open machine findings, but doesn't raise again what someone has already
+// acknowledged, is investigating or marked a false positive.
+export async function scanAnomalies(persist = true) {
+  const [items, transactions] = await Promise.all([loadInventory(), loadTransactions()]);
+  const all = detectAnomalies(items, transactions);
+  const { rows: handled } = await query(
+    `SELECT entity_id, description FROM detected_anomalies WHERE status IN ('ACKNOWLEDGED', 'INVESTIGATING', 'FALSE_POSITIVE')`);
+  const seen = new Set(handled.map((r: any) => `${r.entity_id}|${String(r.description ?? '').match(/^\[([A-Z_]+)\]/)?.[1] ?? ''}`));
+  const findings = all.filter((f) => !seen.has(`${f.entityId}|${f.anomalyType}`));
+  let persisted = 0;
+  if (persist) {
+    await query(`DELETE FROM detected_anomalies WHERE status = 'DETECTED' AND rule_id IS NULL`);
+    for (const f of findings) {
+      await query(
+        `INSERT INTO detected_anomalies (entity_type, entity_id, anomaly_value, severity, status, description)
+         VALUES ($1, $2, $3, $4, 'DETECTED', $5)`,
+        [f.entityType, f.entityId, f.value, f.severity, `[${f.anomalyType}] ${f.description}`]
+      );
+      persisted++;
     }
+  }
+  const count = (key: 'severity' | 'anomalyType') => findings.reduce((acc: Record<string, number>, f) => { acc[f[key]] = (acc[f[key]] || 0) + 1; return acc; }, {});
+  return { scanned: items.length, found: findings.length, alreadyHandled: all.length - findings.length, persisted, bySeverity: count('severity'), byType: count('anomalyType'), findings: findings.slice(0, 200) };
+}
 
-    const bySeverity = findings.reduce((acc: Record<string, number>, f) => {
-      acc[f.severity] = (acc[f.severity] || 0) + 1; return acc;
-    }, {});
-    const byType = findings.reduce((acc: Record<string, number>, f) => {
-      acc[f.anomalyType] = (acc[f.anomalyType] || 0) + 1; return acc;
-    }, {});
-
-    res.json({
-      scanned: items.length,
-      found: findings.length,
-      persisted,
-      bySeverity,
-      byType,
-      findings: findings.slice(0, 200),
-    });
-  } catch (err: any) {
+router.post('/api/analytics/scan-anomalies', async (req, res) => {
+  try { res.json(await scanAnomalies(req.body?.persist !== false)); }
+  catch (err: any) {
     console.error('[ANALYTICS] anomaly scan failed:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Demand forecast generation. Parts without enough history are reported as
-// skipped rather than being given an invented forecast.
+// Demand forecasts. Parts without enough history are reported as skipped
+// rather than being given an invented forecast.
+export async function generateForecasts(horizonDays = 30, modelId: number | null = null) {
+  const transactions = await loadTransactions();
+  const stats = computeConsumptionStats(transactions);
+  const generated: any[] = [];
+  const skipped: any[] = [];
+  const forecastDate = new Date(Date.now() + horizonDays * 86_400_000).toISOString().slice(0, 10);
+  for (const stat of stats.values()) {
+    const f = forecastDemand(stat, horizonDays);
+    if (f.insufficientData) { skipped.push({ partNumber: f.partNumber, reason: f.note }); continue; }
+    await query(
+      `INSERT INTO demand_forecasts (component_id, forecast_date, forecast_quantity, confidence_level, forecast_method, model_id)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (component_id, forecast_date) DO UPDATE
+         SET forecast_quantity = EXCLUDED.forecast_quantity, confidence_level = EXCLUDED.confidence_level, forecast_method = EXCLUDED.forecast_method`,
+      [f.partNumber, forecastDate, f.forecastQuantity, f.confidence, f.method, modelId]
+    );
+    generated.push(f);
+  }
+  return {
+    horizonDays, forecastDate, generated: generated.length, skipped: skipped.length, forecasts: generated, skippedDetail: skipped,
+    note: generated.length === 0
+      ? 'No part has enough movement history to support a forecast yet. Forecasts need at least 3 outbound movements spanning 7+ days.'
+      : undefined,
+  };
+}
+
 router.post('/api/analytics/generate-forecasts', async (req, res) => {
   try {
     const horizonDays = Math.max(1, parseInt(String(req.body?.horizonDays ?? 30), 10) || 30);
-    const modelId = req.body?.modelId ?? null;
-    const transactions = await loadTransactions();
-    const stats = computeConsumptionStats(transactions);
-
-    const generated: any[] = [];
-    const skipped: any[] = [];
-    const forecastDate = new Date(Date.now() + horizonDays * 86_400_000).toISOString().slice(0, 10);
-
-    for (const stat of stats.values()) {
-      const f = forecastDemand(stat, horizonDays);
-      if (f.insufficientData) {
-        skipped.push({ partNumber: f.partNumber, reason: f.note });
-        continue;
-      }
-      await query(
-        `INSERT INTO demand_forecasts (component_id, forecast_date, forecast_quantity, confidence_level, forecast_method, model_id)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         ON CONFLICT (component_id, forecast_date) DO UPDATE
-           SET forecast_quantity = EXCLUDED.forecast_quantity,
-               confidence_level = EXCLUDED.confidence_level,
-               forecast_method = EXCLUDED.forecast_method`,
-        [f.partNumber, forecastDate, f.forecastQuantity, f.confidence, f.method, modelId]
-      );
-      generated.push(f);
-    }
-
-    res.json({
-      horizonDays,
-      forecastDate,
-      generated: generated.length,
-      skipped: skipped.length,
-      forecasts: generated,
-      skippedDetail: skipped,
-      note: generated.length === 0
-        ? 'No part has enough movement history to support a forecast yet. Forecasts need at least 3 outbound movements spanning 7+ days.'
-        : undefined,
-    });
+    res.json(await generateForecasts(horizonDays, req.body?.modelId ?? null));
   } catch (err: any) {
     console.error('[ANALYTICS] forecast generation failed:', err.message);
     res.status(500).json({ error: err.message });
   }
+});
+
+// The forecasts still ahead, with the item's name.
+router.get('/api/analytics/forecasts', async (_req, res) => {
+  try {
+    const { rows } = await query(`SELECT f.component_id, i.name, to_char(f.forecast_date, 'YYYY-MM-DD') AS forecast_date, f.forecast_quantity, f.confidence_level, f.forecast_method, f.created_at
+      FROM demand_forecasts f LEFT JOIN inventory i ON i.serial_number = f.component_id
+      WHERE f.forecast_date >= CURRENT_DATE ORDER BY f.forecast_date, f.forecast_quantity DESC LIMIT 300`);
+    res.json(rows);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+// Supplier assessment: each supplier with orders or NCRs scored from them
+// (./supplierScore), saved to supplier_intelligence.
+export async function assessSuppliers() {
+  const { rows } = await query(`SELECT s.id::text AS id, s.name,
+      COUNT(po.id)::int AS orders,
+      COUNT(po.id) FILTER (WHERE po.status = 'RECEIVED')::int AS received,
+      COUNT(po.id) FILTER (WHERE po.status = 'RECEIVED' AND po.received_at IS NOT NULL AND po.expected_date IS NOT NULL)::int AS timed,
+      COUNT(po.id) FILTER (WHERE po.status = 'RECEIVED' AND po.received_at IS NOT NULL AND po.expected_date IS NOT NULL AND po.received_at::date <= po.expected_date)::int AS on_time,
+      (SELECT COUNT(*)::int FROM non_conformance_reports n WHERE n.supplier_id = s.id::text) AS ncrs
+    FROM suppliers s LEFT JOIN purchase_orders po ON po.supplier_id::text = s.id::text GROUP BY s.id, s.name`);
+  const measured = await loadMeasuredLeadTimes().catch(() => new Map<string, MeasuredLeadTime>());
+  const active = (rows as any[]).filter((r) => r.orders || r.ncrs);
+  let scored = 0;
+  for (const r of active) {
+    const sc = scoreSupplier({ orders: r.orders, received: r.received, timed: r.timed, onTime: r.on_time, ncrs: r.ncrs, leadDays: measured.get(r.id)?.days ?? null });
+    if (sc.score !== null) scored++;
+    await query(
+      `INSERT INTO supplier_intelligence (supplier_id, performance_score, on_time_delivery_pct, quality_score, last_assessed_date, notes)
+       VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $5)
+       ON CONFLICT (supplier_id) DO UPDATE SET performance_score = $2, on_time_delivery_pct = $3, quality_score = $4, last_assessed_date = CURRENT_TIMESTAMP, notes = $5, updated_at = CURRENT_TIMESTAMP`,
+      [r.id, sc.score, sc.onTimePct, sc.qualityScore, sc.note]);
+  }
+  return { assessed: active.length, scored };
+}
+
+router.post('/api/analytics/assess-suppliers', async (_req, res) => {
+  try { res.json(await assessSuppliers()); } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
 // Reorder recommendations, computed live (demand-based where history allows,
@@ -622,6 +443,27 @@ router.post('/api/ml-models/:id/train', async (req, res) => {
   try {
     const model = await queryOne(`SELECT * FROM ml_models WHERE id = $1`, [req.params.id]);
     if (!model) return res.status(404).json({ error: 'model not found' });
+    // Only a demand forecast has an accuracy to measure (a backtest). The
+    // others run what they are and say so, with no score.
+    const settle = async (status: string, note: string) => {
+      await query(`UPDATE ml_models SET status = $1, accuracy = NULL, last_trained_at = CASE WHEN $1 = 'ACTIVE' THEN CURRENT_TIMESTAMP ELSE last_trained_at END,
+        updated_at = CURRENT_TIMESTAMP, model_metadata = $2 WHERE id = $3`, [status, JSON.stringify({ note, lastAttempt: new Date().toISOString() }), req.params.id]);
+      return res.json({ trained: status === 'ACTIVE', accuracy: null, samples: 0, method: model.model_type, note });
+    };
+    if (model.model_type === 'ANOMALY_DETECTION') {
+      const scan = await scanAnomalies(true);
+      return settle('ACTIVE', `Rule checks over stock and the ledger (no accuracy to measure): ${scan.found} found in ${scan.scanned} items.`);
+    }
+    if (model.model_type === 'SUPPLIER_RANKING') {
+      const r = await assessSuppliers();
+      return r.scored
+        ? settle('ACTIVE', `${r.scored} of ${r.assessed} suppliers scored from their orders and NCRs.`)
+        : settle('NEEDS_DATA', `No supplier has ${MIN_RECEIVED} received orders yet, so none can be scored (${r.assessed} have orders).`);
+    }
+    if (model.model_type === 'DEFECT_PREDICTION') {
+      const row = await queryOne(`SELECT COUNT(*)::int AS n FROM qa_inspections WHERE status IN ('PASSED', 'FAILED', 'HOLD')`);
+      return settle('NEEDS_DATA', `Needs a history of inspection results to learn from: ${row?.n ?? 0} completed so far, 30 or more wanted. Record inspection results under Quality.`);
+    }
 
     const transactions = await loadTransactions();
     const result = backtestForecast(transactions);

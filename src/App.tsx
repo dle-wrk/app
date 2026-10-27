@@ -2340,11 +2340,11 @@ if (currentView === 'alternates') {
              }
 
              if (currentView === 'quality_compliance') {
-               return <QualityComplianceDashboard triggerToast={triggerToast} />;
+               return <QualityComplianceDashboard triggerToast={triggerToast} items={items} suppliers={suppliers} onOpenItem={setSelectedDetailPartNumber} />;
              }
 
              if (currentView === 'advanced_automation') {
-               return <AdvancedAutomationDashboard triggerToast={triggerToast} />;
+               return <AdvancedAutomationDashboard triggerToast={triggerToast} onOpenItem={setSelectedDetailPartNumber} />;
              }
 
              if (currentView === 'documentation') {
