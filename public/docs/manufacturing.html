@@ -152,13 +152,14 @@
 
             <h3 id="supplier-bom-generator">Supplier BOM Generator</h3>
             <div class="step">
-                <p>Manufacturing → <strong>Supplier BOM Generator</strong>. Ported from the legacy Python desktop tool. Upload a pick-and-place BOM CSV; the tool resolves each part against the three inventory supplier-PN columns (Mouser = <code>sup_pn_1</code>, DigiKey = <code>sup_pn_2</code>, LCSC = <code>sup_pn_3</code>) with an equivalent-reel fallback for empty columns.</p>
+                <p>Manufacturing → <strong>Supplier BOM Generator</strong>. Ported from the legacy Python desktop tool. Upload a pick-and-place BOM CSV; the tool resolves each part against the inventory supplier-PN columns (Mouser = <code>sup_pn_1</code>, DigiKey = <code>sup_pn_2</code>, LCSC = <code>sup_pn_3</code>, and RS Components = a stock number such as <em>534-2993</em> in any slot, usually 4 or 5) with an equivalent-reel fallback for empty columns.</p>
                 <ul>
                     <li>Auto-skips DNF rows during parse. Merges duplicates by summing qty-per-PCB.</li>
-                    <li>Per-supplier tabs with colour-coded rows: red for missing PN in that supplier, "NO PART" pill for parts unlisted at all three.</li>
+                    <li>Per-supplier tabs with colour-coded rows: red for missing PN in that supplier, "NO PART" pill for parts with a number at none of the four.</li>
+                    <li><strong>RS</strong> tab: RS Components has no price or stock lookup in the app yet. <em>Find on RS</em> opens RS South Africa's search for the part's manufacturer part number in your browser (the description when it has none); paste the RS stock number found there and press <em>Save</em>. It goes in the item's first free "Other" supplier part number (4, then 5; it replaces an RS number already there), so it's there next time. A number already known has an <em>on RS</em> link.</li>
                     <li>Bulk toggles per tab: Check all / Uncheck all / Check only rows with PN.</li>
                     <li>Board qty spinner multiplies through to every exported row.</li>
-                    <li>Exports in each supplier's preferred upload shape: Mouser <code>PN|qty</code>, DigiKey <code>Quantity,"Part Number"</code>, LCSC <code>Comment,Designator,Footprint,LCSC Part #,Quantity</code>.</li>
+                    <li>Exports in each supplier's preferred upload shape: Mouser <code>PN|qty</code>, DigiKey <code>Quantity,"Part Number"</code>, LCSC <code>Comment,Designator,Footprint,LCSC Part #,Quantity</code>, RS <code>RS Stock No.,Quantity,Description,Stock code</code> (for RS's parts-list upload).</li>
                 </ul>
             </div>
 

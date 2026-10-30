@@ -3,20 +3,25 @@
 // pick-and-place / BOM CSV, resolves each part against the inventory's
 // per-supplier PN columns (Mouser = sup_pn_1, DigiKey = sup_pn_2,
 // LCSC = sup_pn_3, with the same equivalent-reel fallback the Python
-// code used), and emits one CSV per supplier in each supplier's
-// preferred upload shape.
+// code used; RS Components = a stock number like 534-2993 in any slot,
+// usually an "Other" one), and emits one CSV per supplier in each
+// supplier's preferred upload shape. RS has no API we can use, so its
+// tab links to RS's own search and saves the stock number found there.
 //
 // Row colouring, DNF skipping and the "check only rows with PN"
 // bulk toggle all mirror the desktop tool so an operator moving from
 // one to the other doesn't have to relearn the flow.
 
 import React, { useMemo, useState } from 'react';
-import { Upload, FileSpreadsheet, Download, CheckSquare, Square, ListFilter, AlertTriangle } from 'lucide-react';
+import { Upload, FileSpreadsheet, Download, CheckSquare, Square, ListFilter, AlertTriangle, ExternalLink } from 'lucide-react';
 import { fmtNumber } from '../../lib/formatMoney';
-import { downloadCsv, toDigikeyCsv, toLcscCsv, toMouserCsv } from '../../lib/supplierBom';
+import { downloadCsv, toDigikeyCsv, toLcscCsv, toMouserCsv, toRsCsv, rsSearchUrl } from '../../lib/supplierBom';
+import { isRsStockNumber } from '../../lib/partNumbers';
+import { canChange } from '../../lib/changeAccess';
 import RestockOrderFiles from '../RestockOrderFiles';
 
-const SUPPLIERS = ['LCSC', 'DigiKey', 'Mouser'] as const;
+const SUPPLIERS = ['LCSC', 'DigiKey', 'Mouser', 'RS'] as const;
+const NO_PNS: Record<'LCSC' | 'DigiKey' | 'Mouser' | 'RS', string> = { LCSC: '', DigiKey: '', Mouser: '', RS: '' };
 type Supplier = typeof SUPPLIERS[number];
 
 interface BomLine {
@@ -34,6 +39,8 @@ interface LookupResult {
   description: string;
   footprint: string;
   supplierPns: Record<Supplier, string>;
+  /** The manufacturer's part number, for looking it up on RS. */
+  mpn?: string;
 }
 
 interface Row {
@@ -44,6 +51,8 @@ interface Row {
   qty: number;
   availableAt: string; // "NO PART" or "at LCSC, at DigiKey…"
   include: boolean;
+  mpn: string;
+  found: boolean;
 }
 
 // ─── CSV parsing (same shape KitBookingView uses) ─────────────────────────
@@ -148,6 +157,10 @@ export const SupplierBOMGeneratorView: React.FC<Props> = ({ triggerToast }) => {
   const [activeTab, setActiveTab] = useState<Supplier>('LCSC');
   const [includeState, setIncludeState] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(false);
+  // RS stock numbers being typed in, by stock code.
+  const [rsDraft, setRsDraft] = useState<Record<string, string>>({});
+  const [rsSaving, setRsSaving] = useState<string | null>(null);
+  const mayEditItems = canChange('/api/inventory/x/rs-number', 'PUT');
 
   const includeKey = (supplier: Supplier, part: string) => `${supplier}::${part}`;
 
@@ -186,11 +199,11 @@ export const SupplierBOMGeneratorView: React.FC<Props> = ({ triggerToast }) => {
   };
 
   const rowsBySupplier = useMemo<Record<Supplier, Row[]>>(() => {
-    const out: Record<Supplier, Row[]> = { LCSC: [], DigiKey: [], Mouser: [] };
+    const out: Record<Supplier, Row[]> = { LCSC: [], DigiKey: [], Mouser: [], RS: [] };
     for (const s of SUPPLIERS) {
       out[s] = bomLines.map(b => {
         const l = lookup.get(b.part);
-        const pns: Record<Supplier, string> = l?.supplierPns || { LCSC: '', DigiKey: '', Mouser: '' };
+        const pns: Record<Supplier, string> = { ...NO_PNS, ...(l?.supplierPns ?? {}) };
         const key = includeKey(s, b.part);
         const include = includeState[key] ?? true;
         return {
@@ -201,6 +214,8 @@ export const SupplierBOMGeneratorView: React.FC<Props> = ({ triggerToast }) => {
           qty: b.qtyPerPcb * boardQty,
           availableAt: availabilityNote(pns),
           include,
+          mpn: l?.mpn || '',
+          found: !!l?.found,
         };
       });
     }
@@ -227,6 +242,28 @@ export const SupplierBOMGeneratorView: React.FC<Props> = ({ triggerToast }) => {
     setIncludeState(prev => ({ ...prev, [includeKey(supplier, part)]: v }));
   };
 
+  // Saves the RS stock number found on RS's site to the item, so the next BOM has it.
+  const saveRs = async (part: string) => {
+    const rsNumber = (rsDraft[part] ?? '').trim();
+    if (!isRsStockNumber(rsNumber)) { triggerToast('An RS stock number is three digits, a hyphen and four digits, such as 534-2993.', 'ERROR'); return; }
+    setRsSaving(part);
+    try {
+      const res = await fetch(`/api/inventory/${encodeURIComponent(part)}/rs-number`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rsNumber }) });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || 'Could not save it');
+      setLookup((prev) => {
+        const next = new Map(prev);
+        const l = next.get(part);
+        if (l) next.set(part, { ...l, supplierPns: { ...NO_PNS, ...l.supplierPns, RS: rsNumber } });
+        return next;
+      });
+      setRsDraft((d) => { const n = { ...d }; delete n[part]; return n; });
+      triggerToast(`${part}: RS ${rsNumber} saved (Sup PN ${body.slot}).`, 'SUCCESS');
+    } catch (err: any) {
+      triggerToast(err.message, 'ERROR');
+    } finally { setRsSaving(null); }
+  };
+
   const doExport = (supplier: Supplier) => {
     const all = rowsBySupplier[supplier];
     const writable = all.filter(r => r.include && r.supplierPn);
@@ -240,6 +277,7 @@ export const SupplierBOMGeneratorView: React.FC<Props> = ({ triggerToast }) => {
     let name = '';
     if (supplier === 'Mouser') { csv = toMouserCsv(writable); name = 'mouser_bom.csv'; }
     else if (supplier === 'DigiKey') { csv = toDigikeyCsv(writable); name = 'digikey_bom.csv'; }
+    else if (supplier === 'RS') { csv = toRsCsv(writable.map((r) => ({ ...r, stockCodes: [r.part] }))); name = 'rs_bom.csv'; }
     else { csv = toLcscCsv(writable); name = 'lcsc_bom.csv'; }
     downloadCsv(name, csv);
     const bits = [`${writable.length} rows written`];
@@ -256,7 +294,7 @@ export const SupplierBOMGeneratorView: React.FC<Props> = ({ triggerToast }) => {
     <div className="p-container-margin space-y-4 max-w-7xl mx-auto w-full">
       <div>
         <h3 className="font-headline-sm text-2xl font-black text-on-surface tracking-tighter leading-none mb-1">Supplier BOM Generator</h3>
-        <p className="text-on-surface-variant font-body-sm/80">Upload a pick-and-place BOM, resolve each part against the three inventory supplier columns, and export the shape each supplier's upload form expects.</p>
+        <p className="text-on-surface-variant font-body-sm/80">Upload a pick-and-place BOM, resolve each part against the inventory's supplier part numbers (Mouser, DigiKey, LCSC and RS Components), and export the shape each supplier's upload form expects.</p>
       </div>
 
       {/* Restock: what the reorder recommendations say to order, no BOM needed */}
@@ -329,8 +367,15 @@ export const SupplierBOMGeneratorView: React.FC<Props> = ({ triggerToast }) => {
             <p className="text-xs text-on-surface-variant">
               Red rows have no <span className="font-bold">{activeTab}</span> PN.
               <span className="ml-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-error/20 text-error text-[10px] font-bold">NO PART</span>
-              means the part isn't listed at any of the three suppliers — the inventory row is missing all three sup_pn columns.
+              means the item has no part number at any of the four suppliers.
             </p>
+            {activeTab === 'RS' && (
+              <p className="text-xs text-on-surface-variant" data-testid="rs-help">
+                RS Components has no price or stock lookup here yet. <strong>Find on RS</strong> opens RS South Africa's search for the part in your browser;
+                copy the RS stock number (such as 534-2993), paste it in and <strong>Save</strong>: it is kept in the item's first free "Other" supplier part number,
+                so it is there next time. The exported file is RS Stock No., Quantity, Description and Stock code, for RS's parts-list upload.
+              </p>
+            )}
 
             <div className="flex items-center gap-sm flex-wrap">
               <button onClick={() => setAll(activeTab, true)} className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-surface-container-high border border-outline-variant text-xs font-bold hover:bg-surface-container-highest transition-all">
@@ -376,7 +421,30 @@ export const SupplierBOMGeneratorView: React.FC<Props> = ({ triggerToast }) => {
                         <td className="py-2 px-3 font-mono text-[11px]">{r.footprint || <span className="text-outline">—</span>}</td>
                         <td className="py-2 px-3 font-mono">
                           {r.supplierPn ? (
-                            <span className="text-on-surface">{r.supplierPn}</span>
+                            <span className="inline-flex items-center gap-1.5">
+                              <span className="text-on-surface">{r.supplierPn}</span>
+                              {activeTab === 'RS' && (
+                                <a href={rsSearchUrl(r.supplierPn)} target="_blank" rel="noopener noreferrer" className="text-primary text-[10px] font-sans font-bold inline-flex items-center gap-0.5 hover:underline" aria-label={`Open ${r.supplierPn} on RS`}>
+                                  on RS <ExternalLink className="w-3 h-3" />
+                                </a>
+                              )}
+                            </span>
+                          ) : activeTab === 'RS' ? (
+                            <span className="inline-flex flex-wrap items-center gap-1.5 font-sans">
+                              <a href={rsSearchUrl(r.mpn || r.description || r.part)} target="_blank" rel="noopener noreferrer" className="text-primary text-[11px] font-bold inline-flex items-center gap-0.5 hover:underline"
+                                title={r.mpn ? `Search RS for ${r.mpn}` : 'No manufacturer part number: searches the description'} aria-label={`Find ${r.part} on RS`}>
+                                Find on RS <ExternalLink className="w-3 h-3" />
+                              </a>
+                              {mayEditItems && r.found && (
+                                <>
+                                  <input value={rsDraft[r.part] ?? ''} onChange={(e) => setRsDraft((d) => ({ ...d, [r.part]: e.target.value }))}
+                                    onKeyDown={(e) => { if (e.key === 'Enter') void saveRs(r.part); }} placeholder="534-2993" aria-label={`RS stock number for ${r.part}`}
+                                    className="w-24 rounded border border-outline-variant bg-surface-container-low px-1.5 py-0.5 text-[11px] font-mono text-on-surface focus:outline-none focus:border-primary" />
+                                  <button type="button" disabled={rsSaving === r.part || !(rsDraft[r.part] ?? '').trim()} onClick={() => void saveRs(r.part)}
+                                    className="px-1.5 py-0.5 rounded bg-primary text-white text-[10px] font-bold disabled:opacity-40">{rsSaving === r.part ? 'Saving…' : 'Save'}</button>
+                                </>
+                              )}
+                            </span>
                           ) : (
                             <span className="inline-flex items-center gap-1 text-error font-bold"><AlertTriangle className="w-3 h-3" /> MISSING</span>
                           )}

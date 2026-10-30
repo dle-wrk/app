@@ -129,6 +129,13 @@ export function classifyPartNumberBySupplier(pn: string): SlotSupplier | null {
   return null;
 }
 
+/** An RS Components stock number: three digits, a hyphen, four digits (534-2993). Kept in an "Other" slot (4 or 5). */
+export const isRsStockNumber = (pn: unknown) => /^\d{3}-\d{4}$/.test(String(pn ?? '').trim());
+
+/** The RS stock number among an item's supplier part numbers, whichever slot it is in; '' when none. */
+export const rsNumberIn = (supPns: Array<string | null | undefined> | undefined) =>
+  (supPns ?? []).map((v) => String(v ?? '').trim()).find(isRsStockNumber) ?? '';
+
 /** The slot (0-based) a supplier part number belongs in, when it isn't the one it is in; else null. */
 export function rightSlotFor(pn: string, slot: number): number | null {
   const supplier = classifyPartNumberBySupplier(pn);

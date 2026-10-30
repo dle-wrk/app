@@ -41,6 +41,21 @@ export function toLcscCsv(rows: OrderRow[]): string {
   return head + body + '\n';
 }
 
+/**
+ * RS Components: RS Stock No., Quantity, then the description and our stock
+ * code to tell the lines apart. For RS's parts-list upload, which asks which
+ * column is which.
+ */
+export function toRsCsv(rows: OrderRow[]): string {
+  const esc = (s: string) => `"${plainText(s).replace(/"/g, "'")}"`;
+  const head = 'RS Stock No.,Quantity,Description,Stock code\n';
+  const body = rows.map(r => `${r.supplierPn},${r.qty},${esc(r.description)},${esc((r.stockCodes ?? []).join(' '))}`).join('\n');
+  return head + body + '\n';
+}
+
+/** RS South Africa's search for a stock number or a manufacturer's part number (opens in the person's browser). */
+export const rsSearchUrl = (term: string) => `https://za.rs-online.com/web/c/?searchTerm=${encodeURIComponent(term.trim())}`;
+
 export const orderCsv = (supplier: SlotSupplier, rows: OrderRow[]) =>
   supplier === 'mouser' ? toMouserCsv(rows) : supplier === 'digikey' ? toDigikeyCsv(rows) : toLcscCsv(rows);
 

@@ -9,7 +9,7 @@
 import type { Express } from 'express';
 import { z } from 'zod';
 import { query, queryOne, exec } from './db';
-import { isUsablePartNumber } from './partNumbers';
+import { isUsablePartNumber, isRsStockNumber, rsNumberIn } from './partNumbers';
 
 export async function ensureProcurementSchema(): Promise<void> {
   await exec(`CREATE TABLE IF NOT EXISTS procurement_projects (
@@ -173,6 +173,28 @@ export function registerProcurementRoutes(app: Express): void {
   const isJunk = (v: string | null | undefined) => !isUsablePartNumber(v);
   const clean = (v: string | null | undefined) => (v || '').trim();
 
+  // An item's RS Components stock number: replaces the RS number it has, else
+  // goes in the first empty "Other" slot (4, then 5). {rsNumber: ''} removes it.
+  app.put('/api/inventory/:serial/rs-number', async (req, res) => {
+    const rs = String(req.body?.rsNumber ?? '').trim();
+    if (rs && !isRsStockNumber(rs)) return res.status(400).json({ error: 'An RS stock number is three digits, a hyphen and four digits, such as 534-2993.' });
+    try {
+      const item = await queryOne<any>(`SELECT serial_number, sup_pn_1, sup_pn_2, sup_pn_3, sup_pn_4, sup_pn_5 FROM inventory WHERE serial_number = $1 AND deleted IS NOT TRUE`, [req.params.serial]);
+      if (!item) return res.status(404).json({ error: 'Item not found.' });
+      const slots = [1, 2, 3, 4, 5].map((n) => String(item[`sup_pn_${n}`] ?? '').trim());
+      let at = slots.findIndex(isRsStockNumber);
+      if (at < 0) {
+        if (!rs) return res.json({ serialNumber: item.serial_number, rsNumber: '' });
+        at = [3, 4].find((i) => !isUsablePartNumber(slots[i])) ?? -1;
+        if (at < 0) return res.status(409).json({ error: `Both "Other" supplier part numbers of ${item.serial_number} are in use (${slots[3]}, ${slots[4]}). Clear one in the item first.` });
+      }
+      await query(`UPDATE inventory SET sup_pn_${at + 1} = $2 WHERE serial_number = $1`, [item.serial_number, rs || null]);
+      res.json({ serialNumber: item.serial_number, rsNumber: rs, slot: at + 1 });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post('/api/supplier-bom/lookup', async (req, res) => {
     const raw = req.body?.parts;
     if (!Array.isArray(raw) || raw.length === 0) return res.json([]);
@@ -181,8 +203,8 @@ export function registerProcurementRoutes(app: Express): void {
     try {
       // First pass: direct hit by serial_number.
       const { rows: direct } = await query<any>(
-        `SELECT serial_number, name, footprint, description,
-                sup_pn_1, sup_pn_2, sup_pn_3
+        `SELECT serial_number, name, footprint, description, man_pn_1,
+                sup_pn_1, sup_pn_2, sup_pn_3, sup_pn_4, sup_pn_5
          FROM inventory
          WHERE serial_number = ANY($1::text[])`,
         [parts]
@@ -221,6 +243,16 @@ export function registerProcurementRoutes(app: Express): void {
         const lcsc = await pickCol('sup_pn_3');
         const digikey = await pickCol('sup_pn_2');
         const mouser = await pickCol('sup_pn_1');
+        // RS Components: a stock number (534-2993) in any slot, usually an
+        // "Other" one; else an equivalent reel's.
+        const slotsOf = (r: any) => [r.sup_pn_1, r.sup_pn_2, r.sup_pn_3, r.sup_pn_4, r.sup_pn_5];
+        let rs = row ? rsNumberIn(slotsOf(row)) : '';
+        if (!rs && anchor && (anchor.name || anchor.footprint)) {
+          const { rows: fb } = await query<any>(
+            `SELECT sup_pn_1, sup_pn_2, sup_pn_3, sup_pn_4, sup_pn_5 FROM inventory
+              WHERE lower(name) = $1 AND lower(footprint) = $2 AND deleted IS NOT TRUE LIMIT 20`, [anchor.name, anchor.footprint]);
+          rs = fb.map((f: any) => rsNumberIn(slotsOf(f))).find(Boolean) ?? '';
+        }
 
         out.push({
           part: p,
@@ -228,7 +260,9 @@ export function registerProcurementRoutes(app: Express): void {
           name: row ? clean(row.name) : '',
           description: row ? clean(row.description) : '',
           footprint: row ? clean(row.footprint) : '',
-          supplierPns: { LCSC: lcsc, DigiKey: digikey, Mouser: mouser },
+          supplierPns: { LCSC: lcsc, DigiKey: digikey, Mouser: mouser, RS: rs },
+          // The manufacturer's part number, to look the part up on RS.
+          mpn: row && isUsablePartNumber(row.man_pn_1) ? clean(row.man_pn_1) : '',
         });
       }
       res.json(out);
