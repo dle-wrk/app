@@ -31,6 +31,7 @@ import { ITEM_CATEGORIES } from './lib/itemCategories';
 import { CategoryCombobox } from './components/CategoryCombobox';
 import { SupplierBOMGeneratorView } from './components/views/SupplierBOMGeneratorView';
 import ProjectProcessingView from './components/views/ProjectProcessingView';
+import PageGuide from './components/PageGuide';
 import { mapDbRowsToItems, mapItemToPayload } from './lib/mapDbItem';
 import { announceDataChanged, changedKeys, needsFullReload, useNewVersion } from './lib/liveUpdates';
 import { mapDbRowsToTransactions, formatTrxDateTime } from './lib/mapDbTransaction';
@@ -1834,6 +1835,8 @@ export default function App() {
             <h2 className="font-headline-md text-lg md:text-xl font-black text-primary select-none flex items-center capitalize gap-sm tracking-tighter leading-none truncate">
               {currentView.replace('_', ' ')}
             </h2>
+            {/* What this page is for and how to use it (./components/PageGuide). */}
+            <PageGuide view={currentView} />
 
             {/* Quick search input — form-wrapped so Enter navigates explicitly.
                 onKeyDown belt-and-braces because some browsers don't fire submit

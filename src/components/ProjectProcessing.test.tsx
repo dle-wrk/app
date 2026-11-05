@@ -2,6 +2,7 @@ import React, { act } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ProjectProcessingView, { previewCode } from './views/ProjectProcessingView';
+import PageGuide from './PageGuide';
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 vi.mock('../lib/confirmDialog', () => ({ confirmDialog: async () => true }));
@@ -45,8 +46,8 @@ const openBuild = async () => {
 };
 
 describe('Project Processing', () => {
-  it('the ? next to the title opens a how-to: on hover, and kept open by a click until Escape', async () => {
-    await act(async () => { root.render(<ProjectProcessingView triggerToast={() => {}} />); });
+  it('the ? next to the page name opens a how-to: on hover, and kept open by a click until Escape', async () => {
+    await act(async () => { root.render(<PageGuide view="project_processing" />); });
     const help = host.querySelector('button[aria-label="How to use this page"]') as HTMLButtonElement;
     const wrap = help.parentElement!;
     expect(host.querySelector('[role="dialog"]')).toBeNull();

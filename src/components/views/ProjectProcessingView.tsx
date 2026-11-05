@@ -11,23 +11,6 @@ import { confirmDialog } from '../../lib/confirmDialog';
 import { fmtNumber } from '../../lib/formatMoney';
 import { printLabels } from '../../lib/stockLabels';
 import { PrimaryButton, SecondaryButton } from '../bookkeeping/shared';
-import HowToTip from '../HowToTip';
-
-/** The page's how-to, behind the "?" next to its title. */
-export function ProcessingGuide() {
-  return (
-    <HowToTip title="How to run a build">
-      <ol className="list-decimal pl-4 space-y-1">
-        <li><strong>New build:</strong> choose the project, what it builds (its Production Costs code) and how many. It gets a build number and a batch code.</li>
-        <li><strong>Book the kit out:</strong> open the build, press <em>Check the kit</em>, then <em>Book out</em>. A short line stops it: tick <em>Leave out</em>, or book that stock in first.</li>
-        <li><strong>Label and book in:</strong> print the unit labels (and the batch label), stick one on each unit, and scan it when it's done. Or type how many and press <em>Book in</em>. <em>Change the formats</em> sets the serials, e.g. TCU06-POP-{'{0000}'}.</li>
-        <li><strong>Count what's left:</strong> type what came back of each part. It goes back to that part, or tick <em>Packet</em> for loose parts off a reel (they go to a packet item, e.g. CAP-024-PKT).</li>
-        <li><strong>Complete:</strong> say how many were scrapped, add a note, press <em>Complete</em>.</li>
-      </ol>
-      <p className="mt-2 text-outline">Every step is in the stock ledger under the build number. A build can be cancelled until its kit is booked out.</p>
-    </HowToTip>
-  );
-}
 
 type Toast = (msg: string, type?: string) => void;
 const input = 'bg-surface-container-high border border-outline-variant rounded px-2 py-1.5 text-xs text-on-surface';
@@ -87,7 +70,7 @@ function BuildList({ triggerToast, onOpen }: { triggerToast: Toast; onOpen: (id:
     <div className="p-container-margin space-y-md max-w-7xl mx-auto w-full">
       <div className="flex flex-wrap items-end justify-between gap-md">
         <div>
-          <div className="flex items-center gap-1"><h3 className="font-headline-sm text-lg text-on-surface">Project processing</h3><ProcessingGuide /></div>
+          <h3 className="font-headline-sm text-lg text-on-surface">Project processing</h3>
           <p className="text-on-surface-variant text-xs max-w-[760px]">A build from start to finish: book the kit out, label and book in what's built, count what's left of each part and put it back (loose parts off a reel into a packet), then complete it.</p>
         </div>
         {may && !form && <PrimaryButton type="button" icon={<Plus className="w-3.5 h-3.5" />} onClick={() => void startNew()}>New build</PrimaryButton>}
@@ -157,7 +140,7 @@ function BuildSheet({ id, triggerToast, onOpenItem, onBack }: { id: number; trig
       <div className="flex flex-wrap items-start justify-between gap-md">
         <div>
           <button type="button" onClick={onBack} className="text-xs text-primary inline-flex items-center gap-1 hover:underline"><ArrowLeft className="w-3.5 h-3.5" /> All builds</button>
-          <div className="flex items-center gap-1 mt-1"><h3 className="font-headline-sm text-lg text-on-surface">{b.number} <span className="text-on-surface-variant text-sm font-normal">· {b.project_name} → {b.model_number} × {fmtNumber(b.qty_planned)}</span></h3><ProcessingGuide /></div>
+          <h3 className="font-headline-sm text-lg text-on-surface mt-1">{b.number} <span className="text-on-surface-variant text-sm font-normal">· {b.project_name} → {b.model_number} × {fmtNumber(b.qty_planned)}</span></h3>
           <p className="text-[11px] text-outline">Batch <span className="font-mono">{b.batch_code}</span> · started {when(b.created_at)}{b.created_by ? ` by ${b.created_by}` : ''}{b.notes ? ` · ${b.notes}` : ''}</p>
         </div>
         <div className="flex items-center gap-sm"><Status s={b.status} />{may && b.status === 'PLANNED' && <SecondaryButton type="button" onClick={() => void cancel()}>Cancel build</SecondaryButton>}</div>
