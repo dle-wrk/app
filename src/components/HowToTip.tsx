@@ -21,8 +21,8 @@ export default function HowToTip({ title, children, label = 'How to use this pag
   return (
     <div ref={box} className="relative inline-flex align-middle" onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
       <button type="button" aria-label={label} aria-expanded={open} aria-controls={id} onClick={() => setPinned((p) => !p)}
-        className={`p-1 rounded-full transition-colors ${open ? 'text-primary' : 'text-outline hover:text-primary'}`}>
-        <HelpCircle className="w-4 h-4" />
+        className={`shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-full border text-[11px] font-bold transition-colors ${open ? 'border-primary bg-primary/15 text-primary' : 'border-primary/50 text-primary hover:bg-primary/10'}`}>
+        <HelpCircle className="w-4 h-4" /><span className="hidden sm:inline">Guide</span>
       </button>
       {open && (
         <div id={id} role="dialog" aria-label={title}
