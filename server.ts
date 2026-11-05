@@ -72,6 +72,7 @@ import { registerBookkeepingRoutes } from './src/lib/bookkeeping-routes';
 import { ensurePhase5Tables } from './src/lib/phase5-db';
 import phase5Routes, { scanAnomalies, generateForecasts, assessSuppliers } from './src/lib/phase5-routes';
 import { ensureQualitySchema, registerQualityRoutes } from './src/lib/qualityRoutes';
+import { ensureProjectBuildsSchema, registerProjectBuildRoutes } from './src/lib/projectBuilds';
 
 const app = express();
 // Request ID first — everything downstream should log with req.id so log
@@ -172,6 +173,7 @@ registerBookkeepingRoutes(app);
 
 // Phase 5: Quality & Compliance + Advanced Automation
 registerQualityRoutes(app);
+registerProjectBuildRoutes(app);
 app.use(phase5Routes);
 
 // Auth (/api/login, /api/session/*, /api/auth/*). attachSessionUser is applied
@@ -1222,6 +1224,7 @@ async function runSchemaBootstrap() {
     // Phase 5: Quality & Compliance + Advanced Automation
     await ensurePhase5Tables().catch((e) => console.error('Failed to bootstrap Phase 5 schema:', e));
     await ensureQualitySchema().catch((e) => console.error('Failed to bootstrap quality schema:', e));
+    await ensureProjectBuildsSchema().catch((e) => console.error('Failed to bootstrap project builds schema:', e));
 
     // Seed the primary admin account if none exists. Password is bcrypt-hashed;
     // in production, override via SEED_ADMIN_PASSWORD env var so nothing

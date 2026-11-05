@@ -8,7 +8,8 @@ import { code128Svg } from './code128';
 
 export const BIN_PREFIX = 'LOC:';
 
-export interface Label { code: string; title?: string | null; kind: 'bin' | 'item' }
+export interface Label { code: string; title?: string | null; kind: 'bin' | 'item' | 'unit' | 'batch' }
+const KIND: Record<Label['kind'], string> = { bin: 'BIN', item: 'ITEM', unit: 'UNIT', batch: 'BATCH' };
 
 export type Scanned = { kind: 'bin'; code: string } | { kind: 'code'; code: string } | null;
 
@@ -34,7 +35,7 @@ const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '
  */
 export function labelsHtml(labels: Label[]): string {
   const cells = labels.map((l) => `<div class="label">
-      <div class="kind">${l.kind === 'bin' ? 'BIN' : 'ITEM'}</div>
+      <div class="kind">${KIND[l.kind]}</div>
       <div class="code">${esc(l.code)}</div>
       <div class="title">${esc(l.title ?? '')}</div>
       <div class="bars">${code128Svg(labelPayload(l))}</div>

@@ -22,6 +22,7 @@
 //     register step: schema creation runs once, before any router is wired.
 
 import { planKitBookOut } from './kitBookOut';
+import { checkBuildForBookOut, recordBuildBookOut } from './projectBuilds';
 import type { Express } from 'express';
 import { z } from 'zod';
 import { pool, query, queryOne, exec } from './db';
@@ -1116,7 +1117,8 @@ export function registerProductionRoutes(app: Express): void {
   // taken from its own SKU; `dnf` lines are left out; any other line takes
   // its resolved part as before. Blocked, with nothing changed, when a line
   // isn't covered or a picked SKU hasn't the stock (counting every line that
-  // uses it). The rules: planKitBookOut in ./kitBookOut.
+  // uses it). The rules: planKitBookOut in ./kitBookOut. With {buildId} (Project
+  // Processing) what it takes is recorded against that build (./projectBuilds).
   app.post('/api/kit-booking/execute', async (req, res) => {
     const { projectId, buildQty } = req.body;
     if (!projectId || !buildQty) {
@@ -1128,6 +1130,7 @@ export function registerProductionRoutes(app: Express): void {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      const build = req.body?.buildId ? await checkBuildForBookOut(client, Number(req.body.buildId), projectId, buildQty) : null;
       const auditResults = await auditKitStock(Number(projectId), Number(buildQty));
       const codes = new Set<string>();
       for (const r of auditResults) codes.add(r.resolved_part_number);
@@ -1147,8 +1150,9 @@ export function registerProductionRoutes(app: Express): void {
         const trxId = `TRX-KIT-${d.code}-${Date.now()}-${i}`;
         await client.query(`INSERT INTO transactions (trxId, itemPartNumber, itemName, type, qtyChange, reference, performedBy, dateTime)
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-          [trxId, d.code, stock.get(d.code)?.name || 'Unknown', 'BOOK-OUT', -d.qty, `Kit Booking: Project ${projectId}${d.forLine !== d.code ? ` (for ${d.forLine})` : ''}`, 'System', now]);
+          [trxId, d.code, stock.get(d.code)?.name || 'Unknown', 'BOOK-OUT', -d.qty, `Kit Booking: Project ${projectId}${build ? ` · Build ${build.number}` : ''}${d.forLine !== d.code ? ` (for ${d.forLine})` : ''}`, 'System', now]);
       }
+      if (build) await recordBuildBookOut(client, build, plan.deductions);
 
       const project = await queryOne(`SELECT assigned_team FROM projects WHERE id = $1`, [projectId]);
       await client.query(`INSERT INTO job_cards (project_id, build_qty, status, created_at, assigned_team) VALUES ($1, $2, $3, $4, $5)`,
@@ -1158,7 +1162,7 @@ export function registerProductionRoutes(app: Express): void {
       res.json({ ok: true, auditResults, deductions: plan.deductions, skipped: plan.skipped });
     } catch (err: any) {
       await client.query('ROLLBACK');
-      res.status(400).json({ error: err.message });
+      res.status(err.status || 400).json({ error: err.message });
     } finally {
       client.release();
     }

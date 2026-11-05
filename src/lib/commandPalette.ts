@@ -44,6 +44,7 @@ export const ROUTES: CommandRoute[] = [
   { id: 'pick_place', label: 'Pick & Place', path: 'Manufacturing', keywords: 'p&p smt pnp coordinates placement', group: 'Pages', icon: 'Database', target: { view: 'pick_place' } },
   { id: 'alternates', label: 'Component Alternates', path: 'Manufacturing', keywords: 'substitutes alternates equivalents crosses', group: 'Pages', icon: 'ArrowLeftRight', target: { view: 'alternates' } },
   { id: 'projects', label: 'Project Manager', path: 'Projects', keywords: 'projects jobs builds', group: 'Pages', icon: 'ClipboardList', target: { view: 'projects' } },
+  { id: 'project_processing', label: 'Project Processing', path: 'Projects › Processing', keywords: 'build builds book out book in kit serial batch label packet leftover count return finished goods complete', group: 'Pages', icon: 'Hammer', target: { view: 'project_processing' } },
   { id: 'project_progress', label: 'Project Progress', path: 'Projects › Progress', keywords: 'progress stages status board kanban pipeline where are projects on hold overdue tracking', group: 'Pages', icon: 'SquareKanban', target: { view: 'project_progress' } },
   { id: 'automation', label: 'Automation Dashboard', path: 'Automation', keywords: 'workflows rules triggers scheduled jobs alerts', group: 'Pages', icon: 'Zap', target: { view: 'automation' } },
   { id: 'auto_po_config', label: 'Auto-PO Config', path: 'Automation', keywords: 'auto po purchase order reorder threshold', group: 'Pages', icon: 'Settings', target: { view: 'auto_po_config' } },

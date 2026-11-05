@@ -182,6 +182,18 @@
                 </ol>
             </div>
 
+            <h3 id="project-processing">Project Processing</h3>
+            <div class="step">
+                <p><span class="menu-path">PROJECTS → Project Processing</span> takes one build of a project from start to finish. <strong>New build</strong>: the project, what it builds (a product from Production Costs; a project's last build fills it in) and how many. It is numbered BLD-2026-0001 and given a batch code.</p>
+                <ol>
+                    <li><strong>Book the kit out.</strong> <em>Check the kit</em> shows the project's BOM for that many against stock. A short line blocks it: tick <em>Leave out</em> for it, or book the stock in first. <em>Book out</em> takes it from stock, as P&amp;P Kit Booking does, and records what it took against the build. (To pick other reels for a line, use P&amp;P Kit Booking.)</li>
+                    <li><strong>Label and book in what's built.</strong> Built units are booked in under the product's code, which is made a stock item the first time (costed at its production cost). Each unit gets its own serial and the build a batch code, from the product's formats: <em>Change the formats</em> to set them, e.g. <code>TCU06-POP-{0000}</code> for populated boards or <code>TCU06-PCB-{0000}</code> for blank boards, and <code>{MODEL}-B{000}</code> for batches ({MODEL} the product code, {0000} the running number, {YYYY} the year). <em>Print unit labels</em> prints one per unit and a batch label; scan a unit's label when it's done to book it in, or book in a number at once.</li>
+                    <li><strong>Count what's left and put it back.</strong> For each part sent, enter what came back. It goes back to the part, or tick <em>Packet</em> for loose parts off a reel: they go to a packet item of their own (its code, e.g. <code>CAP-024-PKT</code>, can be changed; packaging X1 PACKET; a copy of the part's details). The first time makes it; after that the count is added to it. You can count in several goes. If more comes back than was sent, it asks, then puts it all back.</li>
+                    <li><strong>Complete.</strong> How many were scrapped and notes. Labels never booked in must be booked in or marked scrapped first. A part not counted back is taken as all used.</li>
+                </ol>
+                <p>Every stock change is in the stock ledger with the build number: BOOK-OUT, BOOK-IN and RETURN. A build with nothing booked out can be cancelled.</p>
+            </div>
+
             <h3 id="project-progress">Project Progress</h3>
             <div class="step">
                 <p><span class="menu-path">PROJECTS → Project Progress</span> shows every project in the stage it has reached, so when several projects run at the same time you can see where each one is at. The stages start as <strong>Planning → Design &amp; BOM → Sourcing → Kitting → Assembly → Testing → Complete</strong>; the last stage means finished.</p>

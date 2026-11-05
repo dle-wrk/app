@@ -596,6 +596,7 @@ export type ViewType =
   | 'kit_booking'
   | 'projects'
   | 'project_progress'
+  | 'project_processing'
   | 'production_costs'
   | 'bookkeeping'
   | 'automation'

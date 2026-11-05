@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import {
+  Hammer,
   LayoutDashboard,
   Boxes,
   Database,
@@ -114,6 +115,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const projectItems = [
     { id: 'projects', label: 'Project Manager', icon: ClipboardList },
     { id: 'project_progress', label: 'Project Progress', icon: SquareKanban },
+    { id: 'project_processing', label: 'Project Processing', icon: Hammer },
   ] as const;
 
   const automationItems = [

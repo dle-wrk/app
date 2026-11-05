@@ -30,6 +30,7 @@ import { StockCodePrefixPicker } from './components/StockCodePrefixPicker';
 import { ITEM_CATEGORIES } from './lib/itemCategories';
 import { CategoryCombobox } from './components/CategoryCombobox';
 import { SupplierBOMGeneratorView } from './components/views/SupplierBOMGeneratorView';
+import ProjectProcessingView from './components/views/ProjectProcessingView';
 import { mapDbRowsToItems, mapItemToPayload } from './lib/mapDbItem';
 import { announceDataChanged, changedKeys, needsFullReload, useNewVersion } from './lib/liveUpdates';
 import { mapDbRowsToTransactions, formatTrxDateTime } from './lib/mapDbTransaction';
@@ -2277,6 +2278,10 @@ if (currentView === 'alternates') {
                    }}
                  />
                );
+             }
+
+             if (currentView === 'project_processing') {
+               return <ProjectProcessingView triggerToast={triggerToast} onOpenItem={setSelectedDetailPartNumber} />;
              }
 
              if (currentView === 'project_progress') {

@@ -78,6 +78,8 @@ export async function getAllVersions(): Promise<Record<string, number>> {
 const RULES: Array<{ test: RegExp; key: DataKey }> = [
   { test: /^\/api\/items(\/|$)/, key: 'inventory' },
   { test: /^\/api\/inventory(\/|$)/, key: 'inventory' },
+  // A build books stock out and in (Project Processing).
+  { test: /^\/api\/builds(\/|$)/, key: 'inventory' },
   { test: /^\/api\/clients(\/|$)/, key: 'clients' },
   { test: /^\/api\/client-orders(\/|$)/, key: 'client_orders' },
   { test: /^\/api\/client-order-items(\/|$)/, key: 'client_orders' },
