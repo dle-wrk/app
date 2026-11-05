@@ -45,6 +45,21 @@ const openBuild = async () => {
 };
 
 describe('Project Processing', () => {
+  it('the ? next to the title opens a how-to: on hover, and kept open by a click until Escape', async () => {
+    await act(async () => { root.render(<ProjectProcessingView triggerToast={() => {}} />); });
+    const help = host.querySelector('button[aria-label="How to use this page"]') as HTMLButtonElement;
+    const wrap = help.parentElement!;
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+    act(() => { wrap.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); });
+    expect(host.querySelector('[role="dialog"]')!.textContent).toContain('Book the kit out');
+    act(() => { wrap.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })); });
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+    act(() => { help.click(); });
+    expect(help.getAttribute('aria-expanded')).toBe('true');
+    act(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); });
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+  });
+
   it('previews serials from a format', () => {
     expect(previewCode('{MODEL}-POP-{0000}', 'TCU06')).toBe('TCU06-POP-0001');
   });
