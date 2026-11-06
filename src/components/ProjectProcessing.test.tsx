@@ -29,6 +29,7 @@ beforeEach(() => {
     if (url === '/api/kit-booking/validate') return ok([
       { component_id: 'CAP-024', resolved_part_number: 'CAP-024', qty_required: 20, shortage_qty: 0 },
       { component_id: 'CON-010', resolved_part_number: 'CON-010', qty_required: 2, shortage_qty: 1 },
+      { component_id: 'DNF-013', resolved_part_number: 'DNF-013', qty_required: 4, shortage_qty: 4 },
     ]);
     if (url === '/api/kit-booking/execute') return ok({ deductions: [{ code: 'CAP-024', qty: 20 }], skipped: ['CON-010'] });
     if (url === '/api/projects/60/kits') return ok(kits);
@@ -92,7 +93,7 @@ describe('Project Processing', () => {
     expect((button('Book out for 2') as HTMLButtonElement).disabled).toBe(true);
     await act(async () => { (host.querySelector('input[aria-label="Leave out CON-010"]') as HTMLInputElement).click(); });
     await act(async () => { button('Book out for 2').click(); });
-    expect(calls.find((c) => c.url === '/api/kit-booking/execute')!.body).toEqual({ projectId: '60', buildQty: 2, buildId: 5, allocations: {}, dnf: ['CON-010'] });
+    expect(calls.find((c) => c.url === '/api/kit-booking/execute')!.body).toEqual({ projectId: '60', buildQty: 2, buildId: 5, allocations: {}, dnf: ['DNF-013', 'CON-010'] });
   });
 
   it('book-out uses the reels picked in a saved P&P kit for this many: the line is covered and the picks are booked out', async () => {
@@ -103,8 +104,11 @@ describe('Project Processing', () => {
     expect(calls.find((c) => c.url === '/api/kit-booking/validate')!.body).toEqual({ projectId: '60', buildQty: 2, excludeKitId: 31 });
     expect(host.querySelector('[data-kit-line="CON-010"]')!.textContent).toContain('CON-011 ×2');
     expect(host.textContent).not.toContain('is short');
+    // A DNF line starts left out, marked DNF.
+    expect((host.querySelector('input[aria-label="Leave out DNF-013"]') as HTMLInputElement).checked).toBe(true);
+    expect(host.querySelector('[data-kit-line="DNF-013"]')!.textContent).toContain('DNF');
     await act(async () => { button('Book out for 2').click(); });
-    expect(calls.find((c) => c.url === '/api/kit-booking/execute')!.body).toEqual({ projectId: '60', buildQty: 2, buildId: 5, allocations: { 'CON-010': [{ allocatedCode: 'CON-011', qty: 2 }] }, dnf: [], kitId: 31 });
+    expect(calls.find((c) => c.url === '/api/kit-booking/execute')!.body).toEqual({ projectId: '60', buildQty: 2, buildId: 5, allocations: { 'CON-010': [{ allocatedCode: 'CON-011', qty: 2 }] }, dnf: ['DNF-013'], kitId: 31 });
   });
 
   it('a picked reel without the stock shows as short, as the book-out would refuse it', async () => {
@@ -133,7 +137,7 @@ describe('Project Processing', () => {
     expect((host.querySelector('select[aria-label="Picks from"]') as HTMLSelectElement).value).toBe('browser');
     expect((host.querySelector('input[aria-label="Leave out CAP-024"]') as HTMLInputElement).checked).toBe(true);
     await act(async () => { button('Book out for 2').click(); });
-    expect(calls.find((c) => c.url === '/api/kit-booking/execute')!.body).toEqual({ projectId: '60', buildQty: 2, buildId: 5, allocations: { 'CON-010': [{ allocatedCode: 'CON-012', qty: 2 }] }, dnf: ['CAP-024'] });
+    expect(calls.find((c) => c.url === '/api/kit-booking/execute')!.body).toEqual({ projectId: '60', buildQty: 2, buildId: 5, allocations: { 'CON-010': [{ allocatedCode: 'CON-012', qty: 2 }] }, dnf: ['CAP-024', 'DNF-013'] });
   });
 
   it('a scanned unit label books it in; the count goes back, a packet where ticked', async () => {

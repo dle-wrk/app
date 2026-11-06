@@ -12,6 +12,7 @@ import { fmtNumber } from '../../lib/formatMoney';
 import { printLabels } from '../../lib/stockLabels';
 import { PrimaryButton, SecondaryButton } from '../bookkeeping/shared';
 import type { Item } from '../../types';
+import { isDnfCode } from '../../lib/dnf';
 
 type Toast = (msg: string, type?: string) => void;
 const input = 'bg-surface-container-high border border-outline-variant rounded px-2 py-1.5 text-xs text-on-surface';
@@ -160,6 +161,9 @@ interface PickSource { key: string; label: string; picks: Picks; dnf: string[]; 
 /** Where P&P Kit Booking keeps the picks being worked on, per project, in this browser (KitBookingView). */
 export const KIT_BOOKING_CACHE_KEY = 'kitBooking:perProjectState:v1';
 
+/** A BOM line for a position left empty (DNF, DNP, DO NOT FIT …): skipped by default. */
+export const isDnfLine = (l: { component_id: string; resolved_part_number?: string }) => isDnfCode(l.component_id) || isDnfCode(l.resolved_part_number);
+
 /** A saved kit's allocations, by BOM line, as Kit Booking's book-out takes them. */
 export function picksOfKit(allocations: Array<{ stockCode: string; allocatedCode: string; qty: number }>): Picks {
   const out: Picks = {};
@@ -216,7 +220,8 @@ function BookOut({ d, may, items, triggerToast, onDone }: { d: any; may: boolean
 
   const audit = async (s: PickSource) => {
     const l = await api('/api/kit-booking/validate', { method: 'POST', body: JSON.stringify({ projectId: b.project_id, buildQty: b.qty_planned, ...(s.kitId ? { excludeKitId: s.kitId } : {}) }) });
-    setLines(l); setLeaveOut(new Set(s.dnf));
+    // DNF lines (and the kit's DNF marks) start left out: they are never booked out.
+    setLines(l); setLeaveOut(new Set([...s.dnf, ...l.filter(isDnfLine).map((x: any) => x.component_id)]));
   };
   // The picks made in P&P Kit Booking: each saved kit of the project, and what is open there in this browser.
   const check = async () => {
@@ -283,7 +288,7 @@ function BookOut({ d, may, items, triggerToast, onDone }: { d: any; may: boolean
                 const s = lineShort(l, source.picks) || lacking.reduce((n, x) => n + (pickShort.get(x.allocatedCode) ?? 0), 0);
                 return (
                   <tr key={l.component_id} className={s > 0 && !leaveOut.has(l.component_id) ? 'bg-error/5' : ''} data-kit-line={l.component_id}>
-                    <td className="px-2 py-1 font-mono">{l.component_id}</td>
+                    <td className="px-2 py-1 font-mono">{l.component_id}{isDnfLine(l) && <span className="ml-1 px-1 rounded bg-surface-container-high text-[9px] font-sans font-bold text-outline" title="Do not fit: skipped">DNF</span>}</td>
                     <td className="px-2 py-1 font-mono">{p?.length
                       ? <span className="text-primary" title="Picked in P&P Kit Booking">{p.map((x) => `${x.allocatedCode} ×${fmtNumber(x.qty)}`).join(', ')}{lacking.length ? <span className="block text-[10px] text-error font-sans">{lacking.map((x) => `${x.allocatedCode} has ${fmtNumber(stockByCode.get(x.allocatedCode.toUpperCase()) ?? 0)}`).join(', ')}</span> : null}</span>
                       : <span className="text-on-surface-variant">{l.resolved_part_number}</span>}</td>
