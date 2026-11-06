@@ -68,6 +68,8 @@ export function registerClientsRoutes(app: Express): void {
         vatNumber: row.vat_number,
         status: row.status,
         createdAt: row.created_at,
+        paymentTermsDays: row.payment_terms_days ?? null,
+        openingBalance: parseFloat(row.opening_balance) || 0,
       })));
     } catch (err: any) {
       res.status(500).json({ error: err.message });

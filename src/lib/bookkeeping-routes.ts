@@ -2409,7 +2409,7 @@ If a field is unreadable, use null (or [] for lineItems). Never invent values.`;
     }
   });
 
-  // Every customer with anything on their statement (or an opening balance).
+  // Every customer, whether or not they have anything on their statement yet.
   app.get('/api/reports/customer-statements', async (req, res) => {
     const d = statementDates(req);
     if (!d) return res.status(400).json({ error: 'asOf and from must be dates (YYYY-MM-DD)' });
@@ -2418,7 +2418,7 @@ If a field is unreadable, use null (or [] for lineItems). Never invent values.`;
       const out = [];
       for (const r of rows) {
         const s = await loadCustomerStatement(query, r.id, d.asOf, d.from);
-        if (s && (s.transactions.length || Math.abs(s.openingBalance) > 0.005)) out.push(s);
+        if (s) out.push(s);
       }
       res.json(out);
     } catch (err: any) {

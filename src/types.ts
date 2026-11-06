@@ -135,6 +135,8 @@ export interface Client {
   vatNumber?: string;
   status: string;
   createdAt: string;
+  paymentTermsDays?: number | null;
+  openingBalance?: number;
 }
 
 export interface ClientOrder {

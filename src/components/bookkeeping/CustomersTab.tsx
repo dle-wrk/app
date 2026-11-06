@@ -2,12 +2,13 @@ import React, { useMemo, useState } from 'react';
 import { canChange } from '../../lib/changeAccess';
 import { Eye, Trash2, FileText, Download, Loader2 } from 'lucide-react';
 import { Client } from '../../types';
-import { ModuleDataProps, Modal, StatusPill, fmtMoney, EmptyState, SectionCard, apiGet } from './shared';
+import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, EmptyState, SectionCard, apiGet } from './shared';
 import { optimisticListDelete } from '../../lib/optimisticUpdate';
 import { confirmDialog } from '../../lib/confirmDialog';
 import { saveStatementsPdf } from '../../lib/statementPdf';
 import type { CustomerStatement } from '../../lib/customerStatement';
 import { Customer360Modal } from './Customer360Modal';
+import { customerSummaries } from '../../lib/customerSummary';
 
 export const CustomersTab: React.FC<ModuleDataProps> = ({ clients, setClients, clientOrders, invoices, paymentsReceived, triggerToast }) => {
   const [viewing, setViewing] = useState<Client | null>(null);
@@ -20,11 +21,10 @@ export const CustomersTab: React.FC<ModuleDataProps> = ({ clients, setClients, c
     try {
       const asOf = new Date().toISOString().slice(0, 10);
       const all = (await apiGet(`/api/reports/customer-statements?asOf=${asOf}`)) as CustomerStatement[];
-      if (!all.length) { triggerToast('No customer has any invoices or payments yet.', 'INFO'); return; }
+      if (!all.length) { triggerToast('There are no customers yet.', 'INFO'); return; }
       await saveStatementsPdf(all, asOf, { all: true });
       const owing = all.reduce((n, s) => n + s.closingBalance, 0);
-      const left = clients.length - all.length;
-      triggerToast(`${all.length} statement${all.length === 1 ? '' : 's'} downloaded, ${fmtMoney(owing)} owing in all.${left > 0 ? ` ${left} customer${left === 1 ? '' : 's'} with no activity left out.` : ''}`);
+      triggerToast(`Statement for all ${all.length} customers downloaded, ${fmtMoney(owing)} owing in all.`);
     } catch (err: any) {
       triggerToast(err?.message || 'Failed to generate statements', 'ERROR');
     } finally {
@@ -32,14 +32,11 @@ export const CustomersTab: React.FC<ModuleDataProps> = ({ clients, setClients, c
     }
   };
 
-  const balances = useMemo(() => {
-    const map = new Map<number, number>();
-    for (const inv of invoices) {
-      if (inv.status === 'VOID' || inv.status === 'DRAFT' || !inv.clientId) continue;
-      map.set(inv.clientId, (map.get(inv.clientId) || 0) + inv.balanceDue);
-    }
-    return map;
-  }, [invoices]);
+  const today = new Date().toISOString().slice(0, 10);
+  const summaries = useMemo(() => customerSummaries(clients, invoices, paymentsReceived, clientOrders, today), [clients, invoices, paymentsReceived, clientOrders, today]);
+  const sorted = useMemo(() => [...clients].sort((a, b) => a.clientName.localeCompare(b.clientName, undefined, { sensitivity: 'base' })), [clients]);
+  const sum = (k: 'invoiced' | 'paid' | 'balance' | 'overdue') => [...summaries.values()].reduce((n, s) => n + s[k], 0);
+  const dash = <span className="text-outline">—</span>;
 
   // Optimistic delete: removes the customer from the list instantly, then
   // fires DELETE in the background. On failure the row is restored and an
@@ -103,22 +100,58 @@ export const CustomersTab: React.FC<ModuleDataProps> = ({ clients, setClients, c
               <tr className="bg-surface-container-high/50 text-[10px] uppercase font-bold text-outline border-b border-outline-variant">
                 <th className="px-lg py-sm">Name</th>
                 <th className="px-lg py-sm">Contact</th>
-                <th className="px-lg py-sm">Status</th>
+                <th className="px-lg py-sm">VAT no.</th>
+                <th className="px-lg py-sm text-right">Terms</th>
+                <th className="px-lg py-sm text-right" title="Open sales orders, and quotations">Orders</th>
+                <th className="px-lg py-sm text-right">Invoices</th>
+                <th className="px-lg py-sm">Last activity</th>
+                <th className="px-lg py-sm text-right">Invoiced</th>
+                <th className="px-lg py-sm text-right">Paid</th>
                 <th className="px-lg py-sm text-right">AR Balance</th>
+                <th className="px-lg py-sm">Status</th>
                 <th className="px-lg py-sm text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-outline-variant/30">
-              {clients.map(c => (
+              {sorted.map(c => { const s = summaries.get(c.id)!; return (
                 <tr
                   key={c.id}
-                  className="hover:bg-surface-variant/20 transition-all cursor-pointer"
+                  data-customer={c.clientName}
+                  className="hover:bg-surface-variant/20 transition-all cursor-pointer align-top"
                   onClick={() => setViewing(c)}
                 >
-                  <td className="px-lg py-sm font-bold">{c.clientName}</td>
-                  <td className="px-lg py-sm text-on-surface-variant">{c.email || c.contactName || '—'}</td>
+                  <td className="px-lg py-sm">
+                    <div className="font-bold">{c.clientName}</div>
+                    {c.address && <div className="text-[10px] text-on-surface-variant max-w-[220px] truncate" title={c.address}>{c.address}</div>}
+                  </td>
+                  <td className="px-lg py-sm text-on-surface-variant">
+                    {c.contactName || c.email || c.phone ? (
+                      <>
+                        {c.contactName && <div className="text-on-surface">{c.contactName}</div>}
+                        {c.email && <div className="text-[10px]">{c.email}</div>}
+                        {c.phone && <div className="text-[10px]">{c.phone}</div>}
+                      </>
+                    ) : dash}
+                  </td>
+                  <td className="px-lg py-sm font-mono text-on-surface-variant">{c.vatNumber || dash}</td>
+                  <td className="px-lg py-sm text-right text-on-surface-variant">{c.paymentTermsDays != null ? `${c.paymentTermsDays} days` : dash}</td>
+                  <td className="px-lg py-sm text-right">
+                    {s.openOrders || s.quotes ? (
+                      <>
+                        <div className="font-bold">{s.openOrders}</div>
+                        {s.quotes > 0 && <div className="text-[10px] text-on-surface-variant">+ {s.quotes} quote{s.quotes === 1 ? '' : 's'}</div>}
+                      </>
+                    ) : dash}
+                  </td>
+                  <td className="px-lg py-sm text-right">{s.invoices || dash}</td>
+                  <td className="px-lg py-sm text-on-surface-variant whitespace-nowrap">{s.lastActivity ? fmtDate(s.lastActivity) : dash}</td>
+                  <td className="px-lg py-sm text-right font-mono">{s.invoiced ? fmtMoney(s.invoiced) : dash}</td>
+                  <td className="px-lg py-sm text-right font-mono text-green-500">{s.paid ? fmtMoney(s.paid) : dash}</td>
+                  <td className="px-lg py-sm text-right font-mono">
+                    <div className="font-bold">{Math.abs(s.balance) > 0.005 ? fmtMoney(s.balance) : dash}</div>
+                    {s.overdue > 0 && <div className="text-[10px] text-error">{fmtMoney(s.overdue)} overdue ({s.overdueCount})</div>}
+                  </td>
                   <td className="px-lg py-sm"><StatusPill status={c.status || 'ACTIVE'} /></td>
-                  <td className="px-lg py-sm text-right font-mono font-bold">{(balances.get(c.id) || 0) > 0 ? fmtMoney(balances.get(c.id)) : '—'}</td>
                   {/* stopPropagation on the actions cell so clicking the statement PDF
                       or delete button doesn't also fire the row's open-drawer handler. */}
                   <td className="px-lg py-sm text-right flex gap-1 justify-end" onClick={(e) => e.stopPropagation()}>
@@ -142,9 +175,23 @@ export const CustomersTab: React.FC<ModuleDataProps> = ({ clients, setClients, c
                     <button onClick={() => handleDelete(c.id)} className="p-1.5 rounded hover:bg-error/10 text-error" title="Delete customer"><Trash2 className="w-3.5 h-3.5" /></button>
                   </td>
                 </tr>
-              ))}
-              {clients.length === 0 && <EmptyState message="No customers yet — add one from the Customers/Clients page." colSpan={5} />}
+              ); })}
+              {clients.length === 0 && <EmptyState message="No customers yet — add one from the Customers/Clients page." colSpan={12} />}
             </tbody>
+            {clients.length > 0 && (
+              <tfoot>
+                <tr className="border-t border-outline-variant bg-surface-container-high/50 font-bold">
+                  <td className="px-lg py-sm" colSpan={7}>All {clients.length} customers</td>
+                  <td className="px-lg py-sm text-right font-mono">{fmtMoney(sum('invoiced'))}</td>
+                  <td className="px-lg py-sm text-right font-mono text-green-500">{fmtMoney(sum('paid'))}</td>
+                  <td className="px-lg py-sm text-right font-mono">
+                    <div>{fmtMoney(sum('balance'))}</div>
+                    {sum('overdue') > 0 && <div className="text-[10px] text-error">{fmtMoney(sum('overdue'))} overdue</div>}
+                  </td>
+                  <td colSpan={2} />
+                </tr>
+              </tfoot>
+            )}
           </table>
         </div>
       </SectionCard>

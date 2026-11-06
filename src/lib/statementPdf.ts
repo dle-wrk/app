@@ -43,6 +43,7 @@ export function statementRows(s: CustomerStatement, closingLabel = 'Closing bala
     for (const a of t.appliedTo ?? []) rows.push(detail(`Paid towards ${a.docNumber}`, money(a.amount)));
     for (const n of t.notes ?? []) rows.push(detail(`Note: ${n}`));
   }
+  if (!s.transactions.length) rows.push(detail('No invoices, payments or credit notes yet'));
   rows.push({ cells: [s.period.asOf, '', closingLabel, '', '', '', money(s.closingBalance)], kind: 'edge' });
   return rows;
 }
@@ -125,7 +126,7 @@ export async function saveStatementsPdf(statements: CustomerStatement[], asOf: s
   doc.text(c ? 'All Customers' : one.client.name, M, y + 6);
   doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(50);
   const who = c
-    ? [`${c.customers} customer${c.customers === 1 ? '' : 's'}, sorted by name`, `${start} to ${asOf}`]
+    ? [`${c.customers} customer${c.customers === 1 ? '' : 's'}, sorted by name`, `${statements.filter((s) => s.transactions.length).length} with activity`, `${start} to ${asOf}`]
     : [
         one.client.contactName ? `Attn: ${one.client.contactName}` : '',
         ...(one.client.address ? doc.splitTextToSize(one.client.address, W / 2 - M - 5) : []),

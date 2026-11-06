@@ -72,6 +72,14 @@ describe('customer statement', () => {
     expect(c.overdue.map((o) => `${o.customer} ${o.number}`)).toEqual(['Lumax Energy INV-1']);
   });
 
+  it('shows a customer with no activity on the all-customers statement', () => {
+    const quiet = { ...base(), client: { ...client, id: 3, name: 'Bokpoort' }, transactions: [], openingBalance: 0, closingBalance: 0, overdueInvoices: [] };
+    const rows = allCustomerRows([base(), quiet]);
+    const at = rows.findIndex((r) => r.kind === 'group' && r.cells[2] === 'Bokpoort');
+    expect(rows.slice(at, at + 4).map((r) => r.cells[2])).toEqual(['Bokpoort', 'Opening balance', 'No invoices, payments or credit notes yet', 'Closing balance: Bokpoort']);
+    expect(rows.at(-1)!.cells[2]).toBe('All customers (2)');
+  });
+
   it('only takes real dates', () => {
     expect(isIsoDate('2026-11-06')).toBe(true);
     expect(isIsoDate("2026-11-06'; DROP")).toBe(false);
