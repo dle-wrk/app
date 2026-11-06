@@ -46,6 +46,8 @@ export async function ensureProjectBuildsSchema(run: (sql: string) => Promise<vo
     completed_at TIMESTAMPTZ,
     completed_by TEXT
   )`);
+  // The P&P Kit Booking kit whose picks were booked out, if one was.
+  await run(`ALTER TABLE builds ADD COLUMN IF NOT EXISTS kit_id INTEGER`);
   await run(`CREATE TABLE IF NOT EXISTS build_issues (
     id SERIAL PRIMARY KEY,
     build_id INTEGER NOT NULL REFERENCES builds(id) ON DELETE CASCADE,
@@ -450,7 +452,9 @@ export async function checkBuildForBookOut(client: Db, buildId: number, projectI
   return b;
 }
 
-export async function recordBuildBookOut(client: Db, build: any, deductions: Array<{ code: string; qty: number; forLine: string }>) {
+export async function recordBuildBookOut(client: Db, build: any, deductions: Array<{ code: string; qty: number; forLine: string }>, kitId: number | null = null) {
   for (const d of deductions) await client.query(`INSERT INTO build_issues (build_id, serial_number, qty, for_line) VALUES ($1, $2, $3, $4)`, [build.id, d.code, d.qty, d.forLine]);
-  await client.query(`UPDATE builds SET status = 'BOOKED_OUT', booked_out_at = now() WHERE id = $1`, [build.id]);
+  await client.query(`UPDATE builds SET status = 'BOOKED_OUT', booked_out_at = now(), kit_id = $2 WHERE id = $1`, [build.id, kitId]);
+  // The kit's stock is booked out now: what it reserved (if it was locked) is released, so it isn't held twice.
+  if (kitId) await client.query(`DELETE FROM kit_reservations WHERE kit_id = $1`, [kitId]);
 }

@@ -2284,7 +2284,7 @@ if (currentView === 'alternates') {
              }
 
              if (currentView === 'project_processing') {
-               return <ProjectProcessingView triggerToast={triggerToast} onOpenItem={setSelectedDetailPartNumber} />;
+               return <ProjectProcessingView triggerToast={triggerToast} onOpenItem={setSelectedDetailPartNumber} items={items} />;
              }
 
              if (currentView === 'project_progress') {

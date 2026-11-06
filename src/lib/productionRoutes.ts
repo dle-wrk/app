@@ -1131,7 +1131,9 @@ export function registerProductionRoutes(app: Express): void {
     try {
       await client.query('BEGIN');
       const build = req.body?.buildId ? await checkBuildForBookOut(client, Number(req.body.buildId), projectId, buildQty) : null;
-      const auditResults = await auditKitStock(Number(projectId), Number(buildQty));
+      // A saved kit's picks (Project Processing passes kitId): its own reservations aren't counted against it.
+      const kitId = req.body?.kitId != null && req.body.kitId !== '' ? Number(req.body.kitId) : null;
+      const auditResults = await auditKitStock(Number(projectId), Number(buildQty), { excludeKitId: kitId });
       const codes = new Set<string>();
       for (const r of auditResults) codes.add(r.resolved_part_number);
       for (const picks of Object.values(allocations) as any[]) for (const p of Array.isArray(picks) ? picks : []) codes.add(String(p?.allocatedCode ?? ''));
@@ -1152,7 +1154,7 @@ export function registerProductionRoutes(app: Express): void {
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
           [trxId, d.code, stock.get(d.code)?.name || 'Unknown', 'BOOK-OUT', -d.qty, `Kit Booking: Project ${projectId}${build ? ` · Build ${build.number}` : ''}${d.forLine !== d.code ? ` (for ${d.forLine})` : ''}`, 'System', now]);
       }
-      if (build) await recordBuildBookOut(client, build, plan.deductions);
+      if (build) await recordBuildBookOut(client, build, plan.deductions, kitId);
 
       const project = await queryOne(`SELECT assigned_team FROM projects WHERE id = $1`, [projectId]);
       await client.query(`INSERT INTO job_cards (project_id, build_qty, status, created_at, assigned_team) VALUES ($1, $2, $3, $4, $5)`,

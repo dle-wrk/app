@@ -11,6 +11,7 @@ import { confirmDialog } from '../../lib/confirmDialog';
 import { fmtNumber } from '../../lib/formatMoney';
 import { printLabels } from '../../lib/stockLabels';
 import { PrimaryButton, SecondaryButton } from '../bookkeeping/shared';
+import type { Item } from '../../types';
 
 type Toast = (msg: string, type?: string) => void;
 const input = 'bg-surface-container-high border border-outline-variant rounded px-2 py-1.5 text-xs text-on-surface';
@@ -34,11 +35,11 @@ export function previewCode(format: string, model: string, n = 1) {
   return String(format).replace(/\{MODEL\}/gi, model).replace(/\{YYYY\}/gi, String(new Date().getFullYear())).replace(/\{(0+)\}/, (_, z: string) => String(n).padStart(z.length, '0'));
 }
 
-export default function ProjectProcessingView({ triggerToast, onOpenItem }: { triggerToast: Toast; onOpenItem?: (s: string) => void }) {
+export default function ProjectProcessingView({ triggerToast, onOpenItem, items = [] }: { triggerToast: Toast; onOpenItem?: (s: string) => void; items?: Item[] }) {
   const [open, setOpen] = useState<number | null>(null);
   return open === null
     ? <BuildList triggerToast={triggerToast} onOpen={setOpen} />
-    : <BuildSheet id={open} triggerToast={triggerToast} onOpenItem={onOpenItem} onBack={() => setOpen(null)} />;
+    : <BuildSheet id={open} triggerToast={triggerToast} onOpenItem={onOpenItem} items={items} onBack={() => setOpen(null)} />;
 }
 
 // ---------------------------------------------------------------------------
@@ -123,7 +124,7 @@ function Step({ n, title, icon, done, children }: { n: number; title: string; ic
   );
 }
 
-function BuildSheet({ id, triggerToast, onOpenItem, onBack }: { id: number; triggerToast: Toast; onOpenItem?: (s: string) => void; onBack: () => void }) {
+function BuildSheet({ id, triggerToast, onOpenItem, onBack, items }: { id: number; triggerToast: Toast; onOpenItem?: (s: string) => void; onBack: () => void; items: Item[] }) {
   const may = canChange('/api/builds');
   const [d, setD] = useState<any>(null);
   const load = useCallback(async () => { try { setD(await api(`/api/builds/${id}`)); } catch (e: any) { triggerToast(e.message, 'ERROR'); } }, [id, triggerToast]);
@@ -145,7 +146,7 @@ function BuildSheet({ id, triggerToast, onOpenItem, onBack }: { id: number; trig
         </div>
         <div className="flex items-center gap-sm"><Status s={b.status} />{may && b.status === 'PLANNED' && <SecondaryButton type="button" onClick={() => void cancel()}>Cancel build</SecondaryButton>}</div>
       </div>
-      <BookOut d={d} may={may && b.status === 'PLANNED'} triggerToast={triggerToast} onDone={load} />
+      <BookOut d={d} may={may && b.status === 'PLANNED'} items={items} triggerToast={triggerToast} onDone={load} />
       <BookIn d={d} may={may && !closed && b.status !== 'PLANNED'} triggerToast={triggerToast} onDone={load} />
       <CountBack d={d} may={may && !closed && b.status !== 'PLANNED'} triggerToast={triggerToast} onOpenItem={onOpenItem} onDone={load} />
       <Complete d={d} may={may && !closed && b.status !== 'PLANNED'} triggerToast={triggerToast} onDone={load} />
@@ -153,51 +154,149 @@ function BuildSheet({ id, triggerToast, onOpenItem, onBack }: { id: number; trig
   );
 }
 
-function BookOut({ d, may, triggerToast, onDone }: { d: any; may: boolean; triggerToast: Toast; onDone: () => void }) {
+type Picks = Record<string, Array<{ allocatedCode: string; qty: number }>>;
+interface PickSource { key: string; label: string; picks: Picks; dnf: string[]; kitId: number | null; kitQty: number | null }
+
+/** Where P&P Kit Booking keeps the picks being worked on, per project, in this browser (KitBookingView). */
+export const KIT_BOOKING_CACHE_KEY = 'kitBooking:perProjectState:v1';
+
+/** A saved kit's allocations, by BOM line, as Kit Booking's book-out takes them. */
+export function picksOfKit(allocations: Array<{ stockCode: string; allocatedCode: string; qty: number }>): Picks {
+  const out: Picks = {};
+  for (const a of allocations ?? []) if (Number(a.qty) > 0) (out[a.stockCode] ??= []).push({ allocatedCode: a.allocatedCode, qty: Number(a.qty) });
+  return out;
+}
+
+/** The picks being worked on in P&P Kit Booking for a project, in this browser; null when there are none. */
+export function browserPicks(projectId: string): { picks: Picks; dnf: string[] } | null {
+  try {
+    const e = JSON.parse(localStorage.getItem(KIT_BOOKING_CACHE_KEY) || '{}')[projectId];
+    const picks: Picks = {};
+    for (const [line, list] of Object.entries(e?.allocations ?? {})) {
+      const kept = (list as any[]).filter((p) => p && p.allocatedCode && Number(p.qty) > 0).map((p) => ({ allocatedCode: String(p.allocatedCode), qty: Number(p.qty) }));
+      if (kept.length) picks[line] = kept;
+    }
+    const dnf = Array.isArray(e?.dnf) ? e.dnf.map(String) : [];
+    return Object.keys(picks).length || dnf.length ? { picks, dnf } : null;
+  } catch { return null; }
+}
+
+/** How short a line is: its picks against what it needs, or (no picks) the audit's shortage. */
+export function lineShort(line: { component_id: string; qty_required: number; shortage_qty?: number }, picks: Picks): number {
+  const p = picks[line.component_id];
+  if (p?.length) return Math.max(0, line.qty_required - p.reduce((s, x) => s + x.qty, 0));
+  return Math.max(0, Number(line.shortage_qty ?? 0));
+}
+
+/**
+ * The picked reels that haven't the stock for everything asked of them,
+ * across every line still in (the book-out refuses those, as Kit Booking's
+ * does): code -> how many it is short.
+ */
+export function pickedStockShort(lines: Array<{ component_id: string }>, picks: Picks, leaveOut: Set<string>, stockOf: (code: string) => number | undefined): Map<string, number> {
+  const asked = new Map<string, number>();
+  for (const l of lines) {
+    if (leaveOut.has(l.component_id)) continue;
+    for (const p of picks[l.component_id] ?? []) asked.set(p.allocatedCode, (asked.get(p.allocatedCode) ?? 0) + p.qty);
+  }
+  const out = new Map<string, number>();
+  for (const [code, qty] of asked) { const have = stockOf(code); if (have !== undefined && qty > have) out.set(code, qty - Math.max(0, have)); }
+  return out;
+}
+
+function BookOut({ d, may, items, triggerToast, onDone }: { d: any; may: boolean; items: Item[]; triggerToast: Toast; onDone: () => void }) {
+  const stockByCode = useMemo(() => new Map(items.map((i) => [i.partNumber.toUpperCase(), Number(i.stockLevel) || 0])), [items]);
   const b = d.build;
   const [lines, setLines] = useState<any[] | null>(null);
+  const [sources, setSources] = useState<PickSource[]>([]);
+  const [sourceKey, setSourceKey] = useState('bom');
   const [leaveOut, setLeaveOut] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  const source = sources.find((s) => s.key === sourceKey) ?? { key: 'bom', label: '', picks: {}, dnf: [], kitId: null, kitQty: null };
+
+  const audit = async (s: PickSource) => {
+    const l = await api('/api/kit-booking/validate', { method: 'POST', body: JSON.stringify({ projectId: b.project_id, buildQty: b.qty_planned, ...(s.kitId ? { excludeKitId: s.kitId } : {}) }) });
+    setLines(l); setLeaveOut(new Set(s.dnf));
+  };
+  // The picks made in P&P Kit Booking: each saved kit of the project, and what is open there in this browser.
   const check = async () => {
     setBusy(true);
-    try { const l = await api('/api/kit-booking/validate', { method: 'POST', body: JSON.stringify({ projectId: b.project_id, buildQty: b.qty_planned }) }); setLines(l); setLeaveOut(new Set()); }
-    catch (e: any) { triggerToast(e.message, 'ERROR'); } finally { setBusy(false); }
+    try {
+      const kits: any[] = await api(`/api/projects/${encodeURIComponent(b.project_id)}/kits`).catch(() => []);
+      const full = await Promise.all(kits.map((k) => api(`/api/kits/${k.id}`).catch(() => null)));
+      const list: PickSource[] = full.filter(Boolean).map((k: any) => ({
+        key: `kit:${k.id}`, label: `Saved kit "${k.name}" (for ${fmtNumber(k.buildQty)}${k.lockMode ? ', locked' : ''})`,
+        picks: picksOfKit(k.allocations), dnf: (k.dnf ?? []).map(String), kitId: k.id, kitQty: Number(k.buildQty),
+      }));
+      const open = browserPicks(String(b.project_id));
+      if (open) list.push({ key: 'browser', label: 'The picks open in P&P Kit Booking (this browser)', picks: open.picks, dnf: open.dnf, kitId: null, kitQty: null });
+      list.push({ key: 'bom', label: "The project's BOM as it is (no picks)", picks: {}, dnf: [], kitId: null, kitQty: null });
+      setSources(list);
+      // A saved kit for this many first, then what's open in Kit Booking, then any saved kit.
+      const first = list.find((s) => s.kitId && s.kitQty === b.qty_planned) ?? list.find((s) => s.key === 'browser') ?? list[0];
+      setSourceKey(first.key);
+      await audit(first);
+    } catch (e: any) { triggerToast(e.message, 'ERROR'); } finally { setBusy(false); }
   };
-  const short = (lines ?? []).filter((l) => Number(l.shortage_qty ?? 0) > 0 && !leaveOut.has(l.component_id));
+  const choose = async (key: string) => {
+    const s = sources.find((x) => x.key === key)!;
+    setSourceKey(key); setBusy(true);
+    try { await audit(s); } catch (e: any) { triggerToast(e.message, 'ERROR'); } finally { setBusy(false); }
+  };
+  const qtyMismatch = source.kitId && source.kitQty !== b.qty_planned;
+  const pickShort = pickedStockShort(lines ?? [], source.picks, leaveOut, (c) => stockByCode.get(c.toUpperCase()));
+  const lineIsShort = (l: any) => lineShort(l, source.picks) > 0 || (source.picks[l.component_id] ?? []).some((p) => pickShort.has(p.allocatedCode));
+  const short = (lines ?? []).filter((l) => lineIsShort(l) && !leaveOut.has(l.component_id));
   const bookOut = async () => {
     setBusy(true);
     try {
-      const r = await api('/api/kit-booking/execute', { method: 'POST', body: JSON.stringify({ projectId: b.project_id, buildQty: b.qty_planned, buildId: b.id, dnf: [...leaveOut] }) });
+      // Only the lines' picks that are still in the BOM, as Kit Booking sends them.
+      const allocations: Picks = Object.fromEntries((lines ?? []).filter((l) => source.picks[l.component_id]?.length).map((l) => [l.component_id, source.picks[l.component_id]]));
+      const r = await api('/api/kit-booking/execute', { method: 'POST', body: JSON.stringify({ projectId: b.project_id, buildQty: b.qty_planned, buildId: b.id, allocations, dnf: [...leaveOut], ...(source.kitId ? { kitId: source.kitId } : {}) }) });
       triggerToast(`Kit booked out: ${fmtNumber(r.deductions.length)} lines${r.skipped.length ? `, ${fmtNumber(r.skipped.length)} left out` : ''}.`, 'SUCCESS');
       onDone();
     } catch (e: any) { triggerToast(e.message, 'ERROR'); } finally { setBusy(false); }
   };
   const total = d.issues.reduce((s: number, i: any) => s + i.booked_out, 0);
+  const picked = Object.keys(source.picks).length;
   return (
     <Step n={1} title="Book the kit out" icon={<PackageMinus className="w-4 h-4 text-primary" />} done={b.status !== 'PLANNED'}>
       {b.status !== 'PLANNED' ? (
-        <p className="text-xs text-on-surface-variant">{b.booked_out_at ? `Booked out ${when(b.booked_out_at)}: ` : ''}{fmtNumber(d.issues.length)} parts, {fmtNumber(total)} pieces. They're listed under step 3.</p>
+        <p className="text-xs text-on-surface-variant">{b.booked_out_at ? `Booked out ${when(b.booked_out_at)}: ` : ''}{fmtNumber(d.issues.length)} parts, {fmtNumber(total)} pieces{b.kit_id ? `, as picked in saved kit ${b.kit_id}` : ''}. They're listed under step 3.</p>
       ) : !may ? <p className="text-xs text-outline">Not booked out yet.</p> : !lines ? (
         <div className="flex flex-wrap items-center gap-sm"><SecondaryButton type="button" disabled={busy} onClick={() => void check()}>{busy ? 'Checking…' : 'Check the kit'}</SecondaryButton>
-          <span className="text-[11px] text-outline">The project's BOM for {fmtNumber(b.qty_planned)}, against stock. To pick other reels for a line, use P&amp;P Kit Booking.</span></div>
+          <span className="text-[11px] text-outline">The project's BOM for {fmtNumber(b.qty_planned)}, with the reels picked in P&amp;P Kit Booking, against stock.</span></div>
       ) : (
         <div className="space-y-sm">
+          <label className="flex flex-wrap items-center gap-sm text-[11px] text-on-surface-variant">Picks from
+            <select className={`${input} min-w-[300px]`} value={sourceKey} disabled={busy} onChange={(e) => void choose(e.target.value)} aria-label="Picks from">
+              {sources.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+            </select>
+            {picked > 0 && <span className="text-outline">{fmtNumber(picked)} line{picked === 1 ? '' : 's'} picked</span>}
+          </label>
+          {qtyMismatch && <p className="text-[11px] text-error flex items-center gap-1" data-testid="kit-qty-mismatch"><AlertTriangle className="w-3.5 h-3.5" /> This kit was picked for {fmtNumber(source.kitQty ?? 0)}, the build is for {fmtNumber(b.qty_planned)}. Re-save the kit for {fmtNumber(b.qty_planned)} in P&amp;P Kit Booking, or choose other picks.</p>}
           <div className="max-h-[320px] overflow-y-auto custom-scrollbar rounded-lg border border-outline-variant">
             <table className="w-full text-[11px]"><thead className="sticky top-0 bg-surface-container-high"><tr className="text-[10px] text-outline uppercase"><th className="px-2 py-1 text-left">Line</th><th className="px-2 py-1 text-left">Takes</th><th className="px-2 py-1 text-right">Needs</th><th className="px-2 py-1 text-right">Short</th><th className="px-2 py-1">Leave out</th></tr></thead>
               <tbody className="divide-y divide-outline-variant/30">{lines.map((l) => {
-                const s = Number(l.shortage_qty ?? 0);
+                const p = source.picks[l.component_id];
+                const lacking = (p ?? []).filter((x) => pickShort.has(x.allocatedCode));
+                const s = lineShort(l, source.picks) || lacking.reduce((n, x) => n + (pickShort.get(x.allocatedCode) ?? 0), 0);
                 return (
                   <tr key={l.component_id} className={s > 0 && !leaveOut.has(l.component_id) ? 'bg-error/5' : ''} data-kit-line={l.component_id}>
-                    <td className="px-2 py-1 font-mono">{l.component_id}</td><td className="px-2 py-1 font-mono text-on-surface-variant">{l.resolved_part_number}</td>
+                    <td className="px-2 py-1 font-mono">{l.component_id}</td>
+                    <td className="px-2 py-1 font-mono">{p?.length
+                      ? <span className="text-primary" title="Picked in P&P Kit Booking">{p.map((x) => `${x.allocatedCode} ×${fmtNumber(x.qty)}`).join(', ')}{lacking.length ? <span className="block text-[10px] text-error font-sans">{lacking.map((x) => `${x.allocatedCode} has ${fmtNumber(stockByCode.get(x.allocatedCode.toUpperCase()) ?? 0)}`).join(', ')}</span> : null}</span>
+                      : <span className="text-on-surface-variant">{l.resolved_part_number}</span>}</td>
                     <td className="px-2 py-1 text-right font-mono">{fmtNumber(l.qty_required)}</td><td className={`px-2 py-1 text-right font-mono ${s > 0 ? 'text-error font-bold' : 'text-outline'}`}>{s > 0 ? fmtNumber(s) : '—'}</td>
                     <td className="px-2 py-1 text-center"><input type="checkbox" checked={leaveOut.has(l.component_id)} onChange={() => setLeaveOut((x) => { const n = new Set(x); n.has(l.component_id) ? n.delete(l.component_id) : n.add(l.component_id); return n; })} aria-label={`Leave out ${l.component_id}`} /></td>
                   </tr>
                 );
               })}</tbody></table>
           </div>
-          {short.length > 0 && <p className="text-[11px] text-error flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> {fmtNumber(short.length)} line{short.length === 1 ? ' is' : 's are'} short. Leave {short.length === 1 ? 'it' : 'them'} out, or book in the stock first.</p>}
+          {short.length > 0 && <p className="text-[11px] text-error flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> {fmtNumber(short.length)} line{short.length === 1 ? ' is' : 's are'} short. Pick other reels for {short.length === 1 ? 'it' : 'them'} in P&amp;P Kit Booking (then Check again), leave {short.length === 1 ? 'it' : 'them'} out, or book the stock in first.</p>}
           <div className="flex gap-sm justify-end"><SecondaryButton type="button" onClick={() => setLines(null)}>Close</SecondaryButton>
-            <PrimaryButton type="button" disabled={busy || short.length > 0} onClick={() => void bookOut()}>{busy ? 'Booking out…' : `Book out for ${fmtNumber(b.qty_planned)}`}</PrimaryButton></div>
+            <SecondaryButton type="button" disabled={busy} onClick={() => void check()}>Check again</SecondaryButton>
+            <PrimaryButton type="button" disabled={busy || short.length > 0 || !!qtyMismatch} onClick={() => void bookOut()}>{busy ? 'Booking out…' : `Book out for ${fmtNumber(b.qty_planned)}`}</PrimaryButton></div>
         </div>
       )}
     </Step>

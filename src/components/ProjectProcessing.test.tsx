@@ -9,10 +9,13 @@ vi.mock('../lib/confirmDialog', () => ({ confirmDialog: async () => true }));
 
 let host: HTMLDivElement; let root: Root; let calls: Array<{ method: string; url: string; body: any }>;
 let detail: any;
+let kits: any[];
 const BUILD = { id: 5, number: 'BLD-2026-0001', project_id: '60', project_name: 'NCU05', model_number: 'NCU05-POP', qty_planned: 2, qty_built: 0, qty_scrapped: 0, status: 'PLANNED', batch_code: 'NCU05-POP-B001', created_at: '2026-11-05T08:00:00Z' };
 beforeEach(() => {
   calls = [];
+  kits = [];
   localStorage.setItem('currentUser', JSON.stringify({ role: 'admin' }));
+  localStorage.removeItem('kitBooking:perProjectState:v1');
   detail = { build: { ...BUILD }, product: { model_number: 'NCU05-POP', description: 'NCU05 populated', unit_format: '{MODEL}-{0000}', batch_format: '{MODEL}-B{000}' }, issues: [], returns: [], units: [], usage: [] };
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     const method = init?.method ?? 'GET';
@@ -28,6 +31,9 @@ beforeEach(() => {
       { component_id: 'CON-010', resolved_part_number: 'CON-010', qty_required: 2, shortage_qty: 1 },
     ]);
     if (url === '/api/kit-booking/execute') return ok({ deductions: [{ code: 'CAP-024', qty: 20 }], skipped: ['CON-010'] });
+    if (url === '/api/projects/60/kits') return ok(kits);
+    if (url === '/api/kits/31') return ok({ id: 31, name: 'NCU05 x2', buildQty: 2, lockMode: true, allocations: [{ stockCode: 'CON-010', allocatedCode: 'CON-011', qty: 2 }], dnf: [] });
+    if (url === '/api/kits/32') return ok({ id: 32, name: 'NCU05 x10', buildQty: 10, lockMode: false, allocations: [], dnf: [] });
     return ok({ ok: true });
   }));
   host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host);
@@ -86,7 +92,48 @@ describe('Project Processing', () => {
     expect((button('Book out for 2') as HTMLButtonElement).disabled).toBe(true);
     await act(async () => { (host.querySelector('input[aria-label="Leave out CON-010"]') as HTMLInputElement).click(); });
     await act(async () => { button('Book out for 2').click(); });
-    expect(calls.find((c) => c.url === '/api/kit-booking/execute')!.body).toEqual({ projectId: '60', buildQty: 2, buildId: 5, dnf: ['CON-010'] });
+    expect(calls.find((c) => c.url === '/api/kit-booking/execute')!.body).toEqual({ projectId: '60', buildQty: 2, buildId: 5, allocations: {}, dnf: ['CON-010'] });
+  });
+
+  it('book-out uses the reels picked in a saved P&P kit for this many: the line is covered and the picks are booked out', async () => {
+    kits = [{ id: 32, name: 'NCU05 x10', buildQty: 10 }, { id: 31, name: 'NCU05 x2', buildQty: 2 }];
+    await openBuild();
+    await act(async () => { button('Check the kit').click(); });
+    expect((host.querySelector('select[aria-label="Picks from"]') as HTMLSelectElement).value).toBe('kit:31');
+    expect(calls.find((c) => c.url === '/api/kit-booking/validate')!.body).toEqual({ projectId: '60', buildQty: 2, excludeKitId: 31 });
+    expect(host.querySelector('[data-kit-line="CON-010"]')!.textContent).toContain('CON-011 ×2');
+    expect(host.textContent).not.toContain('is short');
+    await act(async () => { button('Book out for 2').click(); });
+    expect(calls.find((c) => c.url === '/api/kit-booking/execute')!.body).toEqual({ projectId: '60', buildQty: 2, buildId: 5, allocations: { 'CON-010': [{ allocatedCode: 'CON-011', qty: 2 }] }, dnf: [], kitId: 31 });
+  });
+
+  it('a picked reel without the stock shows as short, as the book-out would refuse it', async () => {
+    kits = [{ id: 31, name: 'NCU05 x2', buildQty: 2 }];
+    const items: any[] = [{ partNumber: 'CON-011', stockLevel: 0 }, { partNumber: 'CAP-024', stockLevel: 500 }];
+    await act(async () => { root.render(<ProjectProcessingView triggerToast={() => {}} items={items} />); });
+    await act(async () => { button('BLD-2026-0001').click(); });
+    await act(async () => { button('Check the kit').click(); });
+    expect(host.querySelector('[data-kit-line="CON-010"]')!.textContent).toContain('CON-011 has 0');
+    expect(host.textContent).toContain('1 line is short');
+    expect((button('Book out for 2') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('a kit picked for another quantity blocks the book-out until other picks are chosen', async () => {
+    kits = [{ id: 32, name: 'NCU05 x10', buildQty: 10 }];
+    await openBuild();
+    await act(async () => { button('Check the kit').click(); });
+    expect(host.querySelector('[data-testid="kit-qty-mismatch"]')!.textContent).toContain('picked for 10, the build is for 2');
+    expect((button('Book out for 2') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('with no saved kit, the picks open in P&P Kit Booking in this browser are used', async () => {
+    localStorage.setItem('kitBooking:perProjectState:v1', JSON.stringify({ 60: { allocations: { 'CON-010': [{ allocatedCode: 'CON-012', qty: 2 }] }, dnf: ['CAP-024'] } }));
+    await openBuild();
+    await act(async () => { button('Check the kit').click(); });
+    expect((host.querySelector('select[aria-label="Picks from"]') as HTMLSelectElement).value).toBe('browser');
+    expect((host.querySelector('input[aria-label="Leave out CAP-024"]') as HTMLInputElement).checked).toBe(true);
+    await act(async () => { button('Book out for 2').click(); });
+    expect(calls.find((c) => c.url === '/api/kit-booking/execute')!.body).toEqual({ projectId: '60', buildQty: 2, buildId: 5, allocations: { 'CON-010': [{ allocatedCode: 'CON-012', qty: 2 }] }, dnf: ['CAP-024'] });
   });
 
   it('a scanned unit label books it in; the count goes back, a packet where ticked', async () => {
