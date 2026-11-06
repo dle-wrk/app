@@ -13,6 +13,13 @@
 //   PUT  /api/returns/:id/lines/:lineId   {outcome, outcomeNote?}: RESTOCK | SCRAP | REPAIR | REPLACE | CREDIT
 //   POST /api/returns/:id/close           {creditNote: boolean}
 //   POST /api/returns/:id/cancel
+//   POST /api/returns/:id/repaired        {lines: [{lineId, charge?, note?}], noteType: DELIVERY | COLLECTION, invoice: boolean}
+//
+// Repairs: closing a return puts its REPAIR lines "in repair". When they are
+// fixed, "repaired" raises a DRAFT delivery or collection note to send them
+// back (the customer's own goods, so it takes nothing from stock) and, for
+// any line with a repair charge (each, excl. VAT; 0 for warranty), a DRAFT
+// invoice to check and send as usual. Lines not picked stay in repair.
 
 import type { Express } from 'express';
 import { pool, query, exec } from './db';
@@ -48,6 +55,35 @@ export async function ensureReturnsSchema(run: (sql: string) => Promise<void> = 
     outcome TEXT CHECK (outcome IN ('RESTOCK', 'SCRAP', 'REPAIR', 'REPLACE', 'CREDIT')),
     outcome_note TEXT
   )`);
+  await run(`ALTER TABLE customer_return_lines
+    ADD COLUMN IF NOT EXISTS repair_status TEXT CHECK (repair_status IN ('IN_REPAIR', 'REPAIRED')),
+    ADD COLUMN IF NOT EXISTS repair_charge NUMERIC(14,2),
+    ADD COLUMN IF NOT EXISTS repair_note TEXT,
+    ADD COLUMN IF NOT EXISTS repaired_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS repair_invoice_id INTEGER,
+    ADD COLUMN IF NOT EXISTS repair_dispatch_id INTEGER`);
+}
+
+/** The invoice and delivery-note wording for a repaired line. */
+export function repairDescription(l: { description?: string | null; part_number?: string | null; serial_numbers?: string | null }): string {
+  return `Repair: ${l.description || l.part_number || 'returned item'}${l.serial_numbers ? ` (S/N ${l.serial_numbers})` : ''}`;
+}
+
+/** Checks the lines picked as repaired against the return's lines. */
+export function repairPlan(lines: any[], picks: Array<{ lineId: any; charge?: any; note?: any }>) {
+  if (!picks.length) throw fail(400, 'Choose what has been repaired.');
+  const seen = new Set<number>();
+  return picks.map((p) => {
+    const id = Number(p.lineId);
+    const line = lines.find((l) => l.id === id);
+    if (!line) throw fail(404, 'Line not found.');
+    if (seen.has(id)) throw fail(400, 'A line is picked twice.');
+    seen.add(id);
+    if (line.repair_status !== 'IN_REPAIR') throw fail(409, `${line.part_number || line.description} isn't waiting for repair.`);
+    const charge = p.charge === '' || p.charge == null ? 0 : Number(p.charge);
+    if (!Number.isFinite(charge) || charge < 0) throw fail(400, "A repair charge can't be negative.");
+    return { line, charge: Math.round(charge * 100) / 100, note: String(p.note ?? '').trim() || null };
+  });
 }
 
 const httpError = (res: any, err: any) => res.status(err.status || 500).json({ error: err.message });
@@ -59,7 +95,10 @@ async function loadReturn(db: Db, id: number) {
     `SELECT r.*, c.client_name, i.invoice_number, cn.credit_note_number FROM customer_returns r LEFT JOIN clients c ON c.id = r.client_id
        LEFT JOIN invoices i ON i.id = r.invoice_id LEFT JOIN credit_notes cn ON cn.id = r.credit_note_id WHERE r.id = $1`, [id]);
   if (!r) return null;
-  const { rows: lines } = await db.query(`SELECT * FROM customer_return_lines WHERE return_id = $1 ORDER BY id`, [id]);
+  const { rows: lines } = await db.query(
+    `SELECT l.*, ri.invoice_number AS repair_invoice_number, rd.note_number AS repair_dispatch_number, rd.note_type AS repair_dispatch_type
+       FROM customer_return_lines l LEFT JOIN invoices ri ON ri.id = l.repair_invoice_id LEFT JOIN dispatch_notes rd ON rd.id = l.repair_dispatch_id
+      WHERE l.return_id = $1 ORDER BY l.id`, [id]);
   return { ...r, lines };
 }
 
@@ -101,17 +140,79 @@ export async function closeReturn(client: Db, id: number, who: string, withCredi
     creditNote = { id: cn.id, number };
   }
   await client.query(`UPDATE customer_returns SET status = 'CLOSED', closed_at = now(), closed_by = $2, credit_note_id = $3 WHERE id = $1`, [id, who, creditNote?.id ?? null]);
+  const { rowCount: inRepair } = await client.query(`UPDATE customer_return_lines SET repair_status = 'IN_REPAIR' WHERE return_id = $1 AND outcome = 'REPAIR'`, [id]);
   await client.query(
     `INSERT INTO user_activity_logs (user_email, action, entity_type, entity_id, details, status) VALUES ((SELECT email FROM users WHERE email = $1), 'CLOSE_RETURN', 'Return', $2, $3, 'SUCCESS')`,
     [who, r.number, JSON.stringify({ restocked, creditNote: creditNote?.number ?? null, by: who })]);
-  return { number: r.number as string, restocked, creditNote };
+  return { number: r.number as string, restocked, creditNote, inRepair: inRepair ?? 0 };
+}
+
+/** Repaired lines go back: a draft delivery/collection note, and a draft invoice for any charge. In the caller's transaction. */
+export async function sendRepairsBack(client: Db, id: number, who: string, body: any) {
+  const r = await loadReturn(client, id);
+  if (!r) throw fail(404, 'Return not found.');
+  if (r.status !== 'CLOSED') throw fail(409, 'Close the return first; its repair lines then wait here until they are fixed.');
+  const noteType = body?.noteType === 'COLLECTION' ? 'COLLECTION' : 'DELIVERY';
+  const picked = repairPlan(r.lines, Array.isArray(body?.lines) ? body.lines : []);
+  const { rows: [c] } = await client.query(`SELECT client_name, contact_name, address, payment_terms_days FROM clients WHERE id = $1`, [r.client_id]);
+  const { rows: [src] } = r.invoice_id ? await client.query(`SELECT currency FROM invoices WHERE id = $1`, [r.invoice_id]) : { rows: [] as any[] };
+  const notes = picked.filter((p) => p.note).map((p) => `${p.line.part_number || p.line.description}: ${p.note}`);
+  const today = new Date().toISOString().slice(0, 10);
+
+  let invoice: { id: number; number: string } | null = null;
+  const charged = picked.filter((p) => p.charge > 0);
+  if (body?.invoice !== false && charged.length) {
+    const { rows: [def] } = await client.query(`SELECT id FROM tax_rates WHERE is_default ORDER BY id LIMIT 1`);
+    const computed = await Promise.all(charged.map(async (p) => {
+      const taxRateId = p.line.tax_rate_id ?? def?.id ?? null;
+      const taxPct = await resolveTaxPercent(taxRateId);
+      return { p, taxRateId, ...computeLineTotals({ quantity: Number(p.line.quantity), unitPrice: p.charge, taxRatePercent: taxPct, taxInclusive: false } as any) };
+    }));
+    const { subtotal, taxTotal, total } = computeDocumentTotals(computed, 0);
+    const number = await nextDocNumber(client as any, 'INV', 'invoice_seq');
+    const terms = c?.payment_terms_days != null ? Number(c.payment_terms_days) : null;
+    const due = terms != null ? new Date(Date.now() + terms * 86_400_000).toISOString().slice(0, 10) : null;
+    const { rows: [inv] } = await client.query(
+      `INSERT INTO invoices (invoice_number, client_id, invoice_date, due_date, status, currency, subtotal, tax_total, discount_total, total, balance_due, notes)
+       VALUES ($1, $2, $3, $4, 'DRAFT', $5, $6, $7, 0, $8, $8, $9) RETURNING id`,
+      [number, r.client_id, today, due, src?.currency || 'ZAR', subtotal, taxTotal, total, [`Repair of return ${r.number}${r.invoice_number ? ` (from ${r.invoice_number})` : ''}.`, ...notes].join('\n')]);
+    for (const x of computed) {
+      await client.query(
+        `INSERT INTO invoice_items (invoice_id, part_number, description, quantity, unit_price, tax_rate_id, tax_amount, line_total, deduct_stock, tax_inclusive)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, false)`,
+        [inv.id, x.p.line.part_number, repairDescription(x.p.line), x.p.line.quantity, x.p.charge, x.taxRateId, x.taxAmount, x.lineTotal]);
+    }
+    invoice = { id: inv.id, number };
+  }
+
+  const isDelivery = noteType === 'DELIVERY';
+  const noteNumber = await nextDocNumber(client as any, isDelivery ? 'DN' : 'CN', isDelivery ? 'dispatch_delivery_seq' : 'dispatch_collection_seq');
+  const { rows: [dn] } = await client.query(
+    `INSERT INTO dispatch_notes (note_number, note_type, client_id, client_order_id, invoice_id, note_date, scheduled_date, status, contact_person, address, carrier, reference, notes)
+     VALUES ($1, $2, $3, NULL, $4, $5, NULL, 'DRAFT', $6, $7, NULL, $8, $9) RETURNING id`,
+    [noteNumber, noteType, r.client_id, invoice?.id ?? null, today, c?.contact_name || null, c?.address || null, r.number,
+      [`Repaired under return ${r.number}: the customer's own goods going back${isDelivery ? '' : ', for them to collect'}.`, ...notes].join('\n')]);
+  for (const p of picked) {
+    await client.query(
+      `INSERT INTO dispatch_note_items (dispatch_note_id, part_number, description, quantity, serial_numbers, deduct_stock) VALUES ($1, $2, $3, $4, $5, false)`,
+      [dn.id, p.line.part_number, repairDescription(p.line), p.line.quantity, p.line.serial_numbers]);
+    await client.query(
+      `UPDATE customer_return_lines SET repair_status = 'REPAIRED', repair_charge = $2, repair_note = $3, repaired_at = now(), repair_invoice_id = $4, repair_dispatch_id = $5 WHERE id = $1`,
+      [p.line.id, p.charge, p.note, p.charge > 0 ? invoice?.id ?? null : null, dn.id]);
+  }
+  const dispatch = { id: dn.id as number, number: noteNumber, type: noteType };
+  await client.query(
+    `INSERT INTO user_activity_logs (user_email, action, entity_type, entity_id, details, status) VALUES ((SELECT email FROM users WHERE email = $1), 'RETURN_REPAIRED', 'Return', $2, $3, 'SUCCESS')`,
+    [who, r.number, JSON.stringify({ lines: picked.map((p) => ({ part: p.line.part_number, qty: Number(p.line.quantity), charge: p.charge })), invoice: invoice?.number ?? null, dispatch: noteNumber, by: who })]);
+  return { number: r.number as string, repaired: picked.length, invoice, dispatch };
 }
 
 export function registerReturnsRoutes(app: Express): void {
   app.get('/api/returns', async (_req, res) => {
     try {
       const { rows } = await query(`SELECT r.*, c.client_name, i.invoice_number, cn.credit_note_number,
-          (SELECT COUNT(*)::int FROM customer_return_lines l WHERE l.return_id = r.id) AS lines
+          (SELECT COUNT(*)::int FROM customer_return_lines l WHERE l.return_id = r.id) AS lines,
+          (SELECT COUNT(*)::int FROM customer_return_lines l WHERE l.return_id = r.id AND l.repair_status = 'IN_REPAIR') AS in_repair
         FROM customer_returns r LEFT JOIN clients c ON c.id = r.client_id LEFT JOIN invoices i ON i.id = r.invoice_id
         LEFT JOIN credit_notes cn ON cn.id = r.credit_note_id ORDER BY r.id DESC LIMIT 300`);
       res.json(rows);
@@ -186,6 +287,20 @@ export function registerReturnsRoutes(app: Express): void {
       await client.query('BEGIN');
       await client.query(`SELECT 1 FROM customer_returns WHERE id = $1 FOR UPDATE`, [parseInt(req.params.id)]);
       const out = await closeReturn(client, parseInt(req.params.id), req.user?.email ?? 'unknown', req.body?.creditNote !== false);
+      await client.query('COMMIT');
+      res.json(out);
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      httpError(res, err);
+    } finally { client.release(); }
+  });
+
+  app.post('/api/returns/:id/repaired', async (req: any, res) => {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(`SELECT 1 FROM customer_returns WHERE id = $1 FOR UPDATE`, [parseInt(req.params.id)]);
+      const out = await sendRepairsBack(client, parseInt(req.params.id), req.user?.email ?? 'unknown', req.body);
       await client.query('COMMIT');
       res.json(out);
     } catch (err) {
