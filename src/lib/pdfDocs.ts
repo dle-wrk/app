@@ -49,7 +49,8 @@ export interface BuildDocPdfInput {
   extraColumnHeader?: string; // e.g. "Serial numbers" for dispatch
 }
 
-export async function buildAndSaveDocPdf(input: BuildDocPdfInput): Promise<string> {
+/** jsPDF + autotable, loaded on demand (a stale tab reloads once to pick up the new chunks). */
+export async function loadPdfLib(): Promise<{ jsPDF: any; autoTable: any }> {
   // Wrap the dynamic imports so a stale-chunk error (old tab holding
   // a bundle whose jspdf chunk hash no longer exists on the server
   // after a redeploy) surfaces as a clear reload prompt instead of the
@@ -76,7 +77,11 @@ export async function buildAndSaveDocPdf(input: BuildDocPdfInput): Promise<strin
     }
     throw err;
   }
-  const autoTable: any = autoTableMod.default || autoTableMod;
+  return { jsPDF, autoTable: autoTableMod.default || autoTableMod };
+}
+
+export async function buildAndSaveDocPdf(input: BuildDocPdfInput): Promise<string> {
+  const { jsPDF, autoTable } = await loadPdfLib();
 
   const currency = input.currency || 'ZAR';
   const money = (n: any) => fmtCurrency(Number(n) || 0, currency);

@@ -1,6 +1,7 @@
 import type { Express } from 'express';
 import { z } from 'zod';
 import { pool, query, queryOne } from './db';
+import { loadCustomerStatement, isIsoDate } from './customerStatement';
 import {
   getAccountIdByCode,
   nextDocNumber,
@@ -2384,100 +2385,42 @@ If a field is unreadable, use null (or [] for lineItems). Never invent values.`;
     }
   });
 
-  // ── Customer statement ───────────────────────────────────────────────
-  // Every invoice + every payment applied against this client, running
-  // balance, aging buckets on any still-open amount. asOf clips the
-  // window: transactions on or before that date only.
+  // ── Customer statements ──────────────────────────────────────────────
+  // Every invoice (with its lines), payment (with what it paid), credit
+  // note and refund for a client, with a running balance and aging on
+  // what is still open. asOf clips the window; from optionally starts it.
+  const statementDates = (req: any) => {
+    const asOf = String(req.query.asOf || new Date().toISOString().slice(0, 10));
+    const from = req.query.from ? String(req.query.from) : null;
+    if (!isIsoDate(asOf) || (from && !isIsoDate(from))) return null;
+    return { asOf, from };
+  };
   app.get('/api/reports/customer-statement', async (req, res) => {
     const clientId = parseInt(String(req.query.clientId || '0'));
     if (!clientId) return res.status(400).json({ error: 'clientId is required' });
-    const asOf = String(req.query.asOf || new Date().toISOString().slice(0, 10));
-    const from = req.query.from ? String(req.query.from) : null;
+    const d = statementDates(req);
+    if (!d) return res.status(400).json({ error: 'asOf and from must be dates (YYYY-MM-DD)' });
     try {
-      const client = await queryOne<any>(`
-        SELECT id, client_name, contact_email, phone, physical_address, opening_balance
-        FROM clients WHERE id = $1
-      `, [clientId]);
-      if (!client) return res.status(404).json({ error: 'client not found' });
+      const s = await loadCustomerStatement(query, clientId, d.asOf, d.from);
+      if (!s) return res.status(404).json({ error: 'client not found' });
+      res.json(s);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
 
-      const dateClause = from
-        ? `BETWEEN '${from}'::date AND '${asOf}'::date`
-        : `<= '${asOf}'::date`;
-
-      // Invoices go on as debits (increase what client owes).
-      const { rows: invoices } = await query<any>(`
-        SELECT id, invoice_number, invoice_date, due_date, total, amount_paid, balance_due, status
-        FROM invoices
-        WHERE client_id = $1 AND invoice_date ${dateClause} AND status <> 'DRAFT' AND status <> 'VOID'
-        ORDER BY invoice_date, id
-      `, [clientId]);
-
-      // Payments received go on as credits (reduce what client owes).
-      const { rows: payments } = await query<any>(`
-        SELECT id, payment_number, payment_date, amount, method, reference
-        FROM payments_received
-        WHERE client_id = $1 AND payment_date ${dateClause}
-        ORDER BY payment_date, id
-      `, [clientId]);
-
-      // Interleave chronologically for a running balance.
-      const events: any[] = [
-        ...invoices.map(i => ({
-          date: i.invoice_date, type: 'INVOICE', docNumber: i.invoice_number,
-          description: `Invoice`,
-          debit: parseFloat(i.total) || 0,
-          credit: 0,
-          dueDate: i.due_date,
-          balanceDue: parseFloat(i.balance_due) || 0,
-          status: i.status,
-        })),
-        ...payments.map(p => ({
-          date: p.payment_date, type: 'PAYMENT', docNumber: p.payment_number,
-          description: `Payment · ${p.method || ''}${p.reference ? ` · ${p.reference}` : ''}`,
-          debit: 0,
-          credit: parseFloat(p.amount) || 0,
-        })),
-      ];
-      events.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : (a.type === 'INVOICE' ? -1 : 1));
-
-      const opening = parseFloat(client.opening_balance) || 0;
-      let running = opening;
-      for (const e of events) { running += e.debit - e.credit; e.runningBalance = r2(running); }
-      const closingBalance = r2(running);
-
-      // Aging matrix on still-open invoices only.
-      const asOfMs = new Date(asOf).getTime();
-      const aging = { current: 0, d30: 0, d60: 0, d90plus: 0, total: 0 };
-      const overdueInvoices: any[] = [];
-      for (const i of invoices) {
-        const open = parseFloat(i.balance_due) || 0;
-        if (open <= 0.005) continue;
-        const due = i.due_date ? new Date(i.due_date).getTime() : new Date(i.invoice_date).getTime();
-        const daysOverdue = Math.floor((asOfMs - due) / (1000 * 60 * 60 * 24));
-        if (daysOverdue <= 0)      aging.current  += open;
-        else if (daysOverdue <= 30) aging.d30     += open;
-        else if (daysOverdue <= 60) aging.d60     += open;
-        else                        aging.d90plus += open;
-        aging.total += open;
-        if (daysOverdue > 0) overdueInvoices.push({
-          number: i.invoice_number, date: i.invoice_date, dueDate: i.due_date,
-          daysOverdue, amount: open,
-        });
+  // Every customer with anything on their statement (or an opening balance).
+  app.get('/api/reports/customer-statements', async (req, res) => {
+    const d = statementDates(req);
+    if (!d) return res.status(400).json({ error: 'asOf and from must be dates (YYYY-MM-DD)' });
+    try {
+      const { rows } = await query<any>(`SELECT id FROM clients ORDER BY client_name, id`);
+      const out = [];
+      for (const r of rows) {
+        const s = await loadCustomerStatement(query, r.id, d.asOf, d.from);
+        if (s && (s.transactions.length || Math.abs(s.openingBalance) > 0.005)) out.push(s);
       }
-      overdueInvoices.sort((a, b) => b.daysOverdue - a.daysOverdue);
-
-      res.json({
-        client: {
-          id: client.id, name: client.client_name,
-          email: client.contact_email, phone: client.phone, address: client.physical_address,
-        },
-        period: { from, asOf },
-        openingBalance: opening,
-        closingBalance,
-        transactions: events,
-        aging: { current: r2(aging.current), d30: r2(aging.d30), d60: r2(aging.d60), d90plus: r2(aging.d90plus), total: r2(aging.total) },
-        overdueInvoices,
-      });
+      res.json(out);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

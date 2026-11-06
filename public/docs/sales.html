@@ -36,14 +36,18 @@
 
             <h3 id="customer-statements">Customer statements</h3>
             <div class="step">
-                <p>On the Customers tab, every row now has a <strong>📄 Statement</strong> button. Click it and a full PDF statement downloads immediately:</p>
+                <p>Download a statement from the <strong>📄</strong> icon on a customer's row, from <strong>Download PDF statement</strong> on the Statement tab of the customer drawer, or for everyone at once with <strong>Download all statements</strong> at the top of the Customers list. The statement shows:</p>
                 <ul>
-                    <li>Interleaves every invoice (debit) and payment received (credit) chronologically with a running balance from opening.</li>
-                    <li>Aging matrix — Current / 1–30 / 31–60 / 61–90 / 90+ — on any still-open amount.</li>
-                    <li>Sorted list of overdue invoices with days-overdue.</li>
-                    <li>Filename: <code>customer-statement-&lt;client-name&gt;-&lt;YYYY-MM-DD&gt;.pdf</code></li>
+                    <li>The customer's details: name, contact, address, email, phone, VAT number and payment terms.</li>
+                    <li>A summary: opening balance, invoiced, payments, credit notes, refunds and the balance due.</li>
+                    <li>Every invoice, payment, credit note and refund in date order, with a running balance from the opening balance.</li>
+                    <li>Under each invoice: its lines (part, description, quantity × price), discount, subtotal, VAT and anything still owing.</li>
+                    <li>Under each payment: its reference and method, and which invoices it paid.</li>
+                    <li>Every note: the invoice's notes and terms, its sales order's notes, its delivery and collection notes, payment notes and credit-note notes and reasons.</li>
+                    <li>Aging of open invoices (Current / 1–30 / 31–60 / 61+ days) and a list of overdue invoices.</li>
                 </ul>
-                <p>Combined with the new credit-limit feature (planned next), this makes end-of-month collections a two-click job.</p>
+                <p>Draft and void invoices and credit notes are left off. <strong>Download all statements</strong> makes one PDF, with each customer starting on a new page; customers with no invoices, payments or opening balance are left out.</p>
+                <p>File names: <code>customer-statement-&lt;client-name&gt;-&lt;YYYY-MM-DD&gt;.pdf</code> for one customer, <code>customer-statements-all-&lt;YYYY-MM-DD&gt;.pdf</code> for everyone.</p>
             </div>
         </div>
 

@@ -1,16 +1,36 @@
 import React, { useMemo, useState } from 'react';
 import { canChange } from '../../lib/changeAccess';
-import { Eye, Trash2, FileText } from 'lucide-react';
+import { Eye, Trash2, FileText, Download, Loader2 } from 'lucide-react';
 import { Client } from '../../types';
 import { ModuleDataProps, Modal, StatusPill, fmtMoney, EmptyState, SectionCard, apiGet } from './shared';
 import { optimisticListDelete } from '../../lib/optimisticUpdate';
 import { confirmDialog } from '../../lib/confirmDialog';
-import { buildAndSaveDocPdf } from '../../lib/pdfDocs';
+import { saveStatementsPdf } from '../../lib/statementPdf';
+import type { CustomerStatement } from '../../lib/customerStatement';
 import { Customer360Modal } from './Customer360Modal';
 
 export const CustomersTab: React.FC<ModuleDataProps> = ({ clients, setClients, clientOrders, invoices, paymentsReceived, triggerToast }) => {
   const [viewing, setViewing] = useState<Client | null>(null);
   const [showNewClientModal, setShowNewClientModal] = useState(false);
+  const [downloadingAll, setDownloadingAll] = useState(false);
+
+  // One PDF with a statement for every customer that has anything on it.
+  const downloadAllStatements = async () => {
+    setDownloadingAll(true);
+    try {
+      const asOf = new Date().toISOString().slice(0, 10);
+      const all = (await apiGet(`/api/reports/customer-statements?asOf=${asOf}`)) as CustomerStatement[];
+      if (!all.length) { triggerToast('No customer has any invoices or payments yet.', 'INFO'); return; }
+      await saveStatementsPdf(all, asOf);
+      const owing = all.reduce((n, s) => n + s.closingBalance, 0);
+      const left = clients.length - all.length;
+      triggerToast(`${all.length} statement${all.length === 1 ? '' : 's'} downloaded, ${fmtMoney(owing)} owing in all.${left > 0 ? ` ${left} customer${left === 1 ? '' : 's'} with no activity left out.` : ''}`);
+    } catch (err: any) {
+      triggerToast(err?.message || 'Failed to generate statements', 'ERROR');
+    } finally {
+      setDownloadingAll(false);
+    }
+  };
 
   const balances = useMemo(() => {
     const map = new Map<number, number>();
@@ -56,13 +76,25 @@ export const CustomersTab: React.FC<ModuleDataProps> = ({ clients, setClients, c
       <SectionCard 
         title="Customers" 
         badge={`${clients.length} customers`}
-        actions={canChange('/api/clients') &&
-          <button
-            onClick={() => setShowNewClientModal(true)}
-            className="px-3 py-1.5 rounded bg-primary text-white text-xs font-bold hover:opacity-90 transition"
-          >
-            + New Customer
-          </button>
+        actions={
+          <div className="flex gap-2">
+            <button
+              onClick={downloadAllStatements}
+              disabled={downloadingAll}
+              className="px-3 py-1.5 rounded border border-primary text-primary text-xs font-bold hover:bg-primary/10 transition flex items-center gap-1.5 disabled:opacity-50"
+              title="One PDF with every customer's statement"
+            >
+              {downloadingAll ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+              Download all statements
+            </button>
+            {canChange('/api/clients') &&
+              <button
+                onClick={() => setShowNewClientModal(true)}
+                className="px-3 py-1.5 rounded bg-primary text-white text-xs font-bold hover:opacity-90 transition"
+              >
+                + New Customer
+              </button>}
+          </div>
         }
       >
         <div className="overflow-x-auto">
@@ -95,32 +127,8 @@ export const CustomersTab: React.FC<ModuleDataProps> = ({ clients, setClients, c
                       onClick={async () => {
                         try {
                           const asOf = new Date().toISOString().slice(0, 10);
-                          // Server bundles invoices + payments + aging in one
-                          // shot so the PDF has the numbers even if the client-
-                          // side lists happen to be stale.
-                          const s: any = await apiGet(`/api/reports/customer-statement?clientId=${c.id}&asOf=${asOf}`);
-                          const lines = s.transactions.map((t: any) => ({
-                            description: `${t.docNumber || ''}  ${t.description}${t.type === 'INVOICE' && t.dueDate ? ` · due ${t.dueDate}` : ''}`.trim(),
-                            quantity: t.type === 'INVOICE' ? 'Invoice' : 'Payment',
-                            unitPrice: t.debit > 0 ? t.debit : (t.credit > 0 ? -t.credit : 0),
-                            lineTotal: t.runningBalance,
-                          }));
-                          const agingBlurb = `Current ${fmtMoney(s.aging.current)}  ·  1-30 ${fmtMoney(s.aging.d30)}  ·  31-60 ${fmtMoney(s.aging.d60)}  ·  90+ ${fmtMoney(s.aging.d90plus)}`;
-                          await buildAndSaveDocPdf({
-                            docType: 'Customer Statement',
-                            docNumber: `${c.clientName.replace(/[^a-zA-Z0-9]+/g, '-')}-${asOf}`,
-                            meta: [
-                              { label: 'Client', value: s.client.name },
-                              { label: 'As of', value: s.period.asOf },
-                              { label: 'Opening', value: fmtMoney(s.openingBalance) },
-                              { label: 'Closing', value: fmtMoney(s.closingBalance) },
-                              { label: 'Contact', value: s.client.email || s.client.phone || '—' },
-                              { label: 'Total open', value: fmtMoney(s.aging.total) },
-                            ],
-                            lines,
-                            totals: { subtotal: s.openingBalance, total: s.closingBalance },
-                            notes: `Aging on open items — ${agingBlurb}.${s.overdueInvoices.length > 0 ? `  ${s.overdueInvoices.length} invoice(s) overdue — oldest ${s.overdueInvoices[0]?.daysOverdue} days.` : ''}`,
-                          });
+                          const s = (await apiGet(`/api/reports/customer-statement?clientId=${c.id}&asOf=${asOf}`)) as CustomerStatement;
+                          await saveStatementsPdf([s], asOf);
                           triggerToast(`Statement downloaded — ${fmtMoney(s.aging.total)} open across ${s.overdueInvoices.length} overdue invoice(s).`);
                         } catch (err: any) {
                           triggerToast(err?.message || 'Failed to generate statement', 'ERROR');

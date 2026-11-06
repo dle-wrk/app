@@ -21,7 +21,8 @@ import { X, Mail, Phone, MapPin, Hash, FileText, Package, DollarSign, TrendingUp
 import { ClientHistory } from './ClientHistory';
 import { Client, ClientOrder, Invoice, PaymentReceived } from '../../types';
 import { StatusPill, fmtMoney, fmtDate, apiGet } from './shared';
-import { buildAndSaveDocPdf } from '../../lib/pdfDocs';
+import { saveStatementsPdf } from '../../lib/statementPdf';
+import type { CustomerStatement } from '../../lib/customerStatement';
 
 type TabKey = 'OVERVIEW' | 'HISTORY' | 'ORDERS' | 'INVOICES' | 'PAYMENTS' | 'CREDITS' | 'DELIVERIES' | 'STATEMENT';
 
@@ -120,29 +121,8 @@ export const Customer360Modal: React.FC<{
     setDownloadingStatement(true);
     try {
       const asOf = new Date().toISOString().slice(0, 10);
-      const s: any = await apiGet(`/api/reports/customer-statement?clientId=${client.id}&asOf=${asOf}`);
-      const lines = s.transactions.map((t: any) => ({
-        description: `${t.docNumber || ''}  ${t.description}${t.type === 'INVOICE' && t.dueDate ? ` · due ${t.dueDate}` : ''}`.trim(),
-        quantity: t.type === 'INVOICE' ? 'Invoice' : 'Payment',
-        unitPrice: t.debit > 0 ? t.debit : (t.credit > 0 ? -t.credit : 0),
-        lineTotal: t.runningBalance,
-      }));
-      const agingBlurb = `Current ${fmtMoney(s.aging.current)}  ·  1-30 ${fmtMoney(s.aging.d30)}  ·  31-60 ${fmtMoney(s.aging.d60)}  ·  90+ ${fmtMoney(s.aging.d90plus)}`;
-      await buildAndSaveDocPdf({
-        docType: 'Customer Statement',
-        docNumber: `${client.clientName.replace(/[^a-zA-Z0-9]+/g, '-')}-${asOf}`,
-        meta: [
-          { label: 'Client', value: s.client.name },
-          { label: 'As of', value: s.period.asOf },
-          { label: 'Opening', value: fmtMoney(s.openingBalance) },
-          { label: 'Closing', value: fmtMoney(s.closingBalance) },
-          { label: 'Contact', value: s.client.email || s.client.phone || '—' },
-          { label: 'Total open', value: fmtMoney(s.aging.total) },
-        ],
-        lines,
-        totals: { subtotal: s.openingBalance, total: s.closingBalance },
-        notes: `Aging on open items — ${agingBlurb}.${s.overdueInvoices.length > 0 ? `  ${s.overdueInvoices.length} invoice(s) overdue — oldest ${s.overdueInvoices[0]?.daysOverdue} days.` : ''}`,
-      });
+      const s = (await apiGet(`/api/reports/customer-statement?clientId=${client.id}&asOf=${asOf}`)) as CustomerStatement;
+      await saveStatementsPdf([s], asOf);
       triggerToast(`Statement downloaded — ${fmtMoney(s.aging.total)} open.`);
     } catch (err: any) {
       triggerToast(err?.message || 'Failed to generate statement', 'ERROR');
@@ -303,7 +283,7 @@ export const Customer360Modal: React.FC<{
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div className="text-xs text-outline">
-                  Full statement combines every invoice (debit) and payment (credit) into a running balance PDF with an aging matrix.
+                  The PDF lists every invoice (with its lines, VAT and notes), payment (and what it paid), credit note and refund, with a running balance, aging and overdue invoices.
                 </div>
                 <button
                   onClick={downloadStatement}

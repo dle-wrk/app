@@ -782,7 +782,8 @@
                         <tr><td><span class="m m-get">GET</span></td><td>/api/reports/ar-aging</td><td>Customer balances by age at <code>asOf</code>.</td></tr>
                         <tr><td><span class="m m-get">GET</span></td><td>/api/reports/ap-aging</td><td>Supplier balances by age at <code>asOf</code>.</td></tr>
                         <tr><td><span class="m m-get">GET</span></td><td>/api/reports/vat201</td><td>VAT201 computation for <code>from</code>…<code>to</code>.</td></tr>
-                        <tr><td><span class="m m-get">GET</span></td><td>/api/reports/customer-statement</td><td>Statement for one customer. <code>clientId</code>, optional <code>asOf</code>, <code>from</code>.</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/reports/customer-statement</td><td>Statement for one customer: invoices with lines and notes, payments and what they paid, credit notes, refunds, running balance, aging. <code>clientId</code>, optional <code>asOf</code>, <code>from</code> (YYYY-MM-DD).</td></tr>
+                        <tr><td><span class="m m-get">GET</span></td><td>/api/reports/customer-statements</td><td>The same statement for every customer with any activity or an opening balance. Optional <code>asOf</code>, <code>from</code>.</td></tr>
                     </tbody>
                 </table>
             </div>
