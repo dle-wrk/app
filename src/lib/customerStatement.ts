@@ -32,6 +32,8 @@ export interface StatementTxn {
   lines?: StatementLine[];
   appliedTo?: Array<{ docNumber: string; amount: number }>;
   reference?: string | null;
+  /** A draft or void document: listed, but this amount is not owed and not in the balance. */
+  notCounted?: number;
   /** Every note on this document and the ones behind it (sales order, delivery notes). */
   notes?: string[];
 }
@@ -58,6 +60,8 @@ export interface CustomerStatement {
   sections?: StatementSections;
 }
 
+const notCounted = (status: any) => status === 'DRAFT' || status === 'VOID';
+
 const ORDER: Record<StatementTxn['type'], number> = { INVOICE: 0, REFUND: 1, CREDIT_NOTE: 2, PAYMENT: 3 };
 
 export function assembleStatement(input: {
@@ -65,24 +69,30 @@ export function assembleStatement(input: {
   invoices: any[]; payments: any[]; creditNotes: any[];
 }): CustomerStatement {
   const events: StatementTxn[] = [];
-  for (const i of input.invoices) events.push({
-    date: i.date, type: 'INVOICE', docNumber: i.number, description: 'Invoice',
-    debit: num(i.total), credit: 0, runningBalance: 0, dueDate: i.dueDate ?? null,
-    status: i.status, balanceDue: num(i.balanceDue), lines: i.lines ?? [],
-    subtotal: num(i.subtotal), tax: num(i.tax), discount: num(i.discount), notes: i.notes ?? [],
-  });
+  for (const i of input.invoices) {
+    const out = notCounted(i.status);
+    events.push({
+      date: i.date, type: 'INVOICE', docNumber: i.number, description: 'Invoice',
+      debit: out ? 0 : num(i.total), credit: 0, runningBalance: 0, dueDate: i.dueDate ?? null,
+      status: i.status, balanceDue: out ? 0 : num(i.balanceDue), lines: i.lines ?? [],
+      subtotal: num(i.subtotal), tax: num(i.tax), discount: num(i.discount), notes: i.notes ?? [],
+      ...(out ? { notCounted: num(i.total) } : {}),
+    });
+  }
   for (const p of input.payments) events.push({
     date: p.date, type: 'PAYMENT', docNumber: p.number,
     description: ['Payment', p.method].filter(Boolean).join(' · '),
     debit: 0, credit: num(p.amount), runningBalance: 0, reference: p.reference ?? null, appliedTo: p.appliedTo ?? [], notes: p.notes ?? [],
   });
   for (const c of input.creditNotes) {
+    const out = notCounted(c.status);
     events.push({
       date: c.date, type: 'CREDIT_NOTE', docNumber: c.number,
       description: ['Credit note', c.invoiceNumber ? `against ${c.invoiceNumber}` : '', c.reason].filter(Boolean).join(' · '),
-      debit: 0, credit: num(c.total), runningBalance: 0, status: c.status, lines: c.lines ?? [], notes: c.notes ?? [],
+      debit: 0, credit: out ? 0 : num(c.total), runningBalance: 0, status: c.status, lines: c.lines ?? [], notes: c.notes ?? [],
+      ...(out ? { notCounted: num(c.total) } : {}),
     });
-    if (num(c.refunded) > 0) events.push({
+    if (!out && num(c.refunded) > 0) events.push({
       date: c.date, type: 'REFUND', docNumber: c.number, description: 'Refund of credit note',
       debit: num(c.refunded), credit: 0, runningBalance: 0,
     });
@@ -96,6 +106,7 @@ export function assembleStatement(input: {
   const aging = { current: 0, d30: 0, d60: 0, d90plus: 0, total: 0 };
   const overdueInvoices: CustomerStatement['overdueInvoices'] = [];
   for (const i of input.invoices) {
+    if (notCounted(i.status)) continue;
     const open = num(i.balanceDue);
     if (open <= 0.005) continue;
     const days = Math.floor((asOfMs - Date.parse(i.dueDate || i.date)) / 86_400_000);
@@ -137,7 +148,7 @@ export async function loadCustomerStatement(q: Q, clientId: number, asOf: string
            subtotal, tax_total AS tax, discount_total AS discount, total, balance_due AS "balanceDue", status,
            notes AS note_text, terms AS terms_text, client_order_id
     FROM invoices
-    WHERE client_id = $1 AND ${window('invoice_date')} AND status NOT IN ('DRAFT', 'VOID')
+    WHERE client_id = $1 AND ${window('invoice_date')}
     ORDER BY invoice_date, id`, params)).rows;
   const payments = (await q(`
     SELECT id, payment_number AS number, to_char(payment_date, 'YYYY-MM-DD') AS date, amount, method, reference, notes AS note_text
@@ -148,7 +159,7 @@ export async function loadCustomerStatement(q: Q, clientId: number, asOf: string
     SELECT cn.id, cn.credit_note_number AS number, to_char(cn.credit_date, 'YYYY-MM-DD') AS date, cn.total, cn.amount_refunded AS refunded,
            cn.reason, cn.status, cn.notes AS note_text, i.invoice_number AS "invoiceNumber"
     FROM credit_notes cn LEFT JOIN invoices i ON i.id = cn.invoice_id
-    WHERE cn.client_id = $1 AND ${window('cn.credit_date')} AND cn.status NOT IN ('DRAFT', 'VOID')
+    WHERE cn.client_id = $1 AND ${window('cn.credit_date')}
     ORDER BY cn.credit_date, cn.id`, params)).rows;
 
   const ids = (rows: any[]) => rows.map((r) => r.id);

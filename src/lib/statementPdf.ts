@@ -28,9 +28,10 @@ export function statementRows(s: CustomerStatement, closingLabel = 'Closing bala
   // Detail rows span Details..Credit in the PDF, so any amount goes in the text, not under Debit.
   const detail = (text: string, amount = ''): StatementRow => ({ cells: ['', '', amount ? `${text}: ${amount}` : text, '', '', '', ''], kind: 'detail' });
   for (const t of s.transactions) {
-    const details = [TYPE_LABEL[t.type], t.type === 'INVOICE' && t.status ? t.status : '', t.type === 'CREDIT_NOTE' ? t.description.replace(/^Credit note( · )?/, '') : '', t.reference ? `Ref ${t.reference}` : '', t.type === 'PAYMENT' ? t.description.replace(/^Payment( · )?/, '') : '']
+    const details = [TYPE_LABEL[t.type], t.type === 'INVOICE' && t.status ? t.status : '', t.type === 'CREDIT_NOTE' && t.notCounted != null ? t.status ?? '' : '', t.type === 'CREDIT_NOTE' ? t.description.replace(/^Credit note( · )?/, '') : '', t.reference ? `Ref ${t.reference}` : '', t.type === 'PAYMENT' ? t.description.replace(/^Payment( · )?/, '') : '']
       .filter(Boolean).join(' · ');
     rows.push({ cells: [t.date, t.docNumber, details, t.dueDate ?? '', t.debit ? money(t.debit) : '', t.credit ? money(t.credit) : '', money(t.runningBalance)] });
+    if (t.notCounted != null) rows.push(detail(t.status === 'VOID' ? 'Voided: not owed and not in the balance' : 'Draft, not issued yet: not owed and not in the balance', money(t.notCounted)));
     for (const l of t.lines ?? []) {
       rows.push(detail(`${l.partNumber ? `${l.partNumber}  ` : ''}${l.description}  ·  ${l.quantity} × ${money(l.unitPrice)} = ${money(l.lineTotal)}`));
     }
@@ -43,7 +44,14 @@ export function statementRows(s: CustomerStatement, closingLabel = 'Closing bala
     for (const a of t.appliedTo ?? []) rows.push(detail(`Paid towards ${a.docNumber}`, money(a.amount)));
     for (const n of t.notes ?? []) rows.push(detail(`Note: ${n}`));
   }
-  if (!s.transactions.length) rows.push(detail('No invoices, payments or credit notes yet'));
+  if (!s.transactions.length) {
+    const x = s.sections;
+    const elsewhere = x ? [
+      x.orders.length ? `${x.orders.length} order${x.orders.length === 1 ? '' : 's'} or quote${x.orders.length === 1 ? '' : 's'}` : '',
+      x.deliveries.length ? `${x.deliveries.length} deliver${x.deliveries.length === 1 ? 'y or collection' : 'ies or collections'}` : '',
+    ].filter(Boolean) : [];
+    rows.push(detail(`No invoices, payments or credit notes${elsewhere.length ? `; ${elsewhere.join(' and ')} further down` : ''}`));
+  }
   rows.push({ cells: [s.period.asOf, '', closingLabel, '', '', '', money(s.closingBalance)], kind: 'edge' });
   return rows;
 }
@@ -55,8 +63,9 @@ export function allCustomerRows(statements: CustomerStatement[]): StatementRow[]
   const sorted = [...statements].sort(byName);
   const rows: StatementRow[] = [];
   for (const s of sorted) {
-    rows.push({ cells: ['', '', s.client.name, '', '', '', ''], kind: 'group' });
-    rows.push(...statementRows(s, `Closing balance: ${s.client.name}`));
+    const own = statementRows(s, `Closing balance: ${s.client.name}`);
+    // The customer's name rides on their opening-balance row, so it can't be left alone at the foot of a page.
+    rows.push({ cells: [own[0].cells[0], '', s.client.name, '', '', '', own[0].cells[6]], kind: 'group' }, ...own.slice(1));
   }
   const sum = (k: 'debit' | 'credit') => r2(sorted.reduce((n, s) => n + s.transactions.reduce((m, t) => m + t[k], 0), 0));
   rows.push({ cells: ['', '', `All customers (${sorted.length})`, '', money(sum('debit')), money(sum('credit')), money(r2(sorted.reduce((n, s) => n + s.closingBalance, 0)))], kind: 'total' });
@@ -219,7 +228,7 @@ export async function saveStatementsPdf(statements: CustomerStatement[], asOf: s
     head: [['Date', 'Document', 'Details', 'Due', 'Debit', 'Credit', 'Balance']],
     body: rows.map((r) =>
       r.kind === 'detail' ? ['', '', { content: r.cells[2], colSpan: 4 }, '']
-      : r.kind === 'group' ? [{ content: r.cells[2], colSpan: 7 }]
+      : r.kind === 'group' ? [{ content: `${r.cells[2]}   ·   opening balance ${r.cells[0]}`, colSpan: 6 }, r.cells[6]]
       : r.cells),
     styles: { fontSize: 8, cellPadding: 1.8, textColor: 20 },
     headStyles: { fillColor: [30, 30, 30], textColor: 255, fontStyle: 'bold', fontSize: 8 },
@@ -231,7 +240,7 @@ export async function saveStatementsPdf(statements: CustomerStatement[], asOf: s
       if (h.section !== 'body') return;
       const r = rows[h.row.index];
       if (r?.kind === 'detail') { h.cell.styles.fontSize = 7; h.cell.styles.textColor = 110; h.cell.styles.fontStyle = 'normal'; h.cell.styles.halign = 'left'; if (h.column.index === 2) h.cell.styles.cellPadding = { top: 1, bottom: 1, left: 6, right: 1.8 }; }
-      else if (r?.kind === 'group') { h.cell.styles.fillColor = [253, 236, 214]; h.cell.styles.fontStyle = 'bold'; h.cell.styles.fontSize = 10; h.cell.styles.font = 'helvetica'; h.cell.styles.halign = 'left'; h.cell.styles.textColor = [150, 80, 10]; }
+      else if (r?.kind === 'group') { h.cell.styles.fillColor = [253, 236, 214]; h.cell.styles.fontStyle = 'bold'; h.cell.styles.fontSize = 10; h.cell.styles.font = 'helvetica'; h.cell.styles.halign = h.column.index === 0 ? 'left' : 'right'; h.cell.styles.textColor = [150, 80, 10]; }
       else if (r?.kind === 'edge') { h.cell.styles.fillColor = [245, 245, 245]; h.cell.styles.fontStyle = 'bold'; }
       else if (r?.kind === 'total') { h.cell.styles.fillColor = [30, 30, 30]; h.cell.styles.textColor = 255; h.cell.styles.fontStyle = 'bold'; }
     },

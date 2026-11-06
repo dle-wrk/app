@@ -76,7 +76,10 @@ describe('customer statement', () => {
     const quiet = { ...base(), client: { ...client, id: 3, name: 'Bokpoort' }, transactions: [], openingBalance: 0, closingBalance: 0, overdueInvoices: [] };
     const rows = allCustomerRows([base(), quiet]);
     const at = rows.findIndex((r) => r.kind === 'group' && r.cells[2] === 'Bokpoort');
-    expect(rows.slice(at, at + 4).map((r) => r.cells[2])).toEqual(['Bokpoort', 'Opening balance', 'No invoices, payments or credit notes yet', 'Closing balance: Bokpoort']);
+    expect(rows.slice(at, at + 3).map((r) => r.cells[2])).toEqual(['Bokpoort', 'No invoices, payments or credit notes', 'Closing balance: Bokpoort']);
+    expect(rows[at].cells[6]).toBe('R0.00');
+    const withDeliveries: any = { ...quiet, sections: { overview: {}, orders: [], invoices: [], payments: [], creditNotes: [], history: [], deliveries: [{}, {}] } };
+    expect(statementRows(withDeliveries).map((r) => r.cells[2])).toContain('No invoices, payments or credit notes; 2 deliveries or collections further down');
     expect(rows.at(-1)!.cells[2]).toBe('All customers (2)');
   });
 
@@ -104,6 +107,28 @@ describe('customer statement', () => {
     expect(all[0].rows.map((r) => r.cells[0])).toEqual(['Bokpoort', 'Lumax Energy']);
     expect(all[1].rows[0].cells[0]).toBe('Lumax Energy');
     expect(all[1].right).toEqual([5]);
+  });
+
+  it('lists void and draft invoices without counting them', () => {
+    const s = assembleStatement({
+      client, asOf: '2026-11-06', from: null, openingBalance: 0,
+      invoices: [
+        { number: 'INV-5', date: '2026-08-18', dueDate: '2026-09-17', total: '70781.47', balanceDue: '0', status: 'VOID', lines: [] },
+        { number: 'INV-8', date: '2026-10-01', dueDate: null, total: '5385.13', balanceDue: '5385.13', status: 'DRAFT', lines: [] },
+      ],
+      payments: [], creditNotes: [{ number: 'CN-9', date: '2026-10-02', total: '50', refunded: '50', status: 'VOID', lines: [] }],
+    });
+    expect(s.transactions.map((t) => [t.docNumber, t.type, t.debit, t.credit, t.notCounted])).toEqual([
+      ['INV-5', 'INVOICE', 0, 0, 70781.47], ['INV-8', 'INVOICE', 0, 0, 5385.13], ['CN-9', 'CREDIT_NOTE', 0, 0, 50],
+    ]);
+    expect(s.closingBalance).toBe(0);
+    expect(s.aging.total).toBe(0);
+    expect(s.overdueInvoices).toEqual([]);
+    const rows = statementRows(s).map((r) => r.cells[2]);
+    expect(rows).toContain('Invoice · VOID');
+    expect(rows).toContain('Voided: not owed and not in the balance: R70 781.47');
+    expect(rows).toContain('Draft, not issued yet: not owed and not in the balance: R5 385.13');
+    expect(rows).not.toContain('No invoices, payments or credit notes');
   });
 
   it('only takes real dates', () => {
