@@ -20,6 +20,7 @@ import { z } from 'zod';
 import { exec, pool, query, queryOne } from './db';
 import { computeDocumentTotals, computeLineTotals, nextDocNumber, reverseJournalEntry, rewriteReservations } from './bookkeeping-db';
 import { resolveTaxPercent, returnInvoiceStock } from './bookkeeping-routes';
+import { loadClientHistory } from './clientHistory';
 import { LIKELIHOODS, NOTE_KINDS, WIN_TARGETS, sortHistory, type HistoryEntry, type PotentialLine } from './potentialOrders';
 
 export async function ensurePotentialOrdersSchema(run: (sql: string) => Promise<void> = exec): Promise<void> {
@@ -347,37 +348,8 @@ export function registerPotentialOrdersRoutes(app: Express): void {
   });
 
   app.get('/api/clients/:id/history', async (req, res) => {
-    const id = Number(req.params.id);
     try {
-      const day = (d: any) => (d ? new Date(d).toISOString() : '');
-      const out: HistoryEntry[] = [];
-      const base = { by: null, eventId: null, followUpDate: null, followUpDone: false } as const;
-      const [orders, invoices, payments, credits, deliveries, pots, events] = await Promise.all([
-        query<any>(`SELECT order_number, order_date, created_at, status, total, currency FROM client_orders WHERE client_id = $1`, [id]),
-        query<any>(`SELECT invoice_number, invoice_date, created_at, status, total, currency, balance_due FROM invoices WHERE client_id = $1`, [id]),
-        query<any>(`SELECT payment_number, payment_date, created_at, amount, method FROM payments_received WHERE client_id = $1`, [id]),
-        query<any>(`SELECT credit_note_number, credit_date, created_at, status, total, currency, reason FROM credit_notes WHERE client_id = $1`, [id]),
-        query<any>(`SELECT note_number, note_type, note_date, created_at, status FROM dispatch_notes WHERE client_id = $1`, [id]),
-        query<any>(`SELECT number, created_at, status, total, currency, reason, likelihood_pct, expected_date FROM potential_orders WHERE client_id = $1`, [id]),
-        query<any>(`SELECT * FROM client_events WHERE client_id = $1`, [id]),
-      ]);
-      for (const o of orders.rows) {
-        const quote = o.status === 'QUOTATION' || String(o.order_number).startsWith('QUO-');
-        out.push({ ...base, at: day(o.created_at || o.order_date), kind: quote ? 'quotation' : 'sales_order', title: `${quote ? 'Quotation' : 'Sales order'} ${o.order_number}`, detail: `Now ${String(o.status).toLowerCase().replace(/_/g, ' ')}`, docNumber: o.order_number, amount: Number(o.total), currency: o.currency });
-      }
-      for (const i of invoices.rows) {
-        out.push({ ...base, at: day(i.created_at || i.invoice_date), kind: 'invoice', title: `Invoice ${i.invoice_number}`, detail: `Now ${String(i.status).toLowerCase()}${Number(i.balance_due) > 0 && i.status !== 'VOID' ? `, ${Number(i.balance_due).toFixed(2)} due` : ''}`, docNumber: i.invoice_number, amount: Number(i.total), currency: i.currency });
-      }
-      for (const p of payments.rows) out.push({ ...base, at: day(p.created_at || p.payment_date), kind: 'payment', title: `Payment ${p.payment_number}`, detail: p.method || null, docNumber: p.payment_number, amount: Number(p.amount), currency: null });
-      for (const c of credits.rows) out.push({ ...base, at: day(c.created_at || c.credit_date), kind: 'credit_note', title: `Credit note ${c.credit_note_number}`, detail: [String(c.status).toLowerCase(), c.reason].filter(Boolean).join(': '), docNumber: c.credit_note_number, amount: Number(c.total), currency: c.currency });
-      for (const d of deliveries.rows) out.push({ ...base, at: day(d.created_at || d.note_date), kind: 'delivery', title: `${d.note_type === 'COLLECTION' ? 'Collection' : 'Delivery'} ${d.note_number}`, detail: `Now ${String(d.status).toLowerCase()}`, docNumber: d.note_number, amount: null, currency: null });
-      for (const p of pots.rows) out.push({ ...base, at: day(p.created_at), kind: 'potential', title: `Potential Order ${p.number}`, detail: [String(p.status).toLowerCase(), p.likelihood_pct != null ? `${p.likelihood_pct}% likely` : null, p.reason].filter(Boolean).join(' · '), docNumber: p.number, amount: Number(p.total), currency: p.currency });
-      for (const e of events.rows) {
-        out.push({ at: day(e.created_at), kind: e.kind, title: e.kind === 'system' ? e.body : `${e.kind.charAt(0).toUpperCase()}${e.kind.slice(1)}`, detail: e.kind === 'system' ? null : e.body,
-          docNumber: e.doc_number, amount: null, currency: null, by: e.created_by, eventId: e.id,
-          followUpDate: e.follow_up_date ? new Date(e.follow_up_date).toISOString().slice(0, 10) : null, followUpDone: e.follow_up_done });
-      }
-      res.json(sortHistory(out));
+      res.json(await loadClientHistory(query, Number(req.params.id)));
     } catch (err: any) { res.status(500).json({ error: err.message }); }
   });
 

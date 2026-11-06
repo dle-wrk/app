@@ -6,6 +6,9 @@
 // loadCustomerStatement reads the rows; assembleStatement is the pure
 // part (ordering, running balance, aging) so it can be tested alone.
 
+import { loadClientHistory } from './clientHistory';
+import type { HistoryEntry } from './potentialOrders';
+
 type Q = (sql: string, params?: any[]) => Promise<{ rows: any[] }>;
 
 const r2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
@@ -32,6 +35,17 @@ export interface StatementTxn {
   /** Every note on this document and the ones behind it (sales order, delivery notes). */
   notes?: string[];
 }
+/** The Customer 360 tabs, as lists for the statement (drafts and voids included, as the tabs show them). */
+export interface StatementSections {
+  overview: { openAr: number; overdue: number; overdueCount: number; openOrders: number; quotes: number; lifetimeRevenue: number };
+  orders: Array<{ number: string; date: string; requiredDate: string | null; status: string; total: number; notes: string | null; lines: StatementLine[] }>;
+  invoices: Array<{ number: string; date: string; dueDate: string | null; status: string; total: number; paid: number; balance: number }>;
+  payments: Array<{ number: string; date: string; method: string | null; reference: string | null; amount: number; unallocated: number }>;
+  creditNotes: Array<{ number: string; date: string; invoiceNumber: string | null; reason: string | null; status: string; total: number; applied: number; refunded: number }>;
+  deliveries: Array<{ number: string; type: string; date: string; scheduledDate: string | null; status: string; orderNumber: string | null; invoiceNumber: string | null; carrier: string | null; reference: string | null; contact: string | null; address: string | null; notes: string | null; items: Array<{ partNumber: string | null; description: string; quantity: number; serials: string | null }> }>;
+  history: Array<{ at: string; title: string; detail: string | null; amount: number | null; by: string | null; followUp: string | null }>;
+}
+
 export interface CustomerStatement {
   client: { id: number; name: string; contactName: string | null; email: string | null; phone: string | null; address: string | null; vatNumber: string | null; paymentTermsDays: number | null };
   period: { from: string | null; asOf: string };
@@ -41,6 +55,7 @@ export interface CustomerStatement {
   transactions: StatementTxn[];
   aging: { current: number; d30: number; d60: number; d90plus: number; total: number };
   overdueInvoices: Array<{ number: string; date: string; dueDate: string | null; daysOverdue: number; amount: number }>;
+  sections?: StatementSections;
 }
 
 const ORDER: Record<StatementTxn['type'], number> = { INVOICE: 0, REFUND: 1, CREDIT_NOTE: 2, PAYMENT: 3 };
@@ -182,8 +197,67 @@ export async function loadCustomerStatement(q: Q, clientId: number, asOf: string
     for (const p of payments) p.appliedTo = byPay.get(p.id) ?? [];
   }
 
-  return assembleStatement({
+  const sections = await loadSections(q, clientId, params, window, line, group, clean);
+  const statement = assembleStatement({
     client: { id: c.id, name: c.client_name, contactName: c.contact_name || null, email: c.email || null, phone: c.phone || null, address: c.address || null, vatNumber: c.vat_number || null, paymentTermsDays: c.payment_terms_days ?? null },
     asOf, from, openingBalance: num(c.opening_balance), invoices, payments, creditNotes,
   });
+  sections.overview.openAr = statement.closingBalance;
+  return { ...statement, sections };
+}
+
+async function loadSections(
+  q: Q, clientId: number, params: any[], window: (col: string) => string,
+  line: (r: any) => StatementLine, group: <T>(rows: any[], key: string, map: (r: any) => T) => Map<number, T[]>, clean: (v: any) => string,
+): Promise<StatementSections> {
+  const d = (col: string) => `to_char(${col}, 'YYYY-MM-DD')`;
+  const orders = (await q(`
+    SELECT id, order_number, ${d('order_date')} AS date, ${d('required_date')} AS required, status, total, notes
+    FROM client_orders WHERE client_id = $1 AND ${window('order_date')} ORDER BY order_date, id`, params)).rows;
+  const orderLines = orders.length
+    ? group((await q(`SELECT * FROM client_order_items WHERE client_order_id = ANY($1::int[]) ORDER BY id`, [orders.map((o) => o.id)]).catch(() => ({ rows: [] as any[] }))).rows, 'client_order_id', line)
+    : new Map<number, StatementLine[]>();
+  const invoices = (await q(`
+    SELECT invoice_number, ${d('invoice_date')} AS date, ${d('due_date')} AS due, status, total, amount_paid, balance_due
+    FROM invoices WHERE client_id = $1 AND ${window('invoice_date')} ORDER BY invoice_date, id`, params)).rows;
+  const payments = (await q(`
+    SELECT payment_number, ${d('payment_date')} AS date, method, reference, amount, unallocated_amount
+    FROM payments_received WHERE client_id = $1 AND ${window('payment_date')} ORDER BY payment_date, id`, params)).rows;
+  const credits = (await q(`
+    SELECT cn.credit_note_number, ${d('cn.credit_date')} AS date, i.invoice_number, cn.reason, cn.status, cn.total, cn.amount_applied, cn.amount_refunded
+    FROM credit_notes cn LEFT JOIN invoices i ON i.id = cn.invoice_id
+    WHERE cn.client_id = $1 AND ${window('cn.credit_date')} ORDER BY cn.credit_date, cn.id`, params)).rows;
+  const deliveries = (await q(`
+    SELECT dn.id, dn.note_number, dn.note_type, ${d('dn.note_date')} AS date, ${d('dn.scheduled_date')} AS scheduled, dn.status,
+           co.order_number, i.invoice_number, dn.carrier, dn.reference, dn.contact_person, dn.address, dn.notes
+    FROM dispatch_notes dn LEFT JOIN client_orders co ON co.id = dn.client_order_id LEFT JOIN invoices i ON i.id = dn.invoice_id
+    WHERE dn.client_id = $1 AND ${window('dn.note_date')} ORDER BY dn.note_date, dn.id`, params)).rows;
+  const items = deliveries.length
+    ? group((await q(`SELECT dispatch_note_id, part_number, description, quantity, serial_numbers FROM dispatch_note_items WHERE dispatch_note_id = ANY($1::int[]) ORDER BY id`, [deliveries.map((x) => x.id)])).rows,
+        'dispatch_note_id', (r) => ({ partNumber: r.part_number || null, description: r.description || '', quantity: num(r.quantity), serials: clean(r.serial_numbers) || null }))
+    : new Map();
+  const asOf = String(params[1]), from = params[2] ? String(params[2]) : null;
+  const history = (await loadClientHistory(q, clientId)).filter((h: HistoryEntry) => {
+    const day = String(h.at).slice(0, 10);
+    return day <= asOf && (!from || day >= from);
+  });
+
+  const live = invoices.filter((i) => i.status !== 'DRAFT' && i.status !== 'VOID');
+  const overdue = live.filter((i) => num(i.balance_due) > 0.005 && i.due && i.due < asOf);
+  return {
+    overview: {
+      openAr: 0,
+      overdue: r2(overdue.reduce((n, i) => n + num(i.balance_due), 0)),
+      overdueCount: overdue.length,
+      openOrders: orders.filter((o) => !['QUOTATION', 'FULFILLED', 'CANCELLED'].includes(o.status)).length,
+      quotes: orders.filter((o) => o.status === 'QUOTATION').length,
+      lifetimeRevenue: r2(live.reduce((n, i) => n + num(i.total), 0)),
+    },
+    orders: orders.map((o) => ({ number: o.order_number, date: o.date, requiredDate: o.required ?? null, status: o.status, total: num(o.total), notes: clean(o.notes) || null, lines: orderLines.get(o.id) ?? [] })),
+    invoices: invoices.map((i) => ({ number: i.invoice_number, date: i.date, dueDate: i.due ?? null, status: i.status, total: num(i.total), paid: num(i.amount_paid), balance: num(i.balance_due) })),
+    payments: payments.map((p) => ({ number: p.payment_number, date: p.date, method: p.method || null, reference: p.reference || null, amount: num(p.amount), unallocated: num(p.unallocated_amount) })),
+    creditNotes: credits.map((c) => ({ number: c.credit_note_number, date: c.date, invoiceNumber: c.invoice_number || null, reason: clean(c.reason) || null, status: c.status, total: num(c.total), applied: num(c.amount_applied), refunded: num(c.amount_refunded) })),
+    deliveries: deliveries.map((x) => ({ number: x.note_number, type: x.note_type, date: x.date, scheduledDate: x.scheduled ?? null, status: x.status, orderNumber: x.order_number || null, invoiceNumber: x.invoice_number || null, carrier: x.carrier || null, reference: x.reference || null, contact: x.contact_person || null, address: clean(x.address) || null, notes: clean(x.notes) || null, items: items.get(x.id) ?? [] })),
+    history: history.map((h: HistoryEntry) => ({ at: String(h.at).slice(0, 10), title: h.title, detail: h.detail, amount: h.amount, by: h.by, followUp: h.followUpDate ? `${h.followUpDate}${h.followUpDone ? ' (done)' : ''}` : null })),
+  };
 }

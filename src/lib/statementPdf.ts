@@ -79,6 +79,62 @@ export function combineStatements(statements: CustomerStatement[]) {
   };
 }
 
+export type SectionRow = { cells: string[]; detail?: string };
+export interface SectionTable { title: string; head: string[]; rows: SectionRow[]; right: number[] }
+
+const status = (s: string) => s.charAt(0) + s.slice(1).toLowerCase().replace(/_/g, ' ');
+
+/**
+ * The Customer 360 tabs as tables: Overview, Orders & Quotes, Invoices,
+ * Payments, Credit Notes, Deliveries and History. With several customers
+ * each table gets a Customer column and the rows are sorted by customer.
+ */
+export function sectionTables(statements: CustomerStatement[], all: boolean): SectionTable[] {
+  const list = [...statements].sort(byName).filter((s) => s.sections);
+  const who = (s: CustomerStatement) => (all ? [s.client.name] : []);
+  const C = all ? ['Customer'] : [];
+  const shift = (cols: number[]) => cols.map((c) => c + C.length);
+  const each = <T>(pick: (s: CustomerStatement) => T[], row: (s: CustomerStatement, x: T) => SectionRow[]) => list.flatMap((s) => pick(s).flatMap((x) => row(s, x)));
+
+  const overview: SectionRow[] = list.map((s) => {
+    const o = s.sections!.overview;
+    return { cells: [...who(s), money(o.openAr), o.overdueCount ? `${money(o.overdue)} (${o.overdueCount})` : money(0), String(o.openOrders), String(o.quotes), money(o.lifetimeRevenue)] };
+  });
+  const lineText = (l: { partNumber: string | null; description: string; quantity: number; unitPrice: number; lineTotal: number }) =>
+    `${l.partNumber ? `${l.partNumber}  ` : ''}${l.description}  ·  ${l.quantity} × ${money(l.unitPrice)} = ${money(l.lineTotal)}`;
+
+  return [
+    { title: 'Overview', head: [...C, 'Open AR', 'Overdue', 'Open orders', 'Quotes', 'Lifetime revenue'], rows: overview, right: shift([0, 1, 2, 3, 4]) },
+    { title: 'Orders & Quotes', head: [...C, 'Number', 'Date', 'Required', 'Status', 'Total'], right: shift([4]),
+      rows: each((s) => s.sections!.orders, (s, o) => [
+        { cells: [...who(s), o.number, o.date, o.requiredDate ?? '', status(o.status), money(o.total)] },
+        ...o.lines.map((l) => ({ cells: [], detail: lineText(l) })),
+        ...(o.notes ? [{ cells: [], detail: `Note: ${o.notes}` }] : []),
+      ]) },
+    { title: 'Invoices', head: [...C, 'Number', 'Date', 'Due', 'Status', 'Total', 'Paid', 'Balance'], right: shift([4, 5, 6]),
+      rows: each((s) => s.sections!.invoices, (s, i) => [{ cells: [...who(s), i.number, i.date, i.dueDate ?? '', status(i.status), money(i.total), money(i.paid), money(i.balance)] }]) },
+    { title: 'Payments', head: [...C, 'Number', 'Date', 'Method', 'Reference', 'Amount', 'Unallocated'], right: shift([4, 5]),
+      rows: each((s) => s.sections!.payments, (s, p) => [{ cells: [...who(s), p.number, p.date, p.method ?? '', p.reference ?? '', money(p.amount), money(p.unallocated)] }]) },
+    { title: 'Credit Notes', head: [...C, 'Number', 'Date', 'Invoice', 'Status', 'Total', 'Applied', 'Refunded'], right: shift([4, 5, 6]),
+      rows: each((s) => s.sections!.creditNotes, (s, c) => [
+        { cells: [...who(s), c.number, c.date, c.invoiceNumber ?? '', status(c.status), money(c.total), money(c.applied), money(c.refunded)] },
+        ...(c.reason ? [{ cells: [], detail: `Reason: ${c.reason}` }] : []),
+      ]) },
+    { title: 'Deliveries', head: [...C, 'Number', 'Type', 'Date', 'Status', 'Order', 'Invoice'], right: [],
+      rows: each((s) => s.sections!.deliveries, (s, d) => [
+        { cells: [...who(s), d.number, d.type === 'COLLECTION' ? 'Collection' : 'Delivery', d.date, status(d.status), d.orderNumber ?? '', d.invoiceNumber ?? ''] },
+        ...d.items.map((it) => ({ cells: [], detail: `${it.partNumber ? `${it.partNumber}  ` : ''}${it.description}  ·  ${it.quantity}${it.serials ? `  ·  S/N ${it.serials}` : ''}` })),
+        ...[d.scheduledDate ? `Scheduled ${d.scheduledDate}` : '', d.contact ? `Contact: ${d.contact}` : '', d.address ? `Address: ${d.address}` : '', d.carrier ? `Carrier: ${d.carrier}` : '', d.reference ? `Ref ${d.reference}` : '']
+          .filter(Boolean).map((t) => ({ cells: [], detail: t })),
+        ...(d.notes ? [{ cells: [], detail: `Note: ${d.notes}` }] : []),
+      ]) },
+    { title: 'History', head: [...C, 'Date', 'What', 'Details', 'Amount', 'By'], right: shift([3]),
+      rows: each((s) => s.sections!.history, (s, h) => [
+        { cells: [...who(s), h.at, h.title, [h.detail, h.followUp ? `follow up ${h.followUp}` : ''].filter(Boolean).join(' · '), h.amount != null ? money(h.amount) : '', h.by ?? ''] },
+      ]) },
+  ];
+}
+
 const slug = (s: string) => s.replace(/[^a-zA-Z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 
 export function statementFilename(statements: CustomerStatement[], asOf: string): string {
@@ -209,6 +265,35 @@ export async function saveStatementsPdf(statements: CustomerStatement[], asOf: s
       headStyles: { fillColor: [200, 40, 40], textColor: 255, fontSize: 8 },
       columnStyles: c ? { 4: { halign: 'right' }, 5: { halign: 'right', fontStyle: 'bold' } } : { 3: { halign: 'right' }, 4: { halign: 'right', fontStyle: 'bold' } },
       margin: { left: M, right: M }, theme: 'grid',
+    });
+  }
+
+  // The Customer 360 tabs
+  for (const t of sectionTables(statements, all)) {
+    let ty = ((doc as any).lastAutoTable?.finalY ?? 40) + 8;
+    if (ty > doc.internal.pageSize.getHeight() - 35) { doc.addPage(); ty = 20; }
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(0);
+    doc.text(`${t.title} (${t.title === 'Overview' ? t.rows.length : t.rows.filter((r) => !r.detail).length})`, M, ty);
+    const span = t.head.length;
+    const body = t.rows.length
+      ? t.rows.map((r) => (r.detail ? [{ content: r.detail, colSpan: span }] : r.cells))
+      : [[{ content: 'None', colSpan: span }]];
+    const colStyles: any = {};
+    for (const i of t.right) colStyles[i] = { halign: 'right' };
+    if (all) colStyles[0] = { ...(colStyles[0] ?? {}), cellWidth: 30 };
+    autoTable(doc, {
+      startY: ty + 2,
+      head: [t.head],
+      body,
+      styles: { fontSize: 8, cellPadding: 1.6, textColor: 20 },
+      headStyles: { fillColor: [60, 60, 60], textColor: 255, fontSize: 8 },
+      columnStyles: colStyles,
+      didParseCell: (h: any) => {
+        if (h.section !== 'body' || !t.rows[h.row.index]?.detail) return;
+        h.cell.styles.fontSize = 7; h.cell.styles.textColor = 110; h.cell.styles.halign = 'left';
+        h.cell.styles.cellPadding = { top: 0.8, bottom: 0.8, left: 6, right: 1.6 };
+      },
+      margin: { left: M, right: M, bottom: 16 }, theme: 'grid',
     });
   }
 

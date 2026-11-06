@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { assembleStatement, isIsoDate } from './customerStatement';
-import { statementRows, statementFilename, statementStart, allCustomerRows, combineStatements } from './statementPdf';
+import { statementRows, statementFilename, statementStart, allCustomerRows, combineStatements, sectionTables } from './statementPdf';
 
 const client = { id: 30, name: 'Lumax Energy', contactName: 'Thabo', email: 'ap@lumax.test', phone: null, address: '270 Roan Cresent Midrand', vatNumber: '4123', paymentTermsDays: 30 };
 
@@ -78,6 +78,32 @@ describe('customer statement', () => {
     const at = rows.findIndex((r) => r.kind === 'group' && r.cells[2] === 'Bokpoort');
     expect(rows.slice(at, at + 4).map((r) => r.cells[2])).toEqual(['Bokpoort', 'Opening balance', 'No invoices, payments or credit notes yet', 'Closing balance: Bokpoort']);
     expect(rows.at(-1)!.cells[2]).toBe('All customers (2)');
+  });
+
+  it('adds the Customer 360 tabs as tables, with a Customer column for all customers', () => {
+    const sections: any = {
+      overview: { openAr: 550, overdue: 200, overdueCount: 1, openOrders: 1, quotes: 2, lifetimeRevenue: 1650 },
+      orders: [{ number: 'QUO-1', date: '2026-08-01', requiredDate: null, status: 'QUOTATION', total: 900, notes: 'Price valid 30 days', lines: [{ partNumber: 'TCU06', description: 'Controller', quantity: 1, unitPrice: 900, lineTotal: 900 }] }],
+      invoices: [{ number: 'INV-3', date: '2026-11-01', dueDate: null, status: 'DRAFT', total: 10, paid: 0, balance: 10 }],
+      payments: [], creditNotes: [],
+      deliveries: [{ number: 'DN-1', type: 'DELIVERY', date: '2026-10-14', scheduledDate: null, status: 'COMPLETED', orderNumber: 'SO-1', invoiceNumber: 'INV-2', carrier: 'Courier Guy', reference: null, contact: null, address: null, notes: 'Gate 3', items: [{ partNumber: 'TCU06', description: 'Controller', quantity: 2, serials: 'A1, A2' }] }],
+      history: [{ at: '2026-11-02', title: 'Call', detail: 'Asked for a quote', amount: null, by: 'dylan', followUp: '2026-11-09' }],
+    };
+    const one = sectionTables([{ ...base(), sections }], false);
+    expect(one.map((t) => t.title)).toEqual(['Overview', 'Orders & Quotes', 'Invoices', 'Payments', 'Credit Notes', 'Deliveries', 'History']);
+    const orders = one[1].rows;
+    expect(orders[0].cells).toEqual(['QUO-1', '2026-08-01', '', 'Quotation', 'R900.00']);
+    expect(orders.slice(1).map((r) => r.detail)).toEqual(['TCU06  Controller  ·  1 × R900.00 = R900.00', 'Note: Price valid 30 days']);
+    expect(one[2].rows[0].cells[3]).toBe('Draft');
+    expect(one[5].rows.map((r) => r.detail ?? r.cells[0])).toEqual(['DN-1', 'TCU06  Controller  ·  2  ·  S/N A1, A2', 'Carrier: Courier Guy', 'Note: Gate 3']);
+    expect(one[6].rows[0].cells).toEqual(['2026-11-02', 'Call', 'Asked for a quote · follow up 2026-11-09', '', 'dylan']);
+
+    const quiet = { ...base(), client: { ...client, id: 3, name: 'Bokpoort' }, sections: { ...sections, orders: [], deliveries: [], history: [], invoices: [] } };
+    const all = sectionTables([{ ...base(), sections }, quiet], true);
+    expect(all[0].head[0]).toBe('Customer');
+    expect(all[0].rows.map((r) => r.cells[0])).toEqual(['Bokpoort', 'Lumax Energy']);
+    expect(all[1].rows[0].cells[0]).toBe('Lumax Energy');
+    expect(all[1].right).toEqual([5]);
   });
 
   it('only takes real dates', () => {
