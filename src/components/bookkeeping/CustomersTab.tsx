@@ -14,14 +14,14 @@ export const CustomersTab: React.FC<ModuleDataProps> = ({ clients, setClients, c
   const [showNewClientModal, setShowNewClientModal] = useState(false);
   const [downloadingAll, setDownloadingAll] = useState(false);
 
-  // One PDF with a statement for every customer that has anything on it.
+  // One All Customers statement, grouped and sorted by customer, first transaction to today.
   const downloadAllStatements = async () => {
     setDownloadingAll(true);
     try {
       const asOf = new Date().toISOString().slice(0, 10);
       const all = (await apiGet(`/api/reports/customer-statements?asOf=${asOf}`)) as CustomerStatement[];
       if (!all.length) { triggerToast('No customer has any invoices or payments yet.', 'INFO'); return; }
-      await saveStatementsPdf(all, asOf);
+      await saveStatementsPdf(all, asOf, { all: true });
       const owing = all.reduce((n, s) => n + s.closingBalance, 0);
       const left = clients.length - all.length;
       triggerToast(`${all.length} statement${all.length === 1 ? '' : 's'} downloaded, ${fmtMoney(owing)} owing in all.${left > 0 ? ` ${left} customer${left === 1 ? '' : 's'} with no activity left out.` : ''}`);
@@ -82,7 +82,7 @@ export const CustomersTab: React.FC<ModuleDataProps> = ({ clients, setClients, c
               onClick={downloadAllStatements}
               disabled={downloadingAll}
               className="px-3 py-1.5 rounded border border-primary text-primary text-xs font-bold hover:bg-primary/10 transition flex items-center gap-1.5 disabled:opacity-50"
-              title="One PDF with every customer's statement"
+              title="One statement for all customers, sorted by customer, from the first transaction to today"
             >
               {downloadingAll ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
               Download all statements

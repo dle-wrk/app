@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { assembleStatement, isIsoDate } from './customerStatement';
-import { statementRows, statementFilename } from './statementPdf';
+import { statementRows, statementFilename, statementStart, allCustomerRows, combineStatements } from './statementPdf';
 
 const client = { id: 30, name: 'Lumax Energy', contactName: 'Thabo', email: 'ap@lumax.test', phone: null, address: '270 Roan Cresent Midrand', vatNumber: '4123', paymentTermsDays: 30 };
 
@@ -47,6 +47,29 @@ describe('customer statement', () => {
   it('names the file for one customer or all of them', () => {
     expect(statementFilename([base()], '2026-11-06')).toBe('customer-statement-Lumax-Energy-2026-11-06.pdf');
     expect(statementFilename([base(), base()], '2026-11-06')).toBe('customer-statements-all-2026-11-06.pdf');
+  });
+
+  it('runs from the first transaction to the as-of date', () => {
+    const s = base();
+    expect(statementStart(s)).toBe('2026-08-01');
+    expect(statementRows(s)[0].cells[0]).toBe('2026-08-01');
+    expect(statementStart({ ...s, period: { from: '2026-01-01', asOf: '2026-11-06' } })).toBe('2026-01-01');
+  });
+
+  it('puts all customers in one statement, sorted by customer, with grand totals', () => {
+    const lumax = base();
+    const acme = { ...base(), client: { ...client, id: 2, name: 'acme Mining' }, transactions: base().transactions.slice(0, 1), closingBalance: 600, overdueInvoices: [] };
+    const rows = allCustomerRows([lumax, acme]);
+    const groups = rows.filter((r) => r.kind === 'group').map((r) => r.cells[2]);
+    expect(groups).toEqual(['acme Mining', 'Lumax Energy']);
+    expect(rows.at(-1)!.kind).toBe('total');
+    expect(rows.at(-1)!.cells.slice(2)).toEqual(['All customers (2)', '', 'R2 250.00', 'R1 300.00', 'R1 150.00']);
+    expect(rows.find((r) => r.cells[2] === 'Closing balance: Lumax Energy')!.cells[6]).toBe('R550.00');
+    const c = combineStatements([lumax, acme]);
+    expect(c.start).toBe('2026-08-01');
+    expect(c.closingBalance).toBe(1150);
+    expect(c.aging.total).toBe(700);
+    expect(c.overdue.map((o) => `${o.customer} ${o.number}`)).toEqual(['Lumax Energy INV-1']);
   });
 
   it('only takes real dates', () => {
