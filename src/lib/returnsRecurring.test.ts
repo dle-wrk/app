@@ -45,6 +45,14 @@ describe('repairs', () => {
     expect(repairDescription({ part_number: 'P1' })).toBe('Repair: P1');
   });
 
+  it('a replaced board goes back under its new serial, showing old → new', () => {
+    expect(repairDescription(lines[0], 'SN999')).toBe('Repair: Inverter 5kW (board replaced: S/N SN123 → SN999)');
+    expect(repairDescription(lines[1], 'B1, B2')).toBe('Repair: Battery (board replaced: S/N B1, B2)');
+    expect(repairPlan(lines, [{ lineId: 2, newSerials: ' B1 ;B2\n' }])[0].newSerials).toBe('B1, B2');
+    expect(repairPlan(lines, [{ lineId: 1, newSerials: '  ' }])[0].newSerials).toBeNull();
+    expect(() => repairPlan(lines, [{ lineId: 1, newSerials: 'A, B' }])).toThrow('2 new serials for 1 unit');
+  });
+
   it('takes the charge each (empty is no charge, for warranty) and the note', () => {
     const plan = repairPlan(lines, [{ lineId: 1, charge: '850.555', note: ' Replaced the fan ' }, { lineId: '2', charge: '' }]);
     expect(plan.map((p) => [p.line.id, p.charge, p.note])).toEqual([[1, 850.56, 'Replaced the fan'], [2, 0, null]]);

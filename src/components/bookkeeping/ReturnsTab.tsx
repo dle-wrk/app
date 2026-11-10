@@ -22,7 +22,7 @@ async function api(url: string, init?: RequestInit) {
 
 type Line = { id?: number; partNumber: string; description: string; quantity: string; serialNumbers: string; reason: string; unitPrice: number; taxRateId: number | null; invoiceItemId: number | null };
 
-type Repair = { pick: boolean; charge: string; note: string };
+type Repair = { pick: boolean; charge: string; note: string; board: boolean; newSerials: string };
 
 export const ReturnsTab: React.FC<ModuleDataProps> = ({ triggerToast, invoices, clients, refresh }) => {
   const may = canChange('/api/returns');
@@ -33,7 +33,7 @@ export const ReturnsTab: React.FC<ModuleDataProps> = ({ triggerToast, invoices, 
   const [repairInvoice, setRepairInvoice] = useState(true);
   const setOpen = (r: any | null) => {
     setOpenRaw(r);
-    setRepairs(Object.fromEntries((r?.lines ?? []).filter((l: any) => l.repair_status === 'IN_REPAIR').map((l: any) => [l.id, { pick: true, charge: '', note: '' }])));
+    setRepairs(Object.fromEntries((r?.lines ?? []).filter((l: any) => l.repair_status === 'IN_REPAIR').map((l: any) => [l.id, { pick: true, charge: '', note: '', board: false, newSerials: '' }])));
   };
   const [form, setForm] = useState<{ editId?: number; number?: string; clientId: string; invoiceId: string; reason: string; lines: Line[] } | null>(null);
   const edit = (r: any) => {
@@ -82,8 +82,9 @@ export const ReturnsTab: React.FC<ModuleDataProps> = ({ triggerToast, invoices, 
     catch (e: any) { triggerToast(e.message, 'ERROR'); }
   };
   const sendBack = async () => {
-    const lines = Object.entries(repairs).filter(([, x]) => x.pick).map(([lineId, x]) => ({ lineId: Number(lineId), charge: x.charge, note: x.note }));
+    const lines = Object.entries(repairs).filter(([, x]) => x.pick).map(([lineId, x]) => ({ lineId: Number(lineId), charge: x.charge, note: x.note, newSerials: x.board ? x.newSerials : '' }));
     if (!lines.length) { triggerToast('Tick what has been repaired.', 'ERROR'); return; }
+    if (Object.values(repairs).some((x) => x.pick && x.board && !x.newSerials.trim())) { triggerToast('Enter the new serial number for each replaced board.', 'ERROR'); return; }
     const charged = lines.some((l) => Number(l.charge) > 0);
     const kind = sendAs === 'DELIVERY' ? 'delivery note' : 'collection note';
     if (!(await confirmDialog({ title: 'Repaired: send back', message: `Raise a draft ${kind} for ${lines.length} repaired line${lines.length === 1 ? '' : 's'} (it takes nothing from stock)${charged && repairInvoice ? ', and a draft invoice for the repair charges' : ''}. Both are drafts to check and send as usual.`, confirmLabel: 'Send back' }))) return;
@@ -94,7 +95,7 @@ export const ReturnsTab: React.FC<ModuleDataProps> = ({ triggerToast, invoices, 
     } catch (e: any) { triggerToast(e.message, 'ERROR'); }
   };
   const repairState = (l: any) => l.repair_status === 'IN_REPAIR' ? 'In repair'
-    : l.repair_status === 'REPAIRED' ? ['Repaired', l.repair_dispatch_number, l.repair_invoice_number, Number(l.repair_charge) > 0 ? null : 'no charge'].filter(Boolean).join(' · ') : null;
+    : l.repair_status === 'REPAIRED' ? ['Repaired', l.repair_new_serials ? `new S/N ${l.repair_new_serials}` : null, l.repair_dispatch_number, l.repair_invoice_number, Number(l.repair_charge) > 0 ? null : 'no charge'].filter(Boolean).join(' · ') : null;
   const setOutcome = async (lineId: number, outcome: string) => {
     try { await api(`/api/returns/${open.id}/lines/${lineId}`, { method: 'PUT', body: JSON.stringify({ outcome: outcome || null }) }); await reopen(open.id); } catch (e: any) { triggerToast(e.message, 'ERROR'); }
   };
@@ -136,14 +137,25 @@ export const ReturnsTab: React.FC<ModuleDataProps> = ({ triggerToast, invoices, 
             <p className="text-sm font-bold text-on-surface">In repair</p>
             <p className="text-[11px] text-on-surface-variant">When they're fixed, tick them and send them back: a draft delivery or collection note goes to Delivery &amp; Collection (it takes nothing from stock, they're the customer's own), and any repair charge goes on a draft invoice. Leave the charge empty for warranty work.</p>
             <table className="w-full text-xs"><tbody>{open.lines.filter((l: any) => l.repair_status === 'IN_REPAIR').map((l: any) => {
-              const x = repairs[l.id] ?? { pick: false, charge: '', note: '' };
+              const x = repairs[l.id] ?? { pick: false, charge: '', note: '', board: false, newSerials: '' };
               const put = (p: Partial<Repair>) => setRepairs({ ...repairs, [l.id]: { ...x, ...p } });
               return (
-                <tr key={l.id}>
+                <React.Fragment key={l.id}>
+                <tr>
                   <td className="pr-2 py-0.5"><label className="flex items-center gap-1"><input type="checkbox" checked={x.pick} onChange={(e) => put({ pick: e.target.checked })} disabled={!may} aria-label={`Repaired: ${l.part_number ?? l.description}`} /><span className="font-mono font-bold">{l.part_number ?? ''}</span> <span className="text-on-surface-variant">{l.description} × {fmtNumber(Number(l.quantity))}</span></label></td>
                   <td className="pr-1 py-0.5"><input className={`${input} w-32 font-mono`} inputMode="decimal" value={x.charge} onChange={(e) => put({ charge: e.target.value })} disabled={!may} placeholder="Charge each, excl. VAT" aria-label={`Repair charge for ${l.part_number ?? l.description}`} /></td>
                   <td className="py-0.5"><input className={`${input} w-full`} value={x.note} onChange={(e) => put({ note: e.target.value })} disabled={!may} placeholder="What was fixed" aria-label={`Repair note for ${l.part_number ?? l.description}`} /></td>
                 </tr>
+                <tr>
+                  <td colSpan={3} className="pl-5 pb-1.5">
+                    <label className="text-[11px] inline-flex items-center gap-1 text-on-surface-variant"><input type="checkbox" checked={x.board} onChange={(e) => put({ board: e.target.checked })} disabled={!may} aria-label={`Board replaced: ${l.part_number ?? l.description}`} /> Board (PCB) replaced: new serial number{Number(l.quantity) > 1 ? 's' : ''}</label>
+                    {x.board && <>
+                      <input className={`${input} w-64 font-mono ml-2`} value={x.newSerials} onChange={(e) => put({ newSerials: e.target.value })} disabled={!may} placeholder={Number(l.quantity) > 1 ? 'New serials, comma-separated' : 'New serial'} aria-label={`New serial for ${l.part_number ?? l.description}`} />
+                      <span className="ml-2 text-[10px] text-outline">{l.serial_numbers ? `was ${l.serial_numbers}; ` : ''}it goes back under the new serial</span>
+                    </>}
+                  </td>
+                </tr>
+                </React.Fragment>
               );
             })}</tbody></table>
             {may && (

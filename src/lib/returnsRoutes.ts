@@ -15,7 +15,8 @@
 //   POST /api/returns/:id/close           {creditNote: boolean}
 //   POST /api/returns/:id/cancel
 //   DELETE /api/returns/:id               open, received or cancelled only (a closed one has changed stock or the books)
-//   POST /api/returns/:id/repaired        {lines: [{lineId, charge?, note?}], noteType: DELIVERY | COLLECTION, invoice: boolean}
+//   POST /api/returns/:id/repaired        {lines: [{lineId, charge?, note?, newSerials?}], noteType: DELIVERY | COLLECTION, invoice: boolean}
+//                                         newSerials: the board (PCB) was replaced, so the unit goes back under new serial(s)
 //
 // Repairs: closing a return puts its REPAIR lines "in repair". When they are
 // fixed, "repaired" raises a DRAFT delivery or collection note to send them
@@ -63,16 +64,23 @@ export async function ensureReturnsSchema(run: (sql: string) => Promise<void> = 
     ADD COLUMN IF NOT EXISTS repair_note TEXT,
     ADD COLUMN IF NOT EXISTS repaired_at TIMESTAMPTZ,
     ADD COLUMN IF NOT EXISTS repair_invoice_id INTEGER,
-    ADD COLUMN IF NOT EXISTS repair_dispatch_id INTEGER`);
+    ADD COLUMN IF NOT EXISTS repair_dispatch_id INTEGER,
+    ADD COLUMN IF NOT EXISTS repair_new_serials TEXT`);
 }
 
-/** The invoice and delivery-note wording for a repaired line. */
-export function repairDescription(l: { description?: string | null; part_number?: string | null; serial_numbers?: string | null }): string {
-  return `Repair: ${l.description || l.part_number || 'returned item'}${l.serial_numbers ? ` (S/N ${l.serial_numbers})` : ''}`;
+/**
+ * The invoice and delivery-note wording for a repaired line. When the repair
+ * replaced the board (PCB), the unit goes back under its new serial(s), and
+ * the wording shows old → new so the customer can match it up.
+ */
+export function repairDescription(l: { description?: string | null; part_number?: string | null; serial_numbers?: string | null }, newSerials?: string | null): string {
+  const what = `Repair: ${l.description || l.part_number || 'returned item'}`;
+  if (newSerials) return `${what} (board replaced: S/N ${l.serial_numbers ? `${l.serial_numbers} → ` : ''}${newSerials})`;
+  return `${what}${l.serial_numbers ? ` (S/N ${l.serial_numbers})` : ''}`;
 }
 
 /** Checks the lines picked as repaired against the return's lines. */
-export function repairPlan(lines: any[], picks: Array<{ lineId: any; charge?: any; note?: any }>) {
+export function repairPlan(lines: any[], picks: Array<{ lineId: any; charge?: any; note?: any; newSerials?: any }>) {
   if (!picks.length) throw fail(400, 'Choose what has been repaired.');
   const seen = new Set<number>();
   return picks.map((p) => {
@@ -84,7 +92,10 @@ export function repairPlan(lines: any[], picks: Array<{ lineId: any; charge?: an
     if (line.repair_status !== 'IN_REPAIR') throw fail(409, `${line.part_number || line.description} isn't waiting for repair.`);
     const charge = p.charge === '' || p.charge == null ? 0 : Number(p.charge);
     if (!Number.isFinite(charge) || charge < 0) throw fail(400, "A repair charge can't be negative.");
-    return { line, charge: Math.round(charge * 100) / 100, note: String(p.note ?? '').trim() || null };
+    const fresh = String(p.newSerials ?? '').split(/[,;\n]+/).map((s) => s.trim()).filter(Boolean);
+    if (fresh.length > Math.round(Number(line.quantity))) throw fail(400, `${line.part_number || line.description}: ${fresh.length} new serials for ${Number(line.quantity)} unit${Number(line.quantity) === 1 ? '' : 's'}.`);
+    const newSerials = fresh.join(', ') || null;
+    return { line, charge: Math.round(charge * 100) / 100, note: String(p.note ?? '').trim() || null, newSerials };
   });
 }
 
@@ -218,7 +229,7 @@ export async function sendRepairsBack(client: Db, id: number, who: string, body:
       await client.query(
         `INSERT INTO invoice_items (invoice_id, part_number, description, quantity, unit_price, tax_rate_id, tax_amount, line_total, deduct_stock, tax_inclusive)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, false)`,
-        [inv.id, x.p.line.part_number, repairDescription(x.p.line), x.p.line.quantity, x.p.charge, x.taxRateId, x.taxAmount, x.lineTotal]);
+        [inv.id, x.p.line.part_number, repairDescription(x.p.line, x.p.newSerials), x.p.line.quantity, x.p.charge, x.taxRateId, x.taxAmount, x.lineTotal]);
     }
     invoice = { id: inv.id, number };
   }
@@ -233,15 +244,15 @@ export async function sendRepairsBack(client: Db, id: number, who: string, body:
   for (const p of picked) {
     await client.query(
       `INSERT INTO dispatch_note_items (dispatch_note_id, part_number, description, quantity, serial_numbers, deduct_stock) VALUES ($1, $2, $3, $4, $5, false)`,
-      [dn.id, p.line.part_number, repairDescription(p.line), p.line.quantity, p.line.serial_numbers]);
+      [dn.id, p.line.part_number, repairDescription(p.line, p.newSerials), p.line.quantity, p.newSerials ?? p.line.serial_numbers]);
     await client.query(
-      `UPDATE customer_return_lines SET repair_status = 'REPAIRED', repair_charge = $2, repair_note = $3, repaired_at = now(), repair_invoice_id = $4, repair_dispatch_id = $5 WHERE id = $1`,
-      [p.line.id, p.charge, p.note, p.charge > 0 ? invoice?.id ?? null : null, dn.id]);
+      `UPDATE customer_return_lines SET repair_status = 'REPAIRED', repair_charge = $2, repair_note = $3, repaired_at = now(), repair_invoice_id = $4, repair_dispatch_id = $5, repair_new_serials = $6 WHERE id = $1`,
+      [p.line.id, p.charge, p.note, p.charge > 0 ? invoice?.id ?? null : null, dn.id, p.newSerials]);
   }
   const dispatch = { id: dn.id as number, number: noteNumber, type: noteType };
   await client.query(
     `INSERT INTO user_activity_logs (user_email, action, entity_type, entity_id, details, status) VALUES ((SELECT email FROM users WHERE email = $1), 'RETURN_REPAIRED', 'Return', $2, $3, 'SUCCESS')`,
-    [who, r.number, JSON.stringify({ lines: picked.map((p) => ({ part: p.line.part_number, qty: Number(p.line.quantity), charge: p.charge })), invoice: invoice?.number ?? null, dispatch: noteNumber, by: who })]);
+    [who, r.number, JSON.stringify({ lines: picked.map((p) => ({ part: p.line.part_number, qty: Number(p.line.quantity), charge: p.charge, ...(p.newSerials ? { oldSerials: p.line.serial_numbers, newSerials: p.newSerials } : {}) })), invoice: invoice?.number ?? null, dispatch: noteNumber, by: who })]);
   return { number: r.number as string, repaired: picked.length, invoice, dispatch };
 }
 
