@@ -9,6 +9,7 @@
 //   GET  /api/returns                     every return
 //   GET  /api/returns/:id                 one, with its lines
 //   POST /api/returns                     {clientId, invoiceId?, reason?, notes?, lines: [{partNumber?, description, quantity, serialNumbers?, reason?, unitPrice?, taxRateId?, invoiceItemId?}]}
+//   PUT  /api/returns/:id                 edit while open or received: same body as POST, lines with their id kept (and their outcome)
 //   POST /api/returns/:id/receive         the goods have arrived
 //   PUT  /api/returns/:id/lines/:lineId   {outcome, outcomeNote?}: RESTOCK | SCRAP | REPAIR | REPLACE | CREDIT
 //   POST /api/returns/:id/close           {creditNote: boolean}
@@ -100,6 +101,42 @@ async function loadReturn(db: Db, id: number) {
        FROM customer_return_lines l LEFT JOIN invoices ri ON ri.id = l.repair_invoice_id LEFT JOIN dispatch_notes rd ON rd.id = l.repair_dispatch_id
       WHERE l.return_id = $1 ORDER BY l.id`, [id]);
   return { ...r, lines };
+}
+
+/**
+ * Edits an open or received return in the caller's transaction: customer,
+ * invoice, reason and lines. Lines sent with their id are updated (keeping
+ * the outcome already given), new ones added, and lines left out removed.
+ */
+export async function editReturn(client: Db, id: number, b: any, lines: any[]) {
+  const { rows: [r] } = await client.query(`SELECT number, status FROM customer_returns WHERE id = $1 FOR UPDATE`, [id]);
+  if (!r) throw fail(404, 'Return not found.');
+  if (r.status !== 'OPEN' && r.status !== 'RECEIVED') throw fail(409, `This return is ${r.status.toLowerCase()}, so it can't be edited.`);
+  let clientId = b.clientId ? Number(b.clientId) : null;
+  if (b.invoiceId) {
+    const { rows: [inv] } = await client.query(`SELECT client_id FROM invoices WHERE id = $1`, [Number(b.invoiceId)]);
+    if (!inv) throw fail(400, 'That invoice no longer exists.');
+    clientId = inv.client_id;
+  }
+  await client.query(`UPDATE customer_returns SET client_id = $2, invoice_id = $3, reason = $4, notes = COALESCE($5, notes) WHERE id = $1`,
+    [id, clientId, b.invoiceId ? Number(b.invoiceId) : null, String(b.reason ?? '').trim() || null, b.notes === undefined ? null : String(b.notes).trim()]);
+  const { rows: existing } = await client.query(`SELECT id FROM customer_return_lines WHERE return_id = $1`, [id]);
+  const keep = new Set<number>();
+  for (const l of lines) {
+    const vals = [String(l.partNumber ?? '').trim() || null, String(l.description ?? '').trim(), Number(l.quantity), String(l.serialNumbers ?? '').trim() || null, String(l.reason ?? '').trim() || null,
+      Number(l.unitPrice) || 0, l.taxRateId ? Number(l.taxRateId) : null, l.invoiceItemId ? Number(l.invoiceItemId) : null];
+    const lineId = Number(l.id);
+    if (lineId && existing.some((e: any) => e.id === lineId)) {
+      keep.add(lineId);
+      await client.query(`UPDATE customer_return_lines SET part_number = $3, description = $4, quantity = $5, serial_numbers = $6, reason = $7, unit_price = $8, tax_rate_id = $9, invoice_item_id = $10 WHERE id = $1 AND return_id = $2`,
+        [lineId, id, ...vals]);
+    } else {
+      await client.query(`INSERT INTO customer_return_lines (return_id, part_number, description, quantity, serial_numbers, reason, unit_price, tax_rate_id, invoice_item_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`, [id, ...vals]);
+    }
+  }
+  const gone = existing.map((e: any) => e.id).filter((x: number) => !keep.has(x));
+  if (gone.length) await client.query(`DELETE FROM customer_return_lines WHERE return_id = $1 AND id = ANY($2::int[])`, [id, gone]);
+  return { number: r.number as string, removed: gone.length };
 }
 
 /** Closes a return in the caller's transaction: restocks, and the draft credit note if asked. */
@@ -253,6 +290,24 @@ export function registerReturnsRoutes(app: Express): void {
       }
       await client.query('COMMIT');
       res.status(201).json({ id: r.id, number });
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      httpError(res, err);
+    } finally { client.release(); }
+  });
+
+  app.put('/api/returns/:id', async (req: any, res) => {
+    const id = parseInt(req.params.id);
+    const b = req.body ?? {};
+    const lines = (Array.isArray(b.lines) ? b.lines : []).filter((l: any) => Number(l.quantity) > 0 && (l.partNumber || l.description));
+    if (!b.clientId && !b.invoiceId) return res.status(400).json({ error: 'Choose the customer or the invoice.' });
+    if (!lines.length) return res.status(400).json({ error: 'Add what is being returned.' });
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const out = await editReturn(client, id, b, lines);
+      await client.query('COMMIT');
+      res.json(out);
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
       httpError(res, err);

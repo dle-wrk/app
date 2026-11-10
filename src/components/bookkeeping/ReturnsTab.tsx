@@ -3,7 +3,7 @@
 // draft credit note). Server: src/lib/returnsRoutes.ts.
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Loader2, Plus, RotateCcw, Trash2 } from 'lucide-react';
+import { Loader2, Pencil, Plus, RotateCcw, Save, Trash2 } from 'lucide-react';
 import { canChange } from '../../lib/changeAccess';
 import { confirmDialog } from '../../lib/confirmDialog';
 import { fmtNumber } from '../../lib/formatMoney';
@@ -20,7 +20,7 @@ async function api(url: string, init?: RequestInit) {
   return body;
 }
 
-type Line = { partNumber: string; description: string; quantity: string; serialNumbers: string; reason: string; unitPrice: number; taxRateId: number | null; invoiceItemId: number | null };
+type Line = { id?: number; partNumber: string; description: string; quantity: string; serialNumbers: string; reason: string; unitPrice: number; taxRateId: number | null; invoiceItemId: number | null };
 
 type Repair = { pick: boolean; charge: string; note: string };
 
@@ -35,7 +35,15 @@ export const ReturnsTab: React.FC<ModuleDataProps> = ({ triggerToast, invoices, 
     setOpenRaw(r);
     setRepairs(Object.fromEntries((r?.lines ?? []).filter((l: any) => l.repair_status === 'IN_REPAIR').map((l: any) => [l.id, { pick: true, charge: '', note: '' }])));
   };
-  const [form, setForm] = useState<{ clientId: string; invoiceId: string; reason: string; lines: Line[] } | null>(null);
+  const [form, setForm] = useState<{ editId?: number; number?: string; clientId: string; invoiceId: string; reason: string; lines: Line[] } | null>(null);
+  const edit = (r: any) => {
+    setForm({
+      editId: r.id, number: r.number, clientId: r.client_id ? String(r.client_id) : '', invoiceId: r.invoice_id ? String(r.invoice_id) : '', reason: r.reason ?? '',
+      lines: r.lines.map((l: any) => ({ id: l.id, partNumber: l.part_number ?? '', description: l.description ?? '', quantity: String(Number(l.quantity)), serialNumbers: l.serial_numbers ?? '', reason: l.reason ?? '',
+        unitPrice: Number(l.unit_price) || 0, taxRateId: l.tax_rate_id ?? null, invoiceItemId: l.invoice_item_id ?? null })),
+    });
+    setOpen(null);
+  };
   const [credit, setCredit] = useState(true);
   const load = useCallback(async () => { try { setList(await api('/api/returns')); } catch (e: any) { triggerToast(e.message, 'ERROR'); } }, [triggerToast]);
   useEffect(() => { void load(); }, [load]);
@@ -54,6 +62,12 @@ export const ReturnsTab: React.FC<ModuleDataProps> = ({ triggerToast, invoices, 
 
   const create = async () => {
     try {
+      if (form!.editId) {
+        const id = form!.editId;
+        const r = await api(`/api/returns/${id}`, { method: 'PUT', body: JSON.stringify({ clientId: form!.clientId || null, invoiceId: form!.invoiceId || null, reason: form!.reason, lines: form!.lines.filter((l) => Number(l.quantity) > 0) }) });
+        triggerToast(`${r.number} saved.`, 'SUCCESS'); setForm(null); await load(); await reopen(id);
+        return;
+      }
       const r = await api('/api/returns', { method: 'POST', body: JSON.stringify({ clientId: form!.clientId || null, invoiceId: form!.invoiceId || null, reason: form!.reason, lines: form!.lines.filter((l) => Number(l.quantity) > 0) }) });
       triggerToast(`${r.number} opened.`, 'SUCCESS'); setForm(null); await load(); await reopen(r.id);
     } catch (e: any) { triggerToast(e.message, 'ERROR'); }
@@ -91,6 +105,7 @@ export const ReturnsTab: React.FC<ModuleDataProps> = ({ triggerToast, invoices, 
           </div>
           <div className="flex gap-sm items-center">
             <SecondaryButton type="button" onClick={() => setOpen(null)}>Back</SecondaryButton>
+            {may && live && <SecondaryButton type="button" icon={<Pencil className="w-3.5 h-3.5" />} onClick={() => edit(open)}>Edit</SecondaryButton>}
             {may && live && <SecondaryButton type="button" onClick={async () => { if (await confirmDialog({ title: 'Cancel return', message: `Cancel ${open.number}? Nothing has changed stock or the books yet.`, confirmLabel: 'Cancel it', destructive: true })) await act('cancel', {}, `${open.number} cancelled.`); }}>Cancel return</SecondaryButton>}
             {may && open.status === 'OPEN' && <PrimaryButton type="button" onClick={() => void act('receive', {}, `${open.number} received.`)}>Mark received</PrimaryButton>}
             {may && open.status === 'RECEIVED' && <>
@@ -146,6 +161,7 @@ export const ReturnsTab: React.FC<ModuleDataProps> = ({ triggerToast, invoices, 
       </div>
       {form && (
         <div className="rounded-xl border border-outline-variant bg-surface-container-high p-md space-y-sm" data-testid="return-form">
+          {form.editId && <p className="text-sm font-bold text-on-surface">Editing {form.number}<span className="block text-[11px] font-normal text-outline">Change the customer, invoice, reason or lines. Outcomes already given stay with their lines; a line you remove is taken off the return.</span></p>}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-sm">
             <label className="text-[10px] text-outline">From invoice (optional)<select className={`${input} w-full mt-0.5`} value={form.invoiceId} onChange={(e) => void fromInvoice(e.target.value)} aria-label="From invoice">
               <option value="">None</option>{invoices.filter((i) => i.status !== 'DRAFT' && i.status !== 'VOID').map((i) => <option key={i.id} value={i.id}>{i.invoiceNumber} · {i.clientName}</option>)}</select></label>
@@ -165,7 +181,10 @@ export const ReturnsTab: React.FC<ModuleDataProps> = ({ triggerToast, invoices, 
           ))}</tbody></table>
           <div className="flex justify-between">
             <button type="button" className="text-primary text-xs inline-flex items-center gap-1" onClick={() => setForm({ ...form, lines: [...form.lines, { partNumber: '', description: '', quantity: '1', serialNumbers: '', reason: '', unitPrice: 0, taxRateId: null, invoiceItemId: null }] })}><Plus className="w-3 h-3" /> Add a line</button>
-            <div className="flex gap-sm"><SecondaryButton type="button" onClick={() => setForm(null)}>Cancel</SecondaryButton><PrimaryButton type="button" onClick={() => void create()} icon={<RotateCcw className="w-3.5 h-3.5" />}>Open return</PrimaryButton></div>
+            <div className="flex gap-sm"><SecondaryButton type="button" onClick={() => { const back = form.editId; setForm(null); if (back) void reopen(back); }}>Cancel</SecondaryButton>
+              {form.editId
+                ? <PrimaryButton type="button" onClick={() => void create()} icon={<Save className="w-3.5 h-3.5" />}>Save {form.number}</PrimaryButton>
+                : <PrimaryButton type="button" onClick={() => void create()} icon={<RotateCcw className="w-3.5 h-3.5" />}>Open return</PrimaryButton>}</div>
           </div>
           {form.invoiceId && <p className="text-[10px] text-outline">Enter the quantity coming back on each invoice line; lines left at 0 aren't part of the return.</p>}
         </div>
