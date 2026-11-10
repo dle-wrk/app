@@ -76,6 +76,11 @@ export const ReturnsTab: React.FC<ModuleDataProps> = ({ triggerToast, invoices, 
     try { const r = await api(`/api/returns/${open.id}/${path}`, { method: 'POST', body: JSON.stringify(body) }); triggerToast(done.replace('{cn}', r.creditNote ? `; draft credit note ${r.creditNote.number}` : ''), 'SUCCESS'); await reopen(open.id); await load(); }
     catch (e: any) { triggerToast(e.message, 'ERROR'); }
   };
+  const remove = async (r: any) => {
+    if (!(await confirmDialog({ title: `Delete ${r.number}`, message: `Delete ${r.number} and its lines for good? It hasn't changed stock or the books, so nothing else is affected. This can't be undone.`, confirmLabel: 'Delete', destructive: true }))) return;
+    try { await api(`/api/returns/${r.id}`, { method: 'DELETE' }); triggerToast(`${r.number} deleted.`, 'SUCCESS'); setOpen(null); await load(); }
+    catch (e: any) { triggerToast(e.message, 'ERROR'); }
+  };
   const sendBack = async () => {
     const lines = Object.entries(repairs).filter(([, x]) => x.pick).map(([lineId, x]) => ({ lineId: Number(lineId), charge: x.charge, note: x.note }));
     if (!lines.length) { triggerToast('Tick what has been repaired.', 'ERROR'); return; }
@@ -106,6 +111,7 @@ export const ReturnsTab: React.FC<ModuleDataProps> = ({ triggerToast, invoices, 
           <div className="flex gap-sm items-center">
             <SecondaryButton type="button" onClick={() => setOpen(null)}>Back</SecondaryButton>
             {may && live && <SecondaryButton type="button" icon={<Pencil className="w-3.5 h-3.5" />} onClick={() => edit(open)}>Edit</SecondaryButton>}
+            {may && open.status !== 'CLOSED' && <SecondaryButton type="button" className="text-error" icon={<Trash2 className="w-3.5 h-3.5" />} onClick={() => void remove(open)}>Delete</SecondaryButton>}
             {may && live && <SecondaryButton type="button" onClick={async () => { if (await confirmDialog({ title: 'Cancel return', message: `Cancel ${open.number}? Nothing has changed stock or the books yet.`, confirmLabel: 'Cancel it', destructive: true })) await act('cancel', {}, `${open.number} cancelled.`); }}>Cancel return</SecondaryButton>}
             {may && open.status === 'OPEN' && <PrimaryButton type="button" onClick={() => void act('receive', {}, `${open.number} received.`)}>Mark received</PrimaryButton>}
             {may && open.status === 'RECEIVED' && <>

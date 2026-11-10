@@ -14,6 +14,7 @@
 //   PUT  /api/returns/:id/lines/:lineId   {outcome, outcomeNote?}: RESTOCK | SCRAP | REPAIR | REPLACE | CREDIT
 //   POST /api/returns/:id/close           {creditNote: boolean}
 //   POST /api/returns/:id/cancel
+//   DELETE /api/returns/:id               open, received or cancelled only (a closed one has changed stock or the books)
 //   POST /api/returns/:id/repaired        {lines: [{lineId, charge?, note?}], noteType: DELIVERY | COLLECTION, invoice: boolean}
 //
 // Repairs: closing a return puts its REPAIR lines "in repair". When they are
@@ -362,6 +363,17 @@ export function registerReturnsRoutes(app: Express): void {
       await client.query('ROLLBACK').catch(() => {});
       httpError(res, err);
     } finally { client.release(); }
+  });
+
+  // Delete: only a return that hasn't touched stock or the books (open, received or cancelled).
+  app.delete('/api/returns/:id', async (req, res) => {
+    try {
+      const { rows: [r] } = await query(`SELECT number, status FROM customer_returns WHERE id = $1`, [parseInt(req.params.id)]);
+      if (!r) return res.status(404).json({ error: 'Return not found.' });
+      if (r.status === 'CLOSED') return res.status(409).json({ error: `${r.number} is closed: it has already changed stock or the books (restock, credit note, repairs), so it can't be deleted.` });
+      await query(`DELETE FROM customer_returns WHERE id = $1 AND status <> 'CLOSED'`, [parseInt(req.params.id)]);
+      res.json({ ok: true, number: r.number });
+    } catch (err) { httpError(res, err); }
   });
 
   app.post('/api/returns/:id/cancel', async (req, res) => {
