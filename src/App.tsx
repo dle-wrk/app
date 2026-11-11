@@ -22,6 +22,7 @@ import { Item, Transaction, Supplier, ProductionKit, SystemConfig, ViewType, Pro
 import { INITIAL_TRANSACTIONS, INITIAL_PRODUCTION_KITS, INITIAL_SYSTEM_CONFIG, INITIAL_BOM_ITEMS, INITIAL_PP_BOM_ITEMS, CSV_HEADER, itemToCsvRow } from './mockData';
 import { logActivity } from './lib/activityLogger';
 import { optimisticUpdate, optimisticListDelete } from './lib/optimisticUpdate';
+import { ACCOUNT_TYPES, changedFields, fromRow as bankingFromRow, hasBanking, normalizeBanking } from './lib/supplierBanking';
 import { useEscapeKey } from './lib/useEscapeKey';
 import { ConfirmDialogHost, confirmDialog } from './lib/confirmDialog';
 import { setToastHandler } from './lib/toast';
@@ -812,6 +813,9 @@ export default function App() {
             measuredLeadTime: s.measured_lead_time ?? undefined,
             measuredOrders: s.measured_orders ?? undefined,
             measuredSlowest: s.measured_slowest ?? undefined,
+            bank: bankingFromRow(s),
+            bankUpdatedAt: s.bank_updated_at ?? null,
+            bankUpdatedBy: s.bank_updated_by ?? null,
           })));
         }
         // Normalize ids to numbers: the projects table stores TEXT ids, but Project.id
@@ -1207,6 +1211,7 @@ export default function App() {
             notes: supplier.notes,
             lead_time: supplier.leadTime,
             response_time: supplier.responseTime,
+            ...(supplier.bank ? { bank: supplier.bank } : {}),
           }),
         }),
         onSuccess: async () => {
@@ -3009,7 +3014,19 @@ if (currentView === 'alternates') {
                   e.preventDefault();
                   const fd = new FormData(e.currentTarget);
                   const nextId = editingSupplier?.id || String(Math.max(...suppliers.map(s => parseInt(s.id) || 0), 0) + 1);
+                  let bank;
+                  try {
+                    bank = normalizeBanking({
+                      bankName: fd.get('bank_name'), accountHolder: fd.get('bank_account_holder'), accountNumber: fd.get('bank_account_number'),
+                      branchCode: fd.get('bank_branch_code'), accountType: fd.get('bank_account_type'), swift: fd.get('bank_swift'), reference: fd.get('bank_reference'),
+                    });
+                  } catch (err: any) {
+                    triggerToast(err.message, 'ERROR');
+                    return;
+                  }
+                  const bankChanged = changedFields(editingSupplier?.bank ?? bankingFromRow(null), bank).length > 0;
                   const supplier: Supplier = {
+                    ...(editingSupplier ?? {}),
                     id: nextId,
                     name: fd.get('name') as string,
                     website: fd.get('website') as string,
@@ -3017,8 +3034,13 @@ if (currentView === 'alternates') {
                     notes: fd.get('notes') as string,
                     leadTime: parseInt(fd.get('lead_time') as string) || 0,
                     responseTime: parseInt(fd.get('response_time') as string) || 0,
+                    bank,
+                    ...(bankChanged ? { bankUpdatedAt: new Date().toISOString(), bankUpdatedBy: currentUser?.email ?? null } : {}),
                   };
                   handleSaveSupplier(supplier);
+                  if (bankChanged && editingSupplier && hasBanking(editingSupplier.bank ?? bankingFromRow(null))) {
+                    triggerToast(`${supplier.name}'s banking details changed. Before paying, phone them on a number you already have (not one from the email asking for the change) to confirm.`, 'INFO');
+                  }
                 }}
                 className="space-y-sm text-xs"
               >
@@ -3104,6 +3126,40 @@ if (currentView === 'alternates') {
                     defaultValue={editingSupplier?.notes || ''}
                   />
                 </div>
+
+                <fieldset className="border border-outline-variant rounded p-2 space-y-sm">
+                  <legend className="font-bold text-outline px-1">Banking details (for paying them)</legend>
+                  {editingSupplier?.bankUpdatedAt && (
+                    <p className="text-[10px] text-amber-500">
+                      Last changed {new Date(editingSupplier.bankUpdatedAt).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' })}
+                      {editingSupplier.bankUpdatedBy ? ` by ${editingSupplier.bankUpdatedBy}` : ''}. Always confirm new details by phone before paying.
+                    </p>
+                  )}
+                  <div className="grid grid-cols-2 gap-sm">
+                    {([
+                      ['bank_name', 'Bank', 'e.g. FNB', editingSupplier?.bank?.bankName, ''],
+                      ['bank_account_holder', 'Account holder', 'As on the account', editingSupplier?.bank?.accountHolder, ''],
+                      ['bank_account_number', 'Account number', 'e.g. 62123456789', editingSupplier?.bank?.accountNumber, 'font-mono'],
+                      ['bank_branch_code', 'Branch code', 'e.g. 250655', editingSupplier?.bank?.branchCode, 'font-mono'],
+                      ['bank_swift', 'SWIFT / BIC (foreign)', 'e.g. FIRNZAJJ', editingSupplier?.bank?.swift, 'font-mono'],
+                      ['bank_reference', 'Payment reference', 'Our account no. with them', editingSupplier?.bank?.reference, ''],
+                    ] as const).map(([name, label, ph, val, cls]) => (
+                      <div key={name} className="flex flex-col gap-1">
+                        <label className="font-bold text-outline" htmlFor={`sup-${name}`}>{label}</label>
+                        <input id={`sup-${name}`} name={name} placeholder={ph} autoComplete="off" defaultValue={val ?? ''}
+                          className={`bg-surface-container-high border border-outline-variant rounded p-2 text-on-surface outline-none focus:border-primary text-xs ${cls}`} type="text" />
+                      </div>
+                    ))}
+                    <div className="flex flex-col gap-1 col-span-2">
+                      <label className="font-bold text-outline" htmlFor="sup-bank_account_type">Account type</label>
+                      <select id="sup-bank_account_type" name="bank_account_type" defaultValue={editingSupplier?.bank?.accountType ?? ''}
+                        className="bg-surface-container-high border border-outline-variant rounded p-2 text-on-surface outline-none focus:border-primary text-xs">
+                        <option value="">Not set</option>
+                        {ACCOUNT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                </fieldset>
 
                 <button
                   type="submit"

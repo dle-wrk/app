@@ -10,10 +10,37 @@
 import type { Express } from 'express';
 import { query, queryOne } from './db';
 import { RECEIVED_ORDERS_SQL, measureLeadTimes, type MeasuredLeadTime } from './supplierLeadTime';
+import { BANK_COLUMNS, changedFields, fromRow, maskAccount, normalizeBanking } from './supplierBanking';
 
 export async function loadMeasuredLeadTimes(): Promise<Map<string, MeasuredLeadTime>> {
   const { rows } = await query<any>(RECEIVED_ORDERS_SQL);
   return measureLeadTimes(rows.map((r: any) => ({ supplierId: r.supplier_id, orderDate: r.order_date, receivedDate: r.received_date })));
+}
+
+/**
+ * Saves a supplier's banking details when the request carries them (body.bank).
+ * Callers that don't send banking leave it untouched. A change is logged with
+ * the old and new account masked, and stamped with when and by whom.
+ */
+async function saveBanking(id: string, bank: unknown, who: string | null): Promise<string[]> {
+  if (bank === undefined) return [];
+  const next = normalizeBanking(bank);
+  const before = fromRow(await queryOne<any>(`SELECT * FROM suppliers WHERE id = $1`, [id]));
+  const changed = changedFields(before, next);
+  if (!changed.length) return [];
+  const cols = Object.values(BANK_COLUMNS);
+  const vals = (Object.keys(BANK_COLUMNS) as Array<keyof typeof BANK_COLUMNS>).map((k) => next[k]);
+  await query(
+    `UPDATE suppliers SET ${cols.map((c, i) => `${c} = $${i + 2}`).join(', ')}, bank_updated_at = now(), bank_updated_by = $${cols.length + 2} WHERE id = $1`,
+    [id, ...vals, who]);
+  await query(
+    `INSERT INTO user_activity_logs (user_email, action, entity_type, entity_id, details, status) VALUES ((SELECT email FROM users WHERE email = $1), 'UPDATE_SUPPLIER_BANKING', 'Supplier', $2, $3, 'SUCCESS')`,
+    [who, id, JSON.stringify({
+      changed, by: who,
+      accountBefore: maskAccount(before.accountNumber) || null, accountAfter: maskAccount(next.accountNumber) || null,
+      bankBefore: before.bankName, bankAfter: next.bankName,
+    })]).catch(() => {});
+  return changed;
 }
 
 export function registerSuppliersRoutes(app: Express): void {
@@ -27,31 +54,35 @@ export function registerSuppliersRoutes(app: Express): void {
     }));
   });
 
-  app.put('/api/suppliers/:id', async (req, res) => {
+  app.put('/api/suppliers/:id', async (req: any, res) => {
     const id = req.params.id;
     const { name, website, contact_email, notes, lead_time, response_time } = req.body;
     const sqlText = `UPDATE suppliers SET name = $1, website = $2, contact_email = $3, notes = $4, lead_time = $5, response_time = $6 WHERE id = $7`;
     try {
+      if (req.body?.bank !== undefined) normalizeBanking(req.body.bank); // check before writing anything
       const { rowCount } = await query(sqlText, [name, website, contact_email, notes, lead_time, response_time, id]);
       if (rowCount === 0) return res.status(404).json({ error: 'supplier not found' });
+      const bankChanged = await saveBanking(id, req.body?.bank, req.user?.email ?? null);
       const row = await queryOne(`SELECT * FROM suppliers WHERE id = $1`, [id]);
-      res.json(row);
+      res.json({ ...row, bank_changed: bankChanged });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      res.status(err.status || 500).json({ error: err.message });
     }
   });
 
-  app.post('/api/suppliers', async (req, res) => {
+  app.post('/api/suppliers', async (req: any, res) => {
     const { id, name, website, contact_email, notes, lead_time, response_time } = req.body;
     if (!id) return res.status(400).json({ error: 'id is required' });
     const sqlText = `INSERT INTO suppliers (id, name, website, contact_email, notes, lead_time, response_time) VALUES ($1, $2, $3, $4, $5, $6, $7)
                  ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name, website=EXCLUDED.website, contact_email=EXCLUDED.contact_email, notes=EXCLUDED.notes, lead_time=EXCLUDED.lead_time, response_time=EXCLUDED.response_time`;
     try {
+      if (req.body?.bank !== undefined) normalizeBanking(req.body.bank); // check before writing anything
       await query(sqlText, [id, name, website, contact_email, notes, lead_time, response_time]);
+      const bankChanged = await saveBanking(String(id), req.body?.bank, req.user?.email ?? null);
       const row = await queryOne(`SELECT * FROM suppliers WHERE id = $1`, [id]);
-      res.status(201).json(row);
+      res.status(201).json({ ...row, bank_changed: bankChanged });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      res.status(err.status || 500).json({ error: err.message });
     }
   });
 

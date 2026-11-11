@@ -62,6 +62,11 @@ export interface Supplier {
   measuredLeadTime?: number;
   measuredOrders?: number;
   measuredSlowest?: number;
+  /** For paying them (src/lib/supplierBanking.ts). */
+  bank?: SupplierBanking;
+  /** When and by whom the banking details last changed: check by phone before paying new details. */
+  bankUpdatedAt?: string | null;
+  bankUpdatedBy?: string | null;
 }
 
 export interface ProductionKit {
@@ -631,6 +636,7 @@ export interface ProductionProduct {
 // + re-export so this file uses them as types too. Using the same identifier
 // as the enum means these behave as both value and type (an enum is both).
 import { AutomationRuleState, ScheduledJobState } from './lib/automationStates';
+import type { SupplierBanking } from './lib/supplierBanking';
 export { AutomationRuleState, ScheduledJobState };
 export type NotificationState = 'PENDING' | 'SENT' | 'FAILED' | 'READ' | 'ARCHIVED';
 export type EventState = 'CREATED' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'RETRYING';

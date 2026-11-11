@@ -15,6 +15,7 @@ import React, { useMemo, useState } from 'react';
 import { X, Mail, Globe, Clock, FileText, TrendingUp, Receipt, Wallet, CreditCard, Package } from 'lucide-react';
 import { Supplier, PurchaseOrder, Bill, PaymentMade, Expense } from '../../types';
 import { fmtMoney, fmtDate } from './shared';
+import { hasBanking } from '../../lib/supplierBanking';
 import { Metric, Count, Panel, TabList, DocRow } from './Customer360Modal';
 
 type TabKey = 'OVERVIEW' | 'POS' | 'BILLS' | 'PAYMENTS' | 'EXPENSES';
@@ -110,6 +111,26 @@ export const Vendor360Modal: React.FC<{
               {vendor.responseTime != null && <span className="inline-flex items-center gap-1"><Clock className="w-3 h-3" />Response {vendor.responseTime}h</span>}
             </div>
             {vendor.notes && <p className="text-[11px] text-on-surface-variant italic mt-1">"{vendor.notes}"</p>}
+            {vendor.bank && hasBanking(vendor.bank) ? (
+              <div className="mt-2 rounded-lg border border-outline-variant/50 px-3 py-2 text-xs" data-testid="vendor-banking">
+                <div className="text-[10px] uppercase font-bold text-outline mb-1">Banking details</div>
+                <dl className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1">
+                  {([
+                    ['Bank', vendor.bank.bankName], ['Account holder', vendor.bank.accountHolder], ['Account number', vendor.bank.accountNumber],
+                    ['Branch code', vendor.bank.branchCode], ['Account type', vendor.bank.accountType], ['SWIFT / BIC', vendor.bank.swift], ['Payment reference', vendor.bank.reference],
+                  ] as const).filter(([, v]) => v).map(([k, v]) => (
+                    <div key={k}><dt className="text-[10px] text-outline">{k}</dt><dd className="font-mono text-on-surface select-all">{v}</dd></div>
+                  ))}
+                </dl>
+                {vendor.bankUpdatedAt && (
+                  <p className="text-[10px] text-amber-500 mt-1">
+                    Last changed {new Date(vendor.bankUpdatedAt).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' })}{vendor.bankUpdatedBy ? ` by ${vendor.bankUpdatedBy}` : ''}. If that's recent, confirm by phone before paying.
+                  </p>
+                )}
+              </div>
+            ) : (
+              <p className="text-[11px] text-outline mt-1">No banking details yet: add them on the Suppliers page.</p>
+            )}
           </div>
           <button onClick={onClose} className="p-1.5 rounded hover:bg-surface-container-high text-on-surface-variant flex-shrink-0" title="Close">
             <X className="w-4 h-4" />

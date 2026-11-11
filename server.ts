@@ -1169,6 +1169,13 @@ async function runSchemaBootstrap() {
     await exec(`CREATE INDEX IF NOT EXISTS idx_activity_logs_action ON user_activity_logs(action)`).catch(() => {});
     await exec(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS lead_time INTEGER`).catch(() => {});
     await exec(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS response_time INTEGER`).catch(() => {});
+    // Banking details for paying the supplier (src/lib/supplierBanking.ts).
+    await exec(`ALTER TABLE suppliers
+      ADD COLUMN IF NOT EXISTS bank_name TEXT, ADD COLUMN IF NOT EXISTS bank_account_holder TEXT,
+      ADD COLUMN IF NOT EXISTS bank_account_number TEXT, ADD COLUMN IF NOT EXISTS bank_branch_code TEXT,
+      ADD COLUMN IF NOT EXISTS bank_account_type TEXT, ADD COLUMN IF NOT EXISTS bank_swift TEXT,
+      ADD COLUMN IF NOT EXISTS bank_reference TEXT,
+      ADD COLUMN IF NOT EXISTS bank_updated_at TIMESTAMPTZ, ADD COLUMN IF NOT EXISTS bank_updated_by TEXT`).catch((e) => console.error('Failed to add supplier banking columns:', e));
     await exec(`ALTER TABLE production_kits ADD COLUMN IF NOT EXISTS projectId INTEGER`).catch(() => {});
     await exec(`CREATE UNIQUE INDEX IF NOT EXISTS projects_project_name_key ON projects(project_name)`).catch(() => {});
     await exec(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS start_date TEXT`).catch(() => {});

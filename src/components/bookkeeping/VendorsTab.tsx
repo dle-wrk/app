@@ -3,6 +3,7 @@ import { ExternalLink } from 'lucide-react';
 import { Supplier } from '../../types';
 import { ModuleDataProps, fmtMoney, EmptyState, SectionCard } from './shared';
 import { Vendor360Modal } from './Vendor360Modal';
+import { hasBanking, maskAccount } from '../../lib/supplierBanking';
 
 export const VendorsTab: React.FC<ModuleDataProps> = ({ suppliers, bills, purchaseOrders, paymentsMade, expenses }) => {
   const [viewing, setViewing] = useState<Supplier | null>(null);
@@ -22,7 +23,7 @@ export const VendorsTab: React.FC<ModuleDataProps> = ({ suppliers, bills, purcha
       <SectionCard
         title="Vendors"
         badge={`${suppliers.length} suppliers`}
-        actions={<span className="text-[10px] text-outline">Full contact management lives in the Suppliers page</span>}
+        actions={<span className="text-[10px] text-outline">Edit contact and banking details on the Suppliers page</span>}
       >
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse text-xs">
@@ -31,6 +32,7 @@ export const VendorsTab: React.FC<ModuleDataProps> = ({ suppliers, bills, purcha
                 <th className="px-lg py-sm">ID</th>
                 <th className="px-lg py-sm">Name</th>
                 <th className="px-lg py-sm">Contact</th>
+                <th className="px-lg py-sm">Banking</th>
                 <th className="px-lg py-sm text-right">Lead Time</th>
                 <th className="px-lg py-sm text-right">AP Balance</th>
               </tr>
@@ -60,11 +62,19 @@ export const VendorsTab: React.FC<ModuleDataProps> = ({ suppliers, bills, purcha
                     )}
                   </td>
                   <td className="px-lg py-sm text-on-surface-variant">{s.contact_email || '—'}</td>
+                  <td className="px-lg py-sm text-on-surface-variant">
+                    {s.bank && hasBanking(s.bank)
+                      ? <span title="Open the vendor for the full details">{s.bank.bankName || 'Bank'}{s.bank.accountNumber ? <span className="font-mono"> {maskAccount(s.bank.accountNumber)}</span> : ''}{s.bank.branchCode ? <span className="font-mono text-outline"> · {s.bank.branchCode}</span> : ''}</span>
+                      : <span className="text-outline">Not set</span>}
+                    {s.bankUpdatedAt && Date.now() - new Date(s.bankUpdatedAt).getTime() < 30 * 86_400_000 && (
+                      <span className="ml-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/10 text-amber-500" title="Changed in the last 30 days: confirm by phone before paying">changed recently</span>
+                    )}
+                  </td>
                   <td className="px-lg py-sm text-right font-mono">{s.leadTime ? `${s.leadTime}d` : '—'}</td>
                   <td className="px-lg py-sm text-right font-mono font-bold">{(balances.get(s.id) || 0) > 0 ? fmtMoney(balances.get(s.id)) : '—'}</td>
                 </tr>
               ))}
-              {suppliers.length === 0 && <EmptyState message="No suppliers yet — add one from the Suppliers page." colSpan={5} />}
+              {suppliers.length === 0 && <EmptyState message="No suppliers yet — add one from the Suppliers page." colSpan={6} />}
             </tbody>
           </table>
         </div>
