@@ -50,6 +50,16 @@ export interface BuildDocPdfInput {
   /** Image data URLs (scanned receipt pages, …) appended one per page after the document. */
   attachments?: string[];
   attachmentsLabel?: string; // heading on each attachment page, default "Attachment"
+  /** File name to save as (without .pdf); default "<doc-type>-<number>". */
+  fileName?: string;
+}
+
+/** "BILL-2026-0009" + "ACDC Express" → "BILL-2026-0009_ACDC_EXPRESS": safe on every OS, readable in a folder. */
+export function docFileName(docNumber: string, party?: string | null): string {
+  const clean = (s: string) => s.normalize('NFKD').replace(/[̀-ͯ]/g, '').toUpperCase()
+    .replace(/&/g, ' AND ').replace(/[^A-Z0-9-]+/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+  const p = party ? clean(party).slice(0, 60).replace(/_$/, '') : '';
+  return [clean(docNumber) || 'DOCUMENT', p].filter(Boolean).join('_');
 }
 
 /** Largest size that fits w×h inside boxW×boxH without stretching (never upscales past the box). */
@@ -296,7 +306,7 @@ export async function buildAndSaveDocPdf(input: BuildDocPdfInput): Promise<strin
   // Kebab-case doc type for the filename so a delivery note becomes
   // "delivery-note-DN-2026-0004.pdf".
   const slug = input.docType.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-  const filename = `${slug}-${input.docNumber}.pdf`;
+  const filename = input.fileName ? `${input.fileName}.pdf` : `${slug}-${input.docNumber}.pdf`;
   doc.save(filename);
   return filename;
 }

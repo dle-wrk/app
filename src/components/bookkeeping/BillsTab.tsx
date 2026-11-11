@@ -2,7 +2,7 @@ import React, { useMemo, useRef, useState } from 'react';
 import { Plus, Send, Ban, Eye, Wallet, Camera, Image as ImageIcon, X, Trash2, Sparkles, Download } from 'lucide-react';
 import { Bill, PurchaseOrder } from '../../types';
 import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, addDaysISO, apiPost, apiGet, apiDelete, isAdminUser, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard, CreateButton } from './shared';
-import { buildAndSaveDocPdf } from '../../lib/pdfDocs';
+import { buildAndSaveDocPdf, docFileName } from '../../lib/pdfDocs';
 import { runOcr, OcrResult } from '../../lib/receiptOcr';
 import { openReceiptPage, receiptPages } from '../../lib/receiptPages';
 import { MonthHeaderRow, monthSum, useMonthGroups } from './MonthGroups';
@@ -366,6 +366,7 @@ export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
                     notes: viewing.notes,
                     attachments: receiptPages(viewing.receiptImage),
                     attachmentsLabel: 'Scanned receipt',
+                    fileName: docFileName(viewing.billNumber, viewing.supplierName),
                   });
                   triggerToast(`Downloaded ${name}.`);
                 } catch (err: any) {
