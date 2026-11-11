@@ -59,7 +59,26 @@ async function renderAs(role: 'admin' | 'user') {
   localStorage.setItem('currentUser', JSON.stringify({ email: `${role}@example.com`, role }));
   await act(async () => { root.render(<BillsTab {...props} />); });
   await settle();
+  // Settled months start collapsed; these tests are about the rows, so open them all.
+  const expand = Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Expand all');
+  if (expand) await act(async () => { expand.click(); });
 }
+
+describe('Bills grouped by month', () => {
+  beforeEach(() => { impacts = {}; });
+  it('opens the newest month and months with unpaid bills, and folds the settled ones', async () => {
+    localStorage.setItem('currentUser', JSON.stringify({ email: 'user@example.com', role: 'user' }));
+    await act(async () => { root.render(<BillsTab {...props} />); });
+    await settle();
+    const headers = Array.from(document.querySelectorAll('tr[aria-expanded]')).map(r => [r.textContent?.match(/^[A-Za-z]+ \d{4}/)?.[0], r.getAttribute('aria-expanded')]);
+    expect(headers).toEqual([['October 2026', 'true'], ['September 2026', 'false'], ['August 2026', 'false']]);
+    expect(document.body.textContent).toContain('BILL-2026-0008');
+    expect(document.body.textContent).not.toContain('BILL-2026-0005');
+    const sept = document.querySelectorAll<HTMLElement>('tr[aria-expanded]')[1];
+    await act(async () => { sept.click(); });
+    expect(document.body.textContent).toContain('BILL-2026-0005');
+  });
+});
 
 const rowDeleteButtons = () => Array.from(document.querySelectorAll<HTMLButtonElement>('button[aria-label^="Delete BILL-"]'));
 const rowDelete = (billNumber: string) => document.querySelector<HTMLButtonElement>(`button[aria-label="Delete ${billNumber}"]`)!;
@@ -121,7 +140,8 @@ describe('Bills — admin', () => {
     await renderAs('admin');
 
     expect(rowDeleteButtons().map((b) => b.getAttribute('aria-label'))).toEqual([
-      'Delete BILL-2026-0005', 'Delete BILL-2026-0002', 'Delete BILL-2026-0008', 'Delete BILL-2026-0009',
+      // newest month first: October (0008, 0009), September (0005), August (0002)
+      'Delete BILL-2026-0008', 'Delete BILL-2026-0009', 'Delete BILL-2026-0005', 'Delete BILL-2026-0002',
     ]);
   });
 
