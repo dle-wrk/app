@@ -8,6 +8,7 @@ import {
   postJournalEntry,
   reverseJournalEntry,
   computeLineTotals,
+  purchaseLineTotals,
   computeDocumentTotals,
   mapAccount,
   mapTaxRate,
@@ -1184,7 +1185,7 @@ export function registerBookkeepingRoutes(app: Express) {
       await client.query('BEGIN');
       const computedLines = await Promise.all(body.items.map(async (item) => {
         const taxPct = await resolveTaxPercent(item.taxRateId);
-        return { ...item, ...computeLineTotals({ ...item, taxRatePercent: taxPct }) };
+        return { ...item, ...purchaseLineTotals({ ...item, taxRatePercent: taxPct }) };
       }));
       const { subtotal, taxTotal, total } = computeDocumentTotals(computedLines);
 
@@ -1367,7 +1368,7 @@ export function registerBookkeepingRoutes(app: Express) {
       await client.query('BEGIN');
       const computedLines = await Promise.all(body.items.map(async (item) => {
         const taxPct = await resolveTaxPercent(item.taxRateId);
-        return { ...item, ...computeLineTotals({ ...item, taxRatePercent: taxPct }) };
+        return { ...item, ...purchaseLineTotals({ ...item, taxRatePercent: taxPct }) };
       }));
       const { subtotal, taxTotal, total } = computeDocumentTotals(computedLines);
 

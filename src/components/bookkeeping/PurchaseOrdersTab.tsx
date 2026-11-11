@@ -236,7 +236,7 @@ const POEditorModal: React.FC<ModuleDataProps & { onClose: () => void; onSaved: 
     try {
       await apiPost('/api/purchase-orders', {
         supplierId: supplierId || null, orderDate, expectedDate: expectedDate || null, currency, notes, status,
-        items: validLines.map(l => ({ partNumber: l.partNumber || undefined, description: l.description, quantity: l.quantity, unitPrice: l.unitPrice, taxRateId: l.taxRateId || undefined })),
+        items: validLines.map(l => ({ partNumber: l.partNumber || undefined, description: l.description, quantity: l.quantity, unitPrice: l.unitPrice, taxRateId: l.taxRateId || undefined, taxInclusive: !!l.taxInclusive && !!l.taxRateId })),
       });
       triggerToast('Purchase order created.');
       onSaved();

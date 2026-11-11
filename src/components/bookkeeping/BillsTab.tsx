@@ -873,7 +873,7 @@ const BillEditorModal: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
         supplierId: supplierId || null,
         purchaseOrderId: prefillFromPO?.id || null,
         billDate, dueDate, currency, notes, status,
-        items: validLines.map(l => ({ partNumber: l.partNumber || undefined, description: l.description, quantity: l.quantity, unitPrice: l.unitPrice, taxRateId: l.taxRateId || undefined, accountId: l.accountId || undefined, receiveStock: !!l.receiveStock })),
+        items: validLines.map(l => ({ partNumber: l.partNumber || undefined, description: l.description, quantity: l.quantity, unitPrice: l.unitPrice, taxRateId: l.taxRateId || undefined, accountId: l.accountId || undefined, receiveStock: !!l.receiveStock, taxInclusive: !!l.taxInclusive && !!l.taxRateId })),
       });
       // If the user reached this modal from the scan flow, attach the image
       // to the fresh bill so line items and the source slip live together.

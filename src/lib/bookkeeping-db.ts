@@ -1057,6 +1057,23 @@ export function computeLineTotals(line: RawLineInput) {
   return { base, taxAmount, lineTotal };
 }
 
+/**
+ * A bill or purchase-order line. Purchases store the cost excluding VAT,
+ * because that cost is what the journal posts to the expense account and
+ * what stock is booked in at. So a line entered "unit price includes tax"
+ * is saved at its ex-VAT unit price (to 7 decimals, the column's scale),
+ * with the same totals: R91.90 incl. 15% becomes R79.91 ex, R11.99 VAT,
+ * R91.90 total.
+ */
+export function purchaseLineTotals(line: RawLineInput) {
+  const t = computeLineTotals(line);
+  const qty = Number(line.quantity) || 0;
+  const unitPrice = line.taxInclusive && (Number(line.taxRatePercent) || 0) > 0 && qty > 0
+    ? Math.round((t.base / qty) * 1e7) / 1e7
+    : Number(line.unitPrice) || 0;
+  return { ...t, unitPrice };
+}
+
 // ---------------------------------------------------------------------------
 // Sales-order stock reservations
 // ---------------------------------------------------------------------------
