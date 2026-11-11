@@ -4,6 +4,7 @@ import { Bill, PurchaseOrder } from '../../types';
 import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, addDaysISO, apiPost, apiGet, apiDelete, isAdminUser, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard, CreateButton } from './shared';
 import { buildAndSaveDocPdf } from '../../lib/pdfDocs';
 import { runOcr, OcrResult } from '../../lib/receiptOcr';
+import { openReceiptPage, receiptPages } from '../../lib/receiptPages';
 import { LineItemsEditor, EditableLine, newEditableLine } from './LineItemsEditor';
 import { ErrorBoundary } from '../ErrorBoundary';
 import { confirmDialog, ConfirmOptions } from '../../lib/confirmDialog';
@@ -218,8 +219,8 @@ export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
                         title="View / replace scanned receipt"
                         className="inline-flex items-center gap-1.5 text-[11px] text-green-400 hover:text-green-300"
                       >
-                        <img src={b.receiptImage} alt="receipt" className="w-6 h-6 object-cover rounded border border-outline-variant" />
-                        Attached
+                        {receiptPages(b.receiptImage)[0] && <img src={receiptPages(b.receiptImage)[0]} alt="receipt" className="w-6 h-6 object-cover rounded border border-outline-variant" />}
+                        Attached{receiptPages(b.receiptImage).length > 1 ? ` (${receiptPages(b.receiptImage).length} pages)` : ''}
                       </button>
                     ) : (
                       <button
@@ -285,12 +286,21 @@ export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
               </tbody>
             </table>
           </div>
-          {viewing.receiptImage && (
+          {receiptPages(viewing.receiptImage).length > 0 && (
             <div className="mb-md">
-              <div className="text-[10px] uppercase font-bold text-outline mb-1">Attached receipt</div>
-              <a href={viewing.receiptImage} target="_blank" rel="noopener noreferrer" title="Open full size">
-                <img src={viewing.receiptImage} alt="Scanned receipt" className="max-h-64 object-contain rounded border border-outline-variant bg-black/20 p-1" />
-              </a>
+              <div className="text-[10px] uppercase font-bold text-outline mb-1">
+                Attached receipt{receiptPages(viewing.receiptImage).length > 1 ? ` · ${receiptPages(viewing.receiptImage).length} pages` : ''} · click a page to open it full size in a new tab
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {receiptPages(viewing.receiptImage).map((p, i, all) => (
+                  <button key={i} type="button" title={`Open page ${i + 1} full size`} aria-label={`Open receipt page ${i + 1} full size`}
+                    onClick={() => { if (!openReceiptPage(p)) triggerToast('Your browser blocked the new tab. Allow pop-ups for this site to open receipts full size.', 'ERROR'); }}
+                    className="relative cursor-zoom-in">
+                    <img src={p} alt={`Scanned receipt page ${i + 1}`} className="max-h-64 object-contain rounded border border-outline-variant bg-black/20 p-1 hover:border-primary" />
+                    {all.length > 1 && <span className="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-black/60 text-white text-[10px] font-mono">{i + 1}</span>}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
           <div className="flex justify-end mb-md">
@@ -402,19 +412,13 @@ const ReceiptScanModal: React.FC<{
   // Existing receipt_image column stores either a raw data: URL (single
   // page — the pre-multi-page shape) or a JSON array of them. Parse
   // both so old bills open cleanly.
-  const initialPreviews = React.useMemo<string[]>(() => {
-    const raw = bill?.receiptImage;
-    if (!raw) return [];
-    if (raw.startsWith('[')) {
-      try {
-        const arr = JSON.parse(raw);
-        return Array.isArray(arr) ? arr.filter((v: any) => typeof v === 'string' && v.startsWith('data:image/')) : [];
-      } catch { return []; }
-    }
-    return [raw];
-  }, [bill?.receiptImage]);
+  const initialPreviews = React.useMemo<string[]>(() => receiptPages(bill?.receiptImage), [bill?.receiptImage]);
   const [previews, setPreviews] = useState<string[]>(initialPreviews);
   const preview = previews[previews.length - 1] || null; // most recent page for the visible camera-cancel view
+  // The page shown large: the one clicked in the strip, else the newest.
+  const [selectedPage, setSelectedPage] = useState<number | null>(null);
+  const shownPage = selectedPage != null && selectedPage < previews.length ? selectedPage : previews.length - 1;
+  React.useEffect(() => { setSelectedPage(null); }, [previews.length]); // a page added or removed shows the newest again
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
@@ -654,9 +658,15 @@ const ReceiptScanModal: React.FC<{
           </div>
         ) : previews.length > 0 ? (
           <div className="space-y-2">
-            {/* Primary preview — largest / most recent page. */}
-            <div className="rounded-lg border border-outline-variant bg-black/20 flex items-center justify-center p-2">
-              <img src={previews[previews.length - 1]} alt={`Page ${previews.length}`} className="max-h-[calc(50vh/var(--app-zoom,1))] object-contain rounded" />
+            {/* Primary preview — the page picked in the strip, else the newest. */}
+            <div className="relative rounded-lg border border-outline-variant bg-black/20 flex items-center justify-center p-2">
+              <button type="button" className="cursor-zoom-in" title="Open this page full size in a new tab" aria-label={`Open page ${shownPage + 1} full size`}
+                onClick={() => { if (!openReceiptPage(previews[shownPage])) triggerToast('Your browser blocked the new tab. Allow pop-ups for this site to open receipts full size.', 'ERROR'); }}>
+                <img src={previews[shownPage]} alt={`Page ${shownPage + 1}`} className="max-h-[calc(50vh/var(--app-zoom,1))] object-contain rounded" />
+              </button>
+              {previews.length > 1 && (
+                <span className="absolute top-2 left-2 px-2 py-0.5 rounded bg-black/60 text-white text-[10px] font-mono">Page {shownPage + 1} of {previews.length}</span>
+              )}
             </div>
             {/* Page strip — thumbnails of every page with a per-page
                 remove button. Only visible when we have more than one
@@ -666,10 +676,12 @@ const ReceiptScanModal: React.FC<{
                 {previews.map((p, i) => (
                   <div
                     key={i}
-                    className={`relative shrink-0 rounded border ${i === previews.length - 1 ? 'border-primary' : 'border-outline-variant/60'}`}
+                    className={`relative shrink-0 rounded border-2 ${i === shownPage ? 'border-primary' : 'border-outline-variant/60'}`}
                     title={`Page ${i + 1}`}
                   >
-                    <img src={p} alt={`Page ${i + 1}`} className="w-16 h-16 object-cover rounded" />
+                    <button type="button" onClick={() => setSelectedPage(i)} className="block rounded cursor-zoom-in" aria-label={`Show page ${i + 1}`} aria-pressed={i === shownPage}>
+                      <img src={p} alt={`Page ${i + 1}`} className={`w-16 h-16 object-cover rounded ${i === shownPage ? '' : 'opacity-70 hover:opacity-100'}`} />
+                    </button>
                     <button
                       type="button"
                       onClick={() => removePage(i)}
@@ -686,7 +698,7 @@ const ReceiptScanModal: React.FC<{
               </div>
             )}
             <div className="text-[10px] text-outline">
-              {previews.length} page{previews.length === 1 ? '' : 's'} attached.
+              {previews.length} page{previews.length === 1 ? '' : 's'} attached.{previews.length > 1 && ' Click a page below to see it.'} Click the big image to open it full size in a new tab.
               {previews.length < 8 && ' Add another below for multi-page bills.'}
             </div>
           </div>
