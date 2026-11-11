@@ -2,11 +2,16 @@ import React, { useMemo, useState } from 'react';
 import { Plus, Ban } from 'lucide-react';
 import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, apiPost, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard, CreateButton } from './shared';
 import { confirmDialog } from '../../lib/confirmDialog';
+import { MonthHeaderRow, monthSum, useMonthGroups } from './MonthGroups';
 
 export const ExpensesTab: React.FC<ModuleDataProps> = (props) => {
   const { expenses, setExpenses, triggerToast, refresh } = props;
   const [showCreate, setShowCreate] = useState(false);
   const [busy, setBusy] = useState<number | null>(null);
+  // Expenses grouped into collapsible months by expense date; nothing on an
+  // expense waits for action, so only the newest month starts open.
+  const { months, isOpen: isMonthOpen, toggle: toggleMonth, setAll: setAllMonths } =
+    useMonthGroups(expenses, e => e.expenseDate, () => false);
 
   const monthTotal = useMemo(() => {
     const now = new Date();
@@ -58,8 +63,20 @@ export const ExpensesTab: React.FC<ModuleDataProps> = (props) => {
                 <th className="px-lg py-sm text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-outline-variant/30">
-              {expenses.map(e => (
+            {months.map((g, gi) => {
+              const open = isMonthOpen(g, gi);
+              const total = monthSum(g.items.filter(e => e.status !== 'VOID'), e => e.total);
+              return (
+            <tbody key={g.key} className="divide-y divide-outline-variant/30 border-b border-outline-variant/50">
+              <MonthHeaderRow
+                label={g.label} count={g.items.length} noun={['expense', 'expenses']}
+                open={open} onToggle={() => toggleMonth(g, gi)}
+                labelCols={4}
+                amounts={[total ? fmtMoney(total.sum, total.currency) : '']}
+                trailingCols={2}
+                bulk={gi === 0 && months.length > 1 ? { expand: () => setAllMonths(true), collapse: () => setAllMonths(false) } : undefined}
+              />
+              {open && g.items.map(e => (
                 <tr key={e.id} className="hover:bg-surface-variant/20 transition-all">
                   <td className="px-lg py-sm font-mono text-primary font-bold">{e.expenseNumber}</td>
                   <td className="px-lg py-sm font-semibold">{e.payee || '—'}</td>
@@ -74,8 +91,10 @@ export const ExpensesTab: React.FC<ModuleDataProps> = (props) => {
                   </td>
                 </tr>
               ))}
-              {expenses.length === 0 && <EmptyState message="No expenses recorded yet." colSpan={7} />}
             </tbody>
+              );
+            })}
+            {expenses.length === 0 && <tbody><EmptyState message="No expenses recorded yet." colSpan={7} /></tbody>}
           </table>
         </div>
       </SectionCard>

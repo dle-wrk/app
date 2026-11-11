@@ -51,8 +51,9 @@ export const MonthHeaderRow: React.FC<MonthHeaderRowProps> = ({ label, count, no
 );
 
 /** Sum of a money field when every row shares one currency; null when they mix (no meaningful total). */
-export function monthSum<T extends { currency?: string | null }>(rows: T[], amount: (row: T) => number): { sum: number; currency: string } | null {
-  const currencies = new Set(rows.map(r => r.currency || 'ZAR'));
+// Rows without a currency field (expenses) count as ZAR.
+export function monthSum<T extends object>(rows: T[], amount: (row: T) => number): { sum: number; currency: string } | null {
+  const currencies = new Set(rows.map(r => (r as { currency?: string | null }).currency || 'ZAR'));
   if (currencies.size !== 1) return null;
   return { sum: rows.reduce((s, r) => s + (Number(amount(r)) || 0), 0), currency: [...currencies][0] };
 }
