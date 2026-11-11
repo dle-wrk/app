@@ -3,7 +3,7 @@ import { MoveToPotential } from './MoveToPotential';
 import { Plus, Printer, Ban, Eye, Wallet, FileText, Download } from 'lucide-react';
 import { Invoice, InvoiceItem } from '../../types';
 import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, addDaysISO, apiPost, apiPut, apiDelete, apiGet, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard, CreateButton } from './shared';
-import { buildAndSaveDocPdf } from '../../lib/pdfDocs';
+import { buildAndSaveDocPdf, docFileName } from '../../lib/pdfDocs';
 import { LineItemsEditor, EditableLine, newEditableLine, lineTotals } from './LineItemsEditor';
 import { ErrorBoundary } from '../ErrorBoundary';
 import { confirmDialog } from '../../lib/confirmDialog';
@@ -274,6 +274,8 @@ export const InvoicesTab: React.FC<ModuleDataProps> = (props) => {
                       balanceDue: viewingInvoice.balanceDue,
                     },
                     notes: viewingInvoice.notes,
+                    // INV-2026-0007_ACME_LTD.pdf (no client: just the number)
+                    fileName: docFileName(viewingInvoice.invoiceNumber, clients.find(c => c.id === viewingInvoice.clientId)?.clientName),
                   });
                   props.triggerToast(`Downloaded ${name}.`);
                 } catch (err: any) {
