@@ -5,6 +5,7 @@ import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, apiPos
 import { LineItemsEditor, EditableLine, newEditableLine } from './LineItemsEditor';
 import { confirmDialog } from '../../lib/confirmDialog';
 import { ErrorBoundary } from '../ErrorBoundary';
+import { MonthHeaderRow, monthSum, useMonthGroups } from './MonthGroups';
 
 export const PurchaseOrdersTab: React.FC<ModuleDataProps & { onConvertToBill?: (po: PurchaseOrder) => void }> = (props) => {
   const { purchaseOrders, bills, triggerToast, refresh, onConvertToBill } = props;
@@ -15,6 +16,11 @@ export const PurchaseOrdersTab: React.FC<ModuleDataProps & { onConvertToBill?: (
   // been sent, received or cancelled. The server enforces the same rule.
   const isAdmin = isAdminUser();
   const canDelete = (po: { status: string }) => po.status === 'DRAFT' || isAdmin;
+  // Orders grouped into collapsible months by order date. The newest month,
+  // and any month with an order still in progress (draft, sent, part
+  // received), start open.
+  const { months, isOpen: isMonthOpen, toggle: toggleMonth, setAll: setAllMonths } =
+    useMonthGroups(purchaseOrders, po => po.orderDate, po => ['DRAFT', 'SENT', 'PARTIAL'].includes(po.status));
 
   const openView = async (po: PurchaseOrder) => {
     try {
@@ -90,8 +96,20 @@ export const PurchaseOrdersTab: React.FC<ModuleDataProps & { onConvertToBill?: (
                 <th className="px-lg py-sm text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-outline-variant/30">
-              {purchaseOrders.map(po => (
+            {months.map((g, gi) => {
+              const open = isMonthOpen(g, gi);
+              const total = monthSum(g.items.filter(po => po.status !== 'CANCELLED'), po => po.total);
+              return (
+            <tbody key={g.key} className="divide-y divide-outline-variant/30 border-b border-outline-variant/50">
+              <MonthHeaderRow
+                label={g.label} count={g.items.length} noun={['order', 'orders']}
+                open={open} onToggle={() => toggleMonth(g, gi)}
+                labelCols={4}
+                amounts={[total ? fmtMoney(total.sum, total.currency) : '']}
+                trailingCols={2}
+                bulk={gi === 0 && months.length > 1 ? { expand: () => setAllMonths(true), collapse: () => setAllMonths(false) } : undefined}
+              />
+              {open && g.items.map(po => (
                 <tr key={po.id} className="hover:bg-surface-variant/20 transition-all">
                   <td className="px-lg py-sm font-mono text-primary font-bold cursor-pointer" onClick={() => openView(po)}>{po.poNumber}</td>
                   <td className="px-lg py-sm font-semibold">{po.supplierName || po.supplierId || '—'}</td>
@@ -107,8 +125,10 @@ export const PurchaseOrdersTab: React.FC<ModuleDataProps & { onConvertToBill?: (
                   </td>
                 </tr>
               ))}
-              {purchaseOrders.length === 0 && <EmptyState message="No purchase orders yet." colSpan={7} />}
             </tbody>
+              );
+            })}
+            {purchaseOrders.length === 0 && <tbody><EmptyState message="No purchase orders yet." colSpan={7} /></tbody>}
           </table>
         </div>
       </SectionCard>

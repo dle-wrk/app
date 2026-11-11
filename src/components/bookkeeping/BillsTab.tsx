@@ -1,11 +1,11 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { Plus, Send, Ban, Eye, Wallet, Camera, Image as ImageIcon, X, Trash2, Sparkles, Download, ChevronDown, ChevronRight } from 'lucide-react';
+import { Plus, Send, Ban, Eye, Wallet, Camera, Image as ImageIcon, X, Trash2, Sparkles, Download } from 'lucide-react';
 import { Bill, PurchaseOrder } from '../../types';
 import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, addDaysISO, apiPost, apiGet, apiDelete, isAdminUser, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard, CreateButton } from './shared';
 import { buildAndSaveDocPdf } from '../../lib/pdfDocs';
 import { runOcr, OcrResult } from '../../lib/receiptOcr';
 import { openReceiptPage, receiptPages } from '../../lib/receiptPages';
-import { groupByMonth } from '../../lib/groupByMonth';
+import { MonthHeaderRow, monthSum, useMonthGroups } from './MonthGroups';
 import { LineItemsEditor, EditableLine, newEditableLine } from './LineItemsEditor';
 import { ErrorBoundary } from '../ErrorBoundary';
 import { confirmDialog, ConfirmOptions } from '../../lib/confirmDialog';
@@ -95,11 +95,8 @@ export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
   // Bills grouped into collapsible months (by bill date). The newest month,
   // and any month still holding an unpaid bill, start open; a click on a
   // month's header overrides that.
-  const months = useMemo(() => groupByMonth(filtered, b => b.billDate), [filtered]);
-  const [monthOpen, setMonthOpen] = useState<Record<string, boolean>>({});
-  const isMonthOpen = (key: string, i: number, items: Bill[]) =>
-    monthOpen[key] ?? (i === 0 || items.some(b => ['AWAITING_PAYMENT', 'PARTIAL', 'OVERDUE', 'DRAFT'].includes(b.status)));
-  const setAllMonths = (open: boolean) => setMonthOpen(Object.fromEntries(months.map(g => [g.key, open])));
+  const { months, isOpen: isMonthOpen, toggle: toggleMonth, setAll: setAllMonths } =
+    useMonthGroups(filtered, b => b.billDate, b => ['AWAITING_PAYMENT', 'PARTIAL', 'OVERDUE', 'DRAFT'].includes(b.status));
   const totals = useMemo(() => ({
     outstanding: bills.filter(b => ['AWAITING_PAYMENT', 'PARTIAL', 'OVERDUE'].includes(b.status)).reduce((s, b) => s + b.balanceDue, 0),
     overdue: bills.filter(b => b.status === 'OVERDUE').reduce((s, b) => s + b.balanceDue, 0),
@@ -212,36 +209,20 @@ export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
               </tr>
             </thead>
             {months.map((g, gi) => {
-              const open = isMonthOpen(g.key, gi, g.items);
-              const currencies = new Set(g.items.map(b => b.currency || 'ZAR'));
-              const sum = g.items.filter(b => b.status !== 'VOID').reduce((s, b) => s + (Number(b.total) || 0), 0);
-              const due = g.items.filter(b => b.status !== 'VOID').reduce((s, b) => s + (Number(b.balanceDue) || 0), 0);
+              const open = isMonthOpen(g, gi);
+              const live = g.items.filter(b => b.status !== 'VOID');
+              const total = monthSum(live, b => b.total);
+              const due = monthSum(live, b => b.balanceDue);
               return (
             <tbody key={g.key} className="divide-y divide-outline-variant/30 border-b border-outline-variant/50">
-              <tr
-                className="bg-surface-container-high/40 hover:bg-surface-container-high cursor-pointer select-none"
-                onClick={() => setMonthOpen(m => ({ ...m, [g.key]: !open }))}
-                aria-expanded={open}
-              >
-                <td colSpan={4} className="px-lg py-2 font-bold text-[11px] uppercase tracking-wide">
-                  <span className="inline-flex items-center gap-1.5">
-                    {open ? <ChevronDown className="w-3.5 h-3.5 text-primary" /> : <ChevronRight className="w-3.5 h-3.5 text-outline" />}
-                    {g.label}
-                    <span className="ml-1 px-1.5 py-0.5 rounded bg-surface-container text-[10px] font-mono text-on-surface-variant normal-case">{g.items.length} {g.items.length === 1 ? 'bill' : 'bills'}</span>
-                  </span>
-                </td>
-                <td className="px-lg py-2 text-right font-mono text-[11px] text-on-surface-variant">{currencies.size === 1 ? fmtMoney(sum, [...currencies][0]) : ''}</td>
-                <td className="px-lg py-2 text-right font-mono text-[11px] font-bold">{currencies.size === 1 && due > 0 ? fmtMoney(due, [...currencies][0]) : ''}</td>
-                <td colSpan={3} className="px-lg py-2 text-right">
-                  {gi === 0 && months.length > 1 && (
-                    <span className="text-[10px] text-outline font-normal">
-                      <button className="hover:text-primary" onClick={(e) => { e.stopPropagation(); setAllMonths(true); }}>Expand all</button>
-                      {' · '}
-                      <button className="hover:text-primary" onClick={(e) => { e.stopPropagation(); setAllMonths(false); }}>Collapse all</button>
-                    </span>
-                  )}
-                </td>
-              </tr>
+              <MonthHeaderRow
+                label={g.label} count={g.items.length} noun={['bill', 'bills']}
+                open={open} onToggle={() => toggleMonth(g, gi)}
+                labelCols={4}
+                amounts={[total ? fmtMoney(total.sum, total.currency) : '', due && due.sum > 0 ? fmtMoney(due.sum, due.currency) : '']}
+                trailingCols={3}
+                bulk={gi === 0 && months.length > 1 ? { expand: () => setAllMonths(true), collapse: () => setAllMonths(false) } : undefined}
+              />
               {open && g.items.map(b => (
                 <tr key={b.id} className="hover:bg-surface-variant/20 transition-all">
                   <td className="px-lg py-sm font-mono text-primary font-bold cursor-pointer" onClick={() => openView(b)}>{b.billNumber}</td>

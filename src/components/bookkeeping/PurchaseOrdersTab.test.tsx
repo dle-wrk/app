@@ -50,6 +50,9 @@ async function renderAs(role: 'admin' | 'user') {
   localStorage.setItem('currentUser', JSON.stringify({ email: `${role}@example.com`, role }));
   await act(async () => { root.render(<PurchaseOrdersTab {...props} />); });
   await settle();
+  // Finished months start collapsed; these tests are about the rows, so open them all.
+  const expand = Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Expand all');
+  if (expand) await act(async () => { expand.click(); });
 }
 
 const rowDeleteButtons = () => Array.from(document.querySelectorAll<HTMLButtonElement>('button[aria-label^="Delete PO-"]'));
@@ -97,12 +100,30 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe('Purchase Orders grouped by month', () => {
+  it('opens the newest month and months with orders in progress, folds finished ones, and totals without cancelled orders', async () => {
+    localStorage.setItem('currentUser', JSON.stringify({ email: 'user@example.com', role: 'user' }));
+    await act(async () => { root.render(<PurchaseOrdersTab {...props} />); });
+    await settle();
+    const headers = () => Array.from(document.querySelectorAll<HTMLElement>('tr[aria-expanded]'));
+    expect(headers().map(r => [r.textContent?.match(/^[A-Za-z]+ \d{4}/)?.[0], r.getAttribute('aria-expanded')]))
+      .toEqual([['October 2026', 'true'], ['September 2026', 'false'], ['August 2026', 'false']]);
+    expect(document.body.textContent).toContain('PO-2026-0009');
+    expect(document.body.textContent).not.toContain('PO-2026-0006');
+    expect(headers()[2].textContent).toContain('1 order'); // August: just the cancelled one…
+    expect(headers()[2].textContent).not.toMatch(/R\s?1/);  // …which is left out of the total
+    await act(async () => { headers()[1].click(); });
+    expect(document.body.textContent).toContain('PO-2026-0006');
+  });
+});
+
 describe('Purchase Orders — admin', () => {
   it('has a delete button on every row, whatever the status', async () => {
     await renderAs('admin');
 
     expect(rowDeleteButtons().map((b) => b.getAttribute('aria-label'))).toEqual([
-      'Delete PO-2026-0006', 'Delete PO-2026-0003', 'Delete PO-2026-0009',
+      // newest month first: October (0009), September (0006), August (0003)
+      'Delete PO-2026-0009', 'Delete PO-2026-0006', 'Delete PO-2026-0003',
     ]);
   });
 
