@@ -47,6 +47,34 @@ export interface BuildDocPdfInput {
   notes?: string;
   currency?: string;        // ZAR, USD… routed to fmtCurrency
   extraColumnHeader?: string; // e.g. "Serial numbers" for dispatch
+  /** Image data URLs (scanned receipt pages, …) appended one per page after the document. */
+  attachments?: string[];
+  attachmentsLabel?: string; // heading on each attachment page, default "Attachment"
+}
+
+/** Largest size that fits w×h inside boxW×boxH without stretching (never upscales past the box). */
+export function fitInto(w: number, h: number, boxW: number, boxH: number): { w: number; h: number } {
+  if (!(w > 0) || !(h > 0)) return { w: boxW, h: boxH };
+  const s = Math.min(boxW / w, boxH / h);
+  return { w: w * s, h: h * s };
+}
+
+/** Re-encode any browser-readable image as JPEG (jsPDF reads every format that way, and big phone photos shrink). */
+async function toJpeg(dataUrl: string): Promise<{ data: string; w: number; h: number }> {
+  const img = new Image();
+  img.src = dataUrl;
+  await img.decode();
+  const maxSide = 2400; // plenty for an A4 page at print resolution
+  const s = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+  const w = Math.max(1, Math.round(img.naturalWidth * s));
+  const h = Math.max(1, Math.round(img.naturalHeight * s));
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = '#fff'; // transparent PNGs would otherwise turn black
+  ctx.fillRect(0, 0, w, h);
+  ctx.drawImage(img, 0, 0, w, h);
+  return { data: canvas.toDataURL('image/jpeg', 0.85), w, h };
 }
 
 /** jsPDF + autotable, loaded on demand (a stale tab reloads once to pick up the new chunks). */
@@ -207,9 +235,12 @@ export async function buildAndSaveDocPdf(input: BuildDocPdfInput): Promise<strin
     if (t.subtotal != null) line('Subtotal', money(t.subtotal));
     if (t.discount != null && t.discount !== 0) line('Discount', `-${money(t.discount)}`);
     if (t.tax != null) line('Tax', money(t.tax));
+    // Rule sits just under the line above, then the Total drops below it
+    // (it used to be drawn through the Total text).
     doc.setDrawColor(180);
     doc.setLineWidth(0.3);
-    doc.line(totalsX, ty - 2, totalsX + totalsW, ty - 2);
+    doc.line(totalsX, ty - 3.5, totalsX + totalsW, ty - 3.5);
+    ty += 2;
     line('Total', money(t.total), true);
     if (t.amountPaid != null && t.amountPaid !== 0) line('Amount paid', money(t.amountPaid), false, [22, 163, 74]);
     if (t.balanceDue != null && t.balanceDue !== 0) line('Balance due', money(t.balanceDue), true, [239, 68, 68]);
@@ -225,16 +256,42 @@ export async function buildAndSaveDocPdf(input: BuildDocPdfInput): Promise<strin
     doc.text(noteLines, M, ty + 13);
   }
 
-  // ── Footer ───────────────────────────────────────────────────────
   const pageH = doc.internal.pageSize.getHeight();
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8);
-  doc.setTextColor(160);
-  doc.text(
-    `TRACKLAB IM · Generated ${new Date().toLocaleString()}`,
-    pageWidth / 2, pageH - 8,
-    { align: 'center' },
-  );
+
+  // ── Attachments: one image per extra page ────────────────────────
+  const attachments = (input.attachments || []).filter(a => /^data:image\//i.test(a));
+  let skipped = 0;
+  for (let i = 0; i < attachments.length; i++) {
+    let jpeg: { data: string; w: number; h: number };
+    try { jpeg = await toJpeg(attachments[i]); } catch { skipped++; continue; }
+    doc.addPage();
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(247, 145, 43);
+    const label = input.attachmentsLabel || 'Attachment';
+    doc.text(attachments.length > 1 ? `${label} · page ${i + 1} of ${attachments.length}` : label, M, 14);
+    doc.setFont('courier', 'normal');
+    doc.setTextColor(120);
+    doc.text(String(input.docNumber || ''), pageWidth - M, 14, { align: 'right' });
+    const top = 19, bottom = pageH - 14;
+    const fit = fitInto(jpeg.w, jpeg.h, pageWidth - M * 2, bottom - top);
+    doc.addImage(jpeg.data, 'JPEG', (pageWidth - fit.w) / 2, top, fit.w, fit.h);
+  }
+  if (skipped) console.warn(`PDF: ${skipped} attachment(s) could not be read and were left out`);
+
+  // ── Footer on every page ─────────────────────────────────────────
+  const pages = doc.getNumberOfPages();
+  for (let p = 1; p <= pages; p++) {
+    doc.setPage(p);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(160);
+    doc.text(
+      `TRACKLAB IM · Generated ${new Date().toLocaleString()}${pages > 1 ? ` · Page ${p} of ${pages}` : ''}`,
+      pageWidth / 2, pageH - 8,
+      { align: 'center' },
+    );
+  }
 
   // Kebab-case doc type for the filename so a delivery note becomes
   // "delivery-note-DN-2026-0004.pdf".

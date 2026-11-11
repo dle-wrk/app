@@ -342,6 +342,8 @@ export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
                       balanceDue: viewing.balanceDue,
                     },
                     notes: viewing.notes,
+                    attachments: receiptPages(viewing.receiptImage),
+                    attachmentsLabel: 'Scanned receipt',
                   });
                   triggerToast(`Downloaded ${name}.`);
                 } catch (err: any) {
