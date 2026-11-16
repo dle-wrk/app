@@ -34,6 +34,7 @@ import { ensureStockPlacesSchema, registerStockPlacesRoutes } from './src/lib/st
 import { ensureStockCountsSchema, registerStockCountsRoutes } from './src/lib/stockCounts';
 import { ensureMaterialPlanningSchema, registerMaterialPlanningRoutes } from './src/lib/materialPlanningRoutes';
 import { ensureReturnsSchema, registerReturnsRoutes } from './src/lib/returnsRoutes';
+import { ensureScansSchema, registerScansRoutes } from './src/lib/scansRoutes';
 import { ensureRecurringInvoicesSchema, registerRecurringInvoiceRoutes, runDueRecurring } from './src/lib/recurringInvoices';
 import { registerSupplierQuoteRoutes } from './src/lib/supplierQuoteRoutes';
 import { registerUserPrefsRoutes, ensureUserPrefsSchema } from './src/lib/userPrefsRoutes';
@@ -223,6 +224,8 @@ registerStockCountsRoutes(app);
 registerMaterialPlanningRoutes(app);
 // Customer returns (/api/returns) and recurring invoices (/api/recurring-invoices).
 registerReturnsRoutes(app);
+// Pick scans from the scanner phone app (photo + pick note, client, item, quantity).
+registerScansRoutes(app);
 registerRecurringInvoiceRoutes(app);
 registerSupplierQuoteRoutes(app);
 registerUserPrefsRoutes(app);
@@ -992,6 +995,9 @@ async function runSchemaBootstrap() {
     // as "not yet observed active" and gives the session one grace window
     // before enforcing the idle timeout.
     await exec(`ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP`).catch(() => {});
+    // 'web' or 'mobile' (the scanner app): one of each per person, and
+    // signing in on one never ends the other (authRoutes.signIn).
+    await exec(`ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'web'`).catch(() => {});
     // Password reset tokens. Bcrypt-hashed at rest (like the passwords they
     // reset) so a DB read alone can't be turned into an account takeover.
     // One row per issued token; expired/used rows stay for audit.
@@ -1204,6 +1210,7 @@ async function runSchemaBootstrap() {
   await ensureStockCountsSchema().catch((e) => console.error('Failed to bootstrap stock counts schema:', e));
   await ensureMaterialPlanningSchema().catch((e) => console.error('Failed to bootstrap material planning schema:', e));
   await ensureReturnsSchema().catch((e) => console.error('Failed to bootstrap returns schema:', e));
+  await ensureScansSchema().catch((e) => console.error('Failed to bootstrap scans schema:', e));
   await ensureRecurringInvoicesSchema().catch((e) => console.error('Failed to bootstrap recurring invoices schema:', e));
   await ensureAutomationEngineSchema().catch((e) => console.error('Failed to bootstrap automation engine schema:', e));
   await ensureScheduledJobsSchema().catch((e) => console.error('Failed to bootstrap scheduled jobs schema:', e));

@@ -72,6 +72,29 @@ export async function verifyAndUpgradePassword(
 // only after weighing the security/UX tradeoff.
 export const SESSION_IDLE_MS = 24 * 60 * 60 * 1000;
 
+// Phone (scanner app) sessions are their own kind: a person has at most one
+// web session and one phone session, and signing in on one never signs the
+// other out. A phone stays signed in through 30 idle days, so a warehouse
+// handset is not asking for the password every morning.
+export type SessionKind = 'web' | 'mobile';
+export const MOBILE_SESSION_IDLE_MS = 30 * 24 * 60 * 60 * 1000;
+export const idleLimitFor = (kind: string | null | undefined) =>
+  kind === 'mobile' ? MOBILE_SESSION_IDLE_MS : SESSION_IDLE_MS;
+
+/**
+ * The session id a request presents. The web app sends X-Session-Id; the
+ * scanner app may send `Authorization: Bearer <token>` instead (that header
+ * is allowed cross-origin, so the app's web build works). A bearer token is
+ * only honoured for phone sessions: web sessions keep their header-only rule.
+ */
+export function presentedSession(req: any): { id: string; bearer: boolean } {
+  const header = String(req.headers?.['x-session-id'] ?? '');
+  if (header) return { id: header, bearer: false };
+  const auth = String(req.headers?.authorization ?? '');
+  if (/^Bearer\s+[0-9a-f]{16,128}$/i.test(auth)) return { id: auth.replace(/^Bearer\s+/i, ''), bearer: true };
+  return { id: String(req.body?.sessionId ?? ''), bearer: false };
+}
+
 // Paths that shouldn't count as user activity. session/verify runs on a
 // 30s heartbeat and exchange-rate refreshes every few minutes — both would
 // keep last_activity fresh forever and defeat idle detection.
@@ -87,22 +110,22 @@ const POLLING_PATHS = new Set([
 // endpoint can report the specific 'idle_timeout' reason to the client.
 export async function attachSessionUser(req: any, _res: Response, next: NextFunction): Promise<void> {
   try {
-    const sessionId = String(req.headers?.['x-session-id'] ?? req.body?.sessionId ?? '');
+    const { id: sessionId, bearer } = presentedSession(req);
     if (!sessionId) return next();
-    const row = await queryOne<{ id: number; email: string; role: string; status: string; last_activity: string | null }>(
-      `SELECT u.id, u.email, u.role, u.status, s.last_activity
+    const row = await queryOne<{ id: number; email: string; role: string; status: string; last_activity: string | null; kind: string | null }>(
+      `SELECT u.id, u.email, u.role, u.status, s.last_activity, s.kind
          FROM user_sessions s
          JOIN users u ON u.id = s.user_id
         WHERE s.id = $1`,
       [sessionId]
     );
-    if (row && row.status === 'ACTIVE') {
+    if (row && row.status === 'ACTIVE' && (!bearer || row.kind === 'mobile')) {
       // Idle check: NULL last_activity (row predates the migration) gets a
       // grace window — the very next request updates it, so the timer starts
       // from first contact after deploy rather than kicking everyone off.
       const idleMs = row.last_activity ? Date.now() - new Date(row.last_activity).getTime() : 0;
-      if (idleMs < SESSION_IDLE_MS) {
-        req.user = { id: row.id, email: row.email, role: (row.role || '').toLowerCase() };
+      if (idleMs < idleLimitFor(row.kind)) {
+        req.user = { id: row.id, email: row.email, role: (row.role || '').toLowerCase(), sessionKind: row.kind === 'mobile' ? 'mobile' : 'web' };
         // Bump last_activity on real API calls only — polling paths would
         // otherwise keep every idle session alive forever. Fire-and-forget:
         // a slow update shouldn't hold up the actual request.
@@ -124,6 +147,7 @@ export async function attachSessionUser(req: any, _res: Response, next: NextFunc
 // public only if it is listed here.
 const PUBLIC_API_ROUTES = new Set([
   'POST /api/login',
+  'POST /api/mobile/login', // the scanner app's sign-in (same accounts, see signIn)
   'POST /api/session/verify',
   'POST /api/session/logout',
   'POST /api/auth/forgot-password',
@@ -171,7 +195,7 @@ export function requirePermission(permission: Permission) {
 
 // Mint a fresh session id and wipe any prior sessions for the same email.
 // Older devices on that account will fail their next verify and get kicked.
-async function mintSessionAndKickOthers(email: string, userId: number | null, req: Request): Promise<string> {
+async function mintSessionAndKickOthers(email: string, userId: number | null, req: Request, kind: SessionKind = 'web'): Promise<string> {
   const sessionId = randomBytes(24).toString('hex');
   const ua = String(req.headers?.['user-agent'] ?? '').slice(0, 500);
   const ip = String(
@@ -181,16 +205,16 @@ async function mintSessionAndKickOthers(email: string, userId: number | null, re
   // i.e. a tab somewhere is about to be signed out. Stale rows left behind
   // by a closed tab are dropped silently — nobody was actually kicked.
   const { rows: displaced } = await query<{ was_live: boolean | null }>(
-    `DELETE FROM user_sessions WHERE user_email = $1
+    `DELETE FROM user_sessions WHERE user_email = $1 AND COALESCE(kind, 'web') = $2
      RETURNING (last_seen > NOW() - INTERVAL '2 minutes') AS was_live`,
-    [email]
+    [email, kind]
   );
   if (displaced.some((r) => r.was_live)) {
     logAuthEvent(req, email, 'LOGOUT', 'SUCCESS', { kicked: true, reason: 'signed_in_elsewhere' });
   }
   await query(
-    `INSERT INTO user_sessions (id, user_email, user_id, user_agent, ip_address) VALUES ($1, $2, $3, $4, $5)`,
-    [sessionId, email, userId, ua, ip]
+    `INSERT INTO user_sessions (id, user_email, user_id, user_agent, ip_address, kind) VALUES ($1, $2, $3, $4, $5, $6)`,
+    [sessionId, email, userId, ua, ip, kind]
   );
   return sessionId;
 }
@@ -284,8 +308,12 @@ function logAuthEvent(
 }
 
 export function registerAuthRoutes(app: Express): void {
-  // -------------------- POST /api/login --------------------
-  app.post('/api/login', validateBody(LoginSchema), async (req, res) => {
+  // -------------------- POST /api/login, POST /api/mobile/login --------------------
+  // One handler for both: the same users, passwords, rate limits and
+  // activity log. The phone version (the scanner app) mints a phone session,
+  // which leaves the person's web session alone, and refuses viewers and
+  // accounts that must first change their password on the web.
+  const signIn = (kind: SessionKind) => async (req: Request, res: Response) => {
     try {
       const { email, password } = req.body as z.infer<typeof LoginSchema>;
       const ip = clientIp(req);
@@ -354,6 +382,24 @@ export function registerAuthRoutes(app: Express): void {
           return res.status(401).json({ error: 'Invalid email or password' });
         }
 
+        if (kind === 'mobile') {
+          if (String(user.role || '').toLowerCase() === 'viewer') {
+            logAuthEvent(req, normalizedEmail, 'LOGIN', 'ERROR', { reason: 'Viewer on scanner app', app: 'scanner' });
+            return res.status(403).json({ error: 'Viewers cannot use the scanner. Ask an admin to change your role.' });
+          }
+          if (user.must_change_password) {
+            return res.status(403).json({ error: 'Set a new password on the Tracklab website first, then sign in here.' });
+          }
+          const token = await mintSessionAndKickOthers(user.email, user.id, req, 'mobile');
+          logAuthEvent(req, normalizedEmail, 'LOGIN', 'SUCCESS', { app: 'scanner' });
+          const name = [user.first_name, user.last_name].filter(Boolean).join(' ') || user.email;
+          return res.json({
+            token,
+            expiresAfterIdleDays: MOBILE_SESSION_IDLE_MS / 86_400_000,
+            user: { id: user.id, name, email: user.email, role: String(user.role || '').toLowerCase() },
+          });
+        }
+
         const sessionId = await mintSessionAndKickOthers(user.email, user.id, req).catch(() => null);
 
         res.json({
@@ -384,6 +430,18 @@ export function registerAuthRoutes(app: Express): void {
       console.error('Login error:', err.message);
       res.status(500).json({ error: 'Authentication failed' });
     }
+  };
+  app.post('/api/login', validateBody(LoginSchema), signIn('web'));
+  app.post('/api/mobile/login', validateBody(LoginSchema), signIn('mobile'));
+
+  // -------------------- GET /api/mobile/me --------------------
+  // The scanner app calls this on start-up to check its stored token is
+  // still good (401 means sign in again).
+  app.get('/api/mobile/me', async (req: any, res) => {
+    const u = await queryOne<{ id: number; email: string; first_name: string | null; last_name: string | null; role: string }>(
+      `SELECT id, email, first_name, last_name, role FROM users WHERE id = $1`, [req.user.id]);
+    if (!u) return res.status(401).json({ error: 'Sign in required' });
+    res.json({ user: { id: u.id, name: [u.first_name, u.last_name].filter(Boolean).join(' ') || u.email, email: u.email, role: String(u.role || '').toLowerCase() } });
   });
 
   // -------------------- POST /api/session/verify --------------------
@@ -401,8 +459,8 @@ export function registerAuthRoutes(app: Express): void {
         res.setHeader('Retry-After', String(check.retryAfter));
         return res.status(429).json({ error: 'Too many verify calls' });
       }
-      const row = await queryOne<{ user_email: string; last_activity: string | null }>(
-        `SELECT user_email, last_activity FROM user_sessions WHERE id = $1`,
+      const row = await queryOne<{ user_email: string; last_activity: string | null; kind: string | null }>(
+        `SELECT user_email, last_activity, kind FROM user_sessions WHERE id = $1`,
         [sessionId]
       );
       if (!row) return res.json({ active: false, reason: 'signed_in_elsewhere' });
@@ -412,7 +470,7 @@ export function registerAuthRoutes(app: Express): void {
       // client can toast "signed out due to inactivity" instead of the
       // misleading "signed in from another device".
       const lastActivityMs = row.last_activity ? new Date(row.last_activity).getTime() : Date.now();
-      if (Date.now() - lastActivityMs >= SESSION_IDLE_MS) {
+      if (Date.now() - lastActivityMs >= idleLimitFor(row.kind)) {
         await query(`DELETE FROM user_sessions WHERE id = $1`, [sessionId]).catch(() => {});
         logAuthEvent(req, row.user_email, 'LOGOUT', 'SUCCESS', { kicked: true, reason: 'idle_timeout' });
         return res.json({ active: false, reason: 'idle_timeout' });
@@ -433,7 +491,7 @@ export function registerAuthRoutes(app: Express): void {
   // -------------------- POST /api/session/logout --------------------
   app.post('/api/session/logout', validateBody(SessionIdSchema), async (req: any, res) => {
     try {
-      const sessionId = String(req.body?.sessionId ?? req.headers?.['x-session-id'] ?? '');
+      const sessionId = String(req.body?.sessionId || presentedSession(req).id || '');
       if (!sessionId) return res.json({ ok: true });
 
       // Only allow logout if the caller owns that session, or is an admin.

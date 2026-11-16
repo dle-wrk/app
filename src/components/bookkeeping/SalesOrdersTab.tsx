@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { MoveToPotential } from './MoveToPotential';
 import { Plus, Eye, Trash2, Upload, Download, Paperclip, CheckCircle2, XCircle, Printer, Truck, AlertTriangle, Zap, Pencil } from 'lucide-react';
 import { ClientOrder } from '../../types';
+import { RelatedScans } from './ScansTab';
 import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, apiGet, apiPost, apiPut, apiDelete, isAdminUser, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard, CreateButton } from './shared';
 import { LineItemsEditor, EditableLine, newEditableLine, lineTotals } from './LineItemsEditor';
 import { buildAndSaveDocPdf } from '../../lib/pdfDocs';
@@ -821,6 +822,8 @@ const SalesOrderViewModal: React.FC<{
           </span>
         )}
       </div>
+
+      <RelatedScans clientOrderId={order.id} triggerToast={triggerToast} />
 
       {order.items && order.items.length > 0 ? (() => {
         // Classify every line so we can (1) render a per-line VAT

@@ -36,7 +36,7 @@ describe('every write route has an area', () => {
 
   it('only names permissions that exist', () => {
     for (const rule of Object.values(AREAS)) {
-      if (rule === 'open') continue;
+      if (rule === 'open' || rule === 'staff') continue;
       expect(roleCan('admin', rule.change)).toBe(true);
       expect(roleCan('admin', rule.remove)).toBe(true);
     }

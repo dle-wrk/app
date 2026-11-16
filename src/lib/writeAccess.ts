@@ -12,7 +12,8 @@
 import type { NextFunction, Response } from 'express';
 import { notAllowedMessage, roleCan, type Permission } from './permissions';
 
-type Area = { change: Permission; remove: Permission } | 'open';
+// 'staff': anyone signed in except viewers, with no finer permission.
+type Area = { change: Permission; remove: Permission } | 'open' | 'staff';
 
 const INVENTORY: Area = { change: 'inventory.update', remove: 'inventory.delete' };
 const ORDERS: Area = { change: 'orders.update', remove: 'orders.delete' };
@@ -52,6 +53,10 @@ export const AREAS: Record<string, Area> = {
   // also hold each person's profile.
   login: 'open', session: 'open', auth: 'open', 'activity-log': 'open', 'event-log': 'open',
   notifications: 'open', pricing: 'open', 'supplier-bom': 'open', 'supplier-quotes': 'open', settings: 'open',
+  // Scanner app: photos of picked stock. Anyone but viewers saves them.
+  scans: 'staff',
+  // Scanner app sign-in.
+  mobile: 'open',
   // Your own preferences (the routes only touch the caller's row).
   me: 'open',
   // Checked by the routes themselves (admins).
@@ -68,13 +73,14 @@ const LOOKUPS = [
 ];
 
 /** The permission a write needs, or null when any signed-in user may make it. */
-export function permissionForWrite(method: string, path: string): Permission | 'not-viewer' | null {
+export function permissionForWrite(method: string, path: string): Permission | 'not-viewer' | 'staff' | null {
   if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(method.toUpperCase())) return null;
   if (LOOKUPS.some((re) => re.test(path))) return null;
   const area = path.match(/^\/api\/([^/]+)/)?.[1];
   if (!area) return null;
   const rule = AREAS[area];
   if (rule === 'open') return null;
+  if (rule === 'staff') return 'staff';
   if (!rule) return 'not-viewer';
   return method.toUpperCase() === 'DELETE' ? rule.remove : rule.change;
 }
@@ -84,7 +90,7 @@ export function requireWriteAccess(req: any, res: Response, next: NextFunction):
   const fullPath = `${req.baseUrl || ''}${req.path}`.replace(/\/+$/, '');
   const needed = permissionForWrite(req.method, fullPath);
   if (!needed || !req.user) { next(); return; } // requireSession has dealt with no user
-  if (needed === 'not-viewer') {
+  if (needed === 'not-viewer' || needed === 'staff') {
     if (String(req.user.role ?? '').toLowerCase() === 'viewer') { res.status(403).json({ error: 'Viewers can look but not change anything.' }); return; }
     next();
     return;

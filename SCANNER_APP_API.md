@@ -1,0 +1,140 @@
+# Scanner app ↔ Tracklab IM: the API contract
+
+For whoever works on the scanner phone app (`ghostsji/scannerapp2`). This is what Tracklab IM
+implements; it replaces the suggested contract in the original handoff brief where they differ.
+Server code: `src/lib/scansRoutes.ts`, `src/lib/scanStorage.ts`, sign-in in `src/lib/authRoutes.ts`.
+
+Base URL: `https://tracklab-im.fly.dev` (put it in Expo config as `EXPO_PUBLIC_API_URL`).
+All bodies are JSON unless stated. Errors are always `{ "error": "a sentence you can show the user" }`.
+
+## What changed from the brief
+
+| Brief | Tracklab |
+|---|---|
+| `email\|username` | Email only. Tracklab accounts have no username. |
+| `image_url` column, files on disk / S3 | Photos are stored by Tracklab and served from `GET /api/scans/:id/image`, which **needs the token** like every other call. |
+| no retry rule | Send a `clientRef` per scan; resending it returns the saved scan instead of a duplicate. |
+| — | Optional `thumbnail` file and `capturedAt` field on a scan. |
+| — | `GET /api/scans/lookup` to check a pick note number while the user types. |
+| — | `GET /api/mobile/me` to check a stored token on start-up. |
+
+## Signing in
+
+```
+POST /api/mobile/login      { "email": "...", "password": "..." }
+200  { "token": "<48 hex chars>", "expiresAfterIdleDays": 30,
+       "user": { "id": 7, "name": "Sam Nkosi", "email": "...", "role": "engineer" } }
+401  wrong email or password, or the account is not active
+403  the account is a viewer, or must first set a new password on the website
+429  too many attempts; the Retry-After header says how many seconds to wait
+```
+
+- Same accounts and passwords as the website. No second user store.
+- Send the token on every other call as **`Authorization: Bearer <token>`**.
+  (`X-Session-Id: <token>` also works from a native build, but browsers will not send it
+  cross-origin, so use `Authorization` and the Expo web build works too.)
+- Keep the token in `expo-secure-store`, not AsyncStorage.
+- A phone sign-in is separate from the website: neither signs the other out. One phone per person:
+  signing in on a second phone ends the first phone's token.
+- The token dies after 30 days without use, on a password change, or on sign-out.
+  **Any call answering 401 means: drop the token and show the sign-in screen.** Keep the queue of
+  unsent scans; send it after the next sign-in.
+
+```
+GET  /api/mobile/me          -> { "user": { id, name, email, role } }     (401: sign in again)
+POST /api/session/logout     {}  with the Authorization header            -> { "ok": true }
+```
+
+## Saving a scan
+
+```
+POST /api/scans      multipart/form-data
+  image        file, required   JPEG, PNG or WebP, 8 MB at most
+  thumbnail    file, optional   small JPEG (about 320 px wide), 512 KB at most
+  pickNote     required, 60 chars at most
+  description  required, 300 chars at most     (item description or code)
+  quantity     required, a number above 0      ("2.5" and "2,5" both work)
+  clientName   optional
+  clientCode   optional
+  capturedAt   optional ISO time the photo was taken (for scans that waited in the queue)
+  clientRef    optional but strongly advised: 8-80 chars of A-Z a-z 0-9 . _ : -
+
+201  the saved scan (shape below)
+200  the same scan again, with "alreadySaved": true   (this clientRef was saved before)
+400  a field is missing or wrong; the message says which
+401  sign in again        403  viewers cannot save scans
+413  the photo is over 8 MB
+```
+
+- **`clientRef`**: make one id per scan when the user presses Confirm (a UUID is fine) and keep it
+  with the queued scan. Retry with the same id until you get 200 or 201. A 400 or 413 will never
+  succeed on retry: show the message and let the user fix or discard the scan.
+- **Photo size**: resize before sending (longest side about 1600 px, JPEG quality about 0.7, with
+  `expo-image-manipulator`). That is 200-400 KB instead of several MB on a warehouse connection.
+  **HEIC is refused** (browsers cannot show it): convert to JPEG.
+- Do not set the `Content-Type` header yourself for the multipart call; let `fetch` add the boundary.
+- The thumbnail is used in lists. Without one the full photo is served in its place.
+
+The pick note number is matched, ignoring capitals and spaces, against Tracklab's sales order
+numbers (`SO-2026-0004`) and delivery / collection note numbers (`DN-…`, `CN-…`). On a match the
+scan is linked to that document and takes its client, and `pickNote` comes back in Tracklab's
+spelling. With no match it is saved as typed and the links are `null`. Never an error.
+
+## A scan
+
+```json
+{
+  "id": 41,
+  "pickNote": "SO-2026-0004",
+  "clientName": "Acme",            "clientCode": "AC-1",
+  "description": "Relay board",    "quantity": 3,
+  "user": { "id": 7, "name": "Sam Nkosi", "email": "sam@example.com" },
+  "capturedAt": "2026-11-16T08:12:00.000Z",
+  "createdAt": "2026-11-16T08:12:09.512Z",
+  "imageUrl": "/api/scans/41/image",
+  "thumbUrl": "/api/scans/41/image?size=thumb",
+  "client": { "id": 30, "name": "Acme (Pty) Ltd" },
+  "clientOrder": { "id": 13, "number": "SO-2026-0004" },
+  "dispatchNote": null
+}
+```
+
+`clientName` / `clientCode` are what was typed on the phone; `client` is the Tracklab customer it
+was linked to (or `null`). `imageUrl` and `thumbUrl` are paths: prefix the base URL, and send the
+token. In React Native:
+
+```jsx
+<Image source={{ uri: API_URL + scan.thumbUrl, headers: { Authorization: `Bearer ${token}` } }} />
+```
+
+(On the web build an `<img>` cannot send headers: `fetch` the URL with the header and show a
+`URL.createObjectURL(blob)`.) Photos never change, so they are served with a 7-day cache header.
+
+## Reading scans
+
+```
+GET /api/scans?pickNote=&user=&client=&from=YYYY-MM-DD&to=YYYY-MM-DD&page=1&pageSize=30
+    -> { "items": [scan, ...], "total": 57, "page": 1, "pageSize": 30 }
+```
+
+All filters are optional and combine. `pickNote`, `user` (name or email) and `client` (typed name,
+typed code or linked customer) match any part, ignoring case. Dates are inclusive and compare the
+time taken. Newest first. `pageSize` is 100 at most. Also accepted: `clientOrderId`, `dispatchNoteId`.
+
+```
+GET    /api/scans/:id               one scan (404 when gone)
+GET    /api/scans/:id/image         the photo bytes;  ?size=thumb for the small one
+DELETE /api/scans/:id               your own scan, or any as an admin (403 otherwise)
+GET    /api/scans/lookup?pickNote=SO-2026-0004[&clientName=Acme]
+       -> { "pickNote": "...", "matched": true,
+            "clientOrder": { id, number } | null, "dispatchNote": { id, number, type } | null,
+            "client": { id, name } | null }
+```
+
+Use `lookup` on the main screen to show "Sales order SO-2026-0004 · Acme" (or "not a Tracklab
+number, will be saved as typed") before the user starts scanning. It is a hint, not a gate.
+
+## Not built
+
+- Barcode fields: there is no barcode column yet. Put a scanned code in `description` for now.
+- Editing a saved scan: delete it and scan again.

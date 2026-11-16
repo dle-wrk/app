@@ -1,3 +1,5 @@
+import { RelatedScans } from './ScansTab';
+import { showToast } from '../../lib/toast';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Plus, Eye, Send, CheckCircle2, Ban, Trash2, Printer, X, Truck, PackageCheck, Download } from 'lucide-react';
 import { buildAndSaveDocPdf } from '../../lib/pdfDocs';
@@ -559,6 +561,8 @@ const DispatchViewModal: React.FC<{
           </span>
         )}
       </div>
+
+      <RelatedScans dispatchNoteId={note.id} triggerToast={showToast} />
 
       <div className="grid grid-cols-2 gap-3 text-xs mb-md">
         {note.contactPerson && <div><span className="block text-[10px] text-outline uppercase">{meta.partyLabel}</span>{note.contactPerson}</div>}

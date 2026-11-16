@@ -3,7 +3,7 @@ import { SalesBuilderTab } from '../bookkeeping/SalesBuilderTab';
 import { PotentialOrdersTab } from '../bookkeeping/PotentialOrdersTab';
 import { canChange } from '../../lib/changeAccess';
 import { notAllowedMessage } from '../../lib/permissions';
-import { LayoutDashboard, Users, ShoppingCart, Receipt, Wallet, Truck, FileText, CreditCard, Landmark, Wrench, BarChart3, Loader2, Package, Hourglass, Repeat, RotateCcw } from 'lucide-react';
+import { LayoutDashboard, Users, ShoppingCart, Receipt, Wallet, Truck, FileText, CreditCard, Landmark, Wrench, BarChart3, Loader2, Package, Hourglass, Repeat, RotateCcw, Camera } from 'lucide-react';
 import {
   Client, ClientOrder, ClientOrderItem, BuildJob, BomStructure, SubAssembly, FieldedAsset, StockLedgerEntry,
   Item, Supplier, Account, TaxRate, Invoice, PaymentReceived, PurchaseOrder, Bill, PaymentMade, Expense, BookkeepingBootstrap,
@@ -26,6 +26,7 @@ import { DispatchTab } from '../bookkeeping/DispatchTab';
 import { BankRecTab } from '../bookkeeping/BankRecTab';
 import { CreditNotesTab } from '../bookkeeping/CreditNotesTab';
 import { ReturnsTab } from '../bookkeeping/ReturnsTab';
+import { ScansTab } from '../bookkeeping/ScansTab';
 import { RecurringInvoicesTab } from '../bookkeeping/RecurringInvoicesTab';
 import { LandedCostTab } from '../bookkeeping/LandedCostTab';
 
@@ -59,7 +60,7 @@ interface BookkeepingViewProps {
 }
 
 type Section = 'OVERVIEW' | 'SALES' | 'PURCHASES' | 'ACCOUNTING' | 'PRODUCTION' | 'REPORTS';
-type SalesSub = 'CUSTOMERS' | 'ORDERS' | 'POTENTIAL' | 'BUILDER' | 'INVOICES' | 'RECURRING' | 'CREDIT_NOTES' | 'RETURNS' | 'PAYMENTS' | 'DISPATCH';
+type SalesSub = 'CUSTOMERS' | 'ORDERS' | 'POTENTIAL' | 'BUILDER' | 'INVOICES' | 'RECURRING' | 'CREDIT_NOTES' | 'RETURNS' | 'PAYMENTS' | 'DISPATCH' | 'SCANS';
 type PurchasesSub = 'VENDORS' | 'ORDERS' | 'BILLS' | 'LANDED_COST' | 'PAYMENTS' | 'EXPENSES';
 
 const SECTIONS: { key: Section; label: string; icon: React.ReactNode }[] = [
@@ -82,6 +83,7 @@ const SALES_SUBS: { key: SalesSub; label: string; icon: React.ReactNode }[] = [
   { key: 'RETURNS', label: 'Returns', icon: <RotateCcw className="w-3.5 h-3.5" /> },
   { key: 'PAYMENTS', label: 'Payments Received', icon: <Wallet className="w-3.5 h-3.5" /> },
   { key: 'DISPATCH', label: 'Delivery & Collection', icon: <Truck className="w-3.5 h-3.5" /> },
+  { key: 'SCANS', label: 'Pick Scans', icon: <Camera className="w-3.5 h-3.5" /> },
 ];
 
 const PURCHASES_SUBS: { key: PurchasesSub; label: string; icon: React.ReactNode }[] = [
@@ -231,6 +233,7 @@ export const BookkeepingView: React.FC<BookkeepingViewProps> = ({
           {salesSub === 'CREDIT_NOTES' && <CreditNotesTab {...moduleData} />}
           {salesSub === 'RECURRING' && <RecurringInvoicesTab {...moduleData} />}
           {salesSub === 'RETURNS' && <ReturnsTab {...moduleData} />}
+          {salesSub === 'SCANS' && <ScansTab {...moduleData} />}
           {salesSub === 'DISPATCH' && (
             <DispatchTab
               {...moduleData}

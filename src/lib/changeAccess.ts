@@ -10,6 +10,6 @@ import { permissionForWrite } from './writeAccess';
 export function canChange(path: string, method: 'POST' | 'PUT' | 'PATCH' | 'DELETE' = 'POST', role: string | null = currentUserRole()): boolean {
   const needed = permissionForWrite(method, path);
   if (!needed) return true;
-  if (needed === 'not-viewer') return String(role ?? '').toLowerCase() !== 'viewer';
+  if (needed === 'not-viewer' || needed === 'staff') return String(role ?? '').toLowerCase() !== 'viewer';
   return roleCan(role, needed);
 }
