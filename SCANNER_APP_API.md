@@ -225,10 +225,11 @@ POST /api/stock-moves        JSON
 ### 3. My scans, and cancelling one
 
 ```
-GET /api/stock-moves?mine=1&status=PENDING|APPROVED|REJECTED&direction=IN|OUT&part=&user=
-                    &from=YYYY-MM-DD&to=YYYY-MM-DD&page=1&pageSize=30
+GET /api/stock-moves?mine=1&status=PENDING|APPROVED|REJECTED|DONE&direction=IN|OUT&part=&user=
+                    &decidedBy=&from=YYYY-MM-DD&to=YYYY-MM-DD&page=1&pageSize=30
     -> { "items": [scan, ...], "total": 12, "pending": 3, "page": 1, "pageSize": 30 }
        mine=1: only the signed-in person's scans.  "pending": how many are waiting, over everyone.
+       status=DONE: the history, approved and rejected together.  decidedBy: who approved or rejected (name or email).
 
 POST /api/stock-moves/decide   { "ids": [9], "decision": "REJECT", "reason": "Cancelled on the phone" }
     -> { "results": [{ "id": 9, "ok": true, "move": scan } | { "id": 9, "ok": false, "error": "Already approved by …" }],

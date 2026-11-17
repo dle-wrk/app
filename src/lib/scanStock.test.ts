@@ -76,7 +76,8 @@ describe('a booking from the phone', () => {
 describe('listing scanner bookings', () => {
   it('reads the filters', () => {
     expect(parseMoveListQuery({ direction: 'out', part: ' cap ', from: '2026-11-01', to: 'x', page: '2', pageSize: '999' }))
-      .toEqual({ page: 2, pageSize: 100, status: null, mine: false, direction: 'OUT', part: 'cap', user: null, from: '2026-11-01', to: null });
+      .toEqual({ page: 2, pageSize: 100, status: null, mine: false, direction: 'OUT', part: 'cap', user: null, decidedBy: null, from: '2026-11-01', to: null });
+    expect(parseMoveListQuery({ status: 'done', decidedBy: ' Sam ' })).toMatchObject({ status: 'DONE', decidedBy: 'Sam' });
     expect(parseMoveListQuery({ status: 'pending', mine: '1' })).toMatchObject({ status: 'PENDING', mine: true });
     expect(parseMoveListQuery({ status: 'maybe' }).status).toBeNull();
     expect(parseMoveListQuery({ direction: 'both' }).direction).toBeNull();

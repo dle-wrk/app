@@ -182,7 +182,9 @@ export function parseMoveListQuery(q: Record<string, unknown>) {
   const day = (v: unknown) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v ?? '')) ? String(v) : null);
   const d = text(q.direction).toUpperCase();
   const s = text(q.status).toUpperCase();
-  return { page, pageSize, status: (MOVE_STATUSES as readonly string[]).includes(s) ? (s as MoveStatus) : null, mine: text(q.mine) === '1' || text(q.mine).toLowerCase() === 'true', direction: d === 'IN' || d === 'OUT' ? d : null, part: text(q.part) || null, user: text(q.user) || null, from: day(q.from), to: day(q.to) };
+  // DONE: the history, every scan already approved or rejected.
+  const status: MoveStatus | 'DONE' | null = s === 'DONE' ? 'DONE' : (MOVE_STATUSES as readonly string[]).includes(s) ? (s as MoveStatus) : null;
+  return { page, pageSize, status, mine: text(q.mine) === '1' || text(q.mine).toLowerCase() === 'true', direction: d === 'IN' || d === 'OUT' ? d : null, part: text(q.part) || null, user: text(q.user) || null, decidedBy: text(q.decidedBy) || null, from: day(q.from), to: day(q.to) };
 }
 
 // ---------------------------------------------------------------------------
@@ -480,10 +482,12 @@ export function registerScanStockRoutes(app: Express): void {
       const where: string[] = [];
       const params: any[] = [];
       const add = (sql: string, v: any) => { params.push(v); where.push(sql.replace(/\?/g, `$${params.length}`)); };
-      if (f.status) add(`status = ?`, f.status);
+      if (f.status === 'DONE') where.push(`status <> 'PENDING'`);
+      else if (f.status) add(`status = ?`, f.status);
       if (f.direction) add(`direction = ?`, f.direction);
       if (f.part) add(`(part_number ILIKE ? OR item_name ILIKE ?)`, like(f.part));
       if (f.user) add(`(user_name ILIKE ? OR user_email ILIKE ?)`, like(f.user));
+      if (f.decidedBy) add(`(decided_by_name ILIKE ? OR decided_by_email ILIKE ?)`, like(f.decidedBy));
       if (f.mine) add(`user_id = ?`, (req as any).user.id);
       if (f.from) add(`COALESCE(captured_at, created_at) >= ?::date`, f.from);
       if (f.to) add(`COALESCE(captured_at, created_at) < ?::date + 1`, f.to);
