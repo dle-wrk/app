@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../index.css';
+import './scan.css';
 import { ScanApp } from './ScanApp';
 
 // The phone scan page (tracklab-im.fly.dev/scan): its own small entry, so a

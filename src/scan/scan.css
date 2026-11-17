@@ -1,0 +1,15 @@
+/* The phone scan page's own few styles (the rest is the main app's stylesheet). */
+
+/* The page is dark to its edges, also past the content and when overscrolled. */
+html, body { background: #090b14; }
+body { overscroll-behavior-y: none; -webkit-tap-highlight-color: transparent; }
+
+/* The line sweeping the camera window. */
+@keyframes scan-sweep {
+  0%, 100% { top: 10%; }
+  50% { top: 88%; }
+}
+.scan-sweep { top: 10%; animation: scan-sweep 2.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .scan-sweep { animation: none; top: 50%; }
+}
