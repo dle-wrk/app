@@ -11,6 +11,9 @@ const btn = 'w-full py-3.5 rounded-xl font-bold text-base disabled:opacity-40 tr
 const field = 'w-full rounded-xl border border-outline-variant bg-surface-container-low px-3.5 py-3 text-base text-on-surface focus:outline-none focus:border-primary';
 const label = 'block text-xs font-bold text-on-surface-variant mb-1';
 const card = 'rounded-2xl border border-outline-variant bg-surface-container p-4';
+// The page's own dark background: the website gets its from the main app's wrapper, which this page doesn't have.
+// Widths are written out (max-w-[28rem]): this stylesheet's "md" is a small spacing size, not a container width.
+const page = 'min-h-dvh w-full bg-surface text-on-surface';
 
 const when = (v: string | null) => {
   const d = new Date(v || '');
@@ -41,7 +44,7 @@ const SignIn: React.FC<{ onSignedIn: (u: ScanUser) => void }> = ({ onSignedIn })
     } finally { setBusy(false); }
   };
   return (
-    <form onSubmit={submit} className="min-h-dvh flex flex-col justify-center gap-4 p-6 max-w-md mx-auto">
+    <div className={page}>`n    <form onSubmit={submit} className="min-h-dvh flex flex-col justify-center gap-4 p-6 w-full max-w-[28rem] mx-auto">
       <div className="text-center mb-2">
         <img src="/scan-icon-192.png" alt="" className="w-20 h-20 rounded-2xl mx-auto mb-3" />
         <h1 className="text-2xl font-black text-on-surface">Tracklab Scan</h1>
@@ -53,6 +56,7 @@ const SignIn: React.FC<{ onSignedIn: (u: ScanUser) => void }> = ({ onSignedIn })
       <button type="submit" disabled={busy} className={`${btn} bg-primary text-white`}>{busy ? 'Signing in…' : 'Sign in'}</button>
       <p className="text-xs text-outline text-center">This sign-in is separate from the website: it won't sign you out on your computer.</p>
     </form>
+    </div>
   );
 };
 
@@ -181,7 +185,7 @@ export const ScanApp: React.FC = () => {
   const pending = mine.filter(m => m.status === 'PENDING').length;
 
   return (
-    <div className="min-h-dvh max-w-md mx-auto p-4 pb-10 space-y-4 text-on-surface" style={{ paddingTop: 'calc(1rem + env(safe-area-inset-top))' }}>
+    <div className={page}>`n    <div className="w-full max-w-[28rem] mx-auto p-4 pb-10 space-y-4" style={{ paddingTop: 'calc(1rem + env(safe-area-inset-top))' }}>
       <header className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-lg font-black leading-tight">Tracklab Scan</h1>
@@ -289,6 +293,7 @@ export const ScanApp: React.FC = () => {
           onCode={(code) => { const forPlace = camera === 'place'; setCamera(null); void lookUp(code, forPlace); }}
         />
       )}
+    </div>
     </div>
   );
 };
