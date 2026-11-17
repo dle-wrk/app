@@ -10,7 +10,7 @@
 <body data-page="release-notes">
     <div class="header compact">
         <h1>🆕 Release Notes</h1>
-        <p>Everything that changed in v2.9, v2.8, v2.7 and v2.6.</p>
+        <p>Everything that changed in v3.0, v2.9, v2.8, v2.7 and v2.6.</p>
     </div>
     <nav class="docs-nav" id="docs-nav" aria-label="Documentation">
         <noscript><div class="docs-nav-bar"><div class="docs-nav-links"><a href="index.html">← All docs</a></div></div></noscript>
@@ -20,6 +20,40 @@
         <aside class="toc" id="page-toc" aria-label="On this page"></aside>
 
         <div class="main-col">
+        <div class="section" id="whats-new-v30">
+            <h2>🆕 What's New (v3.0, November 2026)</h2>
+            <p style="margin-bottom: 20px;">The scanner release. Stock is scanned in and out on a phone and approved on the website; returns handle repairs; suppliers hold banking details; and bills, purchase orders and expenses are grouped by month.</p>
+
+            <h3 id="v30-scanner">Scanner on your phone</h3>
+            <div class="step">
+                <ul>
+                    <li><strong>Phone scan page</strong> at <a href="/scan"><code>/scan</code></a>: sign in with your Tracklab account, scan a reel or item label with the camera (or type a code), and send a book-in or book-out. It installs from the browser with <em>Add to Home screen</em>; the QR code is on the <a href="index.html#phone-scanner">docs home page</a>. See <a href="inventory.html#phone-scanner">Scanner on your phone</a>.</li>
+                    <li><strong>Scans wait for approval.</strong> Each scan appears under <strong>Sales &gt; Scanner &gt; Stock in &amp; out</strong> within seconds as <em>Pending</em>; stock changes only on <em>Approve</em>. <em>Reject</em> changes nothing.</li>
+                    <li>Supplier reel labels are read: the 2D code on DigiKey, Mouser and most makers' labels, and the LCSC bag QR code, give the part, quantity, lot and date code.</li>
+                    <li>A phone sign-in is separate from the website's: scanning never signs you out on your computer.</li>
+                    <li><strong>Pick scans:</strong> photos of picked stock with pick note, client, item and quantity, linked to their sales order or delivery note.</li>
+                </ul>
+            </div>
+
+            <h3 id="v30-sales-and-returns">Sales &amp; returns</h3>
+            <div class="step">
+                <ul>
+                    <li><strong>Returns for repair:</strong> a repaired line raises a draft delivery or collection note and, for a charge, a draft invoice. A replaced board goes back under its new serial number. Returns can be edited, and deleted until closed.</li>
+                    <li><strong>Save PDF file names:</strong> bills, invoices, sales orders, quotations and delivery / collection notes save as <code>NUMBER_CLIENT.pdf</code>, e.g. <code>BILL-2026-0009_ACDC_EXPRESS.pdf</code>.</li>
+                </ul>
+            </div>
+
+            <h3 id="v30-purchases">Purchases</h3>
+            <div class="step">
+                <ul>
+                    <li><strong>Bills, purchase orders and expenses are grouped by month</strong>, each month a dropdown with its count and total. The newest month, and any month with something unpaid or in progress, starts open.</li>
+                    <li><strong>Tax-inclusive prices</strong> on bills and purchase orders are saved at the ex-VAT cost, so totals match what was typed.</li>
+                    <li><strong>Receipts:</strong> multi-page receipts preview per page and open full size; a bill's <em>Save PDF</em> adds every receipt page.</li>
+                    <li><strong>Supplier banking details</strong>, with every change logged and flagged to confirm by phone before paying.</li>
+                </ul>
+            </div>
+        </div>
+
         <div class="section" id="whats-new-v29">
             <h2>🆕 What's New (v2.9, October 2026)</h2>
             <p style="margin-bottom: 20px;">A data-quality and purchasing release. Every item's part numbers, links and footprints can be put right in one place (Sync Stock); Kit Booking and the Bill of Materials allocate across several reels and only offer true equivalents; order files come per supplier with each supplier's rules; and Auto-PO, lead times and invoice voids now do what they say.</p>
