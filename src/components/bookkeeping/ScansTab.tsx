@@ -3,6 +3,7 @@ import { Camera, ExternalLink, RefreshCw, Trash2, X } from 'lucide-react';
 import { ModuleDataProps, Modal, apiGet, apiDelete, isAdminUser, SecondaryButton, DangerButton, FieldLabel, inputClass, EmptyState, SectionCard } from './shared';
 import { openAuthedFile } from '../../lib/openAuthedFile';
 import { confirmDialog } from '../../lib/confirmDialog';
+import { ScannerStockMoves } from './ScannerStockMoves';
 
 // Pick scans: photos of picked stock sent in by the scanner phone app, with
 // the pick note, client, item and quantity typed on the phone. Read-only
@@ -105,7 +106,27 @@ const ScanViewer: React.FC<{ scan: Scan; onClose: () => void; onDeleted: () => v
   );
 };
 
-export const ScansTab: React.FC<ModuleDataProps> = ({ triggerToast }) => {
+/** The Scanner tab: what the phone app sent in, as stock bookings or as pick scan photos. */
+export const ScansTab: React.FC<ModuleDataProps> = (props) => {
+  const [view, setView] = useState<'STOCK' | 'PICKS'>(() => {
+    try { return localStorage.getItem('scannerTabView') === 'PICKS' ? 'PICKS' : 'STOCK'; } catch { return 'STOCK'; }
+  });
+  const choose = (v: 'STOCK' | 'PICKS') => { setView(v); try { localStorage.setItem('scannerTabView', v); } catch { /* remembered only when it can be */ } };
+  const tab = (v: 'STOCK' | 'PICKS', label: string) => (
+    <button onClick={() => choose(v)} aria-pressed={view === v} className={`px-3 py-1.5 rounded text-xs font-bold transition-all ${view === v ? 'bg-primary text-white' : 'text-on-surface-variant hover:text-on-surface'}`}>{label}</button>
+  );
+  return (
+    <div className="space-y-4">
+      <div className="inline-flex gap-1 p-1 rounded-lg bg-surface-container border border-outline-variant">
+        {tab('STOCK', 'Stock in & out')}
+        {tab('PICKS', 'Pick scans')}
+      </div>
+      {view === 'STOCK' ? <ScannerStockMoves triggerToast={props.triggerToast} /> : <PickScansPanel {...props} />}
+    </div>
+  );
+};
+
+const PickScansPanel: React.FC<ModuleDataProps> = ({ triggerToast }) => {
   const [filters, setFilters] = useState({ pickNote: '', user: '', client: '', from: '', to: '' });
   const [page, setPage] = useState(1);
   const [data, setData] = useState<{ items: Scan[]; total: number } | null>(null);

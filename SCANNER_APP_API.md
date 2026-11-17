@@ -134,7 +134,107 @@ GET    /api/scans/lookup?pickNote=SO-2026-0004[&clientName=Acme]
 Use `lookup` on the main screen to show "Sales order SO-2026-0004 · Acme" (or "not a Tracklab
 number, will be saved as typed") before the user starts scanning. It is a hint, not a gate.
 
+## Booking stock in and out
+
+The main job of the app: scan a reel, packet or any other item and book it in or out of stock.
+Needs a camera barcode scanner in the app (`expo-camera`, with `barcodeScannerSettings` for
+`datamatrix`, `qr`, `code128`, `code39`, `ean13`). **Pass the scanned string through untouched**,
+control characters included: the 2D code on reel labels uses them as field separators.
+Server code: `src/lib/scanStock.ts`.
+
+### 1. What is this code?
+
+```
+GET /api/stock-moves/find?code=<scanned or typed text, URL-encoded>
+
+200 {
+  "code": "…",
+  "label": null | { "kind": "supplier-2d" | "supplier-qr", "partNumbers": ["CL10A106KP8NNNC", "296-1234-1-ND"],
+                    "quantity": 4000, "lot": "LOT778899", "dateCode": "2535" },
+  "matchedBy": "stock code" | "part number" | "search" | null,
+  "exact": true,
+  "items": [ {
+    "partNumber": "CAP-024",            // Tracklab's stock code: send this back when booking
+    "name": "10uF 0603 X5R", "description": "…", "makerPartNumber": "CL10A106KP8NNNC",
+    "packaging": "reel", "status": "ACTIVE",
+    "stock": 12000,
+    "places": [ { "locationId": 4, "code": "REEL-RACK-2", "name": "Reel rack 2", "quantity": 8000 } ],
+    "noLocation": 4000                  // in stock but not put away anywhere
+  } ],
+  "location": null | { "id": 4, "code": "REEL-RACK-2", "name": "Reel rack 2", "active": true }
+}
+```
+
+Understood: a Tracklab stock code (any capitals); a maker's or supplier's part number saved on the
+item; the 2D code on a supplier reel label (DigiKey, Mouser, most makers: starts `[)>`); the QR
+code on an LCSC / JLCPCB bag (`{pbn:…,pc:C2040,pm:…,qty:10}`); a stock location's code; and, for
+typed text of 3+ characters, a search of codes, names and part numbers (up to 10).
+
+What to do with the answer:
+
+- `exact: true` and one item: show it and go straight to the quantity. Pre-fill the quantity, lot
+  and date code from `label` when present.
+- several `items` (`exact: false`): let the user pick one. This happens when a part number is on
+  more than one stock code, or the text was a search.
+- `location` set and no items: the user scanned a shelf or rack label; use it as the place for
+  the booking they are making.
+- nothing: "Not in Tracklab. Add the item on the website first." The app cannot create items.
+
+### 2. Book it
+
+```
+POST /api/stock-moves        JSON
+{
+  "direction":  "IN" | "OUT",
+  "partNumber": "CAP-024",        // an item's partNumber from find
+  "quantity":   4000,             // whole number, 1 or more
+  "locationId": 4,                // optional
+  "lot": "LOT778899", "dateCode": "2535",   // optional, booking IN only
+  "reference":  "PO-2026-0007",   // optional: PO, job or order number
+  "note":       "line 2",         // optional
+  "capturedAt": "2026-11-17T08:12:00Z",     // optional, for bookings that waited in the queue
+  "clientRef":  "<one id per booking>"       // strongly advised, as for scans
+}
+
+201 { "id": 9, "direction": "IN", "partNumber": "CAP-024", "itemName": "…", "quantity": 4000,
+      "stockAfter": 16000, "location": { "id": 4, "code": "REEL-RACK-2" } | null,
+      "lot": "…", "dateCode": "…", "reference": "…", "note": "…",
+      "user": { id, name, email }, "capturedAt": "…", "createdAt": "…" }
+200 the same booking again with "alreadySaved": true   (this clientRef was booked before)
+400 a field is missing or wrong          404 that partNumber is not an item
+403 this account may not change stock    401 sign in again
+409 not enough stock: "Only 35 of CAP-024 in stock." / "Only 15 of CAP-024 at REEL-RACK-2."
+```
+
+- **IN** adds to stock. With `locationId` it is put away there; without, it sits in "No location"
+  until someone puts it away on the website.
+- **OUT** takes from stock. With `locationId` it comes from that place; without, Tracklab takes
+  stock with no location first, then the oldest places.
+- **Retries**: same rule as scans. Keep the booking in the queue with its `clientRef` and resend
+  until 200 or 201. Never resend without the same `clientRef`: that would book twice. A 400, 403,
+  404 or 409 will not succeed on retry: show the message. After a 409, call `find` again to show
+  the current stock.
+- Bookings cannot be edited or deleted. To correct one, book the opposite direction.
+
+### 3. Recent bookings
+
+```
+GET /api/stock-moves?direction=IN|OUT&part=&user=&from=YYYY-MM-DD&to=YYYY-MM-DD&page=1&pageSize=30
+    -> { "items": [booking, ...], "total": 12, "page": 1, "pageSize": 30 }
+GET /api/stock-locations     -> every location { id, code, name, active, … }, for a "choose a place" list
+```
+
+### Suggested screens
+
+1. Home: **Book in**, **Book out**, **Pick scan** (the photo flow above), **Recent**.
+2. Book in / out: camera scanner with a "type it instead" box → `find` → item card (name, stock,
+   where it is) → quantity (pre-filled from the label) → optional place (scan a rack label or pick
+   from the list) → optional reference → **Confirm** → show "Stock is now 16 000" and return to the
+   scanner for the next reel.
+
 ## Not built
 
-- Barcode fields: there is no barcode column yet. Put a scanned code in `description` for now.
+- Creating a new item from the phone. Items are added on the website.
+- Moving stock between locations from the phone (the website does this under Stock locations).
+- Printing Tracklab's own labels. Until then a stock code typed or printed as plain Code 128 / QR text works.
 - Editing a saved scan: delete it and scan again.

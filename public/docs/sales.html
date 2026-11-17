@@ -238,9 +238,17 @@
                     <li>Save PDF includes Applied + Refunded + Remaining rows.</li>
                 </ul>
             </div>
-            <h3 id="pick-scans">Pick Scans (scanner phone app)</h3>
+            <h3 id="scanner-stock">Scanner: booking stock in and out</h3>
             <div class="step">
-                <p><strong>Sales &gt; Pick Scans</strong> shows the photos the warehouse takes with the scanner phone app: each one with its pick note number, client, item description or code, quantity, who took it and when. Filter by pick note, person, client or date; click a row for the full photo and details, and <em>Open full size</em> for a new tab.</p>
+                <p>The scanner phone app books stock in and out: reels, packets and any other item. Scan the label (or type a code), check the item and quantity, and book it. <strong>Sales &gt; Scanner &gt; Stock in &amp; out</strong> lists every booking made on a phone: in or out, item, quantity, the stock afterwards, location, reference, who and when.</p>
+                <p><strong>What can be scanned.</strong> A Tracklab stock code; a maker's or supplier's part number saved on the item; the 2D code on a supplier's reel label (DigiKey, Mouser and most makers), which also gives the quantity, lot and date code; the QR code on an LCSC bag; or a stock location's code, to choose where it goes. When a part number is on more than one item the phone asks which. A placeholder such as "N/A" never matches.</p>
+                <p><strong>Booking in</strong> adds to the item's stock. With a location it is put away there (with its lot and date code); without one it waits under <em>No location</em>, as any other receipt does. <strong>Booking out</strong> takes from stock and is refused when there isn't that much. With a location it comes from that place (refused when the place holds less); without one, stock with no location goes first, then the oldest places.</p>
+                <p>Each booking is an ordinary stock movement on the item (<em>BOOK-IN</em> or <em>BOOK-OUT</em>, reference "Scanner: …", under the person's name), so it shows in the item's history and the stock total everywhere else. It needs the same permission as changing stock on the website; viewers can't. A booking can't be edited: book the opposite way to correct one.</p>
+            </div>
+
+            <h3 id="pick-scans">Scanner: pick scans</h3>
+            <div class="step">
+                <p><strong>Sales &gt; Scanner &gt; Pick scans</strong> shows the photos the warehouse takes with the scanner phone app: each one with its pick note number, client, item description or code, quantity, who took it and when. Filter by pick note, person, client or date; click a row for the full photo and details, and <em>Open full size</em> for a new tab.</p>
                 <p><strong>Signing in on the phone.</strong> The app uses your Tracklab email and password. It is its own sign-in: using the phone never signs you out of the website, and the other way round. A phone stays signed in until it has gone 30 days unused; a new sign-in on another phone ends the old one, and changing your password ends both. Viewers can't use the scanner, and an account that still has to set a new password must do that on the website first.</p>
                 <p><strong>Pick note numbers.</strong> The number typed on the phone is matched (ignoring capitals and spaces) against sales order numbers and delivery / collection note numbers. On a match the scan is linked, takes its client from that document, and also appears under <em>Pick scans</em> when you open that sales order or note. With no match the scan is still saved with the number as typed, marked <em>No matching order</em>.</p>
                 <p><strong>Deleting.</strong> You can delete your own scans; an admin can delete any. The photo goes with it.</p>

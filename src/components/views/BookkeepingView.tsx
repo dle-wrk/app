@@ -83,7 +83,7 @@ const SALES_SUBS: { key: SalesSub; label: string; icon: React.ReactNode }[] = [
   { key: 'RETURNS', label: 'Returns', icon: <RotateCcw className="w-3.5 h-3.5" /> },
   { key: 'PAYMENTS', label: 'Payments Received', icon: <Wallet className="w-3.5 h-3.5" /> },
   { key: 'DISPATCH', label: 'Delivery & Collection', icon: <Truck className="w-3.5 h-3.5" /> },
-  { key: 'SCANS', label: 'Pick Scans', icon: <Camera className="w-3.5 h-3.5" /> },
+  { key: 'SCANS', label: 'Scanner', icon: <Camera className="w-3.5 h-3.5" /> },
 ];
 
 const PURCHASES_SUBS: { key: PurchasesSub; label: string; icon: React.ReactNode }[] = [
