@@ -2,7 +2,7 @@ import { RelatedScans } from './ScansTab';
 import { showToast } from '../../lib/toast';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Plus, Eye, Send, CheckCircle2, Ban, Trash2, Printer, X, Truck, PackageCheck, Download } from 'lucide-react';
-import { buildAndSaveDocPdf } from '../../lib/pdfDocs';
+import { buildAndSaveDocPdf, docFileName } from '../../lib/pdfDocs';
 import { DispatchNote, DispatchNoteItem, DispatchNoteType } from '../../types';
 import {
   ModuleDataProps, Modal, StatusPill, fmtDate, todayISO, apiGet, apiPost, apiPut, apiDelete,
@@ -624,6 +624,8 @@ const DispatchViewModal: React.FC<{
                 })),
                 extraColumnHeader: 'Serial numbers',
                 notes: note.notes,
+                // DN-2026-0012_ACME_LTD.pdf (no client: just the number)
+                fileName: docFileName(note.noteNumber, /^(unassigned|no client|—|-)?$/i.test(clientName.trim()) ? null : clientName),
               });
             } catch (err) {
               console.error('Save PDF failed:', err);

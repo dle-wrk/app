@@ -5,7 +5,7 @@ import { ClientOrder } from '../../types';
 import { RelatedScans } from './ScansTab';
 import { ModuleDataProps, Modal, StatusPill, fmtMoney, fmtDate, todayISO, apiGet, apiPost, apiPut, apiDelete, isAdminUser, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard, CreateButton } from './shared';
 import { LineItemsEditor, EditableLine, newEditableLine, lineTotals } from './LineItemsEditor';
-import { buildAndSaveDocPdf } from '../../lib/pdfDocs';
+import { buildAndSaveDocPdf, docFileName } from '../../lib/pdfDocs';
 import { openAuthedFile } from '../../lib/openAuthedFile';
 import { confirmDialog } from '../../lib/confirmDialog';
 import { renderBrandHeader, waitForBrandImage } from '../../lib/printBrand';
@@ -753,6 +753,8 @@ const SalesOrderViewModal: React.FC<{
         docType: isQuote ? 'Quotation' : 'Sales Order',
         docNumber: order.orderNumber,
         currency: order.currency,
+        // SO-2026-0004_ACME_LTD.pdf (no client: just the number)
+        fileName: docFileName(order.orderNumber, /^(unassigned|no client|—|-)?$/i.test(clientName.trim()) ? null : clientName),
         meta: [
           { label: 'Client', value: clientName },
           { label: 'Status', value: String(order.status || '') },
