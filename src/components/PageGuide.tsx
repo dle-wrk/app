@@ -40,6 +40,7 @@ export const PAGE_GUIDES: Partial<Record<ViewType, Guide>> = {
     title: 'Locations & Counts',
     steps: [
       <><strong>Locations</strong>: the bins and shelves stock is kept in. <em>One bin per item</em> makes a bin for every item at once.</>,
+      <><strong>Group</strong> the list by <em>Category</em> (give each location one, or tick several and <em>Set category</em>) or by code prefix. <strong>Delete</strong> works on any location: what it held stays in stock, under No location.</>,
       <><strong>Scan</strong>: scan a bin label, then items, to put them away; print bin and item labels.</>,
       <><strong>Check stock</strong>: count a bin, some items or everything. Change only what differs, then Confirm.</>,
       <><strong>Lot tracing</strong>: where a lot is and which builds used it.</>,

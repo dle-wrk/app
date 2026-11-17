@@ -2,7 +2,7 @@
 // stock counts (server: src/lib/stockPlaces.ts, src/lib/stockCounts.ts).
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, MapPin, ClipboardList, Plus, Pencil, Trash2, CheckCircle2, Search, ScanLine } from 'lucide-react';
+import { Loader2, MapPin, ClipboardList, Plus, Pencil, Trash2, CheckCircle2, Search, ScanLine, ChevronDown, ChevronRight } from 'lucide-react';
 import { canChange } from '../../lib/changeAccess';
 import { confirmDialog } from '../../lib/confirmDialog';
 import { fmtNumber } from '../../lib/formatMoney';
@@ -13,7 +13,7 @@ import { readScan } from '../../lib/stockLabels';
 import type { Item } from '../../types';
 
 type Toast = (msg: string, type?: string) => void;
-interface Location { id: number; code: string; name: string | null; notes: string | null; active: boolean; items: number; units: number;
+interface Location { id: number; code: string; name: string | null; notes: string | null; category: string | null; active: boolean; items: number; units: number;
   /** The stock item this location is named after, if any (ANT-001). */
   item_serial: string | null; item_name: string | null; item_stock: number | null; item_unplaced: number | null }
 interface Count { id: number; number: string; scope: string; location_code: string | null; prefix: string | null; status: string; created_by: string | null; created_at: string; posted_at: string | null; lines: number; counted: number; summary?: any }
@@ -114,18 +114,58 @@ function OneBinPerItem({ triggerToast, onDone, onCancel }: { triggerToast: Toast
   );
 }
 
+type GroupBy = 'category' | 'prefix' | 'none';
+const NO_CATEGORY = 'No category';
+
+/** The letters before the first dash or digit of a location code: ANT-001 → ANT, A1-03 → A, REEL-RACK-2 → REEL. */
+export const codePrefix = (code: string) => (/^[A-Za-z]+/.exec(code.trim())?.[0] || '#').toUpperCase();
+
+/** Locations in groups for the list, in order: categories A-Z then "No category"; prefixes A-Z. */
+export function groupLocations<T extends { code: string; category: string | null }>(locs: T[], by: GroupBy): Array<{ key: string; items: T[] }> {
+  if (by === 'none') return [{ key: '', items: locs }];
+  const map = new Map<string, T[]>();
+  for (const l of locs) {
+    const key = by === 'category' ? (l.category?.trim() || NO_CATEGORY) : codePrefix(l.code);
+    map.set(key, [...(map.get(key) ?? []), l]);
+  }
+  return [...map.entries()]
+    .sort(([a], [b]) => (a === NO_CATEGORY ? 1 : b === NO_CATEGORY ? -1 : a.localeCompare(b, undefined, { numeric: true })))
+    .map(([key, items]) => ({ key, items }));
+}
+
 function Locations({ triggerToast, onOpenItem, items = [] }: { triggerToast: Toast; onOpenItem?: (s: string) => void; items?: Item[] }) {
   // The Code box offers the stock codes (a bin can be named after the part it holds), and takes anything typed.
   const itemByCode = useMemo(() => new Map(items.map((it) => [it.partNumber.toUpperCase(), it])), [items]);
   const may = canChange('/api/stock-locations');
   const [data, setData] = useState<{ locations: Location[]; unplaced: { units: number; items: number } } | null>(null);
-  const [form, setForm] = useState<{ id?: number; code: string; name: string; notes: string } | null>(null);
+  const [form, setForm] = useState<{ id?: number; code: string; name: string; notes: string; category: string } | null>(null);
+  const [groupBy, setGroupBy] = useState<GroupBy>(() => { try { const g = localStorage.getItem('locationsGroupBy'); return g === 'prefix' || g === 'none' ? g : 'category'; } catch { return 'category'; } });
+  const [closed, setClosed] = useState<Set<string>>(new Set());
+  const [picked, setPicked] = useState<Set<number>>(new Set());
+  const [bulkCategory, setBulkCategory] = useState('');
+  const [filter, setFilter] = useState('');
   const [open, setOpen] = useState<number | null>(null);
   const [contents, setContents] = useState<any[] | null>(null);
   const [putting, setPutting] = useState<number | null>(null);
   const [onePer, setOnePer] = useState(false);
 
   const load = useCallback(async () => { try { setData(await api('/api/stock-locations')); } catch (e: any) { triggerToast(e.message, 'ERROR'); } }, [triggerToast]);
+  const mayDelete = canChange('/api/stock-locations/1', 'DELETE');
+  const chooseGroupBy = (g: GroupBy) => { setGroupBy(g); setClosed(new Set()); try { localStorage.setItem('locationsGroupBy', g); } catch { /* remembered only when it can be */ } };
+  const categories = useMemo(() => [...new Set((data?.locations ?? []).map((l) => l.category?.trim()).filter(Boolean) as string[])].sort(), [data]);
+  const shown = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    const locs = (data?.locations ?? []).filter((l) => !q || [l.code, l.name, l.notes, l.category].some((v) => String(v ?? '').toLowerCase().includes(q)));
+    return groupLocations(locs, groupBy);
+  }, [data, filter, groupBy]);
+  const setCategory = async () => {
+    try {
+      const r = await api('/api/stock-locations/set-category', { method: 'POST', body: JSON.stringify({ ids: [...picked], category: bulkCategory }) });
+      triggerToast(bulkCategory.trim() ? `${r.updated} ${r.updated === 1 ? 'location' : 'locations'} put in ${bulkCategory.trim()}.` : `Category taken off ${r.updated} ${r.updated === 1 ? 'location' : 'locations'}.`);
+      setPicked(new Set()); setBulkCategory(''); await load();
+    } catch (e: any) { triggerToast(e.message, 'ERROR'); }
+  };
+  const togglePick = (ids: number[], on: boolean) => setPicked((p) => { const n = new Set(p); ids.forEach((id) => (on ? n.add(id) : n.delete(id))); return n; });
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
     if (open === null) { setContents(null); return; }
@@ -135,7 +175,7 @@ function Locations({ triggerToast, onOpenItem, items = [] }: { triggerToast: Toa
   const save = async () => {
     if (!form) return;
     try {
-      const body = JSON.stringify({ code: form.code, name: form.name, notes: form.notes });
+      const body = JSON.stringify({ code: form.code, name: form.name, notes: form.notes, category: form.category });
       const saved = form.id ? await api(`/api/stock-locations/${form.id}`, { method: 'PUT', body }) : await api('/api/stock-locations', { method: 'POST', body });
       setForm(null); await load();
       // Named after a stock code with stock to put away: ask straight away.
@@ -144,8 +184,18 @@ function Locations({ triggerToast, onOpenItem, items = [] }: { triggerToast: Toa
   };
   const toggle = async (l: Location) => { try { await api(`/api/stock-locations/${l.id}`, { method: 'PUT', body: JSON.stringify({ active: !l.active }) }); await load(); } catch (e: any) { triggerToast(e.message, 'ERROR'); } };
   const remove = async (l: Location) => {
-    if (!(await confirmDialog({ title: 'Delete location', message: `Delete ${l.code}? Only an empty location can be deleted.`, confirmLabel: 'Delete', destructive: true }))) return;
-    try { await api(`/api/stock-locations/${l.id}`, { method: 'DELETE' }); await load(); } catch (e: any) { triggerToast(e.message, 'ERROR'); }
+    const holds = l.units > 0;
+    const message = holds
+      ? `Delete ${l.code}? It holds ${fmtNumber(l.units)} units of ${fmtNumber(l.items)} ${l.items === 1 ? 'item' : 'items'}. They stay in stock and go back to No location, ready to put away somewhere else. This cannot be undone.`
+      : `Delete ${l.code}? It is empty. This cannot be undone.`;
+    if (!(await confirmDialog({ title: 'Delete location', message, confirmLabel: holds ? 'Delete, keep the stock' : 'Delete', destructive: true }))) return;
+    try {
+      const r = await api(`/api/stock-locations/${l.id}`, { method: 'DELETE' });
+      triggerToast(r.unitsToNoLocation ? `Deleted ${l.code}. ${fmtNumber(r.unitsToNoLocation)} units are now under No location.` : `Deleted ${l.code}.`);
+      if (open === l.id) setOpen(null);
+      setPicked((p) => { const n = new Set(p); n.delete(l.id); return n; });
+      await load();
+    } catch (e: any) { triggerToast(e.message, 'ERROR'); }
   };
 
   if (!data) return <p className="text-xs text-outline flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading…</p>;
@@ -157,47 +207,93 @@ function Locations({ triggerToast, onOpenItem, items = [] }: { triggerToast: Toa
         </p>
         {may && <div className="flex gap-sm shrink-0">
           {data.unplaced.items > 0 && <SecondaryButton type="button" onClick={() => setOnePer(true)}>One bin per item</SecondaryButton>}
-          <PrimaryButton type="button" icon={<Plus className="w-3.5 h-3.5" />} onClick={() => setForm({ code: '', name: '', notes: '' })}>New location</PrimaryButton>
+          <PrimaryButton type="button" icon={<Plus className="w-3.5 h-3.5" />} onClick={() => setForm({ code: '', name: '', notes: '', category: '' })}>New location</PrimaryButton>
         </div>}
       </div>
       {onePer && <OneBinPerItem triggerToast={triggerToast} onCancel={() => setOnePer(false)} onDone={() => { setOnePer(false); void load(); }} />}
       {form && (
-        <div className="rounded-xl border border-outline-variant bg-surface-container-high p-md grid grid-cols-1 md:grid-cols-4 gap-sm items-end" data-testid="location-form">
+        <div className="rounded-xl border border-outline-variant bg-surface-container-high p-md grid grid-cols-1 md:grid-cols-5 gap-sm items-end" data-testid="location-form">
           <label className="text-xs text-outline">Code<input className={`${input} w-full mt-1 font-mono`} list="location-code-options" value={form.code} onChange={(e) => { const code = e.target.value; const it = itemByCode.get(code.trim().toUpperCase()); setForm({ ...form, code, name: form.name || !it ? form.name : String(it.name ?? '') }); }} placeholder="A1-03, or pick a stock code" aria-label="Location code" /><datalist id="location-code-options">{items.map((it) => <option key={it.partNumber} value={it.partNumber}>{it.name}</option>)}</datalist></label>
           <label className="text-xs text-outline">Name<input className={`${input} w-full mt-1`} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Reel rack 1, shelf 3" aria-label="Location name" /></label>
+          <label className="text-xs text-outline">Category<input className={`${input} w-full mt-1`} list="location-category-options" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="Reel racks, Bins, Shelves" aria-label="Location category" /></label>
           <label className="text-xs text-outline">Notes<input className={`${input} w-full mt-1`} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} aria-label="Location notes" /></label>
           <div className="flex gap-sm justify-end"><SecondaryButton type="button" onClick={() => setForm(null)}>Cancel</SecondaryButton><PrimaryButton type="button" onClick={() => void save()}>{form.id ? 'Save' : 'Add'}</PrimaryButton></div>
         </div>
       )}
-      {data.locations.length === 0 ? <p className="text-xs text-on-surface-variant italic">No locations yet.</p> : (
+      <datalist id="location-category-options">{categories.map((cat) => <option key={cat} value={cat} />)}</datalist>
+      {data.locations.length === 0 ? <p className="text-xs text-on-surface-variant italic">No locations yet.</p> : (<>
+        <div className="flex flex-wrap items-center gap-sm">
+          <input className={`${input} w-56`} value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Find a location" aria-label="Find a location" />
+          <span className="text-xs text-outline">Group by</span>
+          <div className="inline-flex rounded border border-outline-variant overflow-hidden text-xs" role="group" aria-label="Group locations by">
+            {([['category', 'Category'], ['prefix', 'Code prefix'], ['none', 'None']] as const).map(([g, text]) => (
+              <button key={g} type="button" aria-pressed={groupBy === g} onClick={() => chooseGroupBy(g)} className={`px-3 py-1.5 font-bold ${groupBy === g ? 'bg-primary text-white' : 'text-on-surface-variant hover:bg-surface-container-high'}`}>{text}</button>
+            ))}
+          </div>
+          {groupBy !== 'none' && shown.length > 1 && <span className="text-[11px] text-outline">
+            <button type="button" className="hover:text-primary" onClick={() => setClosed(new Set())}>Expand all</button>{' · '}
+            <button type="button" className="hover:text-primary" onClick={() => setClosed(new Set(shown.map((g) => g.key)))}>Collapse all</button>
+          </span>}
+        </div>
+        {may && picked.size > 0 && (
+          <div className="rounded-xl border border-primary/30 bg-primary/5 p-sm flex flex-wrap items-center gap-sm text-xs" data-testid="location-bulk">
+            <span className="font-bold">{picked.size} selected</span>
+            <input className={`${input} w-56`} list="location-category-options" value={bulkCategory} onChange={(e) => setBulkCategory(e.target.value)} placeholder="Category, e.g. Reel racks" aria-label="Category for the selected locations" />
+            <PrimaryButton type="button" onClick={() => void setCategory()}>{bulkCategory.trim() ? 'Set category' : 'Clear category'}</PrimaryButton>
+            <SecondaryButton type="button" onClick={() => setPicked(new Set())}>Cancel</SecondaryButton>
+          </div>
+        )}
         <div className="rounded-xl border border-outline-variant overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead><tr className="text-[10px] text-outline uppercase tracking-wider bg-surface-container-high/30">
+              {may && <th className="pl-md py-2 w-6"><span className="sr-only">Select</span></th>}
               <th className="px-md py-2">Location</th><th className="px-md py-2">Items</th><th className="px-md py-2">Units</th><th className="px-md py-2">Notes</th><th className="px-md py-2"><span className="sr-only">Actions</span></th>
             </tr></thead>
-            <tbody className="divide-y divide-outline-variant/30">
-              {data.locations.map((l) => (
+            {shown.map((g) => {
+              const isOpen = groupBy === 'none' || !closed.has(g.key);
+              const ids = g.items.map((l) => l.id);
+              const allPicked = ids.length > 0 && ids.every((id) => picked.has(id));
+              return (
+            <tbody key={g.key || 'all'} className="divide-y divide-outline-variant/30 border-b border-outline-variant/50">
+              {groupBy !== 'none' && (
+                <tr className="bg-surface-container-high/40 hover:bg-surface-container-high cursor-pointer select-none" aria-expanded={isOpen}
+                  onClick={() => setClosed((s) => { const n = new Set(s); n.has(g.key) ? n.delete(g.key) : n.add(g.key); return n; })}>
+                  {may && <td className="pl-md py-2" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={allPicked} onChange={(e) => togglePick(ids, e.target.checked)} aria-label={`Select every location in ${g.key}`} /></td>}
+                  <td className="px-md py-2 font-bold text-[11px] uppercase tracking-wide" colSpan={1}>
+                    <span className="inline-flex items-center gap-1.5">
+                      {isOpen ? <ChevronDown className="w-3.5 h-3.5 text-primary" /> : <ChevronRight className="w-3.5 h-3.5 text-outline" />}
+                      {g.key}
+                      <span className="ml-1 px-1.5 py-0.5 rounded bg-surface-container text-[10px] font-mono text-on-surface-variant normal-case">{g.items.length} {g.items.length === 1 ? 'location' : 'locations'}</span>
+                    </span>
+                  </td>
+                  <td className="px-md py-2 font-mono text-[11px] text-on-surface-variant">{fmtNumber(g.items.reduce((s, l) => s + l.items, 0))}</td>
+                  <td className="px-md py-2 font-mono text-[11px] text-on-surface-variant">{fmtNumber(g.items.reduce((s, l) => s + l.units, 0))}</td>
+                  <td colSpan={2} />
+                </tr>
+              )}
+              {isOpen && g.items.map((l) => (
                 <React.Fragment key={l.id}>
                   <tr className={l.active ? '' : 'opacity-50'} data-location={l.code}>
-                    <td className="px-md py-2"><button type="button" className="font-mono font-bold text-primary hover:underline" onClick={() => setOpen(open === l.id ? null : l.id)}>{l.code}</button>{l.name && <span className="block text-[11px] text-on-surface-variant">{l.name}</span>}{!l.active && <span className="text-[10px] text-outline"> inactive</span>}</td>
+                    {may && <td className="pl-md py-2"><input type="checkbox" checked={picked.has(l.id)} onChange={(e) => togglePick([l.id], e.target.checked)} aria-label={`Select ${l.code}`} /></td>}
+                    <td className="px-md py-2"><button type="button" className="font-mono font-bold text-primary hover:underline" onClick={() => setOpen(open === l.id ? null : l.id)}>{l.code}</button>{l.name && <span className="block text-[11px] text-on-surface-variant">{l.name}</span>}{groupBy !== 'category' && l.category && <span className="inline-block mt-0.5 px-1.5 rounded bg-surface-container-high text-[10px] text-on-surface-variant">{l.category}</span>}{!l.active && <span className="text-[10px] text-outline"> inactive</span>}</td>
                     <td className="px-md py-2 font-mono">{fmtNumber(l.items)}</td>
                     <td className="px-md py-2 font-mono">{fmtNumber(l.units)}</td>
                     <td className="px-md py-2 text-on-surface-variant">{l.notes}</td>
                     <td className="px-md py-2 text-right whitespace-nowrap">{may && <>
-                      <button type="button" aria-label={`Edit ${l.code}`} className="p-1.5 rounded hover:bg-surface-container-high" onClick={() => setForm({ id: l.id, code: l.code, name: l.name ?? '', notes: l.notes ?? '' })}><Pencil className="w-3.5 h-3.5" /></button>
+                      <button type="button" aria-label={`Edit ${l.code}`} className="p-1.5 rounded hover:bg-surface-container-high" onClick={() => setForm({ id: l.id, code: l.code, name: l.name ?? '', notes: l.notes ?? '', category: l.category ?? '' })}><Pencil className="w-3.5 h-3.5" /></button>
                       <button type="button" className="px-2 py-0.5 text-[10px] rounded hover:bg-surface-container-high" onClick={() => void toggle(l)}>{l.active ? 'Make inactive' : 'Make active'}</button>
-                      {canChange('/api/stock-locations/1', 'DELETE') && l.units === 0 && <button type="button" aria-label={`Delete ${l.code}`} className="p-1.5 rounded hover:bg-error/10 text-error" onClick={() => void remove(l)}><Trash2 className="w-3.5 h-3.5" /></button>}
+                      {mayDelete && <button type="button" aria-label={`Delete ${l.code}`} className="p-1.5 rounded hover:bg-error/10 text-error" onClick={() => void remove(l)}><Trash2 className="w-3.5 h-3.5" /></button>}
                     </>}</td>
                   </tr>
                   {l.item_serial && (l.item_unplaced ?? 0) > 0 && (
-                    <tr><td colSpan={5} className="px-md pb-2">
+                    <tr><td colSpan={may ? 6 : 5} className="px-md pb-2">
                       {putting === l.id
                         ? <PutHere l={l} triggerToast={triggerToast} onCancel={() => setPutting(null)} onDone={() => { setPutting(null); void load(); if (open === l.id) setOpen(null); }} />
                         : <span className="text-[11px] text-on-surface-variant">{l.item_serial}: {fmtNumber(l.item_unplaced ?? 0)} not put away yet.{may && <> <button type="button" className="text-primary font-bold hover:underline" onClick={() => setPutting(l.id)}>Put away here</button></>}</span>}
                     </td></tr>
                   )}
                   {open === l.id && (
-                    <tr><td colSpan={5} className="px-md py-2 bg-surface-container-high/30">
+                    <tr><td colSpan={may ? 6 : 5} className="px-md py-2 bg-surface-container-high/30">
                       {!contents ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : contents.length === 0 ? <span className="text-[11px] text-outline">Empty.</span> : (
                         <table className="w-full text-[11px]"><tbody>{contents.map((b) => (
                           <tr key={b.id}><td className="pr-2">{onOpenItem ? <button type="button" className="font-mono text-primary hover:underline" onClick={() => onOpenItem(b.serial_number)}>{b.serial_number}</button> : b.serial_number}</td>
@@ -209,9 +305,12 @@ function Locations({ triggerToast, onOpenItem, items = [] }: { triggerToast: Toa
                 </React.Fragment>
               ))}
             </tbody>
+              );
+            })}
+            {shown.every((g) => g.items.length === 0) && <tbody><tr><td colSpan={may ? 6 : 5} className="px-md py-4 text-center text-outline italic">No location matches.</td></tr></tbody>}
           </table>
         </div>
-      )}
+      </>)}
     </div>
   );
 }

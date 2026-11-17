@@ -41,6 +41,8 @@ export async function ensureStockPlacesSchema(run: (sql: string) => Promise<void
     received_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     source TEXT
   )`);
+  // A free-text group for the list: "Reel racks", "Bins", "Shelves"…
+  await run(`ALTER TABLE stock_locations ADD COLUMN IF NOT EXISTS category TEXT`);
   await run(`CREATE INDEX IF NOT EXISTS stock_bins_item ON stock_bins (serial_number, received_at)`);
   await run(`CREATE INDEX IF NOT EXISTS stock_bins_location ON stock_bins (location_id)`);
   await run(`CREATE TABLE IF NOT EXISTS stock_bin_moves (
@@ -109,14 +111,25 @@ export function putHerePlan(unplaced: number, counted: number, rest: 'elsewhere'
 }
 
 const clean = (v: unknown) => { const t = String(v ?? '').trim(); return t || null; };
+/** A location's category as typed, tidied: spaces collapsed, at most 60 characters; empty is none. */
+export const locationCategory = (v: unknown) => { const t = String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, 60); return t || null; };
+
+/** What deleting a location does to each lot of stock in it: a lot-tracked one keeps its lot with no location; a plain one simply joins the item's No location stock. */
+export function deletePlan(bins: Array<{ id: number; lot: string | null; date_code: string | null; qty: number }>) {
+  const keep = bins.filter((b) => b.lot || b.date_code).map((b) => b.id);
+  const drop = bins.filter((b) => !b.lot && !b.date_code).map((b) => b.id);
+  return { keep, drop, units: bins.reduce((s, b) => s + (Number(b.qty) || 0), 0) };
+}
+
 export const locationCode = (v: unknown) => String(v ?? '').trim().toUpperCase().replace(/\s+/g, '-');
 
 // ---------------------------------------------------------------------------
 // Routes.
 //   GET    /api/stock-locations                    every location, with how many items and units it holds
-//   POST   /api/stock-locations                    {code, name?, notes?}
-//   PUT    /api/stock-locations/:id                {code?, name?, notes?, active?}
-//   DELETE /api/stock-locations/:id                only an empty one (else mark it inactive)
+//   POST   /api/stock-locations                    {code, name?, notes?, category?}
+//   PUT    /api/stock-locations/:id                {code?, name?, notes?, active?, category?}
+//   DELETE /api/stock-locations/:id                its stock goes back to No location (totals unchanged)
+//   POST   /api/stock-locations/set-category       {ids, category}: group several locations at once
 //   GET    /api/stock-locations/:id/contents       what is in it
 //   POST   /api/stock-locations/:id/put-here       {serialNumber, counted, rest}: put an item's stock away here after counting it
 //   GET    /api/stock-locations/one-per-item       items with stock not put away and no location named after them (prefix?)
@@ -219,7 +232,7 @@ export function registerStockPlacesRoutes(app: Express): void {
     const code = locationCode(req.body?.code);
     if (!code || code.length > 40) return res.status(400).json({ error: 'Give the location a code of up to 40 characters, such as A1-03 or REEL-RACK-2.' });
     try {
-      const { rows } = await query(`INSERT INTO stock_locations (code, name, notes) VALUES ($1, $2, $3) RETURNING *`, [code, clean(req.body?.name), clean(req.body?.notes)]);
+      const { rows } = await query(`INSERT INTO stock_locations (code, name, notes, category) VALUES ($1, $2, $3, $4) RETURNING *`, [code, clean(req.body?.name), clean(req.body?.notes), locationCategory(req.body?.category)]);
       res.status(201).json(rows[0]);
     } catch (err: any) {
       if (err.code === '23505') return res.status(409).json({ error: `There is already a location ${code}.` });
@@ -234,6 +247,7 @@ export function registerStockPlacesRoutes(app: Express): void {
     if (b.name !== undefined) set('name', clean(b.name));
     if (b.notes !== undefined) set('notes', clean(b.notes));
     if (b.active !== undefined) set('active', !!b.active);
+    if (b.category !== undefined) set('category', locationCategory(b.category));
     if (!sets.length) return res.status(400).json({ error: 'Nothing to change.' });
     try {
       p.push(parseInt(req.params.id));
@@ -246,14 +260,46 @@ export function registerStockPlacesRoutes(app: Express): void {
     }
   });
 
-  app.delete('/api/stock-locations/:id', async (req, res) => {
+  // Delete a location. Its stock isn't lost: the item totals don't change, and
+  // what was here goes back to No location (a lot keeps its lot and date code),
+  // ready to put away elsewhere. Each lot moved is logged against the item.
+  app.delete('/api/stock-locations/:id', async (req: any, res) => {
+    const id = parseInt(req.params.id);
+    if (!Number.isInteger(id)) return res.status(404).json({ error: 'Location not found.' });
+    const client = await pool.connect();
     try {
-      const id = parseInt(req.params.id);
-      const { rows: [n] } = await query(`SELECT COUNT(*)::int AS n FROM stock_bins WHERE location_id = $1`, [id]);
-      if (n.n > 0) return res.status(409).json({ error: 'It still holds stock: move it out first, or mark the location inactive.' });
-      const { rowCount } = await query(`DELETE FROM stock_locations WHERE id = $1`, [id]);
-      if (!rowCount) return res.status(404).json({ error: 'Location not found.' });
-      res.json({ ok: true });
+      await client.query('BEGIN');
+      const { rows: [loc] } = await client.query(`SELECT id, code FROM stock_locations WHERE id = $1 FOR UPDATE`, [id]);
+      if (!loc) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Location not found.' }); }
+      const { rows: bins } = await client.query(`SELECT id, serial_number, lot, date_code, qty FROM stock_bins WHERE location_id = $1 FOR UPDATE`, [id]);
+      const plan = deletePlan(bins);
+      const who = req.user?.email ?? null;
+      const ref = `Location ${loc.code} deleted`;
+      for (const b of bins) {
+        await client.query(`INSERT INTO stock_bin_moves (serial_number, bin_id, location_id, lot, qty, reason, reference, by_user) VALUES ($1, $2, $3, $4, $5, 'location deleted', $6, $7)`,
+          [b.serial_number, b.id, id, b.lot, b.qty, ref, who]);
+      }
+      if (plan.drop.length) await client.query(`DELETE FROM stock_bins WHERE id = ANY($1::int[])`, [plan.drop]);
+      if (plan.keep.length) await client.query(`UPDATE stock_bins SET location_id = NULL WHERE id = ANY($1::int[])`, [plan.keep]);
+      await client.query(`DELETE FROM stock_locations WHERE id = $1`, [id]);
+      await client.query(`INSERT INTO user_activity_logs (user_email, action, entity_type, entity_id, details, status) VALUES ((SELECT email FROM users WHERE email = $1), 'DELETE_LOCATION', 'Location', $2, $3, 'SUCCESS')`,
+        [who, loc.code, JSON.stringify({ code: loc.code, units: plan.units, items: new Set(bins.map((b: any) => b.serial_number)).size })]);
+      await client.query('COMMIT');
+      res.json({ ok: true, code: loc.code, unitsToNoLocation: plan.units });
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      httpError(res, err);
+    } finally { client.release(); }
+  });
+
+  // Put several locations in one category at once: {ids, category} (empty category: none).
+  app.post('/api/stock-locations/set-category', async (req, res) => {
+    const ids = [...new Set((Array.isArray(req.body?.ids) ? req.body.ids : []).map(Number).filter((n: number) => Number.isInteger(n) && n > 0))];
+    if (!ids.length) return res.status(400).json({ error: 'Choose at least one location.' });
+    if (ids.length > 2000) return res.status(400).json({ error: 'Too many locations at once.' });
+    try {
+      const { rowCount } = await query(`UPDATE stock_locations SET category = $2 WHERE id = ANY($1::int[])`, [ids, locationCategory(req.body?.category)]);
+      res.json({ ok: true, updated: rowCount });
     } catch (err) { httpError(res, err); }
   });
 
