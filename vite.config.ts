@@ -101,6 +101,12 @@ export default defineConfig(() => {
     },
     build: {
       rollupOptions: {
+        // Two pages: the web app, and the phone scan page (/scan), which is
+        // its own small entry so a phone doesn't download the whole app.
+        input: {
+          main: path.resolve(__dirname, 'index.html'),
+          scan: path.resolve(__dirname, 'scan.html'),
+        },
         output: {
           // Tesseract.js (used for receipt OCR) is ~15MB with its WASM
           // engine and language data. Splitting it into its own chunk means

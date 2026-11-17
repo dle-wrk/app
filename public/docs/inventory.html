@@ -194,6 +194,52 @@
             </div>
         </div>
 
+        <div class="section" id="phone-scanner">
+            <h2>Scanner on your phone</h2>
+
+            <h3 id="install-the-scanner">Install the scanner</h3>
+            <div class="step">
+                <div style="display:flex; gap:24px; align-items:center; flex-wrap:wrap;">
+                    <a href="/scan" style="display:block; background:#fff; padding:12px; border-radius:12px; line-height:0;">
+                        <img src="scan-qr.svg" alt="QR code for tracklab-im.fly.dev/scan" width="190" height="190" style="display:block;">
+                    </a>
+                    <div style="flex:1; min-width:240px;">
+                        <p><strong>Point the phone's camera at this code</strong>, or open <a href="/scan"><code>tracklab-im.fly.dev/scan</code></a> in the phone's browser. Sign in with your Tracklab email and password.</p>
+                        <p>To keep it on the phone like an app:</p>
+                        <ul>
+                            <li><strong>Android (Chrome):</strong> menu <strong>⋮</strong> → <em>Add to Home screen</em> (or <em>Install app</em>).</li>
+                            <li><strong>iPhone (Safari):</strong> the <strong>Share</strong> button → <em>Add to Home Screen</em>.</li>
+                        </ul>
+                        <p>It then opens full-screen from its own <em>Tracklab Scan</em> icon. Nothing comes from an app store, and it updates itself. It needs a signal to work, and it asks for the camera the first time you scan.</p>
+                    </div>
+                </div>
+            </div>
+
+            <h3 id="scanning-stock-in-and-out">Scanning stock in and out</h3>
+            <div class="step">
+                <ol>
+                    <li>Choose <strong>Book in</strong> or <strong>Book out</strong>.</li>
+                    <li>Press <strong>Scan a label</strong> and hold the reel or item label in the frame, or type a stock code or part number and press <em>Find</em>. The item appears with its stock and where it is. When a part number is on more than one item, pick the right one.</li>
+                    <li>Enter the quantity. A supplier's reel label fills in the quantity, lot and date code by itself.</li>
+                    <li>Optionally choose the place: pick it from the list, or press <em>Scan</em> and scan the rack or shelf label. Add a reference (PO, job or order number) if there is one.</li>
+                    <li>Press <strong>Send for approval</strong>. The scan shows under <em>My scans</em> as <em>Waiting for approval</em>; you can cancel it there until it is approved.</li>
+                </ol>
+                <p><strong>What can be scanned.</strong> A Tracklab stock code; a maker's or supplier's part number saved on the item; the 2D code on a supplier's reel label (DigiKey, Mouser and most makers); the QR code on an LCSC bag; or a stock location's code. A placeholder such as "N/A" never matches. An item that isn't in Tracklab has to be added on the website first.</p>
+                <p><strong>Signing in on the phone is separate from the website.</strong> It never signs you out on your computer. A phone stays signed in until it has gone 30 days unused; signing in on another phone ends the first one, and changing your password ends both. Viewers can't use the scanner.</p>
+            </div>
+
+            <h3 id="approving-scans">Approving scans</h3>
+            <div class="step">
+                <p>A scan changes nothing until it is approved. <strong>Bookkeeping → Sales → Scanner → Stock in &amp; out</strong> lists the scans waiting, newest first, and re-reads itself every few seconds, so scans appear while they are being made. The card's badge says how many are waiting.</p>
+                <ul>
+                    <li><strong>Approve</strong> changes the stock: a book-in adds to the item (put away at the chosen place with its lot and date code, or under <em>No location</em>); a book-out takes from it (from the chosen place, or stock with no location first, then the oldest places). It becomes an ordinary <em>BOOK-IN</em> / <em>BOOK-OUT</em> movement on the item, under the name of the person who scanned it, with who approved it in the reference.</li>
+                    <li><strong>Reject</strong> changes nothing and marks the scan rejected. The person who scanned sees that on their phone.</li>
+                    <li><strong>Approve all shown</strong> approves every pending scan in the list, oldest first. One that no longer fits (not enough stock left to book out) stays pending and is reported.</li>
+                </ul>
+                <p>Use the <em>Status</em> filter to look back at approved and rejected scans. Anyone who may change stock on the website can approve, including the person who scanned. A decided scan can't be changed: scan the opposite way to correct one.</p>
+            </div>
+        </div>
+
         <div class="section" id="stock-tables-ledger">
             <h2>Stock tables &amp; ledger</h2>
 

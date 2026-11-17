@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('./db', () => ({ pool: {}, query: vi.fn(), queryOne: vi.fn(), exec: vi.fn() }));
 
-import { isPlaceholder, movementReference, parseMoveFields, parseMoveListQuery, parseScannedCode } from './scanStock';
+import { isPlaceholder, movementReference, parseDecision, parseMoveFields, parseMoveListQuery, parseScannedCode } from './scanStock';
 import { permissionForWrite } from './writeAccess';
 import { roleCan } from './permissions';
 
@@ -76,7 +76,23 @@ describe('a booking from the phone', () => {
 describe('listing scanner bookings', () => {
   it('reads the filters', () => {
     expect(parseMoveListQuery({ direction: 'out', part: ' cap ', from: '2026-11-01', to: 'x', page: '2', pageSize: '999' }))
-      .toEqual({ page: 2, pageSize: 100, direction: 'OUT', part: 'cap', user: null, from: '2026-11-01', to: null });
+      .toEqual({ page: 2, pageSize: 100, status: null, mine: false, direction: 'OUT', part: 'cap', user: null, from: '2026-11-01', to: null });
+    expect(parseMoveListQuery({ status: 'pending', mine: '1' })).toMatchObject({ status: 'PENDING', mine: true });
+    expect(parseMoveListQuery({ status: 'maybe' }).status).toBeNull();
     expect(parseMoveListQuery({ direction: 'both' }).direction).toBeNull();
+  });
+});
+
+describe('approving or rejecting scans', () => {
+  it('reads which scans and what to do with them', () => {
+    expect(parseDecision({ ids: [3, '4', 3, 'x', -1], decision: 'approve' })).toEqual({ ids: [3, 4], decision: 'APPROVE', reason: null });
+    expect(parseDecision({ ids: [7], decision: 'REJECT', reason: '  wrong reel ' })).toEqual({ ids: [7], decision: 'REJECT', reason: 'wrong reel' });
+  });
+
+  it('refuses a request that names no scan or no decision', () => {
+    expect(() => parseDecision({ ids: [1], decision: 'maybe' })).toThrow('APPROVE or REJECT');
+    expect(() => parseDecision({ ids: [], decision: 'APPROVE' })).toThrow('at least one');
+    expect(() => parseDecision({ ids: 'all', decision: 'APPROVE' })).toThrow('at least one');
+    expect(() => parseDecision({ ids: Array.from({ length: 201 }, (_, i) => i + 1), decision: 'APPROVE' })).toThrow('200');
   });
 });

@@ -121,7 +121,7 @@ export const ScansTab: React.FC<ModuleDataProps> = (props) => {
         {tab('STOCK', 'Stock in & out')}
         {tab('PICKS', 'Pick scans')}
       </div>
-      {view === 'STOCK' ? <ScannerStockMoves triggerToast={props.triggerToast} /> : <PickScansPanel {...props} />}
+      {view === 'STOCK' ? <ScannerStockMoves triggerToast={props.triggerToast} refresh={props.refresh} /> : <PickScansPanel {...props} />}
     </div>
   );
 };

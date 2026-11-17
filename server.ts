@@ -909,6 +909,14 @@ app.post('/api/shortages/convert-to-po', async (req, res) => {
 
 
 // Serve index.html for all non-API routes (client-side routing)
+// The phone scan page (its own entry, see scan.html). Before the catch-all
+// below, which would otherwise answer /scan with the whole web app.
+app.get(['/scan', '/scan/'], (_req, res) => {
+  res.sendFile(path.join(DIST_DIR, 'scan.html'), (err) => {
+    if (err) { console.error('Error serving scan.html:', err.message); res.status(500).send('Error loading page'); }
+  });
+});
+
 app.get('*', (_req, res) => {
   const indexPath = path.join(DIST_DIR, 'index.html');
   res.sendFile(indexPath, (err) => {

@@ -1,26 +1,32 @@
-// Booking stock in and out from the scanner phone app: reels, packets and
-// any other inventory item. The phone scans (or the user types) a code, the
-// server says which item it is, and a booking changes that item's stock the
-// same way the rest of the app does: inventory.stock, a row in transactions
-// (BOOK-IN / BOOK-OUT, with who did it), and the stock places kept in step.
+// Booking stock in and out with the scanner (the phone page at /scan, or the
+// scanner phone app): reels, packets and any other inventory item. The phone
+// scans (or the user types) a code, the server says which item it is, and
+// the scan is saved as PENDING. Nothing changes in stock until someone
+// approves it on the website (Sales > Scanner). Approving changes the item's
+// stock the same way the rest of the app does: inventory.stock, a row in
+// transactions (BOOK-IN / BOOK-OUT, under the name of the person who
+// scanned), and the stock places kept in step. Rejecting changes nothing.
 //
 //   GET  /api/stock-moves/find?code=   what a scanned or typed code is: the item(s) it matches, with stock
 //                                      and where it is; what a supplier reel label says (part, quantity,
 //                                      lot, date code); or the stock location with that code
 //   POST /api/stock-moves              {direction: IN | OUT, partNumber, quantity, locationId?, lot?, dateCode?,
-//                                       reference?, note?, capturedAt?, clientRef?}
-//                                      IN: adds to stock; with a location (or a lot) it is put away there,
-//                                          otherwise it waits in "No location".
-//                                      OUT: takes from stock, refused if there isn't that much; with a location
-//                                          it comes from that place (refused if the place holds less),
-//                                          otherwise from No location first, then the oldest places.
-//                                      clientRef: an id the phone makes up per booking; resending it returns
-//                                      the booking already made, so a retry never books twice.
-//   GET  /api/stock-moves              ?direction=&part=&user=&from=&to=&page=&pageSize= -> { items, total, page, pageSize }
+//                                       reference?, note?, capturedAt?, clientRef?} -> the scan, status PENDING
+//                                      A book-out for more than is in stock now is refused (409).
+//                                      clientRef: an id the phone makes up per scan; resending it returns
+//                                      the scan already saved, so a retry never saves it twice.
+//   POST /api/stock-moves/decide       {ids: [..], decision: APPROVE | REJECT, reason?}
+//                                      -> { results: [{id, ok, error?, move?}], done, failed }
+//                                      APPROVE, IN: adds to stock; with a location (or a lot) it is put away
+//                                          there, otherwise it waits in "No location".
+//                                      APPROVE, OUT: takes from stock, refused if there isn't that much now;
+//                                          with a location it comes from that place (refused if the place
+//                                          holds less), otherwise from No location first, then the oldest places.
+//   GET  /api/stock-moves              ?status=&direction=&part=&user=&mine=1&from=&to=&page=&pageSize=
+//                                      -> { items, total, pending, page, pageSize }
 //
-// Booking needs the inventory.update permission (writeAccess area
-// "stock-moves"), the same as changing stock on the website.
-
+// Scanning and deciding both need the inventory.update permission
+// (writeAccess area "stock-moves"), the same as changing stock on the website.
 import type { Express, Response } from 'express';
 import { pool, query, queryOne, exec } from './db';
 import { moveStock, placesOf } from './stockPlaces';
@@ -30,6 +36,7 @@ export async function ensureScanStockSchema(): Promise<void> {
   await exec(`CREATE TABLE IF NOT EXISTS scan_stock_moves (
     id SERIAL PRIMARY KEY,
     client_ref TEXT UNIQUE,
+    status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING','APPROVED','REJECTED')),
     direction TEXT NOT NULL CHECK (direction IN ('IN','OUT')),
     part_number TEXT NOT NULL,
     item_name TEXT,
@@ -46,8 +53,14 @@ export async function ensureScanStockSchema(): Promise<void> {
     user_email TEXT,
     user_name TEXT,
     captured_at TIMESTAMPTZ,
+    decided_by_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    decided_by_email TEXT,
+    decided_by_name TEXT,
+    decided_at TIMESTAMPTZ,
+    reject_reason TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`);
+  await exec(`CREATE INDEX IF NOT EXISTS scan_stock_moves_status_idx ON scan_stock_moves (status)`);
   await exec(`CREATE INDEX IF NOT EXISTS scan_stock_moves_created_idx ON scan_stock_moves (created_at DESC)`);
   await exec(`CREATE INDEX IF NOT EXISTS scan_stock_moves_part_idx ON scan_stock_moves (part_number)`);
 }
@@ -114,6 +127,9 @@ export function parseScannedCode(raw: unknown): ScannedCode {
   return { candidates: uniq([s.slice(0, 120)]), quantity: null, lot: null, dateCode: null, kind: 'text' };
 }
 
+export const MOVE_STATUSES = ['PENDING', 'APPROVED', 'REJECTED'] as const;
+export type MoveStatus = typeof MOVE_STATUSES[number];
+
 export interface MoveFields {
   direction: 'IN' | 'OUT';
   partNumber: string;
@@ -165,7 +181,8 @@ export function parseMoveListQuery(q: Record<string, unknown>) {
   const pageSize = Math.min(100, Math.max(1, Math.floor(Number(q.pageSize)) || 30));
   const day = (v: unknown) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v ?? '')) ? String(v) : null);
   const d = text(q.direction).toUpperCase();
-  return { page, pageSize, direction: d === 'IN' || d === 'OUT' ? d : null, part: text(q.part) || null, user: text(q.user) || null, from: day(q.from), to: day(q.to) };
+  const s = text(q.status).toUpperCase();
+  return { page, pageSize, status: (MOVE_STATUSES as readonly string[]).includes(s) ? (s as MoveStatus) : null, mine: text(q.mine) === '1' || text(q.mine).toLowerCase() === 'true', direction: d === 'IN' || d === 'OUT' ? d : null, part: text(q.part) || null, user: text(q.user) || null, from: day(q.from), to: day(q.to) };
 }
 
 // ---------------------------------------------------------------------------
@@ -255,6 +272,7 @@ export async function findByCode(db: Db, raw: string) {
 
 const toMove = (r: any) => ({
   id: r.id,
+  status: r.status as MoveStatus,
   direction: r.direction as 'IN' | 'OUT',
   partNumber: r.part_number,
   itemName: r.item_name,
@@ -265,35 +283,69 @@ const toMove = (r: any) => ({
   reference: r.reference, note: r.note,
   user: { id: r.user_id, name: r.user_name || r.user_email || 'Unknown', email: r.user_email },
   capturedAt: r.captured_at, createdAt: r.created_at,
+  decidedBy: r.decided_by_name || null,
+  decidedAt: r.decided_at || null,
+  rejectReason: r.reject_reason || null,
 });
 
-/** Books stock in or out inside the caller's transaction. Returns the saved booking row. */
-export async function bookMove(client: Db, f: MoveFields, who: { id: number | null; email: string; name: string }) {
+type Who = { id: number | null; email: string; name: string };
+
+async function itemAndPlace(client: Db, partNumber: string, locationId: number | null, direction: 'IN' | 'OUT', lock: boolean) {
   const { rows: [item] } = await client.query(
-    `SELECT serial_number, name, stock FROM inventory WHERE upper(serial_number) = upper($1) AND deleted IS NOT TRUE FOR UPDATE`, [f.partNumber]);
-  if (!item) throw err(404, `${f.partNumber} is not an item in Tracklab.`);
-  const serial: string = item.serial_number;
-  const stock = Number(item.stock) || 0;
+    `SELECT serial_number, name, stock FROM inventory WHERE upper(serial_number) = upper($1) AND deleted IS NOT TRUE${lock ? ' FOR UPDATE' : ''}`, [partNumber]);
+  if (!item) throw err(404, `${partNumber} is not an item in Tracklab.`);
   let loc: { id: number; code: string; active: boolean } | null = null;
-  if (f.locationId !== null) {
-    const { rows: [l] } = await client.query(`SELECT id, code, active FROM stock_locations WHERE id = $1`, [f.locationId]);
+  if (locationId !== null) {
+    const { rows: [l] } = await client.query(`SELECT id, code, active FROM stock_locations WHERE id = $1`, [locationId]);
     if (!l) throw err(400, 'That location no longer exists.');
-    if (f.direction === 'IN' && !l.active) throw err(400, `Location ${l.code} is marked inactive. Choose another.`);
+    if (direction === 'IN' && !l.active) throw err(400, `Location ${l.code} is marked inactive. Choose another.`);
     loc = l;
   }
-  const reference = movementReference(f, loc?.code ?? null);
-  const trxId = `TRX-SCAN-${f.direction}-${serial}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  return { item, serial: item.serial_number as string, stock: Number(item.stock) || 0, loc };
+}
 
-  if (f.direction === 'OUT') {
-    if (f.quantity > stock) throw err(409, stock > 0 ? `Only ${stock} of ${serial} in stock.` : `${serial} has no stock to book out.`);
+const notEnough = (serial: string, stock: number) => err(409, stock > 0 ? `Only ${stock} of ${serial} in stock.` : `${serial} has no stock to book out.`);
+
+/**
+ * Saves a scan from the phone as PENDING. Stock does not change until it is
+ * approved. A book-out for more than there is now is refused straight away,
+ * so the person scanning finds out at the shelf, not later.
+ */
+export async function recordScan(client: Db, f: MoveFields, who: Who) {
+  const { item, serial, stock, loc } = await itemAndPlace(client, f.partNumber, f.locationId, f.direction, false);
+  if (f.direction === 'OUT' && f.quantity > stock) throw notEnough(serial, stock);
+  const { rows: [saved] } = await client.query(
+    `INSERT INTO scan_stock_moves (client_ref, status, direction, part_number, item_name, quantity, location_id, location_code, lot, date_code,
+                                   reference, note, user_id, user_email, user_name, captured_at)
+     VALUES ($1,'PENDING',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
+    [f.clientRef, f.direction, serial, item.name || serial, f.quantity, loc?.id ?? null, loc?.code ?? null, f.lot, f.dateCode,
+     f.reference, f.note, who.id, who.email, who.name, f.capturedAt]);
+  return { ...toMove(saved), stockNow: stock };
+}
+
+/**
+ * Approves a pending scan inside the caller's transaction: this is where
+ * stock changes. The movement is written under the name of the person who
+ * scanned it, with who approved it in the reference.
+ */
+export async function approveScan(client: Db, row: any, approver: Who) {
+  const direction = row.direction as 'IN' | 'OUT';
+  const quantity = Number(row.quantity);
+  const { item, serial, stock, loc } = await itemAndPlace(client, row.part_number, row.location_id ?? null, direction, true);
+  const reference = `${movementReference({ direction, reference: row.reference, note: row.note }, loc?.code ?? null)} (approved by ${approver.name})`.slice(0, 250);
+  const trxId = `TRX-SCAN-${direction}-${serial}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  const scannedBy = row.user_name || row.user_email || approver.name;
+
+  if (direction === 'OUT') {
+    if (quantity > stock) throw notEnough(serial, stock);
     if (loc) {
       // From this place: its bins oldest first. The stock update below then finds the
       // places already in step, so the trigger takes nothing more.
       const { rows: bins } = await client.query(
         `SELECT id, qty, lot FROM stock_bins WHERE serial_number = $1 AND location_id = $2 ORDER BY received_at, id FOR UPDATE`, [serial, loc.id]);
       const there = bins.reduce((s, b) => s + Number(b.qty), 0);
-      if (f.quantity > there) throw err(409, there > 0 ? `Only ${there} of ${serial} at ${loc.code}.` : `No ${serial} at ${loc.code}.`);
-      let left = f.quantity;
+      if (quantity > there) throw err(409, there > 0 ? `Only ${there} of ${serial} at ${loc.code}.` : `No ${serial} at ${loc.code}.`);
+      let left = quantity;
       for (const b of bins) {
         if (left <= 0) break;
         const take = Math.min(left, Number(b.qty));
@@ -301,29 +353,40 @@ export async function bookMove(client: Db, f: MoveFields, who: { id: number | nu
         else await client.query(`UPDATE stock_bins SET qty = qty - $2 WHERE id = $1`, [b.id, take]);
         await client.query(
           `INSERT INTO stock_bin_moves (serial_number, bin_id, location_id, lot, qty, reason, reference, by_user) VALUES ($1, $2, $3, $4, $5, 'used', $6, $7)`,
-          [serial, b.id, loc.id, b.lot, -take, reference, who.email]);
+          [serial, b.id, loc.id, b.lot, -take, reference, row.user_email || approver.email]);
         left -= take;
       }
     }
-    await client.query(`UPDATE inventory SET stock = stock - $2 WHERE serial_number = $1`, [serial, f.quantity]);
+    await client.query(`UPDATE inventory SET stock = stock - $2 WHERE serial_number = $1`, [serial, quantity]);
   } else {
-    await client.query(`UPDATE inventory SET stock = COALESCE(stock, 0) + $2 WHERE serial_number = $1`, [serial, f.quantity]);
-    if (loc || f.lot || f.dateCode) {
-      await moveStock(client as any, serial, { qty: f.quantity, fromBinId: null, toLocationId: loc?.id ?? null, lot: f.lot, dateCode: f.dateCode, reason: 'booked in', reference, by: who.email });
+    await client.query(`UPDATE inventory SET stock = COALESCE(stock, 0) + $2 WHERE serial_number = $1`, [serial, quantity]);
+    if (loc || row.lot || row.date_code) {
+      await moveStock(client as any, serial, { qty: quantity, fromBinId: null, toLocationId: loc?.id ?? null, lot: row.lot, dateCode: row.date_code, reason: 'booked in', reference, by: row.user_email || approver.email });
     }
   }
-  const signed = f.direction === 'IN' ? f.quantity : -f.quantity;
+  const signed = direction === 'IN' ? quantity : -quantity;
   await client.query(
     `INSERT INTO transactions (trxId, itemPartNumber, itemName, type, qtyChange, reference, performedBy, dateTime)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-    [trxId, serial, item.name || serial, f.direction === 'IN' ? 'BOOK-IN' : 'BOOK-OUT', signed, reference, who.name, new Date().toISOString()]);
+    [trxId, serial, item.name || serial, direction === 'IN' ? 'BOOK-IN' : 'BOOK-OUT', signed, reference, scannedBy, new Date().toISOString()]);
   const { rows: [saved] } = await client.query(
-    `INSERT INTO scan_stock_moves (client_ref, direction, part_number, item_name, quantity, stock_after, location_id, location_code, lot, date_code,
-                                   reference, note, trx_id, user_id, user_email, user_name, captured_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
-    [f.clientRef, f.direction, serial, item.name || serial, f.quantity, stock + signed, loc?.id ?? null, loc?.code ?? null, f.lot, f.dateCode,
-     f.reference, f.note, trxId, who.id, who.email, who.name, f.capturedAt]);
+    `UPDATE scan_stock_moves SET status = 'APPROVED', stock_after = $2, trx_id = $3, decided_by_id = $4, decided_by_email = $5, decided_by_name = $6, decided_at = now()
+      WHERE id = $1 RETURNING *`,
+    [row.id, stock + signed, trxId, approver.id, approver.email, approver.name]);
   return toMove(saved);
+}
+
+export interface Decision { ids: number[]; decision: 'APPROVE' | 'REJECT'; reason: string | null }
+
+/** Checks an approve / reject request. Throws an error with status 400 saying what is wrong. */
+export function parseDecision(body: Record<string, unknown>): Decision {
+  const decision = text(body.decision).toUpperCase();
+  if (decision !== 'APPROVE' && decision !== 'REJECT') throw err(400, 'Say whether to APPROVE or REJECT.');
+  const raw = Array.isArray(body.ids) ? body.ids : [];
+  const ids = [...new Set(raw.map(Number).filter(n => Number.isInteger(n) && n > 0))];
+  if (!ids.length) throw err(400, 'Choose at least one scan.');
+  if (ids.length > 200) throw err(400, 'Decide 200 scans at most at a time.');
+  return { ids, decision, reason: text(body.reason).slice(0, 300) || null };
 }
 
 // ---------------------------------------------------------------------------
@@ -336,8 +399,13 @@ const fail = (res: Response, e: any, what: string) => {
   res.status(500).json({ error: `Could not ${what}. Please try again.` });
 };
 
+async function whoIs(user: { id: number | null; email: string }): Promise<Who> {
+  const me = await queryOne<{ email: string; first_name: string | null; last_name: string | null }>(
+    `SELECT email, first_name, last_name FROM users WHERE id = $1`, [user.id]);
+  return { id: user.id, email: user.email, name: [me?.first_name, me?.last_name].filter(Boolean).join(' ') || me?.email || user.email };
+}
+
 export function registerScanStockRoutes(app: Express): void {
-  // Before the list route's siblings so "find" is never read as anything else.
   app.get('/api/stock-moves/find', async (req, res) => {
     try {
       const code = String(req.query.code ?? '');
@@ -348,37 +416,62 @@ export function registerScanStockRoutes(app: Express): void {
   });
 
   app.post('/api/stock-moves', async (req: any, res) => {
-    const client = await pool.connect();
     try {
       const f = parseMoveFields(req.body || {});
-      if (f.clientRef) {
-        const { rows: [dup] } = await client.query(`SELECT * FROM scan_stock_moves WHERE client_ref = $1`, [f.clientRef]);
-        if (dup) return res.status(200).json({ ...toMove(dup), alreadySaved: true });
-      }
-      const me = await queryOne<{ email: string; first_name: string | null; last_name: string | null }>(
-        `SELECT email, first_name, last_name FROM users WHERE id = $1`, [req.user.id]);
-      const name = [me?.first_name, me?.last_name].filter(Boolean).join(' ') || me?.email || req.user.email;
-      await client.query('BEGIN');
-      let move;
+      const already = async () => {
+        if (!f.clientRef) return null;
+        const { rows: [dup] } = await query(`SELECT * FROM scan_stock_moves WHERE client_ref = $1`, [f.clientRef]);
+        return dup ? { ...toMove(dup), alreadySaved: true } : null;
+      };
+      const dup = await already();
+      if (dup) return res.status(200).json(dup);
       try {
-        move = await bookMove(client, f, { id: req.user.id, email: req.user.email, name });
+        res.status(201).json(await recordScan(pool, f, await whoIs(req.user)));
       } catch (e: any) {
-        await client.query('ROLLBACK');
-        // The same resend arriving twice at once: the other copy won, hand back its booking.
-        if (e?.code === '23505' && f.clientRef) {
-          const { rows: [dup] } = await client.query(`SELECT * FROM scan_stock_moves WHERE client_ref = $1`, [f.clientRef]);
-          if (dup) return res.status(200).json({ ...toMove(dup), alreadySaved: true });
-        }
+        // The same resend arriving twice at once: the other copy won, hand back its scan.
+        const late = e?.code === '23505' ? await already() : null;
+        if (late) return res.status(200).json(late);
         throw e;
       }
-      await client.query('COMMIT');
-      void bumpDataVersion('inventory'); // open web tabs re-read stock
-      res.status(201).json(move);
-    } catch (e) {
-      fail(res, e, 'book the stock');
-    } finally {
-      client.release();
-    }
+    } catch (e) { fail(res, e, 'save the scan'); }
+  });
+
+  // Approve or reject pending scans. Each scan is decided in its own
+  // transaction, so one that can't be approved (not enough stock now)
+  // doesn't hold back the rest; the answer says what happened to each.
+  app.post('/api/stock-moves/decide', async (req: any, res) => {
+    try {
+      const d = parseDecision(req.body || {});
+      const approver = await whoIs(req.user);
+      const results: Array<{ id: number; ok: boolean; error?: string; move?: ReturnType<typeof toMove> }> = [];
+      for (const id of d.ids) {
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN');
+          const { rows: [row] } = await client.query(`SELECT * FROM scan_stock_moves WHERE id = $1 FOR UPDATE`, [id]);
+          if (!row) throw err(404, 'That scan no longer exists.');
+          if (row.status !== 'PENDING') throw err(409, `Already ${row.status === 'APPROVED' ? 'approved' : 'rejected'}${row.decided_by_name ? ` by ${row.decided_by_name}` : ''}.`);
+          let move;
+          if (d.decision === 'APPROVE') move = await approveScan(client, row, approver);
+          else {
+            const { rows: [saved] } = await client.query(
+              `UPDATE scan_stock_moves SET status = 'REJECTED', reject_reason = $2, decided_by_id = $3, decided_by_email = $4, decided_by_name = $5, decided_at = now()
+                WHERE id = $1 RETURNING *`, [id, d.reason, approver.id, approver.email, approver.name]);
+            move = toMove(saved);
+          }
+          await client.query('COMMIT');
+          results.push({ id, ok: true, move });
+        } catch (e: any) {
+          await client.query('ROLLBACK').catch(() => {});
+          if (!(e?.status && e.status < 500)) console.error('[stock-moves] decide failed:', e?.message);
+          results.push({ id, ok: false, error: e?.status && e.status < 500 ? e.message : 'Something went wrong. Try again.' });
+        } finally {
+          client.release();
+        }
+      }
+      if (d.decision === 'APPROVE' && results.some(r => r.ok)) void bumpDataVersion('inventory'); // open web tabs re-read stock
+      res.json({ results, done: results.filter(r => r.ok).length, failed: results.filter(r => !r.ok).length });
+    } catch (e) { fail(res, e, 'decide the scans'); }
   });
 
   app.get('/api/stock-moves', async (req, res) => {
@@ -387,16 +480,19 @@ export function registerScanStockRoutes(app: Express): void {
       const where: string[] = [];
       const params: any[] = [];
       const add = (sql: string, v: any) => { params.push(v); where.push(sql.replace(/\?/g, `$${params.length}`)); };
+      if (f.status) add(`status = ?`, f.status);
       if (f.direction) add(`direction = ?`, f.direction);
       if (f.part) add(`(part_number ILIKE ? OR item_name ILIKE ?)`, like(f.part));
       if (f.user) add(`(user_name ILIKE ? OR user_email ILIKE ?)`, like(f.user));
+      if (f.mine) add(`user_id = ?`, (req as any).user.id);
       if (f.from) add(`COALESCE(captured_at, created_at) >= ?::date`, f.from);
       if (f.to) add(`COALESCE(captured_at, created_at) < ?::date + 1`, f.to);
       const w = where.length ? `WHERE ${where.join(' AND ')}` : '';
       const { rows: [{ n }] } = await query(`SELECT count(*)::int AS n FROM scan_stock_moves ${w}`, params);
+      const { rows: [{ pending }] } = await query(`SELECT count(*)::int AS pending FROM scan_stock_moves WHERE status = 'PENDING'`);
       const { rows } = await query(
         `SELECT * FROM scan_stock_moves ${w} ORDER BY COALESCE(captured_at, created_at) DESC, id DESC LIMIT ${f.pageSize} OFFSET ${(f.page - 1) * f.pageSize}`, params);
-      res.json({ items: rows.map(toMove), total: n, page: f.page, pageSize: f.pageSize });
-    } catch (e) { fail(res, e, 'load the bookings'); }
+      res.json({ items: rows.map(toMove), total: n, pending, page: f.page, pageSize: f.pageSize });
+    } catch (e) { fail(res, e, 'load the scans'); }
   });
 }

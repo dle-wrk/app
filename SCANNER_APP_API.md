@@ -136,7 +136,8 @@ number, will be saved as typed") before the user starts scanning. It is a hint, 
 
 ## Booking stock in and out
 
-The main job of the app: scan a reel, packet or any other item and book it in or out of stock.
+The main job of the app: scan a reel, packet or any other item in or out of stock. Each scan
+waits on the website for approval before stock changes.
 Needs a camera barcode scanner in the app (`expo-camera`, with `barcodeScannerSettings` for
 `datamatrix`, `qr`, `code128`, `code39`, `ean13`). **Pass the scanned string through untouched**,
 control characters included: the 2D code on reel labels uses them as field separators.
@@ -180,7 +181,10 @@ What to do with the answer:
   the booking they are making.
 - nothing: "Not in Tracklab. Add the item on the website first." The app cannot create items.
 
-### 2. Book it
+### 2. Send the scan (it waits for approval)
+
+**A scan does not change stock.** It is saved as `PENDING` and shown on the website
+(Sales > Scanner), where someone approves or rejects it. Stock changes on approval.
 
 ```
 POST /api/stock-moves        JSON
@@ -192,46 +196,62 @@ POST /api/stock-moves        JSON
   "lot": "LOT778899", "dateCode": "2535",   // optional, booking IN only
   "reference":  "PO-2026-0007",   // optional: PO, job or order number
   "note":       "line 2",         // optional
-  "capturedAt": "2026-11-17T08:12:00Z",     // optional, for bookings that waited in the queue
-  "clientRef":  "<one id per booking>"       // strongly advised, as for scans
+  "capturedAt": "2026-11-17T08:12:00Z",     // optional, for scans that waited in the queue
+  "clientRef":  "<one id per scan>"          // strongly advised, as for pick scans
 }
 
-201 { "id": 9, "direction": "IN", "partNumber": "CAP-024", "itemName": "…", "quantity": 4000,
-      "stockAfter": 16000, "location": { "id": 4, "code": "REEL-RACK-2" } | null,
+201 { "id": 9, "status": "PENDING", "direction": "IN", "partNumber": "CAP-024", "itemName": "…",
+      "quantity": 4000, "stockAfter": null, "stockNow": 12000,
+      "location": { "id": 4, "code": "REEL-RACK-2" } | null,
       "lot": "…", "dateCode": "…", "reference": "…", "note": "…",
-      "user": { id, name, email }, "capturedAt": "…", "createdAt": "…" }
-200 the same booking again with "alreadySaved": true   (this clientRef was booked before)
+      "user": { id, name, email }, "capturedAt": "…", "createdAt": "…",
+      "decidedBy": null, "decidedAt": null, "rejectReason": null }
+200 the same scan again with "alreadySaved": true   (this clientRef was sent before)
 400 a field is missing or wrong          404 that partNumber is not an item
 403 this account may not change stock    401 sign in again
-409 not enough stock: "Only 35 of CAP-024 in stock." / "Only 15 of CAP-024 at REEL-RACK-2."
+409 OUT for more than is in stock right now: "Only 35 of CAP-024 in stock."
 ```
 
-- **IN** adds to stock. With `locationId` it is put away there; without, it sits in "No location"
-  until someone puts it away on the website.
-- **OUT** takes from stock. With `locationId` it comes from that place; without, Tracklab takes
-  stock with no location first, then the oldest places.
-- **Retries**: same rule as scans. Keep the booking in the queue with its `clientRef` and resend
-  until 200 or 201. Never resend without the same `clientRef`: that would book twice. A 400, 403,
-  404 or 409 will not succeed on retry: show the message. After a 409, call `find` again to show
-  the current stock.
-- Bookings cannot be edited or deleted. To correct one, book the opposite direction.
+- `status` is `PENDING`, then `APPROVED` (with `stockAfter`, `decidedBy`, `decidedAt`) or
+  `REJECTED` (with `rejectReason` when one was given).
+- On approval, **IN** adds to stock (put away at `locationId` when given, otherwise under
+  "No location"); **OUT** takes from stock (from that place when given, otherwise stock with no
+  location first, then the oldest places).
+- **Retries**: same rule as pick scans. Keep the scan in the queue with its `clientRef` and resend
+  until 200 or 201. Never resend without the same `clientRef`. A 400, 403, 404 or 409 will not
+  succeed on retry: show the message.
+- Show the user "Sent for approval", not "Booked".
 
-### 3. Recent bookings
+### 3. My scans, and cancelling one
 
 ```
-GET /api/stock-moves?direction=IN|OUT&part=&user=&from=YYYY-MM-DD&to=YYYY-MM-DD&page=1&pageSize=30
-    -> { "items": [booking, ...], "total": 12, "page": 1, "pageSize": 30 }
-GET /api/stock-locations     -> every location { id, code, name, active, … }, for a "choose a place" list
+GET /api/stock-moves?mine=1&status=PENDING|APPROVED|REJECTED&direction=IN|OUT&part=&user=
+                    &from=YYYY-MM-DD&to=YYYY-MM-DD&page=1&pageSize=30
+    -> { "items": [scan, ...], "total": 12, "pending": 3, "page": 1, "pageSize": 30 }
+       mine=1: only the signed-in person's scans.  "pending": how many are waiting, over everyone.
+
+POST /api/stock-moves/decide   { "ids": [9], "decision": "REJECT", "reason": "Cancelled on the phone" }
+    -> { "results": [{ "id": 9, "ok": true, "move": scan } | { "id": 9, "ok": false, "error": "Already approved by …" }],
+         "done": 1, "failed": 0 }
+       The same call with "decision": "APPROVE" is what the website's Approve button sends.
+
+GET /api/stock-locations     -> { "locations": [{ id, code, name, active, … }], … }, for a "choose a place" list.
+                                Many items have a location named after their own stock code.
 ```
+
+Poll `mine=1` (every 15 s while the app is open) to show each scan turning Approved or Rejected.
 
 ### Suggested screens
 
-1. Home: **Book in**, **Book out**, **Pick scan** (the photo flow above), **Recent**.
-2. Book in / out: camera scanner with a "type it instead" box → `find` → item card (name, stock,
-   where it is) → quantity (pre-filled from the label) → optional place (scan a rack label or pick
-   from the list) → optional reference → **Confirm** → show "Stock is now 16 000" and return to the
-   scanner for the next reel.
+Tracklab's own phone page does exactly this and is the reference to copy:
+`https://tracklab-im.fly.dev/scan`, source in `src/scan/` (`ScanApp.tsx`, `CodeScanner.tsx`, `api.ts`).
 
+1. Sign in. Then a **Book in / Book out** switch at the top.
+2. **Scan a label** (camera) with a "type it instead" box → `find` → item card (name, stock, where
+   it is) → quantity (pre-filled from the label) → optional place (scan a rack label or pick from
+   the list) → optional reference → **Send for approval** → back to the scanner for the next reel.
+3. **My scans** underneath: each with Waiting for approval / Approved / Rejected, and Cancel on
+   the waiting ones.
 ## Not built
 
 - Creating a new item from the phone. Items are added on the website.

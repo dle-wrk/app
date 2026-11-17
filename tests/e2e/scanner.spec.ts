@@ -66,7 +66,7 @@ test.describe('scanner app', () => {
     expect((await request.get('/api/scans', { headers: { 'X-Session-Id': webSession! } })).status()).toBe(200);
   });
 
-  test('books a reel in and out by its label, and the web app shows the booking and the new stock', async ({ page, request }) => {
+  test('scans a reel in by its label, the web app approves it, and the phone page sends a book-out', async ({ page, request }) => {
     await page.goto('/');
     const web = { 'X-Session-Id': (await page.evaluate(() => localStorage.getItem('sessionId')))! };
     const code = `E2E-REEL-${Date.now()}`;
@@ -87,35 +87,60 @@ test.describe('scanner app', () => {
     expect(found).toMatchObject({ exact: true, matchedBy: 'part number', label: { quantity: 4000, lot: 'LOT42', dateCode: '2535' } });
     expect(found.items[0]).toMatchObject({ partNumber: code, stock: 100 });
 
+    // A scan is saved as Pending: stock does not move yet.
     const ref = `e2e-move-${Date.now()}`;
-    const booking = { direction: 'IN', partNumber: code, quantity: 4000, locationId, lot: 'LOT42', dateCode: '2535', reference: 'PO-E2E', clientRef: ref };
-    const inRes = await request.post('/api/stock-moves', { headers: phone, data: booking });
+    const scanIn = { direction: 'IN', partNumber: code, quantity: 4000, locationId, lot: 'LOT42', dateCode: '2535', reference: 'PO-E2E', clientRef: ref };
+    const inRes = await request.post('/api/stock-moves', { headers: phone, data: scanIn });
     expect(inRes.status()).toBe(201);
-    expect(await inRes.json()).toMatchObject({ direction: 'IN', quantity: 4000, stockAfter: 4100 });
-    // The phone retrying the same booking does not book twice.
-    const again = await request.post('/api/stock-moves', { headers: phone, data: booking });
+    const pendingIn = await inRes.json();
+    expect(pendingIn).toMatchObject({ status: 'PENDING', direction: 'IN', quantity: 4000, stockAfter: null });
+    // The phone retrying the same scan does not save it twice.
+    const again = await request.post('/api/stock-moves', { headers: phone, data: scanIn });
     expect(again.status()).toBe(200);
-    expect(await again.json()).toMatchObject({ alreadySaved: true, stockAfter: 4100 });
-
-    const out = await request.post('/api/stock-moves', { headers: phone, data: { direction: 'OUT', partNumber: code, quantity: 150, locationId, note: 'line 2' } });
-    expect(out.status()).toBe(201);
-    expect(await out.json()).toMatchObject({ direction: 'OUT', stockAfter: 3950 });
+    expect(await again.json()).toMatchObject({ alreadySaved: true, id: pendingIn.id });
     const tooMany = await request.post('/api/stock-moves', { headers: phone, data: { direction: 'OUT', partNumber: code, quantity: 99999 } });
     expect(tooMany.status()).toBe(409);
+    const mistake = await (await request.post('/api/stock-moves', { headers: phone, data: { direction: 'IN', partNumber: code, quantity: 7, note: 'mis-scan' } })).json();
+    expect((await (await request.get(`/api/stock-moves/find?code=${code}`, { headers: phone })).json()).items[0].stock).toBe(100);
 
-    const after = await (await request.get(`/api/stock-moves/find?code=${code}`, { headers: phone })).json();
-    expect(after.items[0]).toMatchObject({ stock: 3950, noLocation: 100 });
-    expect(after.items[0].places[0]).toMatchObject({ locationId, quantity: 3850 });
-
-    // On the web: Bookkeeping > Sales > Scanner lists both bookings.
+    // On the web: Bookkeeping > Sales > Scanner shows it waiting; Approve changes stock.
     await page.getByRole('button', { name: /^bookkeeping$/i }).first().click();
     await page.getByRole('button', { name: /^sales$/i }).first().click();
     await page.getByRole('button', { name: 'Scanner', exact: true }).click();
     await page.getByRole('button', { name: 'Stock in & out', exact: true }).click();
-    await expect(page.getByText(code).first()).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByText('+4000')).toBeVisible();
-    await expect(page.getByText('−150')).toBeVisible();
+    await expect(page.getByText('+4000')).toBeVisible({ timeout: 15_000 });
+    await page.getByRole('row', { name: /\+4000/ }).getByRole('button', { name: `Approve ${code}` }).click();
+    await expect(page.getByText('+4000')).toBeHidden({ timeout: 15_000 }); // approved: off the Pending list
+    const afterIn = await (await request.get(`/api/stock-moves/find?code=${code}`, { headers: phone })).json();
+    expect(afterIn.items[0]).toMatchObject({ stock: 4100, noLocation: 100 });
+    expect(afterIn.items[0].places[0]).toMatchObject({ locationId, quantity: 4000 });
 
-    await request.post('/api/session/logout', { headers: phone, data: {} });
+    // Rejecting changes nothing; a decided scan can't be decided again.
+    const rejected = await (await request.post('/api/stock-moves/decide', { headers: web, data: { ids: [mistake.id, pendingIn.id], decision: 'REJECT', reason: 'wrong reel' } })).json();
+    expect(rejected).toMatchObject({ done: 1, failed: 1 });
+    expect((await (await request.get(`/api/stock-moves/find?code=${code}`, { headers: phone })).json()).items[0].stock).toBe(4100);
+
+    // The phone page itself: sign in, find the item by typing, send a book-out, see it waiting.
+    await page.goto('/scan.html');
+    await page.getByLabel('Email').fill(ADMIN.email);
+    await page.getByLabel('Password').fill(ADMIN.password);
+    await page.getByRole('button', { name: 'Sign in' }).click();
+    await page.getByRole('button', { name: 'Book out', exact: true }).click();
+    await page.getByLabel('Stock code or part number').fill(code.toLowerCase());
+    await page.getByRole('button', { name: 'Find' }).click();
+    await expect(page.getByText('In stock:')).toContainText('4100');
+    await page.getByLabel(/Quantity to book out/).fill('150');
+    await page.getByRole('button', { name: /Send for approval: book out/ }).click();
+    await expect(page.getByRole('status')).toContainText(`book out 150 × ${code}`);
+    await expect(page.getByText('Waiting for approval').first()).toBeVisible();
+    // The website's own session is still signed in after the phone sign-in.
+    expect((await request.get('/api/scans', { headers: web })).status()).toBe(200);
+
+    const waiting = await (await request.get('/api/stock-moves?status=pending&mine=1', { headers: { 'X-Session-Id': (await page.evaluate(() => localStorage.getItem('scanToken')))! } })).json();
+    expect(waiting.items).toHaveLength(1);
+    const approved = await (await request.post('/api/stock-moves/decide', { headers: web, data: { ids: [waiting.items[0].id], decision: 'APPROVE' } })).json();
+    expect(approved.results[0]).toMatchObject({ ok: true, move: { status: 'APPROVED', stockAfter: 3950 } });
+    await page.getByRole('button', { name: 'Sign out' }).click();
+    await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible();
   });
 });

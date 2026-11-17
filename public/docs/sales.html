@@ -238,12 +238,10 @@
                     <li>Save PDF includes Applied + Refunded + Remaining rows.</li>
                 </ul>
             </div>
-            <h3 id="scanner-stock">Scanner: booking stock in and out</h3>
+            <h3 id="scanner-stock">Scanner: stock in and out</h3>
             <div class="step">
-                <p>The scanner phone app books stock in and out: reels, packets and any other item. Scan the label (or type a code), check the item and quantity, and book it. <strong>Sales &gt; Scanner &gt; Stock in &amp; out</strong> lists every booking made on a phone: in or out, item, quantity, the stock afterwards, location, reference, who and when.</p>
-                <p><strong>What can be scanned.</strong> A Tracklab stock code; a maker's or supplier's part number saved on the item; the 2D code on a supplier's reel label (DigiKey, Mouser and most makers), which also gives the quantity, lot and date code; the QR code on an LCSC bag; or a stock location's code, to choose where it goes. When a part number is on more than one item the phone asks which. A placeholder such as "N/A" never matches.</p>
-                <p><strong>Booking in</strong> adds to the item's stock. With a location it is put away there (with its lot and date code); without one it waits under <em>No location</em>, as any other receipt does. <strong>Booking out</strong> takes from stock and is refused when there isn't that much. With a location it comes from that place (refused when the place holds less); without one, stock with no location goes first, then the oldest places.</p>
-                <p>Each booking is an ordinary stock movement on the item (<em>BOOK-IN</em> or <em>BOOK-OUT</em>, reference "Scanner: …", under the person's name), so it shows in the item's history and the stock total everywhere else. It needs the same permission as changing stock on the website; viewers can't. A booking can't be edited: book the opposite way to correct one.</p>
+                <p><strong>Sales &gt; Scanner &gt; Stock in &amp; out</strong> is where stock scanned on a phone waits to be approved. Reels, packets and any other item are scanned in or out on the phone scan page; each scan appears here as <em>Pending</em> within a few seconds, and stock only changes when someone presses <strong>Approve</strong>. <strong>Reject</strong> leaves stock as it was.</p>
+                <p>Installing the scanner on a phone, what can be scanned, and how approving works are in <a href="inventory.html#phone-scanner">Inventory &amp; Stock → Scanner on your phone</a>.</p>
             </div>
 
             <h3 id="pick-scans">Scanner: pick scans</h3>
