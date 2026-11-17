@@ -44,7 +44,8 @@ const SignIn: React.FC<{ onSignedIn: (u: ScanUser) => void }> = ({ onSignedIn })
     } finally { setBusy(false); }
   };
   return (
-    <div className={page}>`n    <form onSubmit={submit} className="min-h-dvh flex flex-col justify-center gap-4 p-6 w-full max-w-[28rem] mx-auto">
+    <div className={page}>
+    <form onSubmit={submit} className="min-h-dvh flex flex-col justify-center gap-4 p-6 w-full max-w-[28rem] mx-auto">
       <div className="text-center mb-2">
         <img src="/scan-icon-192.png" alt="" className="w-20 h-20 rounded-2xl mx-auto mb-3" />
         <h1 className="text-2xl font-black text-on-surface">Tracklab Scan</h1>
@@ -185,7 +186,8 @@ export const ScanApp: React.FC = () => {
   const pending = mine.filter(m => m.status === 'PENDING').length;
 
   return (
-    <div className={page}>`n    <div className="w-full max-w-[28rem] mx-auto p-4 pb-10 space-y-4" style={{ paddingTop: 'calc(1rem + env(safe-area-inset-top))' }}>
+    <div className={page}>
+    <div className="w-full max-w-[28rem] mx-auto p-4 pb-10 space-y-4" style={{ paddingTop: 'calc(1rem + env(safe-area-inset-top))' }}>
       <header className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-lg font-black leading-tight">Tracklab Scan</h1>
