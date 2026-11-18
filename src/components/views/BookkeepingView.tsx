@@ -57,6 +57,8 @@ interface BookkeepingViewProps {
   initialSalesSub?: SalesSub;
   initialPurchasesSub?: PurchasesSub;
   pendingTargetKey?: string | null;
+  /** Opens App's supplier form for a new supplier (Purchases > Vendors > New vendor). */
+  onNewVendor?: () => void;
 }
 
 type Section = 'OVERVIEW' | 'SALES' | 'PURCHASES' | 'ACCOUNTING' | 'PRODUCTION' | 'REPORTS';
@@ -97,7 +99,7 @@ const PURCHASES_SUBS: { key: PurchasesSub; label: string; icon: React.ReactNode 
 
 export const BookkeepingView: React.FC<BookkeepingViewProps> = ({
   clients, setClients, clientOrders, setClientOrders, items, suppliers, triggerToast,
-  initialSection, initialSalesSub, initialPurchasesSub, pendingTargetKey,
+  initialSection, initialSalesSub, initialPurchasesSub, pendingTargetKey, onNewVendor,
 }) => {
   const [section, setSection] = useState<Section>(initialSection ?? 'OVERVIEW');
   const [salesSub, setSalesSub] = useState<SalesSub>(initialSalesSub ?? 'INVOICES');
@@ -253,7 +255,7 @@ export const BookkeepingView: React.FC<BookkeepingViewProps> = ({
               </button>
             ))}
           </div>
-          {purchasesSub === 'VENDORS' && <VendorsTab {...moduleData} />}
+          {purchasesSub === 'VENDORS' && <VendorsTab {...moduleData} onNewVendor={onNewVendor} />}
           {purchasesSub === 'ORDERS' && (
             <PurchaseOrdersTab
               {...moduleData}

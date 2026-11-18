@@ -1,11 +1,13 @@
 import React, { useMemo, useState } from 'react';
-import { ExternalLink } from 'lucide-react';
+import { ExternalLink, Plus } from 'lucide-react';
 import { Supplier } from '../../types';
-import { ModuleDataProps, fmtMoney, EmptyState, SectionCard } from './shared';
+import { ModuleDataProps, fmtMoney, EmptyState, SectionCard, PrimaryButton } from './shared';
 import { Vendor360Modal } from './Vendor360Modal';
 import { hasBanking, maskAccount } from '../../lib/supplierBanking';
+import { canChange } from '../../lib/changeAccess';
 
-export const VendorsTab: React.FC<ModuleDataProps> = ({ suppliers, bills, purchaseOrders, paymentsMade, expenses }) => {
+export const VendorsTab: React.FC<ModuleDataProps & { onNewVendor?: () => void }> = ({ suppliers, bills, purchaseOrders, paymentsMade, expenses, onNewVendor }) => {
+  const mayAdd = !!onNewVendor && canChange('/api/suppliers');
   const [viewing, setViewing] = useState<Supplier | null>(null);
 
   const balances = useMemo(() => {
@@ -23,7 +25,12 @@ export const VendorsTab: React.FC<ModuleDataProps> = ({ suppliers, bills, purcha
       <SectionCard
         title="Vendors"
         badge={`${suppliers.length} suppliers`}
-        actions={<span className="text-[10px] text-outline">Edit contact and banking details on the Suppliers page</span>}
+        actions={
+          <>
+            <span className="text-[10px] text-outline">Edit contact and banking details on the Suppliers page</span>
+            {mayAdd && <PrimaryButton icon={<Plus className="w-3.5 h-3.5" />} onClick={onNewVendor}>New vendor</PrimaryButton>}
+          </>
+        }
       >
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse text-xs">
@@ -74,7 +81,7 @@ export const VendorsTab: React.FC<ModuleDataProps> = ({ suppliers, bills, purcha
                   <td className="px-lg py-sm text-right font-mono font-bold">{(balances.get(s.id) || 0) > 0 ? fmtMoney(balances.get(s.id)) : '—'}</td>
                 </tr>
               ))}
-              {suppliers.length === 0 && <EmptyState message="No suppliers yet — add one from the Suppliers page." colSpan={6} />}
+              {suppliers.length === 0 && <EmptyState message={mayAdd ? 'No suppliers yet. Press New vendor to add one.' : 'No suppliers yet.'} colSpan={6} />}
             </tbody>
           </table>
         </div>

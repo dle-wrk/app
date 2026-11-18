@@ -2328,6 +2328,7 @@ if (currentView === 'alternates') {
                    initialSalesSub={pendingBookkeepingTarget?.subSection as any}
                    initialPurchasesSub={pendingBookkeepingTarget?.subSection as any}
                    pendingTargetKey={pendingBookkeepingTarget ? `${pendingBookkeepingTarget.section}:${pendingBookkeepingTarget.subSection}` : null}
+                   onNewVendor={() => { setEditingSupplier(null); setShowSupplierModal(true); }}
                  />
                );
              }
