@@ -15,6 +15,12 @@
 //                                      A book-out for more than is in stock now is refused (409).
 //                                      clientRef: an id the phone makes up per scan; resending it returns
 //                                      the scan already saved, so a retry never saves it twice.
+//                                      Booking in something not in Tracklab: send newItem {partNumber (the
+//                                      new stock code), name, makerPartNumber?, description?} instead of an
+//                                      existing partNumber, plus code (what was scanned); or an existing
+//                                      partNumber with code and saveBarcode: true to link the label to it.
+//                                      Either is saved with the scan and done only on approval: the item is
+//                                      created, the label's codes go in item_barcodes, so find knows them next time.
 //   POST /api/stock-moves/decide       {ids: [..], decision: APPROVE | REJECT, reason?}
 //                                      -> { results: [{id, ok, error?, move?}], done, failed }
 //                                      APPROVE, IN: adds to stock; with a location (or a lot) it is put away
@@ -63,6 +69,19 @@ export async function ensureScanStockSchema(): Promise<void> {
   await exec(`CREATE INDEX IF NOT EXISTS scan_stock_moves_status_idx ON scan_stock_moves (status)`);
   await exec(`CREATE INDEX IF NOT EXISTS scan_stock_moves_created_idx ON scan_stock_moves (created_at DESC)`);
   await exec(`CREATE INDEX IF NOT EXISTS scan_stock_moves_part_idx ON scan_stock_moves (part_number)`);
+  // A book-in of something not in Tracklab yet: the item to create (new_item)
+  // and the barcodes to remember (link_codes), both only on approval.
+  await exec(`ALTER TABLE scan_stock_moves ADD COLUMN IF NOT EXISTS new_item JSONB`);
+  await exec(`ALTER TABLE scan_stock_moves ADD COLUMN IF NOT EXISTS link_codes TEXT[]`);
+  // Barcodes learned from the scanner: a scanned code that isn't a stock code
+  // or a saved part number, linked to the item it belongs to.
+  await exec(`CREATE TABLE IF NOT EXISTS item_barcodes (
+    code TEXT PRIMARY KEY,
+    serial_number TEXT NOT NULL,
+    added_by TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`);
+  await exec(`CREATE INDEX IF NOT EXISTS item_barcodes_serial_idx ON item_barcodes (serial_number)`);
 }
 
 // ---------------------------------------------------------------------------
@@ -141,6 +160,21 @@ export interface MoveFields {
   note: string | null;
   capturedAt: string | null;
   clientRef: string | null;
+  /** Booking in something not in Tracklab yet: the item to create when the scan is approved. */
+  newItem: NewItem | null;
+  /** Barcodes to save on the item when approved, so the next scan of this label finds it. */
+  linkCodes: string[];
+}
+
+export interface NewItem { partNumber: string; name: string; description: string | null; makerPartNumber: string | null }
+
+/** A new stock code as typed on the phone: capitals, spaces as dashes. */
+export const tidyStockCode = (v: unknown) => text(v).toUpperCase().replace(/\s+/g, '-');
+const STOCK_CODE = /^[A-Z0-9][A-Z0-9._\/-]{1,59}$/;
+
+/** The codes in a scan worth remembering as barcodes (no placeholders like "N/A"), at most 4. */
+export function barcodesIn(raw: unknown): string[] {
+  return parseScannedCode(raw).candidates.map(c => c.toUpperCase()).filter(c => !isPlaceholder(c)).slice(0, 4);
 }
 
 /** Checks and tidies a booking from the phone. Throws an error with status 400 saying what is wrong. */
@@ -148,7 +182,7 @@ export function parseMoveFields(body: Record<string, unknown>, now = Date.now())
   const direction = text(body.direction).toUpperCase();
   if (direction !== 'IN' && direction !== 'OUT') throw err(400, 'Say whether this is booking IN or OUT.');
   const partNumber = text(body.partNumber);
-  if (!partNumber) throw err(400, 'Scan or choose the item first.');
+  if (!partNumber && !(body.newItem && typeof body.newItem === 'object')) throw err(400, 'Scan or choose the item first.');
   const quantity = Number(text(body.quantity));
   if (!Number.isInteger(quantity) || quantity <= 0) throw err(400, 'Enter a whole quantity of 1 or more.');
   if (quantity > 10_000_000) throw err(400, 'That quantity is too large.');
@@ -162,11 +196,28 @@ export function parseMoveFields(body: Record<string, unknown>, now = Date.now())
   if (Number.isFinite(t) && t <= now + 5 * 60_000 && t > now - 366 * 86_400_000) capturedAt = new Date(t).toISOString();
   const ref = text(body.clientRef);
   if (ref && !/^[A-Za-z0-9._:-]{8,80}$/.test(ref)) throw err(400, 'clientRef must be 8 to 80 letters, digits or . _ : -');
+
+  let newItem: NewItem | null = null;
+  const ni = body.newItem;
+  if (ni && typeof ni === 'object') {
+    if (direction !== 'IN') throw err(400, 'A new item can only be booked in.');
+    const n = ni as Record<string, unknown>;
+    const code = tidyStockCode(n.partNumber);
+    if (!STOCK_CODE.test(code)) throw err(400, 'Give the new item a stock code: 2 to 60 letters, digits, dashes, dots or slashes.');
+    const name = text(n.name).slice(0, 200);
+    if (!name) throw err(400, 'Give the new item a name.');
+    const maker = text(n.makerPartNumber).slice(0, 120);
+    newItem = { partNumber: code, name, description: text(n.description).slice(0, 500) || null, makerPartNumber: maker && !isPlaceholder(maker) ? maker : null };
+  }
+  // The scanned label's codes are remembered on the item when asked (a new item, or "link to an existing item").
+  const code = typeof body.code === 'string' && body.code.length <= 2000 ? body.code : '';
+  const linkCodes = code && (newItem || body.saveBarcode === true) ? barcodesIn(code).filter(c => c !== (newItem?.partNumber ?? partNumber).toUpperCase()) : [];
+
   return {
-    direction, partNumber, quantity, locationId: loc, lot, dateCode,
+    direction, partNumber: newItem ? newItem.partNumber : partNumber, quantity, locationId: loc, lot, dateCode,
     reference: text(body.reference).slice(0, 120) || null,
     note: text(body.note).slice(0, 300) || null,
-    capturedAt, clientRef: ref || null,
+    capturedAt, clientRef: ref || null, newItem, linkCodes,
   };
 }
 
@@ -231,10 +282,20 @@ async function itemWithPlaces(db: Db, row: any) {
 export async function findByCode(db: Db, raw: string) {
   const scanned = parseScannedCode(raw);
   const found = new Map<string, any>();
-  let matchedBy: 'stock code' | 'part number' | 'search' | null = null;
+  let matchedBy: 'stock code' | 'barcode' | 'part number' | 'search' | null = null;
   for (const c of scanned.candidates) {
     const { rows } = await db.query(`SELECT ${ITEM_COLS} FROM inventory WHERE deleted IS NOT TRUE AND upper(serial_number) = upper($1)`, [c]);
     if (rows.length) { rows.forEach(r => found.set(r.serial_number, r)); matchedBy = 'stock code'; break; }
+  }
+  if (!found.size) {
+    // A barcode an approved scan linked to an item ("link to an existing item", or a new item made from a scan).
+    for (const c of scanned.candidates) {
+      if (isPlaceholder(c)) continue;
+      const { rows } = await db.query(
+        `SELECT ${ITEM_COLS.split(', ').map(col => `i.${col}`).join(', ')} FROM item_barcodes b JOIN inventory i ON i.serial_number = b.serial_number
+          WHERE b.code = upper($1) AND i.deleted IS NOT TRUE`, [c]);
+      if (rows.length) { rows.forEach(r => found.set(r.serial_number, r)); matchedBy = 'barcode'; break; }
+    }
   }
   if (!found.size) {
     for (const c of scanned.candidates) {
@@ -266,9 +327,11 @@ export async function findByCode(db: Db, raw: string) {
     code: text(raw).slice(0, 200),
     label: scanned.kind === 'text' ? null : { kind: scanned.kind, partNumbers: scanned.candidates, quantity: scanned.quantity, lot: scanned.lot, dateCode: scanned.dateCode },
     matchedBy,
-    exact: matchedBy === 'stock code' || (matchedBy === 'part number' && items.length === 1),
+    exact: matchedBy === 'stock code' || matchedBy === 'barcode' || (matchedBy === 'part number' && items.length === 1),
     items,
     location,
+    // Nothing found: the codes the phone can save with a new item, or link to an existing one.
+    barcodes: found.size || location ? [] : barcodesIn(raw),
   };
 }
 
@@ -288,6 +351,8 @@ const toMove = (r: any) => ({
   decidedBy: r.decided_by_name || null,
   decidedAt: r.decided_at || null,
   rejectReason: r.reject_reason || null,
+  newItem: (r.new_item as NewItem | null) || null,
+  linkCodes: (r.link_codes as string[] | null) || [],
 });
 
 type Who = { id: number | null; email: string; name: string };
@@ -296,13 +361,7 @@ async function itemAndPlace(client: Db, partNumber: string, locationId: number |
   const { rows: [item] } = await client.query(
     `SELECT serial_number, name, stock FROM inventory WHERE upper(serial_number) = upper($1) AND deleted IS NOT TRUE${lock ? ' FOR UPDATE' : ''}`, [partNumber]);
   if (!item) throw err(404, `${partNumber} is not an item in Tracklab.`);
-  let loc: { id: number; code: string; active: boolean } | null = null;
-  if (locationId !== null) {
-    const { rows: [l] } = await client.query(`SELECT id, code, active FROM stock_locations WHERE id = $1`, [locationId]);
-    if (!l) throw err(400, 'That location no longer exists.');
-    if (direction === 'IN' && !l.active) throw err(400, `Location ${l.code} is marked inactive. Choose another.`);
-    loc = l;
-  }
+  const { loc } = await placeOnly(client, locationId, direction);
   return { item, serial: item.serial_number as string, stock: Number(item.stock) || 0, loc };
 }
 
@@ -313,16 +372,75 @@ const notEnough = (serial: string, stock: number) => err(409, stock > 0 ? `Only 
  * approved. A book-out for more than there is now is refused straight away,
  * so the person scanning finds out at the shelf, not later.
  */
+/** An item using this stock code, deleted ones included (their code can't be reused for a new item). */
+async function codeTaken(client: Db, code: string) {
+  const { rows: [r] } = await client.query(`SELECT serial_number, name, deleted FROM inventory WHERE upper(serial_number) = upper($1)`, [code]);
+  return r as { serial_number: string; name: string | null; deleted: boolean | null } | undefined;
+}
+const takenError = (t: { serial_number: string; name: string | null; deleted: boolean | null }) =>
+  err(409, t.deleted ? `${t.serial_number} is the code of a deleted item. Choose another stock code, or restore that item on the website.`
+    : `${t.serial_number} is already an item${t.name ? ` (${t.name})` : ''}. Choose another stock code, or link the label to that item instead.`);
+
 export async function recordScan(client: Db, f: MoveFields, who: Who) {
-  const { item, serial, stock, loc } = await itemAndPlace(client, f.partNumber, f.locationId, f.direction, false);
+  let serial: string, name: string, stock: number, loc: { id: number; code: string; active: boolean } | null;
+  if (f.newItem) {
+    const taken = await codeTaken(client, f.newItem.partNumber);
+    if (taken) throw takenError(taken);
+    ({ loc } = await placeOnly(client, f.locationId, 'IN'));
+    serial = f.newItem.partNumber; name = f.newItem.name; stock = 0;
+  } else {
+    const found = await itemAndPlace(client, f.partNumber, f.locationId, f.direction, false);
+    serial = found.serial; name = found.item.name || found.serial; stock = found.stock; loc = found.loc;
+  }
   if (f.direction === 'OUT' && f.quantity > stock) throw notEnough(serial, stock);
+  // Barcodes already linked to this item are not saved again.
+  let linkCodes = f.linkCodes;
+  if (linkCodes.length && !f.newItem) {
+    const { rows } = await client.query(`SELECT code FROM item_barcodes WHERE code = ANY($1) AND serial_number = $2`, [linkCodes, serial]);
+    const have = new Set(rows.map(r => r.code));
+    linkCodes = linkCodes.filter(c => !have.has(c));
+  }
   const { rows: [saved] } = await client.query(
     `INSERT INTO scan_stock_moves (client_ref, status, direction, part_number, item_name, quantity, location_id, location_code, lot, date_code,
-                                   reference, note, user_id, user_email, user_name, captured_at)
-     VALUES ($1,'PENDING',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
-    [f.clientRef, f.direction, serial, item.name || serial, f.quantity, loc?.id ?? null, loc?.code ?? null, f.lot, f.dateCode,
-     f.reference, f.note, who.id, who.email, who.name, f.capturedAt]);
+                                   reference, note, user_id, user_email, user_name, captured_at, new_item, link_codes)
+     VALUES ($1,'PENDING',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
+    [f.clientRef, f.direction, serial, name, f.quantity, loc?.id ?? null, loc?.code ?? null, f.lot, f.dateCode,
+     f.reference, f.note, who.id, who.email, who.name, f.capturedAt, f.newItem ? JSON.stringify(f.newItem) : null, linkCodes.length ? linkCodes : null]);
   return { ...toMove(saved), stockNow: stock };
+}
+
+/**
+ * On approval, before the stock moves: creates the new item a scan brought
+ * in (refused if its stock code was taken meanwhile), and remembers the
+ * label's barcodes on the item. A barcode already linked to another item
+ * stays with that one.
+ */
+async function applyNewItemAndBarcodes(client: Db, row: any, approver: Who) {
+  const ni = row.new_item as NewItem | null;
+  if (ni) {
+    const taken = await codeTaken(client, ni.partNumber);
+    if (taken) throw takenError(taken);
+    await client.query(
+      `INSERT INTO inventory (serial_number, name, description, man_pn_1, stock, status, deleted) VALUES ($1, $2, $3, $4, 0, 'ACTIVE', false)`,
+      [ni.partNumber, ni.name, ni.description ?? ni.name, ni.makerPartNumber]);
+    await client.query(`INSERT INTO user_activity_logs (user_email, action, entity_type, entity_id, details, status) VALUES ((SELECT email FROM users WHERE email = $1), 'CREATE_ITEM', 'Item', $2, $3, 'SUCCESS')`,
+      [approver.email, ni.partNumber, JSON.stringify({ name: ni.name, makerPartNumber: ni.makerPartNumber, from: 'scanner', scannedBy: row.user_email, approvedBy: approver.email })]);
+  }
+  const codes: string[] = row.link_codes || [];
+  for (const c of codes) {
+    await client.query(`INSERT INTO item_barcodes (code, serial_number, added_by) VALUES ($1, $2, $3) ON CONFLICT (code) DO NOTHING`, [c, row.part_number, row.user_email || approver.email]);
+  }
+}
+
+async function placeOnly(client: Db, locationId: number | null, direction: 'IN' | 'OUT') {
+  let loc: { id: number; code: string; active: boolean } | null = null;
+  if (locationId !== null) {
+    const { rows: [l] } = await client.query(`SELECT id, code, active FROM stock_locations WHERE id = $1`, [locationId]);
+    if (!l) throw err(400, 'That location no longer exists.');
+    if (direction === 'IN' && !l.active) throw err(400, `Location ${l.code} is marked inactive. Choose another.`);
+    loc = l;
+  }
+  return { loc };
 }
 
 /**
@@ -333,6 +451,7 @@ export async function recordScan(client: Db, f: MoveFields, who: Who) {
 export async function approveScan(client: Db, row: any, approver: Who) {
   const direction = row.direction as 'IN' | 'OUT';
   const quantity = Number(row.quantity);
+  await applyNewItemAndBarcodes(client, row, approver);
   const { item, serial, stock, loc } = await itemAndPlace(client, row.part_number, row.location_id ?? null, direction, true);
   const reference = `${movementReference({ direction, reference: row.reference, note: row.note }, loc?.code ?? null)} (approved by ${approver.name})`.slice(0, 250);
   const trxId = `TRX-SCAN-${direction}-${serial}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;

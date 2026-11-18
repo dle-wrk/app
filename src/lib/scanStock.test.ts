@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('./db', () => ({ pool: {}, query: vi.fn(), queryOne: vi.fn(), exec: vi.fn() }));
 
-import { isPlaceholder, movementReference, parseDecision, parseMoveFields, parseMoveListQuery, parseScannedCode } from './scanStock';
+import { barcodesIn, isPlaceholder, movementReference, parseDecision, parseMoveFields, parseMoveListQuery, parseScannedCode } from './scanStock';
 import { permissionForWrite } from './writeAccess';
 import { roleCan } from './permissions';
 
@@ -46,7 +46,7 @@ describe('a booking from the phone', () => {
 
   it('is tidied', () => {
     expect(parseMoveFields({ ...base, locationId: '3', lot: ' L1 ', dateCode: '2535', reference: ' PO-2026-0007 ', note: '', clientRef: 'phone-1:abc12345', capturedAt: '2026-11-17T09:00:00Z' }, NOW))
-      .toEqual({ direction: 'IN', partNumber: 'CAP-024', quantity: 4000, locationId: 3, lot: 'L1', dateCode: '2535', reference: 'PO-2026-0007', note: null, capturedAt: '2026-11-17T09:00:00.000Z', clientRef: 'phone-1:abc12345' });
+      .toEqual({ direction: 'IN', partNumber: 'CAP-024', quantity: 4000, locationId: 3, lot: 'L1', dateCode: '2535', reference: 'PO-2026-0007', note: null, capturedAt: '2026-11-17T09:00:00.000Z', clientRef: 'phone-1:abc12345', newItem: null, linkCodes: [] });
     expect(parseMoveFields({ ...base, direction: 'OUT' }, NOW)).toMatchObject({ direction: 'OUT', locationId: null, lot: null });
   });
 
@@ -58,6 +58,23 @@ describe('a booking from the phone', () => {
     expect(() => parseMoveFields({ ...base, direction: 'OUT', lot: 'L1' })).toThrow('only recorded when booking in');
     expect(() => parseMoveFields({ ...base, clientRef: 'short' })).toThrow('clientRef');
     try { parseMoveFields({}); } catch (e: any) { expect(e.status).toBe(400); }
+  });
+
+  it('can bring in a new item from an unknown label, with the label\'s codes to remember', () => {
+    const label = `[)>${RS}06${GS}P296-1234-1-ND${GS}1PCL10A106KP8NNNC${GS}Q4000`;
+    const f = parseMoveFields({ direction: 'in', quantity: '4000', code: label, newItem: { partNumber: ' cap 099 ', name: ' 10uF  0603 ', makerPartNumber: 'CL10A106KP8NNNC' } }, NOW);
+    expect(f).toMatchObject({ partNumber: 'CAP-099', newItem: { partNumber: 'CAP-099', name: '10uF 0603', description: null, makerPartNumber: 'CL10A106KP8NNNC' }, linkCodes: ['CL10A106KP8NNNC', '296-1234-1-ND'] });
+    expect(parseMoveFields({ direction: 'in', quantity: '1', newItem: { partNumber: 'X1', name: 'Thing', makerPartNumber: 'N/A' } }, NOW).newItem?.makerPartNumber).toBeNull();
+    expect(() => parseMoveFields({ direction: 'out', quantity: '1', newItem: { partNumber: 'CAP-099', name: 'x' } })).toThrow('only be booked in');
+    expect(() => parseMoveFields({ direction: 'in', quantity: '1', newItem: { partNumber: '?', name: 'x' } })).toThrow('stock code');
+    expect(() => parseMoveFields({ direction: 'in', quantity: '1', newItem: { partNumber: 'CAP-099', name: ' ' } })).toThrow('name');
+  });
+
+  it('links a label to an existing item only when asked, and never as its own stock code', () => {
+    expect(parseMoveFields({ ...base, code: '5012345678900', saveBarcode: true }, NOW).linkCodes).toEqual(['5012345678900']);
+    expect(parseMoveFields({ ...base, code: '5012345678900' }, NOW).linkCodes).toEqual([]);
+    expect(parseMoveFields({ ...base, code: 'cap-024', saveBarcode: true }, NOW).linkCodes).toEqual([]);
+    expect(barcodesIn('{pc:C2040,pm:N/A,qty:5}')).toEqual(['C2040']);
   });
 
   it('writes a reference the item history can be read by', () => {

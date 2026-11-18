@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  ArrowDownToLine, ArrowUpFromLine, Camera, Check, CheckCircle2, ChevronDown, Clock, Eye, EyeOff, Loader2,
-  LogOut, MapPin, Minus, Package, Plus, ScanLine, Search, X, XCircle,
+  ArrowDownToLine, ArrowUpFromLine, Barcode, Camera, Check, CheckCircle2, ChevronDown, Clock, Eye, EyeOff, Link2, Loader2,
+  LogOut, MapPin, Minus, Package, PackagePlus, Plus, ScanLine, Search, X, XCircle,
 } from 'lucide-react';
-import { api, session, newClientRef, SignedOutError, type FindResult, type FoundItem, type Location, type Move, type ScanUser } from './api';
+import { api, session, newClientRef, SignedOutError, type FindResult, type FoundItem, type Location, type Move, type NewItem, type ScanUser } from './api';
 import { CodeScanner } from './CodeScanner';
 
 // The phone scan page. Sign in with a Tracklab account, choose Book in or
@@ -123,6 +123,11 @@ export const ScanApp: React.FC = () => {
   const [locations, setLocations] = useState<Location[]>([]);
   const [mine, setMine] = useState<Move[]>([]);
   const [, setTick] = useState(0); // re-draws "2 min ago"
+  // A book-in label that isn't in Tracklab: add it as a new item, or link it to an existing one.
+  const [unknown, setUnknown] = useState<{ code: string; barcodes: string[]; label: FindResult['label'] } | null>(null);
+  const [mode, setMode] = useState<null | 'new' | 'link'>(null);
+  const [draft, setDraft] = useState({ partNumber: '', name: '', makerPartNumber: '', description: '' });
+  const [newItem, setNewItem] = useState<NewItem | null>(null);
 
   const guard = useCallback((err: any) => {
     if (err instanceof SignedOutError) { setUser(null); return; }
@@ -152,6 +157,7 @@ export const ScanApp: React.FC = () => {
 
   const reset = () => {
     setItem(null); setChoices(null); setTyped(''); setError(null); setFromLabel(false); setMore(false);
+    setUnknown(null); setMode(null); setNewItem(null); setDraft({ partNumber: '', name: '', makerPartNumber: '', description: '' });
     setForm({ quantity: '', locationId: '', lot: '', dateCode: '', reference: '', note: '' });
     setClientRef(newClientRef());
   };
@@ -160,15 +166,40 @@ export const ScanApp: React.FC = () => {
     setItem(it); setChoices(null);
     // Many items have a location named after their stock code: offer it as the place to put a book-in.
     const own = locations.find(l => l.code.toUpperCase() === it.partNumber.toUpperCase());
-    setFromLabel(!!found?.label?.quantity);
-    if (direction === 'IN' && (found?.label?.lot || found?.label?.dateCode)) setMore(true); // show what the label filled in
+    // When linking an unknown label, what it said (quantity, lot) comes from that first scan.
+    const label = found?.label ?? unknown?.label ?? null;
+    setFromLabel(!!label?.quantity);
+    if (direction === 'IN' && (label?.lot || label?.dateCode)) setMore(true); // show what the label filled in
     setForm(f => ({
       ...f,
       locationId: f.locationId || (direction === 'IN' && own ? String(own.id) : ''),
-      quantity: found?.label?.quantity ? String(found.label.quantity) : f.quantity,
-      lot: found?.label?.lot || f.lot,
-      dateCode: found?.label?.dateCode || f.dateCode,
+      quantity: label?.quantity ? String(label.quantity) : f.quantity,
+      lot: label?.lot || f.lot,
+      dateCode: label?.dateCode || f.dateCode,
     }));
+  };
+
+  const startNew = () => {
+    setMode('new'); setError(null);
+    // A supplier label's first part number is the maker's: offer it for the new item.
+    setDraft(d => ({ ...d, makerPartNumber: d.makerPartNumber || (unknown?.label ? unknown.label.partNumbers[0] || '' : '') }));
+  };
+
+  // The new item's details are checked (stock code free), then it is booked in like any other.
+  const continueNew = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const code = draft.partNumber.trim().toUpperCase().replace(/\s+/g, '-');
+    if (!/^[A-Z0-9][A-Z0-9._/-]{1,59}$/.test(code)) { setError('Give it a stock code: 2 to 60 letters, digits, dashes, dots or slashes.'); return; }
+    if (!draft.name.trim()) { setError('Give the new item a name.'); return; }
+    setBusy(true); setError(null);
+    try {
+      const found = await api<FindResult>(`/api/stock-moves/find?code=${encodeURIComponent(code)}`);
+      const same = found.matchedBy === 'stock code' ? found.items[0] : null;
+      if (same) { setError(`${same.partNumber} is already an item (${same.name}). Choose another stock code, or link the label to it instead.`); return; }
+      const ni: NewItem = { partNumber: code, name: draft.name.trim(), makerPartNumber: draft.makerPartNumber.trim() || null, description: draft.description.trim() || null };
+      setNewItem(ni);
+      choose({ partNumber: code, name: ni.name, description: ni.description, makerPartNumber: ni.makerPartNumber, packaging: null, status: 'ACTIVE', stock: 0, places: [], noLocation: 0 });
+    } catch (err) { guard(err); } finally { setBusy(false); }
   };
 
   const lookUp = async (code: string, forPlace = false) => {
@@ -181,10 +212,18 @@ export const ScanApp: React.FC = () => {
         else setError('That is not a stock location label.');
         return;
       }
+      if (unknown) {
+        // Looking for the existing item to link the unknown label to.
+        if (found.items.length === 1) choose(found.items[0]);
+        else if (found.items.length > 1) setChoices(found.items);
+        else setError('No item matches that. Try another code or name, or add it as a new item.');
+        return;
+      }
       if (found.items.length === 1) choose(found.items[0], found);
       else if (found.items.length > 1) setChoices(found.items);
       else if (found.location) setError(`${found.location.code} is a location. Scan the item first, then its place.`);
-      else setError('Not found in Tracklab. Check the code, or add the item on the website first.');
+      else if (direction === 'IN' && found.barcodes?.length) { setUnknown({ code, barcodes: found.barcodes, label: found.label }); setTyped(''); }
+      else setError(direction === 'OUT' ? 'Not found in Tracklab, so there is nothing to book out. Check the code.' : 'Not found in Tracklab. Check the code.');
     } catch (err) { guard(err); } finally { setBusy(false); }
   };
 
@@ -203,9 +242,12 @@ export const ScanApp: React.FC = () => {
           lot: direction === 'IN' ? form.lot : '', dateCode: direction === 'IN' ? form.dateCode : '',
           reference: form.reference, note: form.note,
           capturedAt: new Date().toISOString(), clientRef,
+          // An unknown label: the item to create, or the label to remember on the chosen item.
+          ...(newItem ? { newItem } : {}),
+          ...(unknown ? { code: unknown.code, saveBarcode: !newItem } : {}),
         },
       });
-      setNotice(`Sent for approval: ${direction === 'IN' ? 'book in' : 'book out'} ${quantity} × ${item.partNumber}.`);
+      setNotice(`Sent for approval: ${direction === 'IN' ? 'book in' : 'book out'} ${quantity} × ${item.partNumber}${newItem ? ' (new item)' : unknown ? ' (barcode linked)' : ''}.`);
       reset();
       loadMine();
     } catch (err) { guard(err); } finally { setBusy(false); }
@@ -230,7 +272,7 @@ export const ScanApp: React.FC = () => {
 
   const tone = TONE[direction];
   const dirBtn = (d: Direction, text: string, Icon: typeof ArrowDownToLine) => (
-    <button type="button" onClick={() => { setDirection(d); setError(null); }} aria-pressed={direction === d}
+    <button type="button" onClick={() => { if (d !== direction && (unknown || newItem)) reset(); setDirection(d); setError(null); }} aria-pressed={direction === d}
       className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-black text-base transition-all ${direction === d ? `${TONE[d].solid} shadow-md` : 'text-on-surface-variant'}`}>
       <Icon className="w-4 h-4" aria-hidden="true" />{text}
     </button>
@@ -274,7 +316,66 @@ export const ScanApp: React.FC = () => {
           </p>
         )}
 
-        {!item && !choices && (
+        {unknown && !item && !choices && (
+          <section className={`${card} overflow-hidden`} aria-label="Not in Tracklab">
+            <div className="px-4 py-3 border-b border-white/[0.07] bg-primary/10 flex items-center gap-2" data-no-mobile-stack>
+              <PackagePlus className="w-4 h-4 text-primary" aria-hidden="true" />
+              <p className="text-sm font-black flex-1">Not in Tracklab yet</p>
+              <button type="button" onClick={reset} aria-label="Start again" className="-m-1 p-1 text-on-surface-variant"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="p-4 space-y-4">
+              <div>
+                <p className={label}>Scanned</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {unknown.barcodes.map(b => <span key={b} className="inline-flex items-center gap-1 rounded-lg bg-surface-container-high px-2 py-1 font-mono text-xs font-bold break-all"><Barcode className="w-3.5 h-3.5 text-on-surface-variant shrink-0" aria-hidden="true" />{b}</span>)}
+                  {unknown.label?.quantity ? <span className="inline-flex items-center rounded-lg bg-surface-container-high px-2 py-1 text-xs text-on-surface-variant">Qty {unknown.label.quantity}</span> : null}
+                </div>
+              </div>
+
+              {!mode && (
+                <>
+                  <button type="button" onClick={startNew} className="w-full text-left rounded-2xl border border-white/10 bg-surface-container-low p-4 flex items-center gap-3 active:border-primary" data-no-mobile-stack>
+                    <span className="inline-flex items-center justify-center w-11 h-11 rounded-xl bg-green-600 text-white shrink-0"><Plus className="w-5 h-5" aria-hidden="true" /></span>
+                    <span className="flex-1"><span className="block font-black">Add as a new item</span><span className="block text-xs text-on-surface-variant">Give it a stock code and name, then book it in</span></span>
+                  </button>
+                  <button type="button" onClick={() => { setMode('link'); setError(null); }} className="w-full text-left rounded-2xl border border-white/10 bg-surface-container-low p-4 flex items-center gap-3 active:border-primary" data-no-mobile-stack>
+                    <span className="inline-flex items-center justify-center w-11 h-11 rounded-xl bg-surface-container-high border border-white/10 shrink-0"><Link2 className="w-5 h-5 text-primary" aria-hidden="true" /></span>
+                    <span className="flex-1"><span className="block font-black">Link to an existing item</span><span className="block text-xs text-on-surface-variant">It's in Tracklab under another code: this label will find it next time</span></span>
+                  </button>
+                  <p className="text-xs text-on-surface-variant text-center">Nothing is added until someone approves the scan on the website.</p>
+                </>
+              )}
+
+              {mode === 'new' && (
+                <form onSubmit={continueNew} className="space-y-3">
+                  <div><label className={label} htmlFor="new-code">New stock code</label><input id="new-code" className={`${field} font-mono uppercase`} value={draft.partNumber} onChange={e => setDraft(d => ({ ...d, partNumber: e.target.value }))} placeholder="e.g. CAP-099" autoCapitalize="characters" autoCorrect="off" required autoFocus /></div>
+                  <div><label className={label} htmlFor="new-name">Name</label><input id="new-name" className={field} value={draft.name} onChange={e => setDraft(d => ({ ...d, name: e.target.value }))} placeholder="e.g. 10uF 0603 X5R 16V" required /></div>
+                  <div><label className={label} htmlFor="new-maker">Maker part number <span className="normal-case font-semibold">(optional)</span></label><input id="new-maker" className={`${field} font-mono`} value={draft.makerPartNumber} onChange={e => setDraft(d => ({ ...d, makerPartNumber: e.target.value }))} autoCapitalize="characters" autoCorrect="off" /></div>
+                  <div><label className={label} htmlFor="new-desc">Description <span className="normal-case font-semibold">(optional)</span></label><input id="new-desc" className={field} value={draft.description} onChange={e => setDraft(d => ({ ...d, description: e.target.value }))} /></div>
+                  <button type="submit" disabled={busy} className={`${big} bg-green-600 text-white`}>{busy && <Loader2 className="w-5 h-5 animate-spin" aria-hidden="true" />}Continue to quantity</button>
+                  <button type="button" onClick={() => { setMode(null); setError(null); }} className="w-full text-sm font-bold text-on-surface-variant py-2">Back</button>
+                </form>
+              )}
+
+              {mode === 'link' && (
+                <div className="space-y-3">
+                  <p className="text-sm">Find the item this label belongs to:</p>
+                  <form onSubmit={(e) => { e.preventDefault(); void lookUp(typed); }} className="flex gap-2">
+                    <div className="relative flex-1">
+                      <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-on-surface-variant pointer-events-none" aria-hidden="true" />
+                      <input className={`${field} !pl-10`} value={typed} onChange={e => setTyped(e.target.value)} placeholder="Stock code, name or part number" aria-label="Find the existing item" autoCapitalize="characters" autoCorrect="off" enterKeyHint="search" autoFocus />
+                    </div>
+                    <button type="submit" disabled={busy || !typed.trim()} className="px-5 rounded-xl bg-surface-container-high border border-white/10 font-bold disabled:opacity-40 inline-flex items-center gap-1.5">{busy ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : null}Find</button>
+                  </form>
+                  <button type="button" onClick={() => setCamera('item')} className={`${big} border border-white/10 bg-surface-container-high !py-3`}><ScanLine className="w-5 h-5" aria-hidden="true" />Scan its Tracklab label</button>
+                  <button type="button" onClick={() => { setMode(null); setError(null); }} className="w-full text-sm font-bold text-on-surface-variant py-2">Back</button>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
+        {!item && !choices && !unknown && (
           <section className={`${card} p-4 space-y-4`}>
             <button type="button" onClick={() => { setError(null); setNotice(null); setCamera('item'); }} disabled={busy}
               className={`w-full flex flex-col items-center justify-center gap-2 py-8 rounded-2xl border-2 border-dashed ${tone.ring} ${tone.soft} transition-transform active:scale-[0.98] disabled:opacity-40`}>
@@ -306,7 +407,7 @@ export const ScanApp: React.FC = () => {
                 <span className="block text-xs text-on-surface-variant">In stock {c.stock}{c.makerPartNumber ? ` · ${c.makerPartNumber}` : ''}</span>
               </button>
             ))}
-            <button type="button" onClick={reset} className={`${big} border border-white/10 !py-3`}>Back</button>
+            <button type="button" onClick={() => (unknown ? setChoices(null) : reset())} className={`${big} border border-white/10 !py-3`}>Back</button>
           </section>
         )}
 
@@ -326,6 +427,16 @@ export const ScanApp: React.FC = () => {
                   {item.makerPartNumber && <p className="text-xs text-on-surface-variant font-mono break-all">{item.makerPartNumber}</p>}
                 </div>
               </div>
+              {newItem && (
+                <p className="flex items-start gap-2 rounded-xl border border-green-500/25 bg-green-500/10 text-green-400 text-xs font-semibold px-3 py-2.5">
+                  <PackagePlus className="w-4 h-4 shrink-0" aria-hidden="true" />New item: it is added to Tracklab when this scan is approved.
+                </p>
+              )}
+              {unknown && !newItem && (
+                <p className="flex items-start gap-2 rounded-xl border border-primary/25 bg-primary/10 text-primary text-xs font-semibold px-3 py-2.5">
+                  <Link2 className="w-4 h-4 shrink-0" aria-hidden="true" /><span>When approved, the label <span className="font-mono">{unknown.barcodes.join(', ')}</span> is saved on this item, so the next scan finds it.</span>
+                </p>
+              )}
               <div className="rounded-xl bg-surface-container-low border border-white/[0.07] p-3">
                 <p className="text-sm">In stock: <strong className="font-mono text-base">{item.stock}</strong></p>
                 <div className="flex flex-wrap gap-1.5 mt-2">
@@ -414,7 +525,10 @@ export const ScanApp: React.FC = () => {
                     <span className="font-mono truncate">{m.partNumber}</span>
                   </p>
                   <p className="text-xs text-on-surface-variant truncate">{[m.location?.code, m.reference, ago(m.capturedAt || m.createdAt)].filter(Boolean).join(' · ')}</p>
-                  <p className="mt-1.5"><StatusChip move={m} /></p>
+                  <p className="mt-1.5 flex flex-wrap gap-1"><StatusChip move={m} />
+                    {m.newItem && <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold border bg-green-500/10 text-green-400 border-green-500/25"><PackagePlus className="w-3 h-3" />New item</span>}
+                    {!m.newItem && !!m.linkCodes?.length && <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold border bg-primary/10 text-primary border-primary/25"><Link2 className="w-3 h-3" />Barcode</span>}
+                  </p>
                   {m.status === 'REJECTED' && m.rejectReason && <p className="text-xs text-error mt-1">{m.rejectReason}</p>}
                   {m.status === 'APPROVED' && m.stockAfter != null && <p className="text-xs text-on-surface-variant mt-1">Stock now {m.stockAfter}{m.decidedBy ? ` · by ${m.decidedBy}` : ''}</p>}
                 </div>

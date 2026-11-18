@@ -224,7 +224,13 @@
                     <li>Optionally choose the place: pick it from the list, or press <em>Scan</em> and scan the rack or shelf label. Add a reference (PO, job or order number) if there is one.</li>
                     <li>Press <strong>Send for approval</strong>. The scan shows under <em>My scans</em> as <em>Waiting for approval</em>; you can cancel it there until it is approved.</li>
                 </ol>
-                <p><strong>What can be scanned.</strong> A Tracklab stock code; a maker's or supplier's part number saved on the item; the 2D code on a supplier's reel label (DigiKey, Mouser and most makers); the QR code on an LCSC bag; or a stock location's code. A placeholder such as "N/A" never matches. An item that isn't in Tracklab has to be added on the website first.</p>
+                <p><strong>What can be scanned.</strong> A Tracklab stock code; a maker's or supplier's part number saved on the item; the 2D code on a supplier's reel label (DigiKey, Mouser and most makers); the QR code on an LCSC bag; or a stock location's code. A placeholder such as "N/A" never matches. A barcode linked to an item by an earlier scan (below) is found too.</p>
+                <p><strong>Booking in something that isn't in Tracklab.</strong> When a scanned label matches nothing, the phone says <em>Not in Tracklab yet</em>, shows what it read, and offers two choices:</p>
+                <ul>
+                    <li><strong>Add as a new item:</strong> type a new stock code and a name (the maker's part number is filled in from a supplier label), then continue to the quantity and place as usual.</li>
+                    <li><strong>Link to an existing item:</strong> for something already in Tracklab under another code. Find it by stock code, name or part number (or scan its Tracklab label), then book it in. The scanned label is remembered on that item, so the next scan finds it straight away.</li>
+                </ul>
+                <p>Either way nothing is added until the scan is approved. The approval list shows <em>New item: added on approval</em> or <em>Saves barcode</em> on those scans; approving creates the item (or saves the barcode) and books the stock in together, and rejecting leaves nothing behind. A stock code already used by another item is refused. Book out only works for items already in Tracklab.</p>
                 <p><strong>Signing in on the phone is separate from the website.</strong> It never signs you out on your computer. A phone stays signed in until it has gone 30 days unused; signing in on another phone ends the first one, and changing your password ends both. Viewers can't use the scanner.</p>
             </div>
 

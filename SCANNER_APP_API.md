@@ -179,7 +179,11 @@ What to do with the answer:
   more than one stock code, or the text was a search.
 - `location` set and no items: the user scanned a shelf or rack label; use it as the place for
   the booking they are making.
-- nothing: "Not in Tracklab. Add the item on the website first." The app cannot create items.
+- nothing, booking IN: `barcodes` lists the codes in the scan that can be remembered. Offer
+  **Add as a new item** or **Link to an existing item** (see "Unknown labels" below).
+- nothing, booking OUT: "Not in Tracklab, so there is nothing to book out."
+
+`matchedBy` can also be `"barcode"`: a label linked to an item by an approved scan (below). Such a match is exact.
 
 ### 2. Send the scan (it waits for approval)
 
@@ -222,6 +226,26 @@ POST /api/stock-moves        JSON
   succeed on retry: show the message.
 - Show the user "Sent for approval", not "Booked".
 
+### Unknown labels: a new item, or a barcode for an existing one
+
+Both ride on the book-in above and happen **only when the scan is approved**; rejecting leaves nothing.
+
+```
+New item:   { "direction": "IN", "quantity": 4000, "code": "<what was scanned>",
+              "newItem": { "partNumber": "CAP-099", "name": "10uF 0603 X5R 10V",
+                           "makerPartNumber": "GRM188R61A106KE69D", "description": null }, ... }
+Link:       { "direction": "IN", "partNumber": "CAP-024", "quantity": 4000,
+              "code": "<what was scanned>", "saveBarcode": true, ... }
+```
+
+- `newItem.partNumber` is the new stock code (capitals; spaces become dashes). 409 when an item (even a
+  deleted one) already has it: "CAP-099 is already an item (…). Choose another stock code, or link the label".
+  Check first with `find?code=CAP-099` (`matchedBy: "stock code"` means taken).
+- On approval the item is created (stock 0, ACTIVE, maker part number in the first slot), the codes in
+  `code` (the label's part numbers, or the barcode text) are remembered on it, then the stock is booked in.
+  If the stock code was taken meanwhile, approving fails with the same 409 and the scan stays pending.
+- A scan carries `newItem` and `linkCodes` (the codes approving remembers) for the website to show.
+
 ### 3. My scans, and cancelling one
 
 ```
@@ -255,7 +279,6 @@ Tracklab's own phone page does exactly this and is the reference to copy:
    the waiting ones.
 ## Not built
 
-- Creating a new item from the phone. Items are added on the website.
 - Moving stock between locations from the phone (the website does this under Stock locations).
 - Printing Tracklab's own labels. Until then a stock code typed or printed as plain Code 128 / QR text works.
 - Editing a saved scan: delete it and scan again.

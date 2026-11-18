@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowDownToLine, ArrowUpFromLine, Check, Download, History, RefreshCw, X } from 'lucide-react';
+import { ArrowDownToLine, ArrowUpFromLine, Barcode, Check, Download, History, PackagePlus, RefreshCw, X } from 'lucide-react';
 import { ModuleDataProps, apiGet, apiPost, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
 import { MonthHeaderRow, useMonthGroups } from './MonthGroups';
 import { downloadCsv } from '../../lib/supplierBom';
@@ -31,6 +31,10 @@ export interface StockMove {
   decidedBy: string | null;
   decidedAt: string | null;
   rejectReason: string | null;
+  /** Booked in from a label not in Tracklab: the item approving creates. */
+  newItem?: { partNumber: string; name: string; description: string | null; makerPartNumber: string | null } | null;
+  /** Barcodes approving saves on the item, so the next scan finds it. */
+  linkCodes?: string[];
 }
 
 type View = 'waiting' | 'history';
@@ -187,6 +191,17 @@ export const ScannerStockMoves: React.FC<Pick<ModuleDataProps, 'triggerToast' | 
       <td className="px-lg py-sm">
         <span className="font-mono font-bold text-primary">{m.partNumber}</span>
         {m.itemName && m.itemName !== m.partNumber && <span className="block text-[10px] text-on-surface-variant">{m.itemName}</span>}
+        {m.newItem && (
+          <span className="mt-0.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-green-500/10 text-green-400 border border-green-500/20"
+            title={m.status === 'PENDING' ? 'Not in Tracklab yet: approving adds this item, then books the stock in' : 'Added to Tracklab from the scanner'}>
+            <PackagePlus className="w-3 h-3" /> {m.status === 'PENDING' ? 'New item: added on approval' : 'New item'}{m.newItem.makerPartNumber ? ` · ${m.newItem.makerPartNumber}` : ''}
+          </span>
+        )}
+        {!!m.linkCodes?.length && (
+          <span className="mt-0.5 block text-[10px] text-on-surface-variant" title="The scanned label, remembered on this item so the next scan finds it">
+            <Barcode className="w-3 h-3 inline -mt-0.5" /> {m.status === 'PENDING' ? 'Saves barcode' : 'Barcode'} <span className="font-mono">{m.linkCodes.join(', ')}</span>
+          </span>
+        )}
       </td>
       <td className="px-lg py-sm text-right font-mono font-bold whitespace-nowrap">
         {m.direction === 'IN' ? '+' : '−'}{m.quantity}

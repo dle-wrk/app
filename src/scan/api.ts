@@ -49,7 +49,10 @@ export interface FindResult {
   exact: boolean;
   items: FoundItem[];
   location: { id: number; code: string; name: string | null; active: boolean } | null;
+  /** Nothing found: the codes in the scan that can be saved with a new item or linked to an existing one. */
+  barcodes?: string[];
 }
+export interface NewItem { partNumber: string; name: string; description: string | null; makerPartNumber: string | null }
 export interface Move {
   id: number; status: 'PENDING' | 'APPROVED' | 'REJECTED'; direction: 'IN' | 'OUT';
   partNumber: string; itemName: string | null; quantity: number; stockAfter: number | null;
@@ -57,6 +60,7 @@ export interface Move {
   reference: string | null; note: string | null;
   capturedAt: string | null; createdAt: string;
   decidedBy: string | null; rejectReason: string | null;
+  newItem?: NewItem | null; linkCodes?: string[];
 }
 export interface Location { id: number; code: string; name: string | null; active: boolean }
 
