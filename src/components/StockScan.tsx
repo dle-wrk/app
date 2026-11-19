@@ -25,22 +25,37 @@ async function api<T = any>(url: string, init?: RequestInit): Promise<T> {
   return body;
 }
 
+interface ReelRow { id: number; serial_number: string; name: string | null; lot: string | null; date_code: string | null; qty: number; location_code: string | null }
+
 function Labels({ items, locations, triggerToast }: { items: Item[]; locations: Loc[]; triggerToast: Toast }) {
-  const [kind, setKind] = useState<'bin' | 'item'>('bin');
+  const [kind, setKind] = useState<'bin' | 'item' | 'reel'>('bin');
   const [prefix, setPrefix] = useState('');
+  const [reels, setReels] = useState<ReelRow[] | null>(null);
+  // Reels are read from the server: every place holding stock, by lot.
+  useEffect(() => {
+    if (kind !== 'reel') return;
+    let gone = false;
+    const t = setTimeout(() => {
+      api<{ bins: ReelRow[] }>(`/api/stock-bins?prefix=${encodeURIComponent(prefix.trim())}`)
+        .then((r) => { if (!gone) setReels(r.bins); })
+        .catch((e) => { if (!gone) { setReels([]); triggerToast(e.message, 'ERROR'); } });
+    }, 300);
+    return () => { gone = true; clearTimeout(t); };
+  }, [kind, prefix, triggerToast]);
   const chosen: Label[] = useMemo(() => {
     const p = prefix.trim().toUpperCase();
+    if (kind === 'reel') return (reels ?? []).map((b) => ({ kind: 'reel' as const, code: b.serial_number, title: b.name, lot: b.lot, dateCode: b.date_code, qty: b.qty, place: b.location_code }));
     return kind === 'bin'
       ? locations.filter((l) => l.active && l.code.startsWith(p)).map((l) => ({ kind: 'bin' as const, code: l.code, title: l.name }))
       : items.filter((i) => i.partNumber.toUpperCase().startsWith(p)).map((i) => ({ kind: 'item' as const, code: i.partNumber, title: i.name }));
-  }, [kind, prefix, items, locations]);
+  }, [kind, prefix, items, locations, reels]);
   const sheets = Math.ceil(chosen.length / 21);
   return (
     <div className="rounded-xl border border-outline-variant bg-surface-container-high p-md space-y-sm" data-testid="labels">
       <p className="text-xs font-bold text-on-surface flex items-center gap-1.5"><Printer className="w-3.5 h-3.5" /> Print labels</p>
       <div className="flex flex-wrap items-center gap-sm">
         <div className="flex gap-1" role="radiogroup" aria-label="Labels for">
-          {([['bin', 'Bins'], ['item', 'Items']] as const).map(([k, label]) => (
+          {([['bin', 'Bins'], ['item', 'Items'], ['reel', 'Reels']] as const).map(([k, label]) => (
             <button key={k} type="button" role="radio" aria-checked={kind === k} onClick={() => setKind(k)}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${kind === k ? 'bg-primary text-on-primary border-primary' : 'border-outline-variant text-on-surface-variant hover:text-on-surface'}`}>{label}</button>
           ))}
@@ -50,7 +65,8 @@ function Labels({ items, locations, triggerToast }: { items: Item[]; locations: 
         <PrimaryButton type="button" disabled={!chosen.length} icon={<Printer className="w-3.5 h-3.5" />}
           onClick={() => { if (!printLabels(chosen)) triggerToast('The print window was blocked: allow pop-ups for this site.', 'ERROR'); }}>Print</PrimaryButton>
       </div>
-      <p className="text-[11px] text-outline">A4 sheets of 21 labels (3 across, 7 down, 63.5 × 38.1 mm). A bin label's barcode starts with LOC: so a scan can tell a bin from an item, even when the bin is named after its item.</p>
+      <p className="text-[11px] text-outline">A4 sheets of 21 labels (3 across, 7 down, 63.5 × 38.1 mm). A bin label's barcode starts with LOC: so a scan can tell a bin from an item, even when the bin is named after its item.
+        {kind === 'reel' && <> Reels: one label for each place holding stock, by lot, with a QR code carrying the stock code, lot, date code, quantity and place. Scanning it on the phone fills all of them in.{reels?.length === 500 ? ' Showing the first 500: narrow it with the codes box.' : ''}</>}</p>
     </div>
   );
 }

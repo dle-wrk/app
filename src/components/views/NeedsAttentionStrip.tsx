@@ -10,6 +10,8 @@
 //   • Overdue invoices (past dueDate, still owing)
 //   • Bills due this week (AWAITING_PAYMENT with dueDate ≤ +7 days)
 //   • Critical low-stock parts (already computed by App)
+//   • Phone scans waiting for approval (Sales > Scanner): stock doesn't
+//     change until someone approves them, so they shouldn't sit unseen
 //
 // Each card is a button that navigates directly to the filtered view.
 // A card with zero actionable items still renders (as a muted "clear"
@@ -21,7 +23,7 @@
 // quotation propagates without a manual reload.
 
 import React, { useEffect, useState } from 'react';
-import { FileText, AlertTriangle, Receipt, PackageX, CalendarClock, CheckCircle2, ArrowRight } from 'lucide-react';
+import { FileText, AlertTriangle, Receipt, PackageX, CalendarClock, CheckCircle2, ArrowRight, ScanLine } from 'lucide-react';
 import { apiGet } from '../bookkeeping/shared';
 import { fmtCurrency } from '../../lib/formatMoney';
 
@@ -46,6 +48,7 @@ type Signals = {
   overdueValue: number;
   billsDueSoon: number;
   billsDueValue: number;
+  scansWaiting: number;
 };
 
 const EMPTY: Signals = {
@@ -57,6 +60,7 @@ const EMPTY: Signals = {
   overdueValue: 0,
   billsDueSoon: 0,
   billsDueValue: 0,
+  scansWaiting: 0,
 };
 
 export const NeedsAttentionStrip: React.FC<NeedsAttentionStripProps> = ({ criticalCount, onNavigate }) => {
@@ -68,11 +72,13 @@ export const NeedsAttentionStrip: React.FC<NeedsAttentionStripProps> = ({ critic
     const load = async () => {
       // Everything below is best-effort: a failing endpoint zeroes just
       // its own signal, so a partial outage doesn't blank the whole strip.
-      const [orders, invoices, bills, resSummary] = await Promise.all([
+      const [orders, invoices, bills, resSummary, scans] = await Promise.all([
         apiGet('/api/client-orders').catch(() => []),
         apiGet('/api/invoices').catch(() => []),
         apiGet('/api/bills').catch(() => []),
         apiGet('/api/client-order-reservations/summary').catch(() => []),
+        // pending is the count of every waiting scan, whatever the page holds.
+        apiGet('/api/stock-moves?status=PENDING&pageSize=1').catch(() => null),
       ]);
       if (cancelled) return;
 
@@ -111,6 +117,7 @@ export const NeedsAttentionStrip: React.FC<NeedsAttentionStripProps> = ({ critic
         overdueValue: overdue.reduce((sum: number, i: any) => sum + (Number(i.balanceDue) || 0), 0),
         billsDueSoon: billsDue.length,
         billsDueValue: billsDue.reduce((sum: number, b: any) => sum + (Number(b.balanceDue) || 0), 0),
+        scansWaiting: Number(scans?.pending) || 0,
       });
     };
 
@@ -121,7 +128,7 @@ export const NeedsAttentionStrip: React.FC<NeedsAttentionStripProps> = ({ critic
     return () => { cancelled = true; clearInterval(id); };
   }, []);
 
-  const totalActionable = s.quotationsOpen + s.backorderCount + s.overdueCount + s.billsDueSoon + criticalCount;
+  const totalActionable = s.quotationsOpen + s.backorderCount + s.overdueCount + s.billsDueSoon + criticalCount + s.scansWaiting;
 
   return (
     <div className="bg-surface-container p-md rounded-xl border border-outline-variant">
@@ -140,7 +147,7 @@ export const NeedsAttentionStrip: React.FC<NeedsAttentionStripProps> = ({ critic
         )}
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-sm">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-sm">
         <ActionCard
           icon={<FileText className="w-4 h-4" />}
           label="Quotations awaiting reply"
@@ -179,6 +186,13 @@ export const NeedsAttentionStrip: React.FC<NeedsAttentionStripProps> = ({ critic
           tone={criticalCount > 0 ? 'error' : 'muted'}
           onClick={() => onNavigate({ view: 'items' })}
         />
+        <ActionCard
+          icon={<ScanLine className="w-4 h-4" />}
+          label="Scans waiting for approval"
+          count={s.scansWaiting}
+          tone={s.scansWaiting > 0 ? 'primary' : 'muted'}
+          onClick={() => onNavigate({ view: 'bookkeeping', section: 'SALES', subSection: 'SCANS' })}
+        />
       </div>
     </div>
   );
@@ -187,7 +201,7 @@ export const NeedsAttentionStrip: React.FC<NeedsAttentionStripProps> = ({ critic
 // ── Card primitive ────────────────────────────────────────────────────
 // Uses `button` so keyboard tab-order and focus rings come for free.
 // tone drives the accent colour; muted (count === 0) still renders so
-// the strip stays a stable 5-column grid.
+// the strip stays a stable grid.
 
 const ActionCard: React.FC<{
   icon: React.ReactNode;

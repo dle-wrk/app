@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowDownToLine, ArrowUpFromLine, Barcode, Check, Download, History, PackagePlus, RefreshCw, X } from 'lucide-react';
+import { ArrowDownToLine, ArrowUpFromLine, Barcode, Boxes, Check, Download, History, PackagePlus, Printer, RefreshCw, Truck, X } from 'lucide-react';
 import { ModuleDataProps, apiGet, apiPost, PrimaryButton, SecondaryButton, DangerButton, FieldLabel, inputClass, selectClass, EmptyState, SectionCard } from './shared';
 import { MonthHeaderRow, useMonthGroups } from './MonthGroups';
 import { downloadCsv } from '../../lib/supplierBom';
 import { canChange } from '../../lib/changeAccess';
 import { confirmDialog } from '../../lib/confirmDialog';
+import { printLabels } from '../../lib/stockLabels';
 
 // Stock scanned in and out with the scanner (the phone page at /scan, or the
 // phone app). A scan arrives here as Pending and changes nothing until it is
@@ -35,6 +36,10 @@ export interface StockMove {
   newItem?: { partNumber: string; name: string; description: string | null; makerPartNumber: string | null } | null;
   /** Barcodes approving saves on the item, so the next scan finds it. */
   linkCodes?: string[];
+  /** Received against this purchase order line: approving counts it as received there. */
+  po?: { id: number | null; number: string | null; itemId: number } | null;
+  /** Picked for this saved kit. */
+  kit?: { id: number; name: string | null } | null;
 }
 
 type View = 'waiting' | 'history';
@@ -65,8 +70,8 @@ const csvCell = (v: unknown) => {
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 export function movesCsv(moves: StockMove[]): string {
-  const head = ['Scanned', 'In/out', 'Stock code', 'Item', 'Quantity', 'Location', 'Lot', 'Date code', 'Reference', 'Note', 'Scanned by', 'Status', 'Decided by', 'Decided', 'Stock after', 'Reject reason'];
-  const rows = moves.map(m => [scannedAt(m), m.direction, m.partNumber, m.itemName, m.quantity, m.location?.code, m.lot, m.dateCode, m.reference, m.note, m.user.name, m.status, m.decidedBy, m.decidedAt, m.stockAfter, m.rejectReason]);
+  const head = ['Scanned', 'In/out', 'Stock code', 'Item', 'Quantity', 'Location', 'Lot', 'Date code', 'Reference', 'Note', 'Purchase order', 'Kit', 'Scanned by', 'Status', 'Decided by', 'Decided', 'Stock after', 'Reject reason'];
+  const rows = moves.map(m => [scannedAt(m), m.direction, m.partNumber, m.itemName, m.quantity, m.location?.code, m.lot, m.dateCode, m.reference, m.note, m.po?.number, m.kit?.name, m.user.name, m.status, m.decidedBy, m.decidedAt, m.stockAfter, m.rejectReason]);
   return [head, ...rows].map(r => r.map(csvCell).join(',')).join('\r\n') + '\r\n';
 }
 
@@ -211,10 +216,23 @@ export const ScannerStockMoves: React.FC<Pick<ModuleDataProps, 'triggerToast' | 
         {m.location ? <span className="font-mono">{m.location.code}</span> : <span className="text-outline">{m.direction === 'IN' ? 'Not put away' : 'Oldest stock first'}</span>}
         {(m.lot || m.dateCode) && <span className="block text-[10px] text-on-surface-variant">{[m.lot && `Lot ${m.lot}`, m.dateCode && `D/C ${m.dateCode}`].filter(Boolean).join(' · ')}</span>}
       </td>
-      <td className="px-lg py-sm text-on-surface-variant">{[m.reference, m.note].filter(Boolean).join(' · ') || '—'}</td>
+      <td className="px-lg py-sm text-on-surface-variant">
+        {m.po && <span className="mr-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-primary/10 text-primary border border-primary/20" title={m.status === 'PENDING' ? 'Approving counts it as received on this purchase order' : 'Received on this purchase order'}><Truck className="w-3 h-3" /> {m.po.number || 'PO'}</span>}
+        {m.kit && <span className="mr-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-500 border border-amber-500/20" title="Picked for this kit"><Boxes className="w-3 h-3" /> Kit {m.kit.name || m.kit.id}</span>}
+        {[m.reference !== m.po?.number && m.reference !== (m.kit ? `Kit ${m.kit.name}` : null) ? m.reference : null, m.note].filter(Boolean).join(' · ') || (m.po || m.kit ? '' : '—')}
+      </td>
       <td className="px-lg py-sm text-on-surface-variant">{m.user.name}</td>
       <td className="px-lg py-sm text-on-surface-variant whitespace-nowrap">{fmtWhen(scannedAt(m))}</td>
-      <td className="px-lg py-sm"><MoveStatusPill move={m} /></td>
+      <td className="px-lg py-sm">
+        <MoveStatusPill move={m} />
+        {m.status === 'APPROVED' && m.direction === 'IN' && (
+          <button type="button" className="mt-1 inline-flex items-center gap-1 text-[10px] font-bold text-on-surface-variant hover:text-primary" aria-label={`Print a reel label for ${m.partNumber}`}
+            title="A label with a QR code: scanning it fills in the stock code, lot, date code, quantity and place"
+            onClick={() => { if (!printLabels([{ kind: 'reel', code: m.partNumber, title: m.itemName, lot: m.lot, dateCode: m.dateCode, qty: m.quantity, place: m.location?.code ?? null }])) triggerToast('The print window was blocked: allow pop-ups for this site.', 'ERROR'); }}>
+            <Printer className="w-3 h-3" /> Reel label
+          </button>
+        )}
+      </td>
       {showActions && (
         <td className="px-lg py-sm text-right whitespace-nowrap">
           {m.status === 'PENDING' && (

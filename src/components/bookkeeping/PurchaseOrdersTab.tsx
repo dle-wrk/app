@@ -137,7 +137,7 @@ export const PurchaseOrdersTab: React.FC<ModuleDataProps & { onConvertToBill?: (
         <POEditorModal {...props} onClose={() => setShowCreate(false)} onSaved={async () => { setShowCreate(false); await refresh(); }} />
       )}
 
-      {viewing && (
+      {viewing && (() => { const anyReceived = (viewing.items || []).some((it: any) => Number(it.qtyReceived) > 0); return (
         <Modal title={viewing.poNumber} subtitle={`${viewing.supplierName || viewing.supplierId || 'No supplier'} · ${fmtDate(viewing.orderDate)}`} onClose={() => setViewing(null)} maxWidth="max-w-2xl">
           <div className="flex items-center gap-2 mb-md"><StatusPill status={viewing.status} /></div>
           <div className="overflow-x-auto rounded-lg border border-outline-variant/40 mb-md">
@@ -146,6 +146,7 @@ export const PurchaseOrdersTab: React.FC<ModuleDataProps & { onConvertToBill?: (
                 <tr className="bg-surface-container-high/50 text-outline text-[10px] uppercase">
                   <th className="py-2 px-3">Description</th>
                   <th className="py-2 px-3 text-right">Qty</th>
+                  {anyReceived && <th className="py-2 px-3 text-right" title="Booked in with the scanner against this order">Received</th>}
                   <th className="py-2 px-3 text-right">Cost</th>
                   <th className="py-2 px-3 text-right">Total</th>
                 </tr>
@@ -155,6 +156,7 @@ export const PurchaseOrdersTab: React.FC<ModuleDataProps & { onConvertToBill?: (
                   <tr key={it.id} className="border-t border-outline-variant/20">
                     <td className="py-2 px-3">{it.description}{it.partNumber && <span className="block text-[10px] text-outline font-mono">{it.partNumber}</span>}</td>
                     <td className="py-2 px-3 text-right font-mono">{it.quantity}</td>
+                    {anyReceived && <td className={`py-2 px-3 text-right font-mono ${Number(it.qtyReceived) >= Number(it.quantity) ? 'text-green-400' : Number(it.qtyReceived) > 0 ? 'text-amber-400' : 'text-outline'}`}>{Number(it.qtyReceived) || 0}</td>}
                     <td className="py-2 px-3 text-right font-mono">{fmtMoney(it.unitPrice, viewing.currency)}</td>
                     <td className="py-2 px-3 text-right font-mono font-bold">{fmtMoney(it.lineTotal, viewing.currency)}</td>
                   </tr>
@@ -174,8 +176,9 @@ export const PurchaseOrdersTab: React.FC<ModuleDataProps & { onConvertToBill?: (
             {canDelete(viewing) && <DangerButton icon={<Trash2 className="w-3.5 h-3.5" />} onClick={() => handleDelete(viewing)} disabled={busy}>Delete</DangerButton>}
             {onConvertToBill && <PrimaryButton icon={<FileText className="w-3.5 h-3.5" />} onClick={() => { onConvertToBill(viewing); setViewing(null); }}>Convert to Bill</PrimaryButton>}
           </div>
+          {anyReceived && <p className="text-[11px] text-outline mt-2">Received: booked in with the scanner against this order. A bill made from it doesn't book those lines in again.</p>}
         </Modal>
-      )}
+      ); })()}
     </div>
   );
 };

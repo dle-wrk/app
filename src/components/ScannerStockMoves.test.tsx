@@ -45,7 +45,8 @@ describe('the scanner list', () => {
       const history = url.includes('status=DONE');
       const items = history
         ? [move(3, { createdAt: '2026-11-12T08:00:00Z' }), move(2, { direction: 'OUT', quantity: 4, createdAt: '2026-11-02T08:00:00Z' }), move(1, { status: 'REJECTED', createdAt: '2026-10-20T08:00:00Z' })]
-        : [move(9, { status: 'PENDING', decidedBy: null, decidedAt: null })];
+        : [move(9, { status: 'PENDING', decidedBy: null, decidedAt: null, reference: 'PO-2026-0031', po: { id: 7, number: 'PO-2026-0031', itemId: 11 } }),
+           move(8, { status: 'PENDING', direction: 'OUT', decidedBy: null, decidedAt: null, reference: 'Kit TCU06', kit: { id: 4, name: 'TCU06' } })];
       return { ok: true, json: async () => ({ items, total: items.length, pending: 1 }) } as any;
     }));
     vi.useFakeTimers({ shouldAdvanceTime: true });
@@ -61,6 +62,10 @@ describe('the scanner list', () => {
     expect(asked.at(-1)).toContain('status=PENDING');
     expect(host.textContent).toContain('CAP-9');
     expect(host.textContent).toContain('Approve');
+    // The order or kit a scan belongs to shows as a chip, not repeated as the reference.
+    expect(host.textContent).toContain('PO-2026-0031');
+    expect(host.textContent!.split('PO-2026-0031').length - 1).toBe(1);
+    expect(host.textContent).toContain('Kit TCU06');
 
     await act(async () => { [...host.querySelectorAll('[role="tab"]')].find(b => b.textContent === 'History')!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await settle();
@@ -74,5 +79,7 @@ describe('the scanner list', () => {
     expect(host.textContent).not.toContain('CAP-1');
     expect([...host.querySelectorAll('button')].some(b => b.textContent === 'Approve')).toBe(false);
     expect(host.textContent).toContain('Download CSV');
+    // An approved book-in can have its reel label printed; a book-out or a rejected scan can't.
+    expect(host.querySelectorAll('[aria-label^="Print a reel label"]').length).toBe(1);
   });
 });

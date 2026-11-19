@@ -44,7 +44,8 @@ export interface FoundItem {
 }
 export interface FindResult {
   code: string;
-  label: { kind: string; partNumbers: string[]; quantity: number | null; lot: string | null; dateCode: string | null } | null;
+  /** What a supplier's or Tracklab's reel label said; place is where a Tracklab reel label says the reel was put away. */
+  label: { kind: string; partNumbers: string[]; quantity: number | null; lot: string | null; dateCode: string | null; place?: string | null } | null;
   matchedBy: string | null;
   exact: boolean;
   items: FoundItem[];
@@ -61,8 +62,28 @@ export interface Move {
   capturedAt: string | null; createdAt: string;
   decidedBy: string | null; rejectReason: string | null;
   newItem?: NewItem | null; linkCodes?: string[];
+  po?: { id: number | null; number: string | null; itemId: number } | null;
+  kit?: { id: number; name: string | null } | null;
 }
 export interface Location { id: number; code: string; name: string | null; active: boolean }
+
+/** A purchase order still to be received, and its lines. */
+export interface PoSummary { id: number; number: string; status: string; supplier: string | null; orderDate: string | null; expectedDate: string | null; lines: number; outstanding: number }
+export interface PoLine { id: number; partNumber: string | null; inTracklab: boolean; name: string | null; description: string | null; quantity: number; received: number; waiting: number }
+export interface PoDetail { id: number; number: string; status: string; supplier: string | null; expectedDate: string | null; lines: PoLine[] }
+
+/** A saved kit, and what to pick for it. */
+export interface KitSummary { id: number; name: string; buildQty: number; project: string | null; lines: number }
+export interface PickLine { code: string; need: number; forLines: string[]; item: FoundItem | null; waiting: number; bookedOut: number }
+export interface KitDetail { id: number; name: string; buildQty: number; project: string | null; lines: PickLine[] }
+
+/** Still to receive on a PO line, or to pick for a kit line, after what is received and waiting. */
+export const stillDue = (total: number, done: number, waiting: number) => Math.max(0, total - done - waiting);
+
+/** A stock count (stock take) and its lines. */
+export interface CountSummary { id: number; number: string; scope: string; status: string; location_code: string | null; lines: number; counted: number; created_at: string }
+export interface CountLine { id: number; serial_number: string; name: string | null; location_id: number | null; location_code: string | null; lot: string | null; date_code: string | null; counted: number | null; added: boolean }
+export interface CountDetail { count: CountSummary & { location_id: number | null }; lines: CountLine[] }
 
 /** An id for one scan, sent with it so a retry is never saved twice. */
 export const newClientRef = () => {

@@ -271,14 +271,42 @@ Poll `mine=1` (every 15 s while the app is open) to show each scan turning Appro
 Tracklab's own phone page does exactly this and is the reference to copy:
 `https://tracklab-im.fly.dev/scan`, source in `src/scan/` (`ScanApp.tsx`, `CodeScanner.tsx`, `api.ts`).
 
-1. Sign in. Then a **Book in / Book out** switch at the top.
+1. Sign in. Then a **Book in / Book out** switch at the top, and Receive a PO / Pick a kit / Count stock.
 2. **Scan a label** (camera) with a "type it instead" box → `find` → item card (name, stock, where
    it is) → quantity (pre-filled from the label) → optional place (scan a rack label or pick from
    the list) → optional reference → **Send for approval** → back to the scanner for the next reel.
 3. **My scans** underneath: each with Waiting for approval / Approved / Rejected, and Cancel on
    the waiting ones.
+### Jobs: receiving a PO, picking a kit, counting
+
+```
+GET /api/stock-moves/purchase-orders          -> { items: [{ id, number, status, supplier, orderDate, expectedDate, lines, outstanding }] }
+                                                 draft, sent and part-received orders
+GET /api/stock-moves/purchase-orders/:id      -> { id, number, status, supplier, expectedDate,
+                                                   lines: [{ id, partNumber, inTracklab, name, description, quantity, received, waiting }] }
+GET /api/stock-moves/kits                     -> { items: [{ id, name, buildQty, project, lines }] }
+GET /api/stock-moves/kits/:id                 -> { id, name, buildQty, project,
+                                                   lines: [{ code, need, forLines, item (as find's items), waiting, bookedOut }] }
+```
+
+- Receiving: send the scan as usual (`direction: "IN"`) with `poItemId` (a line's `id`). Refused
+  (400) when the item isn't that line's part, 409 when the order is received or cancelled.
+  Approving adds the quantity to the line's received and sets the order PARTIAL / RECEIVED.
+- Picking: `direction: "OUT"` with `kitId`. Refused (400) when the item isn't on the kit's pick list.
+- With either, an empty `reference` becomes the PO number / "Kit <name>". A scan in the lists carries
+  `po: { id, number, itemId } | null` and `kit: { id, name } | null`.
+- Counting uses the website's stock count routes: `GET /api/stock-counts` (open ones have
+  `status: "OPEN"`), `POST /api/stock-counts { scope: "location", locationId }`,
+  `GET /api/stock-counts/:id`, `PUT /api/stock-counts/:id/lines { lines: [{ id, counted }] }`,
+  `POST /api/stock-counts/:id/lines { serialNumber, locationId? }`. Posting stays on the website.
+
+### Tracklab's own labels
+
+`find` reads them: a bin label `LOC:A1-03` is that location (`location`, no items); a reel label
+`TL:CAP-024?lot=L1&dc=2431&qty=4000&at=A1-03` (a QR code; values URL-encoded, all optional) is the
+item, with `label: { kind: "tracklab", quantity, lot, dateCode, place }`.
+
 ## Not built
 
 - Moving stock between locations from the phone (the website does this under Stock locations).
-- Printing Tracklab's own labels. Until then a stock code typed or printed as plain Code 128 / QR text works.
 - Editing a saved scan: delete it and scan again.

@@ -875,7 +875,8 @@ const BillEditorModal: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
   const poItems = (prefillFromPO as any)?.items as any[] | undefined;
   const [lines, setLines] = useState<EditableLine[]>(() => {
     if (poItems?.length) {
-      return poItems.map((it: any) => ({ key: `L${it.id}`, partNumber: it.partNumber, description: it.description, quantity: it.quantity, unitPrice: it.unitPrice, taxRateId: it.taxRateId ?? null, receiveStock: !!it.partNumber }));
+      // A line already booked in with the scanner against the PO doesn't receive stock again.
+      return poItems.map((it: any) => ({ key: `L${it.id}`, partNumber: it.partNumber, description: it.description, quantity: it.quantity, unitPrice: it.unitPrice, taxRateId: it.taxRateId ?? null, receiveStock: !!it.partNumber && !(Number(it.qtyReceived) > 0) }));
     }
     // OCR extracted per-line items — prefer these over the single-line
     // fallback so the user starts with a structured bill they only need
@@ -951,6 +952,11 @@ const BillEditorModal: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
       </div>
 
       <ErrorBoundary>
+        {poItems?.some((it: any) => Number(it.qtyReceived) > 0) && (
+          <p className="text-xs text-amber-400 mb-2" data-testid="po-scanned-note">
+            Already booked in with the scanner: {poItems.filter((it: any) => Number(it.qtyReceived) > 0).map((it: any) => `${it.partNumber} ${Number(it.qtyReceived)} of ${Number(it.quantity)}`).join(', ')}. Receive stock is off for those lines; turn it on only for stock that hasn't been scanned in.
+          </p>
+        )}
         <LineItemsEditor lines={lines} onChange={setLines} items={items} taxRates={taxRates} accounts={accounts} mode="PURCHASE" currency={currency} />
       </ErrorBoundary>
 

@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('./db', () => ({ pool: {}, query: vi.fn(), queryOne: vi.fn(), exec: vi.fn() }));
 
-import { barcodesIn, isPlaceholder, movementReference, parseDecision, parseMoveFields, parseMoveListQuery, parseScannedCode } from './scanStock';
+import { barcodesIn, isPlaceholder, kitPickList, movementReference, parseDecision, parseMoveFields, parseMoveListQuery, parseScannedCode, poStatusAfter } from './scanStock';
+import { reelPayload, readReel, readBin } from './reelLabel';
+import { readScan } from './stockLabels';
 import { permissionForWrite } from './writeAccess';
 import { roleCan } from './permissions';
 
@@ -46,7 +48,7 @@ describe('a booking from the phone', () => {
 
   it('is tidied', () => {
     expect(parseMoveFields({ ...base, locationId: '3', lot: ' L1 ', dateCode: '2535', reference: ' PO-2026-0007 ', note: '', clientRef: 'phone-1:abc12345', capturedAt: '2026-11-17T09:00:00Z' }, NOW))
-      .toEqual({ direction: 'IN', partNumber: 'CAP-024', quantity: 4000, locationId: 3, lot: 'L1', dateCode: '2535', reference: 'PO-2026-0007', note: null, capturedAt: '2026-11-17T09:00:00.000Z', clientRef: 'phone-1:abc12345', newItem: null, linkCodes: [] });
+      .toEqual({ direction: 'IN', partNumber: 'CAP-024', quantity: 4000, locationId: 3, lot: 'L1', dateCode: '2535', reference: 'PO-2026-0007', note: null, capturedAt: '2026-11-17T09:00:00.000Z', clientRef: 'phone-1:abc12345', newItem: null, linkCodes: [], poItemId: null, kitId: null });
     expect(parseMoveFields({ ...base, direction: 'OUT' }, NOW)).toMatchObject({ direction: 'OUT', locationId: null, lot: null });
   });
 
@@ -112,5 +114,63 @@ describe('approving or rejecting scans', () => {
     expect(() => parseDecision({ ids: [], decision: 'APPROVE' })).toThrow('at least one');
     expect(() => parseDecision({ ids: 'all', decision: 'APPROVE' })).toThrow('at least one');
     expect(() => parseDecision({ ids: Array.from({ length: 201 }, (_, i) => i + 1), decision: 'APPROVE' })).toThrow('200');
+  });
+});
+describe("Tracklab's own labels", () => {
+  it('reads a reel label back as it was printed', () => {
+    const p = reelPayload({ code: 'CAP-024', lot: 'L 24/31', dateCode: '2431', qty: 5000, place: 'A1-03' });
+    expect(p.startsWith('TL:CAP-024?')).toBe(true);
+    expect(/^[ -~]+$/.test(p)).toBe(true); // plain ASCII: a keyboard scanner types it as is
+    expect(readReel(p)).toEqual({ code: 'CAP-024', lot: 'L 24/31', dateCode: '2431', qty: 5000, place: 'A1-03' });
+    expect(readReel(reelPayload({ code: 'PCB/V2' }))).toEqual({ code: 'PCB/V2', lot: null, dateCode: null, qty: null, place: null });
+    expect(readReel('CAP-024')).toBeNull();
+    expect(readReel('TL:')).toBeNull();
+  });
+
+  it('the scanner reads a reel label: the item, its quantity, lot, date code and place', () => {
+    const r = parseScannedCode(reelPayload({ code: 'CAP-024', lot: 'L1', dateCode: '2431', qty: 400, place: 'a1-03' }));
+    expect(r).toMatchObject({ kind: 'tracklab', candidates: ['CAP-024'], quantity: 400, lot: 'L1', dateCode: '2431', place: 'A1-03' });
+  });
+
+  it('the scanner reads a bin label as a place, not an item', () => {
+    expect(readBin(' loc:a1 03 ')).toBe('A1-03');
+    expect(parseScannedCode('LOC:A1-03')).toMatchObject({ kind: 'place', candidates: [], place: 'A1-03' });
+    expect(barcodesIn('LOC:A1-03')).toEqual([]);
+  });
+
+  it('the web scan page takes a reel label as its item', () => {
+    expect(readScan(reelPayload({ code: 'RES-1K', qty: 10 }))).toEqual({ kind: 'code', code: 'RES-1K' });
+  });
+});
+
+describe('receiving on a purchase order, picking for a kit', () => {
+  it('takes a PO line on a book-in and a kit on a book-out, only', () => {
+    expect(parseMoveFields({ direction: 'IN', partNumber: 'A', quantity: 1, poItemId: 12 }, NOW).poItemId).toBe(12);
+    expect(parseMoveFields({ direction: 'OUT', partNumber: 'A', quantity: 1, kitId: '7' }, NOW).kitId).toBe(7);
+    expect(parseMoveFields({ direction: 'IN', partNumber: 'A', quantity: 1 }, NOW)).toMatchObject({ poItemId: null, kitId: null });
+    expect(() => parseMoveFields({ direction: 'OUT', partNumber: 'A', quantity: 1, poItemId: 12 }, NOW)).toThrow('booked in');
+    expect(() => parseMoveFields({ direction: 'IN', partNumber: 'A', quantity: 1, kitId: 7 }, NOW)).toThrow('booked out');
+    expect(() => parseMoveFields({ direction: 'IN', partNumber: 'A', quantity: 1, poItemId: -1 }, NOW)).toThrow('not valid');
+  });
+
+  it("a kit's pick list: qty per board x builds, the reels picked for a line instead of its own code, DNF left out", () => {
+    const lines = kitPickList(
+      [{ stock_code: 'CAP-1', qty_per_pcb: 2 }, { stock_code: 'RES-1', qty_per_pcb: 1 }, { stock_code: 'RES-1', qty_per_pcb: 3 },
+       { stock_code: 'IC-1', qty_per_pcb: 1 }, { stock_code: 'DNF', qty_per_pcb: 1 }, { stock_code: 'LED-1', qty_per_pcb: 1 }],
+      [{ stock_code: 'IC-1', allocated_code: 'IC-1B', qty: 6 }, { stock_code: 'IC-1', allocated_code: 'IC-1', qty: 4 }, { stock_code: 'cap-1', allocated_code: 'CAP-1', qty: 0 }],
+      ['LED-1'], 10);
+    expect(lines).toEqual([
+      { code: 'CAP-1', need: 20, forLines: ['CAP-1'] },
+      { code: 'IC-1', need: 4, forLines: ['IC-1'] },
+      { code: 'IC-1B', need: 6, forLines: ['IC-1'] },
+      { code: 'RES-1', need: 40, forLines: ['RES-1'] },
+    ]);
+  });
+
+  it("a PO's status once stock comes in on it", () => {
+    expect(poStatusAfter('SENT', [{ quantity: 10, received: 4 }, { quantity: 5, received: 0 }])).toBe('PARTIAL');
+    expect(poStatusAfter('PARTIAL', [{ quantity: 10, received: 10 }, { quantity: 5, received: 6 }])).toBe('RECEIVED');
+    expect(poStatusAfter('DRAFT', [{ quantity: 10, received: 0 }])).toBe('DRAFT');
+    expect(poStatusAfter('CANCELLED', [{ quantity: 10, received: 10 }])).toBe('CANCELLED');
   });
 });

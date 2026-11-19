@@ -1,30 +1,33 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  ArrowDownToLine, ArrowUpFromLine, Barcode, Camera, Check, CheckCircle2, ChevronDown, Clock, Eye, EyeOff, Link2, Loader2,
-  LogOut, MapPin, Minus, Package, PackagePlus, Plus, ScanLine, Search, X, XCircle,
+  ArrowDownToLine, ArrowUpFromLine, Barcode, Boxes, Camera, Check, CheckCircle2, ChevronDown, ClipboardList, Clock, Eye, EyeOff, Link2, Loader2,
+  LogOut, MapPin, Minus, Package, PackagePlus, Plus, ScanLine, Search, Truck, X, XCircle,
 } from 'lucide-react';
-import { api, session, newClientRef, SignedOutError, type FindResult, type FoundItem, type Location, type Move, type NewItem, type ScanUser } from './api';
+import {
+  api, session, newClientRef, stillDue, SignedOutError,
+  type FindResult, type FoundItem, type KitDetail, type Location, type Move, type NewItem, type PickLine, type PoDetail, type PoLine, type ScanUser,
+} from './api';
 import { CodeScanner } from './CodeScanner';
+import { JobPicker, KitCard, PoCard } from './Jobs';
+import { CountJob } from './CountJob';
+import { TONE, big, card, field, label } from './ui';
 
 // The phone scan page. Sign in with a Tracklab account, choose Book in or
 // Book out, scan a label (or type a code), check the item and quantity, and
 // send it. The scan goes to the website as Pending (Sales > Scanner), where
 // someone approves it; only then does stock change.
 //
+// Three guided jobs use the same booking: Receive a PO (each scan books in
+// against one of its lines, and a label for something not on the order is
+// refused), Pick a kit (each scan books out a code from the kit's pick list;
+// a wrong part is refused before anything is sent), and Count stock
+// (./CountJob: fills in a stock count, posted on the website).
+//
 // Layout notes: widths are written out (max-w-[28rem]) because this
 // stylesheet's "md" is a spacing size, not a width. Rows that put text and a
 // button side by side carry data-no-mobile-stack: the main app's stylesheet
 // otherwise stacks `flex justify-between items-start` rows on phones.
 
-const field = 'w-full rounded-xl border border-white/10 bg-surface-container-low px-3.5 py-3 text-base text-on-surface placeholder:text-on-surface-variant/60 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20';
-const label = 'block text-[11px] font-bold uppercase tracking-wide text-on-surface-variant mb-1.5';
-const card = 'rounded-2xl border border-white/10 bg-surface-container shadow-lg shadow-black/20';
-const big = 'w-full flex items-center justify-center gap-2 py-4 rounded-2xl font-black text-base disabled:opacity-40 transition-transform active:scale-[0.98]';
-
-const TONE = {
-  IN: { solid: 'bg-green-600 text-white', soft: 'bg-green-500/10 text-green-400 border-green-500/25', text: 'text-green-400', ring: 'border-green-500/40' },
-  OUT: { solid: 'bg-amber-500 text-black', soft: 'bg-amber-500/10 text-amber-400 border-amber-500/25', text: 'text-amber-400', ring: 'border-amber-500/40' },
-} as const;
 
 /** "2 min ago", "3 h ago", then the date. */
 export function ago(v: string | null, now = Date.now()): string {
@@ -98,6 +101,7 @@ const SignIn: React.FC<{ onSignedIn: (u: ScanUser) => void }> = ({ onSignedIn })
 };
 
 type Direction = 'IN' | 'OUT';
+const same = (a: string | null | undefined, b: string | null | undefined) => String(a ?? '').trim().toUpperCase() === String(b ?? '').trim().toUpperCase();
 
 const StatusChip: React.FC<{ move: Move }> = ({ move }) => {
   const [cls, Icon, text] = move.status === 'PENDING' ? ['bg-primary/10 text-primary border-primary/30', Clock, 'Waiting for approval']
@@ -128,6 +132,13 @@ export const ScanApp: React.FC = () => {
   const [mode, setMode] = useState<null | 'new' | 'link'>(null);
   const [draft, setDraft] = useState({ partNumber: '', name: '', makerPartNumber: '', description: '' });
   const [newItem, setNewItem] = useState<NewItem | null>(null);
+  // A guided job: receiving a purchase order, picking a kit, or counting.
+  const [picking, setPicking] = useState<null | 'po' | 'kit'>(null);
+  const [po, setPo] = useState<PoDetail | null>(null);
+  const [poLine, setPoLine] = useState<PoLine | null>(null);
+  const [kit, setKit] = useState<KitDetail | null>(null);
+  const [pick, setPick] = useState<PickLine | null>(null);
+  const [counting, setCounting] = useState(false);
 
   const guard = useCallback((err: any) => {
     if (err instanceof SignedOutError) { setUser(null); return; }
@@ -158,25 +169,66 @@ export const ScanApp: React.FC = () => {
   const reset = () => {
     setItem(null); setChoices(null); setTyped(''); setError(null); setFromLabel(false); setMore(false);
     setUnknown(null); setMode(null); setNewItem(null); setDraft({ partNumber: '', name: '', makerPartNumber: '', description: '' });
+    setPoLine(null); setPick(null);
     setForm({ quantity: '', locationId: '', lot: '', dateCode: '', reference: '', note: '' });
     setClientRef(newClientRef());
   };
 
-  const choose = (it: FoundItem, found?: FindResult) => {
+  /** due: what is still to receive or pick on the job's line, the quantity to start from when the label doesn't say. */
+  const choose = (it: FoundItem, found?: FindResult, due?: number) => {
     setItem(it); setChoices(null);
     // Many items have a location named after their stock code: offer it as the place to put a book-in.
     const own = locations.find(l => l.code.toUpperCase() === it.partNumber.toUpperCase());
     // When linking an unknown label, what it said (quantity, lot) comes from that first scan.
     const label = found?.label ?? unknown?.label ?? null;
-    setFromLabel(!!label?.quantity);
+    // Picking a kit takes what the kit needs, not the whole reel the label describes.
+    const labelQty = kit ? null : label?.quantity ?? null;
+    // A Tracklab reel label says where the reel was put away.
+    const at = label?.place ? locations.find(l => same(l.code, label.place)) : undefined;
+    const atOk = !!at && (direction === 'IN' || it.places.some(p => p.locationId === at.id));
+    setFromLabel(!!labelQty);
     if (direction === 'IN' && (label?.lot || label?.dateCode)) setMore(true); // show what the label filled in
     setForm(f => ({
       ...f,
-      locationId: f.locationId || (direction === 'IN' && own ? String(own.id) : ''),
-      quantity: label?.quantity ? String(label.quantity) : f.quantity,
+      locationId: f.locationId || (atOk ? String(at!.id) : direction === 'IN' && own ? String(own.id) : ''),
+      quantity: labelQty ? String(labelQty) : due ? String(due) : f.quantity,
       lot: label?.lot || f.lot,
       dateCode: label?.dateCode || f.dateCode,
     }));
+  };
+
+  const openJob = async (kind: 'po' | 'kit', id: number) => {
+    setBusy(true); setError(null); setNotice(null);
+    try {
+      if (kind === 'po') { setPo(await api<PoDetail>(`/api/stock-moves/purchase-orders/${id}`)); setKit(null); setDirection('IN'); }
+      else { setKit(await api<KitDetail>(`/api/stock-moves/kits/${id}`)); setPo(null); setDirection('OUT'); }
+      reset(); setPicking(null);
+    } catch (err) { guard(err); } finally { setBusy(false); }
+  };
+  const refreshJob = async () => {
+    try {
+      if (po) setPo(await api<PoDetail>(`/api/stock-moves/purchase-orders/${po.id}`));
+      if (kit) setKit(await api<KitDetail>(`/api/stock-moves/kits/${kit.id}`));
+    } catch (err) { guard(err); }
+  };
+  const closeJob = () => { setPo(null); setKit(null); reset(); };
+
+  /** A line of the order being received: its item, with what's still due as the quantity. */
+  const selectPoLine = async (line: PoLine, found?: FindResult) => {
+    setBusy(true); setError(null);
+    try {
+      let it = found?.items.find(i => same(i.partNumber, line.partNumber));
+      if (!it) it = (await api<FindResult>(`/api/stock-moves/find?code=${encodeURIComponent(line.partNumber || '')}`)).items.find(i => same(i.partNumber, line.partNumber));
+      if (!it) { setError(`${line.partNumber} is not an item in Tracklab.`); return; }
+      setPoLine(line);
+      choose(it, found, stillDue(line.quantity, line.received, line.waiting) || undefined);
+    } catch (err) { guard(err); } finally { setBusy(false); }
+  };
+  /** A code on the kit's pick list: its item, with what's still to pick as the quantity. */
+  const selectPick = (line: PickLine, found?: FindResult) => {
+    if (!line.item) return;
+    setPick(line); setError(null);
+    choose(line.item, found, stillDue(line.need, line.bookedOut, line.waiting) || undefined);
   };
 
   const startNew = () => {
@@ -219,6 +271,24 @@ export const ScanApp: React.FC = () => {
         else setError('No item matches that. Try another code or name, or add it as a new item.');
         return;
       }
+      if (po) {
+        // Receiving an order: the label must be for one of its lines (the one still due first).
+        const lines = po.lines.filter(l => l.inTracklab && found.items.some(i => same(i.partNumber, l.partNumber)));
+        if (lines.length) { await selectPoLine(lines.find(l => stillDue(l.quantity, l.received, l.waiting) > 0) ?? lines[0], found); return; }
+        if (found.items.length) { setError(`${found.items.map(i => i.partNumber).slice(0, 3).join(', ')} ${found.items.length === 1 ? 'is' : 'are'} not on ${po.number}. Check the label, or close the order to book it in on its own.`); return; }
+        if (found.location) { setError(`${found.location.code} is a location. Scan the item first, then its place.`); return; }
+        // A supplier label Tracklab doesn't know: say which line it is, and the label is remembered for next time.
+        if (found.barcodes?.length) { setUnknown({ code, barcodes: found.barcodes, label: found.label }); setMode('link'); setTyped(''); return; }
+        setError('Not found in Tracklab. Check the code.');
+        return;
+      }
+      if (kit) {
+        const line = kit.lines.find(l => l.item && found.items.some(i => same(i.partNumber, l.code)));
+        if (line) { selectPick(line, found); return; }
+        if (found.items.length) { setError(`Wrong part: ${found.items[0].partNumber} is not on the pick list for kit ${kit.name}.`); return; }
+        setError(found.location ? `${found.location.code} is a location. Scan the reel first.` : 'Not found in Tracklab. Check the code.');
+        return;
+      }
       if (found.items.length === 1) choose(found.items[0], found);
       else if (found.items.length > 1) setChoices(found.items);
       else if (found.location) setError(`${found.location.code} is a location. Scan the item first, then its place.`);
@@ -245,11 +315,15 @@ export const ScanApp: React.FC = () => {
           // An unknown label: the item to create, or the label to remember on the chosen item.
           ...(newItem ? { newItem } : {}),
           ...(unknown ? { code: unknown.code, saveBarcode: !newItem } : {}),
+          ...(po && poLine ? { poItemId: poLine.id } : {}),
+          ...(kit && pick ? { kitId: kit.id } : {}),
         },
       });
-      setNotice(`Sent for approval: ${direction === 'IN' ? 'book in' : 'book out'} ${quantity} × ${item.partNumber}${newItem ? ' (new item)' : unknown ? ' (barcode linked)' : ''}.`);
+      const job = po ? ` on ${po.number}` : kit ? ` for kit ${kit.name}` : '';
+      setNotice(`Sent for approval: ${direction === 'IN' ? 'book in' : 'book out'} ${quantity} × ${item.partNumber}${job}${newItem ? ' (new item)' : unknown ? ' (barcode linked)' : ''}.`);
       reset();
       loadMine();
+      void refreshJob();
     } catch (err) { guard(err); } finally { setBusy(false); }
   };
 
@@ -265,7 +339,7 @@ export const ScanApp: React.FC = () => {
   const signOut = async () => {
     await api('/api/session/logout', { method: 'POST', body: {} }).catch(() => {});
     session.clear();
-    setUser(null); reset(); setMine([]);
+    setUser(null); reset(); setMine([]); setPo(null); setKit(null); setCounting(false); setPicking(null);
   };
 
   if (!user) return <SignIn onSignedIn={(u) => { setUser(u); setNotice(null); }} />;
@@ -299,10 +373,31 @@ export const ScanApp: React.FC = () => {
       </header>
 
       <main className="w-full max-w-[28rem] mx-auto p-4 pb-12 space-y-4">
-        <div className="flex gap-1 p-1 rounded-2xl bg-surface-container border border-white/10" role="group" aria-label="Book in or out">
-          {dirBtn('IN', 'Book in', ArrowDownToLine)}
-          {dirBtn('OUT', 'Book out', ArrowUpFromLine)}
-        </div>
+        {counting ? (
+          <CountJob locations={locations} onClose={() => setCounting(false)} onError={guard} />
+        ) : po ? (
+          <PoCard po={po} active={poLine?.id ?? null} onLine={(l) => { reset(); void selectPoLine(l); }} onClose={closeJob} />
+        ) : kit ? (
+          <KitCard kit={kit} active={pick?.code ?? null} onLine={(l) => { reset(); selectPick(l); }} onClose={closeJob} />
+        ) : (
+          <>
+            <div className="flex gap-1 p-1 rounded-2xl bg-surface-container border border-white/10" role="group" aria-label="Book in or out">
+              {dirBtn('IN', 'Book in', ArrowDownToLine)}
+              {dirBtn('OUT', 'Book out', ArrowUpFromLine)}
+            </div>
+            {!item && !unknown && !choices && !picking && (
+              <div className="grid grid-cols-3 gap-2" role="group" aria-label="Other jobs">
+                {([['po', 'Receive a PO', Truck], ['kit', 'Pick a kit', Boxes], ['count', 'Count stock', ClipboardList]] as const).map(([k, text, Icon]) => (
+                  <button key={k} type="button" onClick={() => { setError(null); setNotice(null); if (k === 'count') setCounting(true); else setPicking(k); }}
+                    className="flex flex-col items-center gap-1 rounded-xl border border-white/10 bg-surface-container py-2.5 text-xs font-bold text-on-surface-variant active:border-primary active:text-on-surface">
+                    <Icon className="w-4 h-4 text-primary" aria-hidden="true" />{text}
+                  </button>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+        {picking && !counting && <JobPicker kind={picking} onPick={(id) => void openJob(picking, id)} onClose={() => setPicking(null)} onError={guard} />}
 
         {notice && (
           <p role="status" className="flex items-start gap-2 rounded-xl border border-green-500/25 bg-green-500/10 text-green-400 text-sm font-semibold px-3.5 py-3">
@@ -316,6 +411,7 @@ export const ScanApp: React.FC = () => {
           </p>
         )}
 
+        {!counting && !picking && (<>
         {unknown && !item && !choices && (
           <section className={`${card} overflow-hidden`} aria-label="Not in Tracklab">
             <div className="px-4 py-3 border-b border-white/[0.07] bg-primary/10 flex items-center gap-2" data-no-mobile-stack>
@@ -331,6 +427,20 @@ export const ScanApp: React.FC = () => {
                   {unknown.label?.quantity ? <span className="inline-flex items-center rounded-lg bg-surface-container-high px-2 py-1 text-xs text-on-surface-variant">Qty {unknown.label.quantity}</span> : null}
                 </div>
               </div>
+
+              {mode === 'link' && po && (
+                <div className="space-y-2">
+                  <p className="text-sm">Which line of <span className="font-mono font-bold">{po.number}</span> is it? The label is remembered on that item, so it's found next time.</p>
+                  {po.lines.filter(l => l.inTracklab).map(l => (
+                    <button key={l.id} type="button" onClick={() => void selectPoLine(l)} className="w-full text-left rounded-xl border border-white/10 bg-surface-container-low p-3 active:border-primary">
+                      <span className="font-mono font-bold text-primary">{l.partNumber}</span>
+                      <span className="block text-sm">{l.name || l.description}</span>
+                      <span className="block text-xs text-on-surface-variant">{l.received} of {l.quantity} received{l.waiting ? ` · ${l.waiting} waiting` : ''}</span>
+                    </button>
+                  ))}
+                  <button type="button" onClick={reset} className="w-full text-sm font-bold text-on-surface-variant py-2">It isn't on this order</button>
+                </div>
+              )}
 
               {!mode && (
                 <>
@@ -357,7 +467,7 @@ export const ScanApp: React.FC = () => {
                 </form>
               )}
 
-              {mode === 'link' && (
+              {mode === 'link' && !po && (
                 <div className="space-y-3">
                   <p className="text-sm">Find the item this label belongs to:</p>
                   <form onSubmit={(e) => { e.preventDefault(); void lookUp(typed); }} className="flex gap-2">
@@ -381,13 +491,13 @@ export const ScanApp: React.FC = () => {
               className={`w-full flex flex-col items-center justify-center gap-2 py-8 rounded-2xl border-2 border-dashed ${tone.ring} ${tone.soft} transition-transform active:scale-[0.98] disabled:opacity-40`}>
               <span className={`inline-flex items-center justify-center w-16 h-16 rounded-2xl ${tone.solid} shadow-lg`}><Camera className="w-8 h-8" aria-hidden="true" /></span>
               <span className="text-lg font-black text-on-surface">Scan a label</span>
-              <span className="text-xs text-on-surface-variant">Reel, bag or item label · to book {direction === 'IN' ? 'in' : 'out'}</span>
+              <span className="text-xs text-on-surface-variant">{po ? `A reel or bag from ${po.supplier || 'the supplier'} · to receive on ${po.number}` : kit ? `A reel on the pick list · to book out for kit ${kit.name}` : `Reel, bag or item label · to book ${direction === 'IN' ? 'in' : 'out'}`}</span>
             </button>
             <div className="flex items-center gap-3 text-[11px] font-bold uppercase tracking-wide text-on-surface-variant"><span className="h-px flex-1 bg-white/10" />or type it<span className="h-px flex-1 bg-white/10" /></div>
             <form onSubmit={(e) => { e.preventDefault(); void lookUp(typed); }} className="flex gap-2">
               <div className="relative flex-1">
                 <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-on-surface-variant pointer-events-none" aria-hidden="true" />
-                <input className={`${field} !pl-10`} value={typed} onChange={e => setTyped(e.target.value)} placeholder="Stock code or part number" aria-label="Stock code or part number" autoCapitalize="characters" autoCorrect="off" enterKeyHint="search" />
+                <input className={`${field} !pl-10`} value={typed} onChange={e => setTyped(e.target.value)} placeholder={po || kit ? 'Or tap a line above' : 'Stock code or part number'} aria-label="Stock code or part number" autoCapitalize="characters" autoCorrect="off" enterKeyHint="search" />
               </div>
               <button type="submit" disabled={busy || !typed.trim()} className="px-5 rounded-xl bg-surface-container-high border border-white/10 font-bold disabled:opacity-40 inline-flex items-center gap-1.5">
                 {busy ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : null}Find
@@ -415,7 +525,7 @@ export const ScanApp: React.FC = () => {
           <form onSubmit={submit} className={`${card} overflow-hidden`}>
             <div className={`px-4 py-3 border-b border-white/[0.07] ${tone.soft} border-x-0 border-t-0 flex items-center gap-2 text-xs font-black uppercase tracking-wide`} data-no-mobile-stack>
               {direction === 'IN' ? <ArrowDownToLine className="w-4 h-4" aria-hidden="true" /> : <ArrowUpFromLine className="w-4 h-4" aria-hidden="true" />}
-              Booking {direction === 'IN' ? 'in' : 'out'}
+              {po ? `Receiving on ${po.number}` : kit ? `Picking for kit ${kit.name}` : `Booking ${direction === 'IN' ? 'in' : 'out'}`}
               <button type="button" onClick={reset} aria-label="Start again" className="ml-auto -m-1 p-1 text-on-surface-variant"><X className="w-4 h-4" /></button>
             </div>
             <div className="p-4 space-y-4">
@@ -457,6 +567,14 @@ export const ScanApp: React.FC = () => {
                 </div>
                 {fromLabel && <p className="text-xs text-on-surface-variant mt-1.5 flex items-center gap-1"><Check className="w-3 h-3 text-green-400" aria-hidden="true" />Read from the label. Change it if the reel isn't full.</p>}
                 {short && <p className="text-xs text-error mt-1.5">Only {item.stock} in stock: this will be refused.</p>}
+                {po && poLine && (() => { const due = stillDue(poLine.quantity, poLine.received, poLine.waiting); return (
+                  <p className={`text-xs mt-1.5 ${qty > due ? 'text-amber-400' : 'text-on-surface-variant'}`}>
+                    {po.number}: {poLine.received} of {poLine.quantity} received{poLine.waiting ? `, ${poLine.waiting} waiting for approval` : ''}. {qty > due ? `That's more than the ${due} still due: check the delivery.` : due - qty > 0 ? `${due - qty} still due after this.` : 'This completes the line.'}
+                  </p>); })()}
+                {kit && pick && (() => { const due = stillDue(pick.need, pick.bookedOut, pick.waiting); return (
+                  <p className={`text-xs mt-1.5 ${qty > due ? 'text-amber-400' : 'text-on-surface-variant'}`}>
+                    Kit {kit.name} needs {pick.need}{pick.bookedOut + pick.waiting ? `, ${pick.bookedOut + pick.waiting} already sent` : ''}. {qty > due ? `That's more than the ${due} still to pick.` : due - qty > 0 ? `${due - qty} still to pick after this (short: pick the rest from another reel).` : 'This completes it.'}
+                  </p>); })()}
               </div>
 
               <div>
@@ -477,7 +595,7 @@ export const ScanApp: React.FC = () => {
                 {place && <p className="text-xs text-on-surface-variant mt-1.5 flex items-center gap-1"><MapPin className="w-3 h-3" aria-hidden="true" /><span className="font-mono">{place.code}</span>{place.name ? ` · ${place.name}` : ''}</p>}
               </div>
 
-              <div><label className={label} htmlFor="ref">Reference <span className="normal-case font-semibold">(optional)</span></label><input id="ref" className={field} value={form.reference} onChange={e => setForm(f => ({ ...f, reference: e.target.value }))} placeholder="PO, job or order number" autoCapitalize="characters" /></div>
+              <div><label className={label} htmlFor="ref">Reference <span className="normal-case font-semibold">(optional)</span></label><input id="ref" className={field} value={form.reference} onChange={e => setForm(f => ({ ...f, reference: e.target.value }))} placeholder={po ? po.number : kit ? `Kit ${kit.name}` : 'PO, job or order number'} autoCapitalize="characters" /></div>
 
               <div>
                 <button type="button" onClick={() => setMore(m => !m)} aria-expanded={more} className="flex items-center gap-1 text-xs font-bold text-on-surface-variant">
@@ -504,8 +622,9 @@ export const ScanApp: React.FC = () => {
             </div>
           </form>
         )}
+        </>)}
 
-        <section className="pt-2">
+        {!counting && <section className="pt-2">
           <div className="flex items-center gap-2 mb-2.5" data-no-mobile-stack>
             <h2 className="text-sm font-black">My scans</h2>
             {pending > 0 && <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-primary/15 text-primary">{pending} waiting</span>}
@@ -524,10 +643,12 @@ export const ScanApp: React.FC = () => {
                     <span className={`font-mono ${TONE[m.direction].text}`}>{m.direction === 'IN' ? '+' : '−'}{m.quantity}</span>
                     <span className="font-mono truncate">{m.partNumber}</span>
                   </p>
-                  <p className="text-xs text-on-surface-variant truncate">{[m.location?.code, m.reference, ago(m.capturedAt || m.createdAt)].filter(Boolean).join(' · ')}</p>
+                  <p className="text-xs text-on-surface-variant truncate">{[m.location?.code, m.reference !== m.po?.number && m.reference !== (m.kit ? `Kit ${m.kit.name}` : null) ? m.reference : null, ago(m.capturedAt || m.createdAt)].filter(Boolean).join(' · ')}</p>
                   <p className="mt-1.5 flex flex-wrap gap-1"><StatusChip move={m} />
                     {m.newItem && <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold border bg-green-500/10 text-green-400 border-green-500/25"><PackagePlus className="w-3 h-3" />New item</span>}
                     {!m.newItem && !!m.linkCodes?.length && <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold border bg-primary/10 text-primary border-primary/25"><Link2 className="w-3 h-3" />Barcode</span>}
+                    {m.po && <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold border bg-surface-container-high text-on-surface-variant border-white/10"><Truck className="w-3 h-3" />{m.po.number}</span>}
+                    {m.kit && <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold border bg-surface-container-high text-on-surface-variant border-white/10"><Boxes className="w-3 h-3" />Kit {m.kit.name}</span>}
                   </p>
                   {m.status === 'REJECTED' && m.rejectReason && <p className="text-xs text-error mt-1">{m.rejectReason}</p>}
                   {m.status === 'APPROVED' && m.stockAfter != null && <p className="text-xs text-on-surface-variant mt-1">Stock now {m.stockAfter}{m.decidedBy ? ` · by ${m.decidedBy}` : ''}</p>}
@@ -536,12 +657,12 @@ export const ScanApp: React.FC = () => {
               </li>
             ))}
           </ul>
-        </section>
+        </section>}
       </main>
 
       {camera && (
         <CodeScanner
-          title={camera === 'place' ? 'Scan the place' : `Scan to book ${direction === 'IN' ? 'in' : 'out'}`}
+          title={camera === 'place' ? 'Scan the place' : po ? `Scan to receive on ${po.number}` : kit ? `Scan to pick for ${kit.name}` : `Scan to book ${direction === 'IN' ? 'in' : 'out'}`}
           hint={camera === 'place' ? 'Point at the rack or shelf label' : 'Point at the reel or item label'}
           onClose={() => setCamera(null)}
           onCode={(code) => { const forPlace = camera === 'place'; setCamera(null); void lookUp(code, forPlace); }}

@@ -21,10 +21,16 @@
 //                                      partNumber with code and saveBarcode: true to link the label to it.
 //                                      Either is saved with the scan and done only on approval: the item is
 //                                      created, the label's codes go in item_barcodes, so find knows them next time.
+//                                      poItemId: received against that purchase order line (IN only; the item
+//                                      must be the line's part); kitId: picked for that saved kit (OUT only; the
+//                                      item must be on its pick list, kitPickList).
+//   GET  /api/stock-moves/purchase-orders[/:id]   orders still to receive; one order's lines (received, waiting)
+//   GET  /api/stock-moves/kits[/:id]              saved kits; one kit's pick list (where each code is, what's sent)
 //   POST /api/stock-moves/decide       {ids: [..], decision: APPROVE | REJECT, reason?}
 //                                      -> { results: [{id, ok, error?, move?}], done, failed }
 //                                      APPROVE, IN: adds to stock; with a location (or a lot) it is put away
-//                                          there, otherwise it waits in "No location".
+//                                          there, otherwise it waits in "No location". On a PO line, the
+//                                          line's qty_received goes up and the order's status follows (receiveOnPo).
 //                                      APPROVE, OUT: takes from stock, refused if there isn't that much now;
 //                                          with a location it comes from that place (refused if the place
 //                                          holds less), otherwise from No location first, then the oldest places.
@@ -37,6 +43,8 @@ import type { Express, Response } from 'express';
 import { pool, query, queryOne, exec } from './db';
 import { moveStock, placesOf } from './stockPlaces';
 import { bumpDataVersion } from './dataVersion';
+import { readBin, readReel } from './reelLabel';
+import { isDnfCode } from './dnf';
 
 export async function ensureScanStockSchema(): Promise<void> {
   await exec(`CREATE TABLE IF NOT EXISTS scan_stock_moves (
@@ -82,6 +90,16 @@ export async function ensureScanStockSchema(): Promise<void> {
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`);
   await exec(`CREATE INDEX IF NOT EXISTS item_barcodes_serial_idx ON item_barcodes (serial_number)`);
+  // A book-in against a purchase order line, or a book-out picked for a kit.
+  // No foreign keys: the scan stays the record of what was scanned even if
+  // the order or kit is deleted later.
+  await exec(`ALTER TABLE scan_stock_moves ADD COLUMN IF NOT EXISTS po_item_id INTEGER`);
+  await exec(`ALTER TABLE scan_stock_moves ADD COLUMN IF NOT EXISTS po_id INTEGER`);
+  await exec(`ALTER TABLE scan_stock_moves ADD COLUMN IF NOT EXISTS po_number TEXT`);
+  await exec(`ALTER TABLE scan_stock_moves ADD COLUMN IF NOT EXISTS kit_id INTEGER`);
+  await exec(`ALTER TABLE scan_stock_moves ADD COLUMN IF NOT EXISTS kit_name TEXT`);
+  await exec(`CREATE INDEX IF NOT EXISTS scan_stock_moves_po_item_idx ON scan_stock_moves (po_item_id) WHERE po_item_id IS NOT NULL`);
+  await exec(`CREATE INDEX IF NOT EXISTS scan_stock_moves_kit_idx ON scan_stock_moves (kit_id) WHERE kit_id IS NOT NULL`);
 }
 
 // ---------------------------------------------------------------------------
@@ -97,8 +115,10 @@ export interface ScannedCode {
   quantity: number | null;
   lot: string | null;
   dateCode: string | null;
-  /** Which kind of label it was, for the phone to show. */
-  kind: 'supplier-2d' | 'supplier-qr' | 'text';
+  /** Which kind of label it was, for the phone to show: a supplier's, Tracklab's own reel or bin label, or plain text. */
+  kind: 'supplier-2d' | 'supplier-qr' | 'tracklab' | 'place' | 'text';
+  /** The stock location on a Tracklab bin label, or where a Tracklab reel label says the reel was put away. */
+  place?: string | null;
 }
 
 const wholeQty = (v: string | undefined) => { const n = Number(String(v ?? '').replace(/[^\d]/g, '')); return Number.isInteger(n) && n > 0 && n <= 10_000_000 ? n : null; };
@@ -111,12 +131,18 @@ const wholeQty = (v: string | undefined) => { const n = Number(String(v ?? '').r
  *    each tagged: 1P maker's part, P or 30P the supplier's, Q quantity,
  *    1T lot, 9D / 10D date code);
  *  - the QR code on LCSC / JLCPCB bags: {pbn:…,on:…,pc:C2040,pm:STM32…,qty:10,…}.
+ * Tracklab's own labels (./reelLabel): a bin label "LOC:A1-03", a reel
+ * label "TL:CAP-024?lot=…&dc=…&qty=…&at=…".
  * Anything else is taken as typed text: a Tracklab stock code, a part
  * number, or a location code.
  */
 export function parseScannedCode(raw: unknown): ScannedCode {
   const s = String(raw ?? '').trim();
   const uniq = (xs: (string | undefined | null)[]) => [...new Set(xs.map(x => text(x)).filter(Boolean))];
+  const bin = readBin(s);
+  if (bin) return { candidates: [], quantity: null, lot: null, dateCode: null, kind: 'place', place: bin };
+  const reel = readReel(s);
+  if (reel) return { candidates: uniq([reel.code]), quantity: reel.qty ?? null, lot: reel.lot ?? null, dateCode: reel.dateCode ?? null, kind: 'tracklab', place: reel.place ?? null };
   if (s.startsWith('[)>')) {
     // Fields are split by control characters (GS, RS, EOT); each starts with
     // its tag: up to two digits and a letter ("1P", "Q", "30P", "10D").
@@ -164,6 +190,10 @@ export interface MoveFields {
   newItem: NewItem | null;
   /** Barcodes to save on the item when approved, so the next scan of this label finds it. */
   linkCodes: string[];
+  /** A book-in received against this purchase order line. */
+  poItemId: number | null;
+  /** A book-out picked for this saved kit. */
+  kitId: number | null;
 }
 
 export interface NewItem { partNumber: string; name: string; description: string | null; makerPartNumber: string | null }
@@ -212,12 +242,22 @@ export function parseMoveFields(body: Record<string, unknown>, now = Date.now())
   // The scanned label's codes are remembered on the item when asked (a new item, or "link to an existing item").
   const code = typeof body.code === 'string' && body.code.length <= 2000 ? body.code : '';
   const linkCodes = code && (newItem || body.saveBarcode === true) ? barcodesIn(code).filter(c => c !== (newItem?.partNumber ?? partNumber).toUpperCase()) : [];
+  const id = (v: unknown, what: string) => {
+    if (v === null || v === undefined || v === '') return null;
+    const n = Number(v);
+    if (!Number.isInteger(n) || n <= 0) throw err(400, `That ${what} is not valid.`);
+    return n;
+  };
+  const poItemId = id(body.poItemId, 'purchase order line');
+  const kitId = id(body.kitId, 'kit');
+  if (poItemId && direction !== 'IN') throw err(400, 'Stock received on a purchase order is booked in.');
+  if (kitId && direction !== 'OUT') throw err(400, 'Stock picked for a kit is booked out.');
 
   return {
     direction, partNumber: newItem ? newItem.partNumber : partNumber, quantity, locationId: loc, lot, dateCode,
     reference: text(body.reference).slice(0, 120) || null,
     note: text(body.note).slice(0, 300) || null,
-    capturedAt, clientRef: ref || null, newItem, linkCodes,
+    capturedAt, clientRef: ref || null, newItem, linkCodes, poItemId, kitId,
   };
 }
 
@@ -236,6 +276,59 @@ export function parseMoveListQuery(q: Record<string, unknown>) {
   // DONE: the history, every scan already approved or rejected.
   const status: MoveStatus | 'DONE' | null = s === 'DONE' ? 'DONE' : (MOVE_STATUSES as readonly string[]).includes(s) ? (s as MoveStatus) : null;
   return { page, pageSize, status, mine: text(q.mine) === '1' || text(q.mine).toLowerCase() === 'true', direction: d === 'IN' || d === 'OUT' ? d : null, part: text(q.part) || null, user: text(q.user) || null, decidedBy: text(q.decidedBy) || null, from: day(q.from), to: day(q.to) };
+}
+
+export interface KitBomLine { stock_code: string; qty_per_pcb: number }
+export interface KitPick { stock_code: string; allocated_code: string; qty: number }
+export interface PickLine { code: string; need: number; forLines: string[] }
+
+/**
+ * What to take from the shelves for a saved kit, one line per stock code:
+ * each BOM line needs qty per board x the build quantity, taken from the
+ * reels picked for it in Kit Booking (its allocations) or, with none, from
+ * its own stock code. DNF lines take nothing. The same rules as the kit
+ * book-out on the website (./kitBookOut).
+ */
+export function kitPickList(bom: KitBomLine[], picks: KitPick[], dnf: string[], buildQty: number): PickLine[] {
+  const skip = new Set(dnf.map(d => d.toUpperCase()));
+  const byLine = new Map<string, KitPick[]>();
+  for (const p of picks) {
+    if (!(Number(p.qty) > 0)) continue;
+    const k = p.stock_code.toUpperCase();
+    byLine.set(k, [...(byLine.get(k) ?? []), p]);
+  }
+  const out = new Map<string, PickLine>();
+  const take = (code: string, qty: number, forLine: string) => {
+    const k = code.toUpperCase();
+    const l = out.get(k) ?? { code, need: 0, forLines: [] };
+    l.need += qty;
+    if (!l.forLines.includes(forLine)) l.forLines.push(forLine);
+    out.set(k, l);
+  };
+  const seen = new Set<string>();
+  for (const b of bom) {
+    const line = text(b.stock_code);
+    const k = line.toUpperCase();
+    // A BOM can list a stock code on several rows (different designators): the kit's picks cover them together.
+    if (!line || skip.has(k) || isDnfCode(line)) continue;
+    const need = (Number(b.qty_per_pcb) || 0) * Math.max(1, Number(buildQty) || 1);
+    if (!(need > 0)) continue;
+    const ps = byLine.get(k);
+    if (ps?.length) {
+      if (seen.has(k)) continue;
+      seen.add(k);
+      for (const p of ps) take(p.allocated_code, Number(p.qty), line);
+    } else take(line, need, line);
+  }
+  return [...out.values()].sort((a, b) => a.code.localeCompare(b.code));
+}
+
+/** A purchase order's status once stock has been received on it: RECEIVED when every line is in full, otherwise PARTIAL. */
+export function poStatusAfter(current: string, lines: Array<{ quantity: number; received: number }>): string {
+  if (!['DRAFT', 'SENT', 'PARTIAL'].includes(current)) return current;
+  const any = lines.some(l => l.received > 0);
+  if (!any) return current;
+  return lines.every(l => l.received >= l.quantity) ? 'RECEIVED' : 'PARTIAL';
 }
 
 // ---------------------------------------------------------------------------
@@ -307,10 +400,12 @@ export async function findByCode(db: Db, raw: string) {
     }
   }
   let location: { id: number; code: string; name: string | null; active: boolean } | null = null;
-  if (scanned.kind === 'text' && scanned.candidates[0]) {
-    const code = scanned.candidates[0].toUpperCase().replace(/\s+/g, '-');
-    const { rows: [l] } = await db.query(`SELECT id, code, name, active FROM stock_locations WHERE upper(code) = $1`, [code]);
+  const placeCode = scanned.kind === 'place' ? scanned.place : scanned.kind === 'text' ? scanned.candidates[0]?.toUpperCase().replace(/\s+/g, '-') : null;
+  if (placeCode) {
+    const { rows: [l] } = await db.query(`SELECT id, code, name, active FROM stock_locations WHERE upper(code) = $1`, [placeCode]);
     if (l) location = { id: l.id, code: l.code, name: l.name, active: l.active };
+  }
+  if (scanned.kind === 'text' && scanned.candidates[0]) {
     // Typed text that is nothing exactly: offer the closest items (3+ characters, so "C" doesn't list the store).
     if (!found.size && !location && scanned.candidates[0].length >= 3) {
       const q = like(scanned.candidates[0]);
@@ -325,7 +420,8 @@ export async function findByCode(db: Db, raw: string) {
   for (const r of found.values()) items.push(await itemWithPlaces(db, r));
   return {
     code: text(raw).slice(0, 200),
-    label: scanned.kind === 'text' ? null : { kind: scanned.kind, partNumbers: scanned.candidates, quantity: scanned.quantity, lot: scanned.lot, dateCode: scanned.dateCode },
+    label: scanned.kind === 'text' || scanned.kind === 'place' ? null
+      : { kind: scanned.kind, partNumbers: scanned.candidates, quantity: scanned.quantity, lot: scanned.lot, dateCode: scanned.dateCode, place: scanned.place ?? null },
     matchedBy,
     exact: matchedBy === 'stock code' || matchedBy === 'barcode' || (matchedBy === 'part number' && items.length === 1),
     items,
@@ -353,7 +449,30 @@ const toMove = (r: any) => ({
   rejectReason: r.reject_reason || null,
   newItem: (r.new_item as NewItem | null) || null,
   linkCodes: (r.link_codes as string[] | null) || [],
+  po: r.po_item_id ? { id: r.po_id as number | null, number: r.po_number as string | null, itemId: r.po_item_id as number } : null,
+  kit: r.kit_id ? { id: r.kit_id as number, name: r.kit_name as string | null } : null,
 });
+
+/** A purchase order line, with its order, for a scan received against it. */
+async function poLineFor(client: Db, poItemId: number) {
+  const { rows: [l] } = await client.query(
+    `SELECT poi.id, poi.part_number, poi.quantity, COALESCE(poi.qty_received, 0) AS received, po.id AS po_id, po.po_number, po.status
+       FROM purchase_order_items poi JOIN purchase_orders po ON po.id = poi.purchase_order_id WHERE poi.id = $1`, [poItemId]);
+  return l as { id: number; part_number: string | null; quantity: string; received: string; po_id: number; po_number: string; status: string } | undefined;
+}
+
+/** A saved kit and what to pick for it (kitPickList). */
+export async function kitPicks(db: Db, kitId: number) {
+  const { rows: [kit] } = await db.query(
+    `SELECT k.id, k.name, k.build_qty, k.project_id, p.project_name FROM kits k LEFT JOIN projects p ON p.id::text = k.project_id::text WHERE k.id = $1`, [kitId]);
+  if (!kit) return null;
+  const [{ rows: bom }, { rows: picks }, { rows: dnf }] = await Promise.all([
+    db.query(`SELECT stock_code, qty_per_pcb FROM kit_bom WHERE kit_id = $1 ORDER BY id`, [kitId]),
+    db.query(`SELECT stock_code, allocated_code, qty FROM kit_allocations WHERE kit_id = $1 ORDER BY id`, [kitId]),
+    db.query(`SELECT stock_code FROM kit_dnf WHERE kit_id = $1`, [kitId]),
+  ]);
+  return { kit, lines: kitPickList(bom, picks, dnf.map((d: any) => d.stock_code), Number(kit.build_qty) || 1) };
+}
 
 type Who = { id: number | null; email: string; name: string };
 
@@ -393,6 +512,22 @@ export async function recordScan(client: Db, f: MoveFields, who: Who) {
     serial = found.serial; name = found.item.name || found.serial; stock = found.stock; loc = found.loc;
   }
   if (f.direction === 'OUT' && f.quantity > stock) throw notEnough(serial, stock);
+  let po: { po_id: number; po_number: string } | null = null;
+  if (f.poItemId) {
+    const l = await poLineFor(client, f.poItemId);
+    if (!l) throw err(404, 'That purchase order line no longer exists.');
+    if (!['DRAFT', 'SENT', 'PARTIAL'].includes(l.status)) throw err(409, `${l.po_number} is ${l.status.toLowerCase()}: nothing more is received on it.`);
+    if (String(l.part_number ?? '').trim().toUpperCase() !== serial.toUpperCase()) throw err(400, `${serial} is not on that line of ${l.po_number}.`);
+    po = l;
+  }
+  let kit: { id: number; name: string } | null = null;
+  if (f.kitId) {
+    const k = await kitPicks(client, f.kitId);
+    if (!k) throw err(404, 'That kit no longer exists.');
+    if (!k.lines.some(l => l.code.toUpperCase() === serial.toUpperCase())) throw err(400, `${serial} is not on the pick list for kit ${k.kit.name}.`);
+    kit = { id: k.kit.id, name: k.kit.name };
+  }
+  const reference = f.reference || (po ? po.po_number : kit ? `Kit ${kit.name}` : null);
   // Barcodes already linked to this item are not saved again.
   let linkCodes = f.linkCodes;
   if (linkCodes.length && !f.newItem) {
@@ -402,10 +537,12 @@ export async function recordScan(client: Db, f: MoveFields, who: Who) {
   }
   const { rows: [saved] } = await client.query(
     `INSERT INTO scan_stock_moves (client_ref, status, direction, part_number, item_name, quantity, location_id, location_code, lot, date_code,
-                                   reference, note, user_id, user_email, user_name, captured_at, new_item, link_codes)
-     VALUES ($1,'PENDING',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
+                                   reference, note, user_id, user_email, user_name, captured_at, new_item, link_codes,
+                                   po_item_id, po_id, po_number, kit_id, kit_name)
+     VALUES ($1,'PENDING',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22) RETURNING *`,
     [f.clientRef, f.direction, serial, name, f.quantity, loc?.id ?? null, loc?.code ?? null, f.lot, f.dateCode,
-     f.reference, f.note, who.id, who.email, who.name, f.capturedAt, f.newItem ? JSON.stringify(f.newItem) : null, linkCodes.length ? linkCodes : null]);
+     reference, f.note, who.id, who.email, who.name, f.capturedAt, f.newItem ? JSON.stringify(f.newItem) : null, linkCodes.length ? linkCodes : null,
+     f.poItemId, po?.po_id ?? null, po?.po_number ?? null, kit?.id ?? null, kit?.name ?? null]);
   return { ...toMove(saved), stockNow: stock };
 }
 
@@ -490,11 +627,34 @@ export async function approveScan(client: Db, row: any, approver: Who) {
     `INSERT INTO transactions (trxId, itemPartNumber, itemName, type, qtyChange, reference, performedBy, dateTime)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
     [trxId, serial, item.name || serial, direction === 'IN' ? 'BOOK-IN' : 'BOOK-OUT', signed, reference, scannedBy, new Date().toISOString()]);
+  if (direction === 'IN' && row.po_item_id) await receiveOnPo(client, Number(row.po_item_id), quantity);
   const { rows: [saved] } = await client.query(
     `UPDATE scan_stock_moves SET status = 'APPROVED', stock_after = $2, trx_id = $3, decided_by_id = $4, decided_by_email = $5, decided_by_name = $6, decided_at = now()
       WHERE id = $1 RETURNING *`,
     [row.id, stock + signed, trxId, approver.id, approver.email, approver.name]);
   return toMove(saved);
+}
+
+/**
+ * Stock approved on a purchase order line: the line's received quantity goes
+ * up, and the order becomes PARTIAL, or RECEIVED once every line is in full
+ * (when it was first received is kept, for measured lead times). An order
+ * deleted or cancelled since the scan is left alone: the stock still came in.
+ */
+export async function receiveOnPo(client: Db, poItemId: number, quantity: number) {
+  const { rows: [line] } = await client.query(
+    `UPDATE purchase_order_items SET qty_received = COALESCE(qty_received, 0) + $2 WHERE id = $1 RETURNING purchase_order_id`, [poItemId, quantity]);
+  if (!line) return;
+  const { rows: [po] } = await client.query(`SELECT id, status FROM purchase_orders WHERE id = $1 FOR UPDATE`, [line.purchase_order_id]);
+  if (!po) return;
+  const { rows: lines } = await client.query(
+    `SELECT quantity, COALESCE(qty_received, 0) AS received FROM purchase_order_items WHERE purchase_order_id = $1`, [po.id]);
+  const next = poStatusAfter(po.status, lines.map((l: any) => ({ quantity: Number(l.quantity) || 0, received: Number(l.received) || 0 })));
+  if (next !== po.status) {
+    await client.query(
+      `UPDATE purchase_orders SET status = $2, received_at = CASE WHEN $2 = 'RECEIVED' THEN COALESCE(received_at, now()) ELSE received_at END WHERE id = $1`,
+      [po.id, next]);
+  }
 }
 
 export interface Decision { ids: number[]; decision: 'APPROVE' | 'REJECT'; reason: string | null }
@@ -534,6 +694,79 @@ export function registerScanStockRoutes(app: Express): void {
       if (code.length > 2000) return res.status(400).json({ error: 'That code is too long to be a label.' });
       res.json(await findByCode(pool, code));
     } catch (e) { fail(res, e, 'look up the code'); }
+  });
+
+  // Purchase orders that can still be received (draft, sent or part received), newest first.
+  app.get('/api/stock-moves/purchase-orders', async (_req, res) => {
+    try {
+      const { rows } = await query(
+        `SELECT po.id, po.po_number, po.status, po.order_date, po.expected_date, s.name AS supplier,
+                COUNT(poi.id)::int AS lines,
+                COALESCE(SUM(GREATEST(poi.quantity - COALESCE(poi.qty_received, 0), 0)), 0)::float AS outstanding
+           FROM purchase_orders po LEFT JOIN suppliers s ON s.id = po.supplier_id
+           LEFT JOIN purchase_order_items poi ON poi.purchase_order_id = po.id
+          WHERE po.status IN ('DRAFT', 'SENT', 'PARTIAL')
+          GROUP BY po.id, s.name
+          ORDER BY (po.status = 'DRAFT'), po.id DESC LIMIT 100`);
+      res.json({ items: rows.map((r: any) => ({ id: r.id, number: r.po_number, status: r.status, supplier: r.supplier || null, orderDate: r.order_date, expectedDate: r.expected_date, lines: r.lines, outstanding: Number(r.outstanding) || 0 })) });
+    } catch (e) { fail(res, e, 'load the purchase orders'); }
+  });
+
+  // One purchase order's lines: ordered, received so far, and waiting for approval on the scanner.
+  app.get('/api/stock-moves/purchase-orders/:id', async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'That purchase order is not valid.' });
+      const { rows: [po] } = await query(
+        `SELECT po.id, po.po_number, po.status, po.expected_date, s.name AS supplier FROM purchase_orders po LEFT JOIN suppliers s ON s.id = po.supplier_id WHERE po.id = $1`, [id]);
+      if (!po) return res.status(404).json({ error: 'That purchase order no longer exists.' });
+      const { rows } = await query(
+        `SELECT poi.id, poi.part_number, poi.description, poi.quantity::float AS quantity, COALESCE(poi.qty_received, 0)::float AS received,
+                i.serial_number AS item, i.name AS item_name,
+                COALESCE((SELECT SUM(m.quantity) FROM scan_stock_moves m WHERE m.po_item_id = poi.id AND m.status = 'PENDING'), 0)::int AS waiting
+           FROM purchase_order_items poi
+           LEFT JOIN inventory i ON upper(i.serial_number) = upper(trim(poi.part_number)) AND i.deleted IS NOT TRUE
+          WHERE poi.purchase_order_id = $1 ORDER BY poi.id`, [id]);
+      res.json({
+        id: po.id, number: po.po_number, status: po.status, supplier: po.supplier || null, expectedDate: po.expected_date,
+        lines: rows.map((r: any) => ({ id: r.id, partNumber: r.item || (r.part_number ? String(r.part_number).trim() : null), inTracklab: !!r.item, name: r.item_name || null, description: r.description, quantity: r.quantity, received: r.received, waiting: r.waiting })),
+      });
+    } catch (e) { fail(res, e, 'load the purchase order'); }
+  });
+
+  // Saved kits (Kit Booking), newest first.
+  app.get('/api/stock-moves/kits', async (_req, res) => {
+    try {
+      const { rows } = await query(
+        `SELECT k.id, k.name, k.build_qty, p.project_name, k.updated_at,
+                (SELECT COUNT(*)::int FROM kit_bom b WHERE b.kit_id = k.id) AS lines
+           FROM kits k LEFT JOIN projects p ON p.id::text = k.project_id::text ORDER BY k.updated_at DESC NULLS LAST, k.id DESC LIMIT 100`);
+      res.json({ items: rows.map((r: any) => ({ id: r.id, name: r.name, buildQty: r.build_qty, project: r.project_name || null, lines: r.lines, updatedAt: r.updated_at })) });
+    } catch (e) { fail(res, e, 'load the kits'); }
+  });
+
+  // A kit's pick list: each stock code to take, how many, where it is, and what the scanner has already sent for it.
+  app.get('/api/stock-moves/kits/:id', async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'That kit is not valid.' });
+      const k = await kitPicks(pool, id);
+      if (!k) return res.status(404).json({ error: 'That kit no longer exists.' });
+      const codes = k.lines.map(l => l.code);
+      const { rows: items } = await query(`SELECT ${ITEM_COLS} FROM inventory WHERE deleted IS NOT TRUE AND upper(serial_number) = ANY($1::text[])`, [codes.map(c => c.toUpperCase())]);
+      const byCode = new Map<string, any>();
+      for (const r of items) byCode.set(String(r.serial_number).toUpperCase(), await itemWithPlaces(pool, r));
+      const { rows: sent } = await query(
+        `SELECT upper(part_number) AS code, status, SUM(quantity)::int AS qty FROM scan_stock_moves WHERE kit_id = $1 AND status IN ('PENDING', 'APPROVED') GROUP BY 1, 2`, [id]);
+      const sum = (code: string, status: string) => sent.filter((s: any) => s.code === code.toUpperCase() && s.status === status).reduce((t: number, s: any) => t + s.qty, 0);
+      res.json({
+        id: k.kit.id, name: k.kit.name, buildQty: Number(k.kit.build_qty) || 1, project: k.kit.project_name || null,
+        lines: k.lines.map(l => {
+          const it = byCode.get(l.code.toUpperCase()) ?? null;
+          return { code: it?.partNumber ?? l.code, need: l.need, forLines: l.forLines, item: it, waiting: sum(l.code, 'PENDING'), bookedOut: sum(l.code, 'APPROVED') };
+        }),
+      });
+    } catch (e) { fail(res, e, 'load the kit'); }
   });
 
   app.post('/api/stock-moves', async (req: any, res) => {

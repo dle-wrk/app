@@ -374,6 +374,22 @@ export function registerStockPlacesRoutes(app: Express): void {
     } catch (err) { httpError(res, err); }
   });
 
+  // Reels (places) for printing reel labels: ?prefix= stock codes starting
+  // with it, ?location= one location's code. At most 500.
+  app.get('/api/stock-bins', async (req, res) => {
+    const prefix = String(req.query.prefix ?? '').trim().toUpperCase();
+    const location = String(req.query.location ?? '').trim().toUpperCase();
+    try {
+      const { rows } = await query(
+        `SELECT b.id, b.serial_number, i.name, b.lot, b.date_code, b.qty, l.code AS location_code
+           FROM stock_bins b JOIN inventory i USING (serial_number) LEFT JOIN stock_locations l ON l.id = b.location_id
+          WHERE i.deleted IS NOT TRUE AND b.qty > 0 AND upper(b.serial_number) LIKE $1 AND ($2 = '' OR upper(l.code) = $2)
+          ORDER BY b.serial_number, l.code NULLS LAST, b.received_at, b.id LIMIT 500`,
+        [`${prefix.replace(/[\\%_]/g, '\\$&')}%`, location]);
+      res.json({ bins: rows });
+    } catch (err) { httpError(res, err); }
+  });
+
   app.get('/api/stock-locations/:id/contents', async (req, res) => {
     try {
       const { rows } = await query(`SELECT b.*, i.name, i.description, i.stock FROM stock_bins b JOIN inventory i USING (serial_number)
