@@ -2,7 +2,17 @@
 
 /* The page is dark to its edges, also past the content and when overscrolled. */
 html, body { background: #090b14; }
-body { overscroll-behavior-y: none; -webkit-tap-highlight-color: transparent; }
+body { -webkit-tap-highlight-color: transparent; }
+
+/* Scrolling. The main stylesheet sets overflow-x: hidden on html and body on
+   phones, which makes body a scroll box of its own; with overscroll-behavior
+   on body as well, a swipe went nowhere and the page couldn't be scrolled.
+   Here the page scrolls as a plain page, the sideways spill is clipped on the
+   page's own root (no scroll box), and the bounce / pull-to-refresh is
+   stopped on the viewport (html), which doesn't block scrolling. */
+html, body { overflow: visible !important; }
+html { overscroll-behavior-y: none; }
+#root { overflow-x: clip; }
 
 /* The line sweeping the camera window. */
 @keyframes scan-sweep {
