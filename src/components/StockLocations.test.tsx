@@ -102,4 +102,18 @@ describe('the locations list', () => {
     await settle();
     expect(calls.find((c) => c.url === '/api/stock-locations/set-category')?.body).toEqual({ ids: [1, 2], category: 'Antennas' });
   });
+
+  it('moves the stock in the selected locations to another location', async () => {
+    const toasts: string[] = [];
+    await act(async () => { root.render(<StockPlacesView triggerToast={(m) => { toasts.push(m); }} items={[]} />); });
+    await settle();
+    await act(async () => { (host.querySelector('input[aria-label="Select every location in Antenna bins"]') as HTMLInputElement).click(); });
+    // The target list offers the other locations, not the ones being emptied.
+    expect([...host.querySelectorAll('#move-to-options option')].map((o) => (o as HTMLOptionElement).value)).toEqual(['RR-1']);
+    type(host.querySelector('input[aria-label="Move the stock in the selected locations to"]') as HTMLInputElement, 'antenna shelf');
+    await act(async () => { (host.querySelector('[data-testid="location-bulk"] input[type="checkbox"]') as HTMLInputElement).click(); });
+    await act(async () => { btn('Move stock').click(); });
+    await settle();
+    expect(calls.find((c) => c.url === '/api/stock-locations/move-contents')?.body).toEqual({ ids: [1, 2], to: 'ANTENNA-SHELF', deactivate: true });
+  });
 });

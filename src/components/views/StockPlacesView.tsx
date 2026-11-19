@@ -143,6 +143,9 @@ function Locations({ triggerToast, onOpenItem, items = [] }: { triggerToast: Toa
   const [closed, setClosed] = useState<Set<string>>(new Set());
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const [bulkCategory, setBulkCategory] = useState('');
+  const [moveTo, setMoveTo] = useState('');
+  const [emptyOff, setEmptyOff] = useState(false);
+  const [moving, setMoving] = useState(false);
   const [filter, setFilter] = useState('');
   const [open, setOpen] = useState<number | null>(null);
   const [contents, setContents] = useState<any[] | null>(null);
@@ -164,6 +167,26 @@ function Locations({ triggerToast, onOpenItem, items = [] }: { triggerToast: Toa
       triggerToast(bulkCategory.trim() ? `${r.updated} ${r.updated === 1 ? 'location' : 'locations'} put in ${bulkCategory.trim()}.` : `Category taken off ${r.updated} ${r.updated === 1 ? 'location' : 'locations'}.`);
       setPicked(new Set()); setBulkCategory(''); await load();
     } catch (e: any) { triggerToast(e.message, 'ERROR'); }
+  };
+  // Everything in the selected locations, moved to one location (made if it's a new code).
+  const moveStockTo = async () => {
+    const to = moveTo.trim().toUpperCase().replace(/\s+/g, '-');
+    if (!to) { triggerToast('Type or choose the location to move the stock to.', 'ERROR'); return; }
+    const chosen = (data?.locations ?? []).filter((l) => picked.has(l.id) && l.code.toUpperCase() !== to);
+    const units = chosen.reduce((sum, l) => sum + (Number(l.units) || 0), 0);
+    const exists = (data?.locations ?? []).some((l) => l.code.toUpperCase() === to);
+    if (!chosen.length) { triggerToast(`The stock is already in ${to}.`, 'ERROR'); return; }
+    if (!(await confirmDialog({
+      title: 'Move stock',
+      message: `Move everything in ${chosen.length === 1 ? chosen[0].code : `${chosen.length} locations`} (${fmtNumber(units)} units) to ${to}?${exists ? '' : ` There is no location ${to} yet: it will be made.`} Lots are kept; stock totals don't change.${emptyOff ? ' The emptied locations are made inactive.' : ''}`,
+      confirmLabel: `Move to ${to}`,
+    }))) return;
+    setMoving(true);
+    try {
+      const r = await api('/api/stock-locations/move-contents', { method: 'POST', body: JSON.stringify({ ids: chosen.map((l) => l.id), to, deactivate: emptyOff }) });
+      triggerToast(`Moved ${fmtNumber(r.units)} units of ${r.items} ${r.items === 1 ? 'item' : 'items'} from ${r.locations} ${r.locations === 1 ? 'location' : 'locations'} to ${r.to}${r.created ? ' (new location)' : ''}.`);
+      setPicked(new Set()); setMoveTo(''); setEmptyOff(false); await load();
+    } catch (e: any) { triggerToast(e.message, 'ERROR'); } finally { setMoving(false); }
   };
   const togglePick = (ids: number[], on: boolean) => setPicked((p) => { const n = new Set(p); ids.forEach((id) => (on ? n.add(id) : n.delete(id))); return n; });
   useEffect(() => { void load(); }, [load]);
@@ -221,6 +244,7 @@ function Locations({ triggerToast, onOpenItem, items = [] }: { triggerToast: Toa
         </div>
       )}
       <datalist id="location-category-options">{categories.map((cat) => <option key={cat} value={cat} />)}</datalist>
+      <datalist id="move-to-options">{(data?.locations ?? []).filter((l) => !picked.has(l.id)).map((l) => <option key={l.id} value={l.code}>{l.name ?? ''}</option>)}</datalist>
       {data.locations.length === 0 ? <p className="text-xs text-on-surface-variant italic">No locations yet.</p> : (<>
         <div className="flex flex-wrap items-center gap-sm">
           <input className={`${input} w-56`} value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Find a location" aria-label="Find a location" />
@@ -240,6 +264,13 @@ function Locations({ triggerToast, onOpenItem, items = [] }: { triggerToast: Toa
             <span className="font-bold">{picked.size} selected</span>
             <input className={`${input} w-56`} list="location-category-options" value={bulkCategory} onChange={(e) => setBulkCategory(e.target.value)} placeholder="Category, e.g. Reel racks" aria-label="Category for the selected locations" />
             <PrimaryButton type="button" onClick={() => void setCategory()}>{bulkCategory.trim() ? 'Set category' : 'Clear category'}</PrimaryButton>
+            {canChange('/api/stock-locations/move-contents') && (
+              <span className="inline-flex flex-wrap items-center gap-sm pl-sm border-l border-primary/30">
+                <input className={`${input} w-48 font-mono uppercase`} list="move-to-options" value={moveTo} onChange={(e) => setMoveTo(e.target.value)} placeholder="Move stock to…" aria-label="Move the stock in the selected locations to" />
+                <label className="inline-flex items-center gap-1 text-outline"><input type="checkbox" checked={emptyOff} onChange={(e) => setEmptyOff(e.target.checked)} />Make emptied ones inactive</label>
+                <PrimaryButton type="button" disabled={moving || !moveTo.trim()} onClick={() => void moveStockTo()}>{moving ? 'Moving…' : 'Move stock'}</PrimaryButton>
+              </span>
+            )}
             <SecondaryButton type="button" onClick={() => setPicked(new Set())}>Cancel</SecondaryButton>
           </div>
         )}

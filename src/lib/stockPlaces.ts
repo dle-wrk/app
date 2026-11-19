@@ -185,6 +185,40 @@ export async function moveStock(db: Db, serial: string, m: { qty: number; fromBi
     [serial, m.fromBinId, m.toLocationId ?? fromLocation, lot, qty, m.reason ?? (m.fromBinId === null ? 'put away' : 'moved'), m.reference ?? null, m.by ?? null]);
 }
 
+/**
+ * Moves every item in the given locations to one location, in the caller's
+ * transaction, keeping each lot and when it came in. The target is made if
+ * no location has that code (active again if it was inactive). Each lot
+ * moved is logged as a "moved" place change; stock totals don't change.
+ */
+export async function moveContents(client: Db, ids: number[], toCode: string, deactivate: boolean, who: string) {
+  let { rows: [target] } = await client.query(`SELECT id, code, active FROM stock_locations WHERE upper(code) = upper($1)`, [toCode]);
+  let created = false;
+  if (!target) {
+    ({ rows: [target] } = await client.query(`INSERT INTO stock_locations (code) VALUES ($1) RETURNING id, code, active`, [toCode]));
+    created = true;
+  } else if (!target.active) await client.query(`UPDATE stock_locations SET active = true WHERE id = $1`, [target.id]);
+  const from = ids.filter((id) => id !== target.id);
+  if (!from.length) throw Object.assign(new Error(`The stock is already in ${target.code}.`), { status: 400 });
+  const { rows: locs } = await client.query(`SELECT id, code FROM stock_locations WHERE id = ANY($1::int[])`, [from]);
+  if (locs.length !== from.length) throw Object.assign(new Error('A chosen location no longer exists. Reload and try again.'), { status: 409 });
+  const codeOf = new Map(locs.map((l: any) => [l.id, l.code as string]));
+  const { rows: bins } = await client.query(
+    `SELECT id, serial_number, qty, location_id FROM stock_bins WHERE location_id = ANY($1::int[]) AND qty > 0 ORDER BY serial_number, id`, [from]);
+  // Items locked in one order, so two moves at once can't wait on each other.
+  const serials = [...new Set(bins.map((b: any) => b.serial_number as string))];
+  if (serials.length) await client.query(`SELECT 1 FROM inventory WHERE serial_number = ANY($1::text[]) ORDER BY serial_number FOR UPDATE`, [serials]);
+  let units = 0;
+  for (const b of bins) {
+    await moveStock(client, b.serial_number, { qty: Number(b.qty), fromBinId: b.id, toLocationId: target.id, reason: 'moved', reference: `Moved from ${codeOf.get(b.location_id)} to ${target.code}`, by: who });
+    units += Number(b.qty) || 0;
+  }
+  if (deactivate) await client.query(`UPDATE stock_locations SET active = false WHERE id = ANY($1::int[])`, [from]);
+  await client.query(`INSERT INTO user_activity_logs (user_email, action, entity_type, entity_id, details, status) VALUES ((SELECT email FROM users WHERE email = $1), 'MOVE_LOCATION_CONTENTS', 'StockLocation', $2, $3, 'SUCCESS')`,
+    [who, target.code, JSON.stringify({ from: locs.map((l: any) => l.code), to: target.code, created, items: serials.length, units, deactivated: deactivate, by: who })]);
+  return { to: target.code as string, created, locations: from.length, items: serials.length, lots: bins.length, units, deactivated: deactivate ? from.length : 0 };
+}
+
 /** Counts an item's stock in a location and puts it away there, in the caller's transaction (see putHerePlan). */
 export async function putItemHere(client: Db, locationId: number, serial: string, counted: number, rest: 'elsewhere' | 'missing', who: string) {
   const { rows: [loc] } = await client.query(`SELECT id, code FROM stock_locations WHERE id = $1`, [locationId]);
@@ -301,6 +335,27 @@ export function registerStockPlacesRoutes(app: Express): void {
       const { rowCount } = await query(`UPDATE stock_locations SET category = $2 WHERE id = ANY($1::int[])`, [ids, locationCategory(req.body?.category)]);
       res.json({ ok: true, updated: rowCount });
     } catch (err) { httpError(res, err); }
+  });
+
+  // Move everything in several locations to one other location:
+  // {ids, to: location code (made if it doesn't exist yet), deactivate?: make the emptied locations inactive}.
+  app.post('/api/stock-locations/move-contents', requirePermission('inventory.update'), async (req: any, res) => {
+    const ids = [...new Set((Array.isArray(req.body?.ids) ? req.body.ids : []).map(Number).filter((n: number) => Number.isInteger(n) && n > 0))] as number[];
+    if (!ids.length) return res.status(400).json({ error: 'Choose the locations to move stock out of.' });
+    if (ids.length > 2000) return res.status(400).json({ error: 'Too many locations at once.' });
+    const to = locationCode(req.body?.to);
+    if (!to || to.length > 40) return res.status(400).json({ error: 'Say which location to move the stock to.' });
+    const who = req.user?.email ?? 'unknown';
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const out = await moveContents(client, ids, to, !!req.body?.deactivate, who);
+      await client.query('COMMIT');
+      res.json(out);
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      httpError(res, err);
+    } finally { client.release(); }
   });
 
   // Put an item's stock away here after counting it: {serialNumber, counted, rest: 'elsewhere' | 'missing'}.
