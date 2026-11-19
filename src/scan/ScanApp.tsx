@@ -1,7 +1,7 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ArrowDownToLine, ArrowUpFromLine, Barcode, Boxes, Camera, Check, CheckCircle2, ChevronDown, ClipboardList, Clock, Eye, EyeOff, Link2, Loader2,
-  LogOut, MapPin, Minus, Package, PackagePlus, Plus, ScanLine, Search, Truck, X, XCircle,
+  ArrowUp, LogOut, MapPin, Minus, Package, PackagePlus, Plus, ScanLine, Search, Truck, X, XCircle,
 } from 'lucide-react';
 import {
   api, session, newClientRef, stillDue, SignedOutError,
@@ -101,6 +101,20 @@ const SignIn: React.FC<{ onSignedIn: (u: ScanUser) => void }> = ({ onSignedIn })
 };
 
 type Direction = 'IN' | 'OUT';
+
+/** Scans loaded per page of My scans (more load as the list is scrolled). */
+export const SCANS_PAGE = 20;
+const scannedAt = (m: Move) => new Date(m.capturedAt || m.createdAt).getTime() || 0;
+/**
+ * My scans after a page arrives: the new rows replace the ones with the same
+ * id (their status may have changed), nothing is listed twice, newest first
+ * (as the server sorts them).
+ */
+export function mergeScans(prev: Move[], page: Move[]): Move[] {
+  const byId = new Map(prev.map(m => [m.id, m]));
+  for (const m of page) byId.set(m.id, m);
+  return [...byId.values()].sort((a, b) => scannedAt(b) - scannedAt(a) || b.id - a.id);
+}
 const same = (a: string | null | undefined, b: string | null | undefined) => String(a ?? '').trim().toUpperCase() === String(b ?? '').trim().toUpperCase();
 
 const StatusChip: React.FC<{ move: Move }> = ({ move }) => {
@@ -126,6 +140,11 @@ export const ScanApp: React.FC = () => {
   const [clientRef, setClientRef] = useState(newClientRef);
   const [locations, setLocations] = useState<Location[]>([]);
   const [mine, setMine] = useState<Move[]>([]);
+  // My scans: the newest page is re-read every 15 s; older pages load as the list is scrolled.
+  const [mineTotal, setMineTotal] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [showTop, setShowTop] = useState(false);
+  const moreRef = useRef<HTMLDivElement>(null);
   const [, setTick] = useState(0); // re-draws "2 min ago"
   // A book-in label that isn't in Tracklab: add it as a new item, or link it to an existing one.
   const [unknown, setUnknown] = useState<{ code: string; barcodes: string[]; label: FindResult['label'] } | null>(null);
@@ -146,7 +165,35 @@ export const ScanApp: React.FC = () => {
   }, []);
 
   const loadMine = useCallback(() => {
-    api<{ items: Move[] }>('/api/stock-moves?mine=1&pageSize=15').then(r => setMine(r.items || [])).catch(e => { if (e instanceof SignedOutError) setUser(null); });
+    api<{ items: Move[]; total: number }>(`/api/stock-moves?mine=1&pageSize=${SCANS_PAGE}`)
+      .then(r => { setMine(prev => mergeScans(prev, r.items || [])); setMineTotal(r.total || 0); })
+      .catch(e => { if (e instanceof SignedOutError) setUser(null); });
+  }, []);
+  // The next page of older scans. New scans arriving meanwhile only shift rows already loaded onto
+  // the next page, and those are merged by id, so nothing is skipped or listed twice.
+  const loadMore = useCallback(async () => {
+    if (loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const page = Math.floor(mine.length / SCANS_PAGE) + 1;
+      const r = await api<{ items: Move[]; total: number }>(`/api/stock-moves?mine=1&pageSize=${SCANS_PAGE}&page=${page}`);
+      setMine(prev => mergeScans(prev, r.items || []));
+      setMineTotal(r.total || 0);
+    } catch (e) { if (e instanceof SignedOutError) setUser(null); } finally { setLoadingMore(false); }
+  }, [loadingMore, mine.length]);
+  const hasMore = mine.length < mineTotal;
+  // Older scans load when the end of the list comes into view.
+  useEffect(() => {
+    const el = moreRef.current;
+    if (!el || !hasMore || typeof IntersectionObserver === 'undefined') return;
+    const io = new IntersectionObserver((es) => { if (es.some(e => e.isIntersecting)) void loadMore(); }, { rootMargin: '300px 0px' });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [hasMore, loadMore]);
+  useEffect(() => {
+    const on = () => setShowTop(window.scrollY > 900);
+    window.addEventListener('scroll', on, { passive: true });
+    return () => window.removeEventListener('scroll', on);
   }, []);
 
   useEffect(() => {
@@ -339,7 +386,7 @@ export const ScanApp: React.FC = () => {
   const signOut = async () => {
     await api('/api/session/logout', { method: 'POST', body: {} }).catch(() => {});
     session.clear();
-    setUser(null); reset(); setMine([]); setPo(null); setKit(null); setCounting(false); setPicking(null);
+    setUser(null); reset(); setMine([]); setMineTotal(0); setPo(null); setKit(null); setCounting(false); setPicking(null);
   };
 
   if (!user) return <SignIn onSignedIn={(u) => { setUser(u); setNotice(null); }} />;
@@ -628,6 +675,7 @@ export const ScanApp: React.FC = () => {
           <div className="flex items-center gap-2 mb-2.5" data-no-mobile-stack>
             <h2 className="text-sm font-black">My scans</h2>
             {pending > 0 && <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-primary/15 text-primary">{pending} waiting</span>}
+            {mineTotal > 0 && <span className="ml-auto text-[11px] text-on-surface-variant">{mine.length < mineTotal ? `${mine.length} of ${mineTotal}` : `${mineTotal} in all`}</span>}
           </div>
           {mine.length === 0 && (
             <div className="rounded-2xl border border-dashed border-white/10 p-6 text-center">
@@ -657,8 +705,23 @@ export const ScanApp: React.FC = () => {
               </li>
             ))}
           </ul>
+          {hasMore ? (
+            <div ref={moreRef} className="pt-3">
+              <button type="button" onClick={() => void loadMore()} disabled={loadingMore} className="w-full rounded-xl border border-white/10 py-3 text-sm font-bold text-on-surface-variant inline-flex items-center justify-center gap-2 disabled:opacity-60">
+                {loadingMore ? <><Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />Loading older scans…</> : `Show older scans (${mineTotal - mine.length} more)`}
+              </button>
+            </div>
+          ) : mine.length > SCANS_PAGE ? <p className="pt-3 text-center text-xs text-on-surface-variant">That's all your scans.</p> : null}
         </section>}
       </main>
+
+      {showTop && (
+        <button type="button" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} aria-label="Back to top"
+          className="fixed right-4 z-30 inline-flex items-center gap-1.5 rounded-full bg-primary text-black font-bold text-sm px-4 py-2.5 shadow-lg shadow-black/40"
+          style={{ bottom: 'calc(1rem + env(safe-area-inset-bottom))' }}>
+          <ArrowUp className="w-4 h-4" aria-hidden="true" />Top
+        </button>
+      )}
 
       {camera && (
         <CodeScanner
