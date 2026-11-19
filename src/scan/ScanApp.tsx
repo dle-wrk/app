@@ -21,7 +21,7 @@ import { TONE, big, card, field, label } from './ui';
 // against one of its lines, and a label for something not on the order is
 // refused), Pick a kit (each scan books out a code from the kit's pick list;
 // a wrong part is refused before anything is sent), and Count stock
-// (./CountJob: fills in a stock count, posted on the website).
+// (./CountJob: scan an item, correct the quantity at each place; saved at once, no approval).
 //
 // Layout notes: widths are written out (max-w-[28rem]) because this
 // stylesheet's "md" is a spacing size, not a width. Rows that put text and a

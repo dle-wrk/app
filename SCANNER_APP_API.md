@@ -295,10 +295,12 @@ GET /api/stock-moves/kits/:id                 -> { id, name, buildQty, project,
 - Picking: `direction: "OUT"` with `kitId`. Refused (400) when the item isn't on the kit's pick list.
 - With either, an empty `reference` becomes the PO number / "Kit <name>". A scan in the lists carries
   `po: { id, number, itemId } | null` and `kit: { id, name } | null`.
-- Counting uses the website's stock count routes: `GET /api/stock-counts` (open ones have
-  `status: "OPEN"`), `POST /api/stock-counts { scope: "location", locationId }`,
-  `GET /api/stock-counts/:id`, `PUT /api/stock-counts/:id/lines { lines: [{ id, counted }] }`,
-  `POST /api/stock-counts/:id/lines { serialNumber, locationId? }`. Posting stays on the website.
+- Counting changes stock at once (no approval). `GET /api/inventory/:serial/places` gives the item's
+  places (`bins: [{ id, location_id, location_code, lot, date_code, qty }]`, `unplaced`); send what
+  changed to `POST /api/stock-counts/quick { serialNumber, counts: [{ binId, counted } |
+  { binId: null, locationId: null, counted } (no location) | { locationId, counted } (found elsewhere)] }`
+  -> `{ number, stock, change, ... }`. It is posted as a stock count of that item; 409 when a place
+  has moved since it was read (read the places again).
 
 ### Tracklab's own labels
 

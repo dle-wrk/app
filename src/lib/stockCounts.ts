@@ -22,6 +22,7 @@ import type { Express } from 'express';
 import { pool, query, exec } from './db';
 import { requirePermission } from './authRoutes';
 import { nextDocNumber } from './bookkeeping-db';
+import { bumpDataVersion } from './dataVersion';
 
 export async function ensureStockCountsSchema(run: (sql: string) => Promise<void> = exec): Promise<void> {
   await run(`CREATE SEQUENCE IF NOT EXISTS stock_count_seq`);
@@ -178,7 +179,82 @@ export async function postCount(client: Db, id: number, who: string) {
   return { number: count.number as string, linesCounted: lines.length, placesChanged, items: summary };
 }
 
+// ---------------------------------------------------------------------------
+// Counting one item on the phone: what is at each of its places, posted at once.
+
+export interface QuickEntry { binId: number | null; locationId: number | null; lot: string | null; counted: number }
+
+/** Checks a phone count: the item, and for each place counted, its quantity. Throws a 400 saying what is wrong. */
+export function parseQuickCount(body: any): { serial: string; entries: QuickEntry[] } {
+  const serial = String(body?.serialNumber ?? '').trim();
+  if (!serial) throw fail(400, 'Scan the item to count.');
+  const raw = Array.isArray(body?.counts) ? body.counts : [];
+  if (!raw.length) throw fail(400, 'Enter how many there are.');
+  if (raw.length > 200) throw fail(400, 'Too many places at once.');
+  const id = (v: unknown) => (v === null || v === undefined || v === '' ? null : Number(v));
+  const entries = raw.map((e: any): QuickEntry => {
+    const counted = Number(e?.counted);
+    if (!Number.isInteger(counted) || counted < 0 || counted > 10_000_000) throw fail(400, 'A count is a whole number of 0 or more.');
+    const binId = id(e?.binId), locationId = id(e?.locationId);
+    if ((binId !== null && !(Number.isInteger(binId) && binId > 0)) || (locationId !== null && !(Number.isInteger(locationId) && locationId > 0))) throw fail(400, 'That place is not valid.');
+    return { binId, locationId: binId !== null ? null : locationId, lot: binId !== null ? null : String(e?.lot ?? '').trim().slice(0, 80) || null, counted };
+  });
+  const keys = entries.map((e: QuickEntry) => (e.binId !== null ? `b${e.binId}` : `l${e.locationId ?? ''}|${(e.lot ?? '').toUpperCase()}`));
+  if (new Set(keys).size !== keys.length) throw fail(400, 'The same place is counted twice.');
+  return { serial, entries };
+}
+
+/**
+ * Counts one item and posts it straight away, in the caller's transaction: a
+ * stock count of that item (so it has a number and shows under Counts), its
+ * places set to what was counted, the difference booked as STOCK-COUNT.
+ * Places not sent are left as they are.
+ */
+export async function quickCount(client: Db, serialIn: string, entries: QuickEntry[], who: string) {
+  const { rows: [item] } = await client.query(`SELECT serial_number FROM inventory WHERE upper(serial_number) = upper($1) AND deleted IS NOT TRUE FOR UPDATE`, [serialIn]);
+  if (!item) throw fail(404, `${serialIn} isn't in inventory.`);
+  const serial = item.serial_number as string;
+  const { id } = await createCount(client, { scope: 'items', locationId: null, prefix: null, notes: 'Counted on the phone', by: who, serials: [serial] });
+  const { rows: lines } = await client.query(`SELECT id, bin_id, location_id, lot FROM stock_count_lines WHERE count_id = $1`, [id]);
+  for (const e of entries) {
+    let line = e.binId !== null ? lines.find((l: any) => l.bin_id === e.binId)
+      : lines.find((l: any) => l.bin_id === null && (l.location_id ?? null) === e.locationId && String(l.lot ?? '').toUpperCase() === String(e.lot ?? '').toUpperCase());
+    if (!line && e.binId !== null) throw fail(409, `${serial} has moved since it was scanned. Scan it again.`);
+    if (!line) {
+      if (e.locationId !== null) {
+        const { rows: [loc] } = await client.query(`SELECT id FROM stock_locations WHERE id = $1`, [e.locationId]);
+        if (!loc) throw fail(400, 'That location no longer exists.');
+      }
+      ({ rows: [line] } = await client.query(
+        `INSERT INTO stock_count_lines (count_id, serial_number, location_id, lot, expected, added) VALUES ($1, $2, $3, $4, 0, true) RETURNING id`,
+        [id, serial, e.locationId, e.lot]));
+    }
+    await client.query(`UPDATE stock_count_lines SET counted = $2 WHERE id = $1`, [line.id, e.counted]);
+  }
+  const posted = await postCount(client, id, who);
+  const { rows: [after] } = await client.query(`SELECT stock FROM inventory WHERE serial_number = $1`, [serial]);
+  return { ...posted, id, serialNumber: serial, stock: Number(after?.stock) || 0, change: posted.items.reduce((s, i) => s + i.change, 0) };
+}
+
 export function registerStockCountsRoutes(app: Express): void {
+  // The phone's count: one item, posted at once (no approval step).
+  app.post('/api/stock-counts/quick', requirePermission('inventory.update'), async (req: any, res) => {
+    let parsed;
+    try { parsed = parseQuickCount(req.body); } catch (err) { return httpError(res, err); }
+    const who = req.user?.email ?? 'unknown';
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await quickCount(client, parsed.serial, parsed.entries, who);
+      await client.query('COMMIT');
+      if (result.change) void bumpDataVersion('inventory'); // open web tabs re-read stock
+      res.json(result);
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      httpError(res, err);
+    } finally { client.release(); }
+  });
+
   app.get('/api/stock-counts', async (_req, res) => {
     try {
       const { rows } = await query(`SELECT c.*, l.code AS location_code,
