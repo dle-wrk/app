@@ -103,6 +103,25 @@ const SignIn: React.FC<{ onSignedIn: (u: ScanUser) => void }> = ({ onSignedIn })
 
 type Direction = 'IN' | 'OUT';
 
+/** Whether addEventListener takes an options object (older browsers read it as useCapture = true). */
+function supportsPassive(): boolean {
+  let yes = false;
+  try {
+    const opts = Object.defineProperty({}, 'passive', { get() { yes = true; return true; } });
+    window.addEventListener('test-passive', () => {}, opts as any);
+    window.removeEventListener('test-passive', () => {}, opts as any);
+  } catch { /* old browser */ }
+  return yes;
+}
+
+/** Back to the top: smoothly where the browser can, a plain jump on older ones. */
+export function toTop(): void {
+  try {
+    if ('scrollBehavior' in document.documentElement.style) { window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
+  } catch { /* fall through */ }
+  window.scrollTo(0, 0);
+}
+
 /** Scans loaded per page of My scans (more load as the list is scrolled). */
 export const SCANS_PAGE = 20;
 const scannedAt = (m: Move) => new Date(m.capturedAt || m.createdAt).getTime() || 0;
@@ -175,16 +194,18 @@ export const ScanApp: React.FC = () => {
   }, []);
   // The next page of older scans. New scans arriving meanwhile only shift rows already loaded onto
   // the next page, and those are merged by id, so nothing is skipped or listed twice.
+  const loadingMoreRef = useRef(false); // scroll events come faster than state updates
   const loadMore = useCallback(async () => {
-    if (loadingMore) return;
+    if (loadingMoreRef.current) return;
+    loadingMoreRef.current = true;
     setLoadingMore(true);
     try {
       const page = Math.floor(mine.length / SCANS_PAGE) + 1;
       const r = await api<{ items: Move[]; total: number }>(`/api/stock-moves?mine=1&pageSize=${SCANS_PAGE}&page=${page}`);
       setMine(prev => mergeScans(prev, r.items || []));
       setMineTotal(r.total || 0);
-    } catch (e) { if (e instanceof SignedOutError) setUser(null); } finally { setLoadingMore(false); }
-  }, [loadingMore, mine.length]);
+    } catch (e) { if (e instanceof SignedOutError) setUser(null); } finally { loadingMoreRef.current = false; setLoadingMore(false); }
+  }, [mine.length]);
   const hasMore = mine.length < mineTotal;
   // Older scans load when the end of the list comes into view.
   useEffect(() => {
@@ -194,11 +215,19 @@ export const ScanApp: React.FC = () => {
     io.observe(el);
     return () => io.disconnect();
   }, [hasMore, loadMore]);
+  // The scroll itself, read the plain way older phones' browsers understand: the Top button,
+  // and (where IntersectionObserver is missing, or the list is short of the screen) loading
+  // older scans near the bottom.
   useEffect(() => {
-    const on = () => setShowTop(window.scrollY > 900);
-    window.addEventListener('scroll', on, { passive: true });
-    return () => window.removeEventListener('scroll', on);
-  }, []);
+    const on = () => {
+      const y = window.pageYOffset || document.documentElement.scrollTop || document.body.scrollTop || 0;
+      setShowTop(y > 900);
+      const end = (document.documentElement.scrollHeight || document.body.scrollHeight) - (window.innerHeight || document.documentElement.clientHeight);
+      if (hasMore && y >= end - 400) void loadMore();
+    };
+    window.addEventListener('scroll', on, supportsPassive() ? { passive: true } : false);
+    return () => window.removeEventListener('scroll', on, false);
+  }, [hasMore, loadMore]);
 
   useEffect(() => {
     if (!user) return;
@@ -733,7 +762,7 @@ export const ScanApp: React.FC = () => {
       </main>
 
       {showTop && (
-        <button type="button" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} aria-label="Back to top"
+        <button type="button" onClick={toTop} aria-label="Back to top"
           className="fixed right-4 z-30 inline-flex items-center gap-1.5 rounded-full bg-primary text-black font-bold text-sm px-4 py-2.5 shadow-lg shadow-black/40"
           style={{ bottom: 'calc(1rem + env(safe-area-inset-bottom))' }}>
           <ArrowUp className="w-4 h-4" aria-hidden="true" />Top
