@@ -2,7 +2,6 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { isDnfCode } from '../lib/dnf';
 import { searchFields, searchWords } from '../lib/itemSearch';
 import { canChange } from '../lib/changeAccess';
-import { useEscapeKey } from '../lib/useEscapeKey';
 import { Item, Transaction, Project, BOMItem } from '../types';
 import { mapDbRowsToItems } from '../lib/mapDbItem';
 import { fmtNumber } from '../lib/formatMoney';
@@ -13,6 +12,7 @@ import { colorToCssBackground, KitAllocationDialog, type MatchCandidate } from '
 import { allocateAllByTier, otherLinesParts, withPickedElsewhere } from '../lib/kitTierFill';
 import { mergeBomLines } from '../lib/mergeBomLines';
 import { confirmDialog } from '../lib/confirmDialog';
+import { BomPickPanel, scannedBomLines, type PickView } from './BomPickPanel';
 import { 
   ClipboardCheck, 
   Layers, 
@@ -285,10 +285,59 @@ export default function BOMManager({
     }
   };
 
-  const [showBookOutConfirm, setShowBookOutConfirm] = useState(false);
-  useEscapeKey(() => setShowBookOutConfirm(false), showBookOutConfirm);
+  // ---- Booking the BOM out by scanning (BomPickPanel, src/lib/bomPicks.ts)
+  // "Book Out Entire BOM" starts a pick: the phone scans each item, lines go
+  // green here, and a final check books out what was scanned.
+  const [pick, setPick] = useState<PickView | null>(null);
+  const [pickPanel, setPickPanel] = useState(false);
+  const scannedLines = useMemo(() => scannedBomLines(pick), [pick]);
+  // Items already scanned for a green line: not offered as another line's alternate.
+  const scannedCodes = useMemo(() => (pick?.status === 'OPEN' ? pick.lines.filter(l => scannedLines.has(l.bomCode)).map(l => l.code) : []), [pick, scannedLines]);
+  const pickRequestLines = () => auditResults.filter(r => !r.isVoided).map(r => ({ bomCode: r.line.stockCode, need: r.requiredTotal, picks: r.picks.map(p => ({ code: p.allocatedCode, qty: p.qty })) }));
+  const loadPick = async (id: number): Promise<PickView | null> => {
+    const r = await fetch(`/api/bom-picks/${id}`);
+    return r.ok ? r.json() : null;
+  };
+  // A project's open pick, picked up again after a reload: its board count and allocations come back too.
+  useEffect(() => {
+    let gone = false;
+    setPick(null); setPickPanel(false);
+    fetch(`/api/bom-picks?status=OPEN&projectId=${selectedProjectId}`).then(r => (r.ok ? r.json() : { items: [] })).then(async (d) => {
+      const first = d.items?.[0];
+      const full = first ? await loadPick(first.id) : null;
+      if (gone || !full) return;
+      setPick(full);
+      setPcbQty(full.buildQty);
+      const restored: Record<string, Array<{ allocatedCode: string; qty: number }>> = {};
+      for (const l of full.lines) if (l.code !== l.bomCode || l.itemsForBomLine > 1) (restored[l.bomCode] ??= []).push({ allocatedCode: l.code, qty: l.need });
+      setAllocations(restored);
+    }).catch(() => {});
+    return () => { gone = true; };
+  }, [selectedProjectId]);
+  // Live: the lines turn green while the phone scans.
+  useEffect(() => {
+    if (!pick || pick.status !== 'OPEN') return;
+    const t = window.setInterval(() => { if (!document.hidden) void loadPick(pick.id).then(p => { if (p) setPick(p); }); }, 3000);
+    return () => window.clearInterval(t);
+  }, [pick?.id, pick?.status]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Allocations or the board count changed while scanning: the lines not scanned yet follow.
+  const sentKey = React.useRef('');
+  useEffect(() => {
+    if (!pick || pick.status !== 'OPEN') { sentKey.current = ''; return; }
+    const lines = pickRequestLines();
+    const key = JSON.stringify([pcbQty, lines]);
+    if (!sentKey.current) { sentKey.current = key; return; }
+    if (key === sentKey.current) return;
+    const t = window.setTimeout(() => {
+      sentKey.current = key;
+      fetch(`/api/bom-picks/${pick.id}/lines`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ buildQty: pcbQty, lines }) })
+        .then(async r => { const d = await r.json(); if (r.ok) setPick(d); else triggerToast(d.error || 'Could not update the BOM pick', 'ERROR'); })
+        .catch(() => {});
+    }, 600);
+    return () => window.clearTimeout(t);
+  }, [allocations, pcbQty, pick?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const requestBookOut = () => {
+  const requestBookOut = async () => {
     if (pcbQty <= 0) {
       triggerToast('Please enter a valid PCB quantity of 1 or more.', 'ERROR');
       return;
@@ -297,60 +346,48 @@ export default function BOMManager({
       triggerToast('No BOM lines to book out for this project.', 'ERROR');
       return;
     }
-    setShowBookOutConfirm(true);
+    if (pick?.status === 'OPEN') { setPickPanel(true); return; }
+    try {
+      const r = await fetch('/api/bom-picks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId: selectedProjectId, buildQty: pcbQty, lines: pickRequestLines() }) });
+      const d = await r.json();
+      if (r.status === 409 && d.id) { const p = await loadPick(d.id); if (p) { setPick(p); setPickPanel(true); } return; }
+      if (!r.ok) throw new Error(d.error || 'Could not start the BOM pick');
+      sentKey.current = '';
+      setPick(d); setPickPanel(true);
+      triggerToast('Waiting for the scanner: open /scan on the phone and tap SCAN BOM ITEMS.', 'INFO');
+    } catch (err: any) { triggerToast(err.message, 'ERROR'); }
   };
 
-  // Handles booking out the entire BOM using the unified kit-booking API
-  const handleBookOutEntireBOM = async () => {
-    setShowBookOutConfirm(false);
-    try {
-      // Use the unified kit-booking API for atomic execution
-      const res = await fetch('/api/kit-booking/execute', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        // Each line's picks are taken from their own reels; voided lines are left out.
-        body: JSON.stringify({
-          projectId: selectedProjectId,
-          buildQty: pcbQty,
-          allocations,
-          dnf: auditResults.filter(r => r.isVoided).map(r => r.line.stockCode),
-        })
-      });
+  const cancelPick = async () => {
+    if (!pick) return;
+    if (!(await confirmDialog({ title: 'Cancel the BOM pick', message: `Stop scanning ${activeProject?.projectName || 'this BOM'}? ${pick.lines.some(l => l.picked > 0) ? 'What was scanned is forgotten; ' : ''}nothing is booked out.`, confirmLabel: 'Cancel the pick', destructive: true }))) return;
+    const r = await fetch(`/api/bom-picks/${pick.id}/cancel`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { triggerToast(d.error || 'Could not cancel it', 'ERROR'); return; }
+    setPick(null); setPickPanel(false);
+    triggerToast('BOM pick cancelled. Nothing was booked out.', 'INFO');
+  };
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to process kit booking');
-      }
-
-      // Refresh items and transactions from API to ensure frontend sync
-      const [itemsRes, trxRes] = await Promise.all([
-        fetch('/api/items'),
-        fetch('/api/transactions')
-      ]);
-
-      const [newItems, newTrx] = await Promise.all([
-        itemsRes.json(),
-        trxRes.json()
-      ]);
-
-      // Map backend inventory to the frontend Item interface via the shared
-      // mapper — a partial mapping here strips fields (value/footprint/weblinks)
-      // that other views rely on for spec matching.
-      const mappedItems: Item[] = mapDbRowsToItems(newItems);
-
-      if (mappedItems.length > 0) setItems(mappedItems);
-      setTransactions(newTrx);
-      setAllocations({});
-      triggerToast(`Unified Workflow: Successfully booked out stock for ${pcbQty} x ${activeProject?.projectName}.`);
-    } catch (err: any) {
-      console.error('Failed to persist BOM book-out:', err);
-      triggerToast(`Booking failed: ${err.message}`, "ERROR");
-    }
+  const bookOutPick = async () => {
+    if (!pick) return;
+    const r = await fetch(`/api/bom-picks/${pick.id}/book-out`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { triggerToast(`Booking failed: ${d.error || r.statusText}`, 'ERROR'); const p = await loadPick(pick.id); if (p) setPick(p); return; }
+    const [newItems, newTrx] = await Promise.all([fetch('/api/items').then(x => x.json()), fetch('/api/transactions').then(x => x.json())]);
+    const mappedItems: Item[] = mapDbRowsToItems(newItems);
+    if (mappedItems.length > 0) setItems(mappedItems);
+    setTransactions(newTrx);
+    setAllocations({}); setPick(null); setPickPanel(false);
+    triggerToast(`Booked out ${fmtNumber(d.result?.units ?? 0)} units of ${d.result?.items?.length ?? 0} items for ${pcbQty} × ${activeProject?.projectName}, as scanned.`);
   };
 
   return (
     <div className="p-container-margin space-y-lg max-w-[1600px] mx-auto w-full select-none">
       
+      {pick && pickPanel && pick.status === 'OPEN' && (
+        <BomPickPanel pick={pick} onClose={() => setPickPanel(false)} onCancelPick={() => void cancelPick()} onBookOut={bookOutPick} />
+      )}
+
       {allocatingCode && (() => {
         const row = auditResults.find(r => r.line.stockCode === allocatingCode);
         if (!row) return null;
@@ -361,7 +398,7 @@ export default function BOMManager({
             existing={allocations[allocatingCode] || []}
             autoResolved={allocatingCode}
             reservations={withPickedElsewhere(reservedByPart, allocations, allocatingCode)}
-            excludeCodes={[...otherLinesParts(projectBOM.map(l => l.stockCode), allocatingCode)]}
+            excludeCodes={[...otherLinesParts(projectBOM.map(l => l.stockCode), allocatingCode), ...scannedCodes]}
             onClose={() => setAllocatingCode(null)}
             onSave={(picks) => {
               setAllocations(prev => {
@@ -519,8 +556,15 @@ export default function BOMManager({
               </div>
             )}
 
+            {canChange('/api/kit-booking/execute') && pick?.status === 'OPEN' && (
+              <div className="rounded-lg border border-primary/40 bg-primary/10 p-sm text-[11px] text-on-surface space-y-1" data-testid="bom-pick-status">
+                <div className="flex items-center justify-between font-bold"><span>Scanning: {pick.done} of {pick.total} items picked</span><span className="font-mono">{pick.total ? Math.round((pick.done / pick.total) * 100) : 0}%</span></div>
+                <div className="h-1.5 rounded-full bg-surface-container-highest overflow-hidden"><div className="h-full bg-green-500 transition-all" style={{ width: `${pick.total ? (pick.done / pick.total) * 100 : 0}%` }} /></div>
+                <div className="text-outline">{pick.picker ? `${pick.picker} is scanning` : 'Waiting for a phone: /scan > SCAN BOM ITEMS'}{pick.complete ? ' · ready for the final check' : ''}</div>
+              </div>
+            )}
             {canChange('/api/kit-booking/execute') && <button
-              onClick={requestBookOut}
+              onClick={() => void requestBookOut()}
               className={`w-full font-bold px-lg py-sm rounded-lg flex items-center justify-center gap-xs shadow text-xs uppercase tracking-wider transition-all duration-150 ${
                 totalShortagesCount > 0 
                   ? 'bg-surface-container-highest hover:brightness-110 border border-outline-variant text-on-surface'
@@ -528,7 +572,7 @@ export default function BOMManager({
               }`}
             >
               <ShoppingBag className="w-3.5 h-3.5" />
-              Book Out Entire BOM ({auditResults.length} Lines)
+              {pick?.status === 'OPEN' ? (pick.complete ? 'Final check & book out' : 'Show the scan progress') : `Book Out Entire BOM (${auditResults.length} Lines)`}
             </button>}
           </div>
         </div>
@@ -590,10 +634,15 @@ export default function BOMManager({
                   {displayedAudit.map(({ line, isVoided, picks, picked, resolvedCode, inventoryItem, requiredTotal, currentStock, remainingStock, isShortage, isPrimaryReplenished, shortageAmount }) => {
                     // Check if alternates are available for substitution
                     const altOptions = getAlternatesFor(line.stockCode);
+                    // While the BOM is being scanned: green once every item for this line is in.
+                    const scanned = scannedLines.has(line.stockCode);
+                    const scanLines = pick?.status === 'OPEN' ? pick.lines.filter(l => l.bomCode === line.stockCode) : [];
+                    const scanPart = !scanned && scanLines.some(l => l.picked > 0);
 
                     return (
-                      <tr key={line.id} className={`hover:bg-surface-variant/20 transition-all ${
-                        isVoided ? 'opacity-60 bg-surface-container-highest/20'
+                      <tr key={line.id} data-scan-state={scanned ? 'done' : scanPart ? 'part' : undefined} className={`hover:bg-surface-variant/20 transition-all ${
+                        scanned ? 'bg-green-500/10'
+                        : isVoided ? 'opacity-60 bg-surface-container-highest/20'
                         : isShortage ? 'bg-red-500/5'
                         : ''
                       }`}>
@@ -708,7 +757,12 @@ export default function BOMManager({
 
                         {/* Status checks */}
                         <td className="px-lg py-3 text-center" data-label="Status">
-                          {isVoided ? (
+                          {scanned ? (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-green-500/20 text-green-400 border border-green-500/30 font-mono" title="Scanned on the phone">
+                              <CheckCircle2 className="w-3 h-3" />
+                              SCANNED
+                            </span>
+                          ) : isVoided ? (
                             <span
                               className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-outline-variant/20 text-outline border border-outline-variant/40 font-mono"
                               title="Voided line — do-not-fit, test placeholder, or zero quantity. Not counted as a shortage."
@@ -733,6 +787,10 @@ export default function BOMManager({
                         <td className="px-lg py-3 text-center" data-label="Allocations">
                           {isVoided ? (
                             <span className="text-[10px] text-outline italic">Not needed</span>
+                          ) : scanned ? (
+                            <span className="text-[10px] text-green-400 font-bold" title="Scanned: its allocation can no longer be changed">
+                              {scanLines.map(l => `${l.code} ×${fmtNumber(l.picked)}`).join(', ')}
+                            </span>
                           ) : (
                             <div className="flex flex-col items-center gap-1">
                               {picks.length > 0 && (
@@ -755,8 +813,9 @@ export default function BOMManager({
                               <span className={`text-[9px] font-mono ${picks.length ? (picked >= requiredTotal ? 'text-green-400' : 'text-red-400') : 'text-[#8c909f]'}`}>
                                 {picks.length
                                   ? `${fmtNumber(picked)}/${fmtNumber(requiredTotal)} from ${picks.length} reel${picks.length === 1 ? '' : 's'}`
-                                  : (() => { const n = getAlternatesFor(line.stockCode).length; return n ? `${n} alternate${n === 1 ? '' : 's'} in stock` : 'Own stock only'; })()}
+                                  : (() => { const n = getAlternatesFor(line.stockCode).filter(a => !scannedCodes.includes(a.partNumber)).length; return n ? `${n} alternate${n === 1 ? '' : 's'} in stock` : 'Own stock only'; })()}
                               </span>
+                              {scanPart && <span className="text-[9px] font-mono text-amber-400">scanning: {scanLines.map(l => `${l.code} ${fmtNumber(l.picked)}/${fmtNumber(l.need)}`).join(', ')}</span>}
                             </div>
                           )}
                         </td>
@@ -770,46 +829,6 @@ export default function BOMManager({
           </div>
         </div>
       </div>
-
-      {showBookOutConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowBookOutConfirm(false)}>
-          {/* Explicit width: max-w-md would resolve to --spacing-md (16px) here. */}
-          <div className="bg-surface-container border border-outline-variant rounded-xl shadow-2xl max-w-[448px] w-full mx-4" onClick={(e) => e.stopPropagation()}>
-            <div className="px-lg py-md border-b border-outline-variant flex items-center gap-xs">
-              <ShoppingBag className="w-4 h-4 text-primary" />
-              <h4 className="font-bold text-sm text-on-surface">Confirm BOM Book-Out</h4>
-            </div>
-            <div className="px-lg py-md text-xs text-on-surface-variant space-y-2">
-              <p>
-                Book out the entire BOM ({auditResults.length} line{auditResults.length === 1 ? '' : 's'}) for{' '}
-                <span className="font-bold text-on-surface">{pcbQty} PCB{pcbQty === 1 ? '' : 's'}</span> of{' '}
-                <span className="font-bold text-primary">{activeProject?.projectName || 'selected project'}</span>?
-              </p>
-              {totalShortagesCount > 0 && (
-                <p className="flex items-start gap-1.5 text-red-400 font-semibold">
-                  <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" />
-                  {totalShortagesCount} line{totalShortagesCount === 1 ? ' has' : 's have'} stock shortages — proceeding will exhaust remaining stock on those lines.
-                </p>
-              )}
-            </div>
-            <div className="px-lg py-md border-t border-outline-variant flex justify-end gap-sm">
-              <button
-                onClick={() => setShowBookOutConfirm(false)}
-                className="px-md py-1.5 rounded-lg text-xs font-bold border border-outline-variant text-on-surface hover:bg-surface-variant/40 transition-all"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleBookOutEntireBOM}
-                className="px-md py-1.5 rounded-lg text-xs font-bold bg-primary text-on-primary hover:brightness-110 active:scale-95 transition-all flex items-center gap-xs"
-              >
-                <ShoppingBag className="w-3 h-3" />
-                Book Out BOM
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

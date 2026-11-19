@@ -14,8 +14,18 @@ const bomItems = [{ id: 'b1', projectId: 1, stockCode: 'RES-033', comment: '', d
 let host: HTMLDivElement;
 let root: Root;
 let calls: Array<{ url: string; body: any }>;
+// A BOM pick as the server returns it (src/lib/bomPicks.ts): RES-033 four reels' worth, RES-041 the rest.
+const pickLine = (id: number, code: string, need: number, picked: number, reel = false) => ({
+  id, bomCode: 'RES-033', code, need, picked, state: picked >= need ? 'done' : picked > 0 ? 'part' : 'todo', itemsForBomLine: 2, reel,
+  item: { name: '10k' }, places: [], scans: picked ? [{ id: id * 10, locationCode: code, lot: null, qty: picked, wholeReel: reel, by: 'Sam' }] : [],
+});
+let pickResponse: any;
+let openPicks: any[];
 beforeEach(() => {
   calls = [];
+  openPicks = [];
+  pickResponse = { id: 7, projectId: 1, projectName: 'TCU06 PCB', buildQty: 1000, status: 'OPEN', createdBy: 'Dylan', picker: 'Sam', pickerSeenAt: new Date().toISOString(),
+    lines: [pickLine(1, 'RES-033', 4752, 4752, true), pickLine(2, 'RES-041', 13248, 20000, true)], done: 2, total: 2, complete: true };
   localStorage.setItem('currentUser', JSON.stringify({ role: 'admin' }));
   setConfirmHandler(async () => true);
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
@@ -26,6 +36,9 @@ beforeEach(() => {
       { serialNumber: 'RES-041', name: '10k', description: '', footprint: '0603', stock: 20000, status: 'ACTIVE', matchTier: 2, matchNote: '' },
     ] });
     if (url === '/api/kit-booking/execute') return ok({ ok: true });
+    if (String(url).startsWith('/api/bom-picks?')) return ok({ items: openPicks });
+    if (url === '/api/bom-picks' || url === '/api/bom-picks/7') return ok(pickResponse);
+    if (url === '/api/bom-picks/7/book-out') return ok({ result: { units: 24752, items: [{ code: 'RES-033', qty: 4752 }, { code: 'RES-041', qty: 20000 }] }, pick: { ...pickResponse, status: 'BOOKED' } });
     if (url === '/api/items') return ok([]);
     if (url === '/api/transactions') return ok([]);
     return ok([]);
@@ -37,7 +50,7 @@ const settle = async () => { for (let i = 0; i < 8; i++) await act(async () => {
 const button = (re: RegExp) => [...host.querySelectorAll('button')].find((b) => re.test(b.textContent ?? '')) as HTMLButtonElement;
 
 describe('Bill of Materials allocations', () => {
-  it('auto-allocates a line across reels by tier for the PCB quantity, and books out those picks', async () => {
+  it('auto-allocates a line across reels by tier, sends those picks to the scanner, and books out what was scanned after the final check', async () => {
     const toast = vi.fn();
     await act(async () => { root.render(<BOMManager items={items} setItems={() => {}} transactions={[]} setTransactions={() => {}} projects={[{ id: 1, projectName: 'TCU06 PCB' } as any]} bomItems={bomItems} triggerToast={toast} />); });
     await act(async () => { button(/^\s*1000\s*$/).click(); });
@@ -52,13 +65,39 @@ describe('Bill of Materials allocations', () => {
     expect(host.textContent).toContain('from 2 reels');
     expect(host.textContent).not.toContain('SHORTAGE');
 
+    // Book Out Entire BOM starts a pick for the phone: nothing is booked out yet.
     await act(async () => { button(/Book out entire BOM/i).click(); });
     await settle();
-    const confirm = [...host.querySelectorAll('button')].filter((b) => /book out|confirm/i.test(b.textContent ?? '')).at(-1)!;
-    await act(async () => { confirm.click(); });
+    expect(calls.find((c) => c.url === '/api/bom-picks')?.body).toEqual({ projectId: 1, buildQty: 1000, lines: [{ bomCode: 'RES-033', need: 18000, picks: [{ code: 'RES-033', qty: 4752 }, { code: 'RES-041', qty: 13248 }] }] });
+    expect(calls.some((c) => c.url === '/api/kit-booking/execute')).toBe(false);
+    const panel = host.querySelector('[role="dialog"]')!;
+    expect(panel.textContent).toContain('SCAN BOM ITEMS');
+    expect(panel.textContent).toContain('Sam is scanning');
+    expect([...host.querySelectorAll('[data-testid="bom-pick-lines"] li')].map((li) => li.getAttribute('data-state'))).toEqual(['done', 'done']);
+
+    // Every line scanned: the final check shows what was scanned, whole reels included, then books it out.
+    await act(async () => { button(/^\s*Final check\s*$/).click(); });
+    expect(host.querySelector('[data-testid="bom-final-check"]')?.textContent).toContain('20,000'.replace(',', '\u00a0'));
+    expect(host.textContent).toContain('RES-041 +6');
+    await act(async () => { button(/Approve & book out/).click(); });
     await settle();
-    const exec = calls.find((c) => c.url === '/api/kit-booking/execute');
-    expect(exec?.body).toEqual({ projectId: 1, buildQty: 1000, allocations: { 'RES-033': [{ allocatedCode: 'RES-033', qty: 4752 }, { allocatedCode: 'RES-041', qty: 13248 }] }, dnf: [] });
+    expect(calls.some((c) => c.url === '/api/bom-picks/7/book-out')).toBe(true);
+    expect(toast).toHaveBeenLastCalledWith(expect.stringContaining('as scanned'));
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('picks up an open pick: a scanned line is green and its allocation can no longer be changed', async () => {
+    openPicks = [{ id: 7 }];
+    pickResponse = { ...pickResponse, lines: [pickLine(1, 'RES-033', 18000, 18000)], done: 1, total: 1 };
+    pickResponse.lines[0].itemsForBomLine = 1;
+    await act(async () => { root.render(<BOMManager items={items} setItems={() => {}} transactions={[]} setTransactions={() => {}} projects={[{ id: 1, projectName: 'TCU06 PCB' } as any]} bomItems={bomItems} triggerToast={() => {}} />); });
+    await settle();
+    const row = host.querySelector('tbody tr')!;
+    expect(row.getAttribute('data-scan-state')).toBe('done');
+    expect(row.textContent).toContain('SCANNED');
+    expect(host.querySelector('[aria-label="Allocate reels for RES-033"]')).toBeNull();
+    expect(host.querySelector('[data-testid="bom-pick-status"]')?.textContent).toContain('1 of 1 items picked');
+    expect(button(/Final check & book out/)).toBeTruthy();
   });
 
   it('shows a part the BOM lists twice as one line, with its quantities added', async () => {

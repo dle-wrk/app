@@ -80,6 +80,22 @@ export interface KitDetail { id: number; name: string; buildQty: number; project
 /** Still to receive on a PO line, or to pick for a kit line, after what is received and waiting. */
 export const stillDue = (total: number, done: number, waiting: number) => Math.max(0, total - done - waiting);
 
+/** A BOM being booked out by scanning (Book Out Entire BOM on the desktop). */
+export interface BomPickSummary { id: number; projectId: number; projectName: string | null; buildQty: number; status: string; createdBy: string | null; createdAt: string; picker: string | null; lines: number; done: number }
+export interface BomPickPlace { binId: number | null; locationCode: string | null; locationName: string | null; lot: string | null; dateCode: string | null; qty: number; available: number }
+export interface BomPickLine {
+  id: number; bomCode: string; code: string; need: number; picked: number; state: 'done' | 'part' | 'todo';
+  itemsForBomLine: number;
+  item: { name: string; description: string | null; makerPartNumber: string | null; stock: number; packaging: string | null } | null;
+  reel: boolean; places: BomPickPlace[];
+  scans: { id: number; binId: number | null; locationCode: string | null; lot: string | null; qty: number; wholeReel: boolean; by: string; at: string }[];
+}
+export interface BomPick {
+  id: number; projectId: number; projectName: string | null; buildQty: number; status: 'OPEN' | 'BOOKED' | 'CANCELLED';
+  createdBy: string | null; picker: string | null; pickerSeenAt: string | null; decidedBy: string | null;
+  lines: BomPickLine[]; done: number; total: number; complete: boolean;
+}
+
 /** A stock count (stock take) and its lines. */
 export interface CountSummary { id: number; number: string; scope: string; status: string; location_code: string | null; lines: number; counted: number; created_at: string }
 export interface CountLine { id: number; serial_number: string; name: string | null; location_id: number | null; location_code: string | null; lot: string | null; date_code: string | null; counted: number | null; added: boolean }

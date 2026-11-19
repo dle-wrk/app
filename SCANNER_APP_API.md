@@ -302,6 +302,17 @@ GET /api/stock-moves/kits/:id                 -> { id, name, buildQty, project,
   -> `{ number, stock, change, ... }`. It is posted as a stock count of that item; 409 when a place
   has moved since it was read (read the places again).
 
+### Scanning a BOM out
+
+`GET /api/bom-picks?status=OPEN` lists the BOMs the desktop sent (Book out entire BOM): `{ items: [{ id,
+projectName, buildQty, lines, done, picker }] }`; poll it to announce new ones. `POST /api/bom-picks/:id/open`
+(shows on the desktop who is scanning) returns the pick: `lines: [{ id, bomCode, code, need, picked,
+state: todo|part|done, itemsForBomLine, reel, item, places: [{ binId, locationCode, lot, qty, available }],
+scans }]`, `complete`. Scan: `POST /api/bom-picks/:id/scans { lineId, binId (null: no location), qty? }`
+-> `{ scan: { qty, wholeReel, state }, pick }`. On a reel item the whole place is taken whatever `qty`
+says; otherwise `qty` defaults to what the line still needs and may not exceed it. Undo:
+`POST /api/bom-picks/:id/scans/:scanId/undo`. Booking out (`/book-out`) is the desktop's final check.
+
 ### Tracklab's own labels
 
 `find` reads them: a bin label `LOC:A1-03` is that location (`location`, no items); a reel label
