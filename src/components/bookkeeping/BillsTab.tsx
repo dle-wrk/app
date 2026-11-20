@@ -82,6 +82,7 @@ export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
   const [scanningForNewBill, setScanningForNewBill] = useState(false);
   const [scanResultForEditor, setScanResultForEditor] = useState<PrefillFromScan | null>(null);
   const [fillingMissing, setFillingMissing] = useState(false);
+  const [readingBill, setReadingBill] = useState<Bill | null>(null);
   const [busy, setBusy] = useState(false);
   // Anyone can delete a draft; only an admin can delete a bill that has been
   // posted, paid or voided. The server enforces the same rule.
@@ -413,9 +414,21 @@ export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
         <QuickBillPaymentModal bill={payingBill} accounts={props.accounts} triggerToast={triggerToast} onClose={() => setPayingBill(null)} onSaved={async () => { setPayingBill(null); await refresh(); }} />
       )}
 
+      {readingBill && (
+        <FillMissingModal
+          bills={[readingBill]}
+          autoStart
+          supplierName={(id) => props.suppliers.find(x => String(x.id) === String(id))?.name || id}
+          onClose={() => setReadingBill(null)}
+          onDone={refresh}
+          triggerToast={triggerToast}
+        />
+      )}
+
       {scanningBill && (
         <ReceiptScanModal
           bill={scanningBill}
+          onRead={canChange('/api/bills/1/fill-missing', 'POST') ? () => { setReadingBill(scanningBill); setScanningBill(null); } : undefined}
           onClose={() => setScanningBill(null)}
           onSaved={async () => { setScanningBill(null); await refresh(); }}
           triggerToast={triggerToast}
@@ -451,8 +464,10 @@ const ReceiptScanModal: React.FC<{
   onClose: () => void;
   onSaved: () => Promise<void> | void;
   onContinueToBill?: (payload: PrefillFromScan) => void;
+  /** Read the attached invoice: fill in what the bill and its supplier are missing. */
+  onRead?: () => void;
   triggerToast: (m: string, t?: 'SUCCESS' | 'ERROR' | 'INFO') => void;
-}> = ({ bill, mode = 'attach', onClose, onSaved, onContinueToBill, triggerToast }) => {
+}> = ({ bill, mode = 'attach', onClose, onSaved, onContinueToBill, onRead, triggerToast }) => {
   // Existing receipt_image column stores either a raw data: URL (single
   // page — the pre-multi-page shape) or a JSON array of them. Parse
   // both so old bills open cleanly.
@@ -851,6 +866,11 @@ const ReceiptScanModal: React.FC<{
             )}
           </div>
           <div className="flex flex-wrap gap-2">
+            {!cameraOn && mode === 'attach' && bill?.receiptImage && !dirty && onRead && (
+              <PrimaryButton icon={<Sparkles className="w-3.5 h-3.5" />} onClick={onRead} disabled={saving} title="Read the invoice: its supplier's VAT number, contact details and invoice number, and fill in what's missing">
+                Read
+              </PrimaryButton>
+            )}
             {!cameraOn && mode === 'attach' && bill?.receiptImage && !dirty && (
               <DangerButton icon={<Trash2 className="w-3.5 h-3.5" />} onClick={remove} disabled={saving}>
                 Remove

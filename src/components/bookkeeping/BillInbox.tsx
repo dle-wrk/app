@@ -180,7 +180,13 @@ export const BillInbox: React.FC<{
 // Fill in what existing bills and their suppliers are missing.
 
 interface Proposal { key: string; target: 'bill' | 'supplier'; label: string; current: string | null; value: string }
-interface BillResult { billId: number; billNumber: string; supplier: { id: string; name: string | null } | null; proposals: Proposal[]; warnings: string[]; error?: string }
+interface BillResult { billId: number; billNumber: string; supplier: { id: string; name: string | null } | null; proposals: Proposal[]; warnings: string[]; ocr?: BillOcr; error?: string }
+
+/** What was read off an invoice, in a line: who, their VAT number, the invoice number, date and total. */
+export const readSummary = (o: BillOcr | undefined) => !o ? '' : [
+  o.supplier, o.supplierVatNumber && `VAT ${o.supplierVatNumber}`, o.invoiceNumber && `invoice ${o.invoiceNumber}`, o.date && fmtDate(o.date),
+  o.total != null && fmtMoney(o.total, o.currency || 'ZAR'), o.taxTotal != null && `VAT ${fmtMoney(o.taxTotal, o.currency || 'ZAR')}`,
+].filter(Boolean).join(' · ');
 
 export const FillMissingModal: React.FC<{
   bills: Bill[];
@@ -188,7 +194,9 @@ export const FillMissingModal: React.FC<{
   onClose: () => void;
   onDone: () => void | Promise<void>;
   triggerToast: (m: string, t?: 'SUCCESS' | 'ERROR' | 'INFO') => void;
-}> = ({ bills, supplierName, onClose, onDone, triggerToast }) => {
+  /** Start reading at once (one bill's Read button), rather than after a click. */
+  autoStart?: boolean;
+}> = ({ bills, supplierName, onClose, onDone, triggerToast, autoStart = false }) => {
   const withPhotos = useMemo(() => bills.filter(b => receiptPages(b.receiptImage).length > 0 && b.status !== 'VOID'), [bills]);
   const [results, setResults] = useState<BillResult[]>([]);
   const [running, setRunning] = useState(false);
@@ -236,10 +244,12 @@ export const FillMissingModal: React.FC<{
     } catch (e: any) { triggerToast(e.message || 'Could not fill them in', 'ERROR'); } finally { setApplying(false); }
   };
 
+  const started = React.useRef(false);
+  useEffect(() => { if (autoStart && !started.current && withPhotos.length) { started.current = true; void readAll(); } }, [autoStart, withPhotos.length]); // eslint-disable-line react-hooks/exhaustive-deps
   const offered = results.reduce((s, r) => s + r.proposals.length, 0);
   const show = (p: Proposal) => (p.key === 'supplierId' ? supplierName(p.value) : p.value);
   return (
-    <Modal title="Fill missing details from photos" subtitle="Reads each bill's attached photos and offers what the bill and its supplier are missing. Only empty fields are filled; nothing is changed until you apply it." onClose={onClose} maxWidth="max-w-4xl">
+    <Modal title={autoStart && bills.length === 1 ? `Read ${bills[0].billNumber}` : 'Fill missing details from photos'} subtitle="Reads each bill's attached photos and offers what the bill and its supplier are missing. Only empty fields are filled; nothing is changed until you apply it." onClose={onClose} maxWidth="max-w-4xl">
       <div className="space-y-md text-xs">
         {!results.length && !running && (
           <div className="space-y-sm">
@@ -254,6 +264,7 @@ export const FillMissingModal: React.FC<{
               <li key={r.billId} className="p-sm space-y-1">
                 <p className="font-bold"><span className="font-mono text-primary">{r.billNumber}</span>{r.supplier ? <span className="text-on-surface-variant font-normal"> · {r.supplier.name || r.supplier.id}</span> : null}</p>
                 {r.error && <p className="text-error">{r.error}</p>}
+                {r.ocr && <p className="text-on-surface-variant" data-testid="read-summary">Read: {readSummary(r.ocr) || 'nothing clear'}</p>}
                 {!r.error && !r.proposals.length && <p className="text-outline">Nothing missing that the photos show.</p>}
                 {r.proposals.map(p => (
                   <label key={p.key} className="flex items-center gap-2 cursor-pointer">

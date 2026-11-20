@@ -23,7 +23,8 @@ beforeEach(() => {
     if (url.startsWith('/api/bill-scans?')) return ok({ items: [scan], ocr: true });
     if (url === '/api/bill-scans/4') return ok({ ...scan, pages: [jpeg, jpeg] });
     if (url === '/api/bills/inbox/4/attach') return ok({ billNumber: 'BILL-2026-0003', pages: 3, invoiceNumber: 'INV-88123' });
-    if (url === '/api/bills/7/read-missing') return ok({ billId: 7, billNumber: 'BILL-2026-0007', supplier: { id: '1', name: 'Mouser' }, proposals: [{ key: 'vatNumber', target: 'supplier', label: 'VAT number', current: null, value: '4123456789' }, { key: 'supplierInvoiceNumber', target: 'bill', label: 'Supplier invoice number', current: null, value: 'INV-7' }], warnings: [] });
+    if (url === '/api/bills/7/read-missing') return ok({ billId: 7, billNumber: 'BILL-2026-0007', supplier: { id: '1', name: 'Mouser' }, proposals: [{ key: 'vatNumber', target: 'supplier', label: 'VAT number', current: null, value: '4123456789' }, { key: 'supplierInvoiceNumber', target: 'bill', label: 'Supplier invoice number', current: null, value: 'INV-7' }], warnings: [],
+      ocr: { supplier: 'HD Cabling', supplierVatNumber: '4123456789', invoiceNumber: 'SO-16907', date: '2026-11-10', total: 174, taxTotal: 22.7, currency: 'ZAR', lineItems: [] } });
     if (url === '/api/bills/7/fill-missing') return ok({ billNumber: 'BILL-2026-0007', filled: ['vatNumber'] });
     return ok({});
   }));
@@ -85,5 +86,20 @@ describe('filling in what existing bills miss', () => {
     expect(calls.find(c => c.url === '/api/bills/7/fill-missing')?.body).toEqual({ values: { vatNumber: '4123456789' } });
     expect(calls.some(c => c.url === '/api/bills/8/read-missing')).toBe(false);
     expect(done).toHaveBeenCalled();
+  });
+});
+
+describe("one bill's Read button", () => {
+  it('reads that bill at once and shows what the invoice says, with what is missing', async () => {
+    const bills: any[] = [{ id: 7, billNumber: 'BILL-2026-0007', status: 'PAID', receiptImage: jpeg }];
+    await act(async () => { root.render(<FillMissingModal bills={bills} autoStart supplierName={() => 'HD Cabling'} onClose={() => {}} onDone={() => {}} triggerToast={() => {}} />); });
+    await settle();
+    expect(calls.filter(c => c.url === '/api/bills/7/read-missing')).toHaveLength(1);
+    expect(host.textContent).toContain('Read BILL-2026-0007');
+    const summary = host.querySelector('[data-testid="read-summary"]')!.textContent!;
+    expect(summary).toContain('HD Cabling');
+    expect(summary).toContain('invoice SO-16907');
+    expect(summary).toContain('VAT 4123456789');
+    expect(btn(/Fill in 2 of 2/)).toBeTruthy();
   });
 });
