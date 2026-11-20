@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('./db', () => ({ pool: {}, query: vi.fn(), queryOne: vi.fn(), exec: vi.fn() }));
 
 import { normaliseBillOcr, ocrWarnings, tidyVatNumber, type BillOcr } from './billOcr';
-import { billPages, checkPages, companyKey, matchSupplier, missingProposals, poKey } from './billScans';
+import { billPages, checkPages, codeKey, companyKey, matchSupplier, missingProposals, poKey } from './billScans';
 import { permissionForWrite } from './writeAccess';
 import { prefillFromBillScan, type BillScan } from '../components/bookkeeping/BillInbox';
 
@@ -71,6 +71,19 @@ describe('a bill sent from the scanner', () => {
       lineItems: [{ description: '10uF 0603', quantity: 4000, unitPrice: 0.25, partNumber: 'CAP-024' }], warnings: ['w'],
       supplierDetails: { vatNumber: '4123456789', phone: '011 555 0100' },
     });
+  });
+
+  it("a line that isn't one of our stock items keeps the supplier's part number as its SKU, the description as it was", () => {
+    const scan = { id: 9, status: 'INBOX', pageCount: 1, thumb: jpeg, note: null, user: { id: 1, name: 'Sam' }, capturedAt: null, createdAt: '', read: { status: 'READ', error: null, at: null },
+      ocr: ocr({ lineItems: [{ description: 'CIRC CON PLASTIC IP68 SCW LOCK', partNumber: 'XY-CC211-3P-1-1C', quantity: 10, unitPrice: 114, lineTotal: 1140 }] }), warnings: [], billId: null, billNumber: null,
+      match: { supplier: null, po: null, dueDate: null, lines: [{ partNumber: 'XY-CC211-3P-1-1C', item: null }] } } as unknown as BillScan;
+    expect(prefillFromBillScan(scan, [jpeg]).lineItems).toEqual([{ description: 'CIRC CON PLASTIC IP68 SCW LOCK', quantity: 10, unitPrice: 114, partNumber: 'XY-CC211-3P-1-1C', accountId: null, taxRateId: null }]);
+  });
+
+  it('compares part codes with look-alike letters counted the same', () => {
+    expect(codeKey('XY-CC211-3P-I-1C')).toBe(codeKey('XY-CC211-3P-1-1C'));
+    expect(codeKey('S500ML')).toBe(codeKey('5500ML'));
+    expect(codeKey('CBT8380BL')).not.toBe(codeKey('CBT8380BK'));
   });
 });
 

@@ -75,13 +75,12 @@ export function prefillFromRead(o: BillOcr | null, match: ReadMatch | null | und
     taxTotal: o?.taxTotal ?? null,
     purchaseOrderId: m?.po && ['DRAFT', 'SENT', 'PARTIAL', 'RECEIVED'].includes(m.po.status) ? m.po.id : null,
     receiptImage: pages.length ? (pages.length === 1 ? pages[0] : JSON.stringify(pages)) : null,
-    // A line matched to a stock item carries its stock code; a learned line its saved description, account and VAT rate;
-    // otherwise the supplier's code leads its description.
+    // The SKU / part number: the stock item it matched (or was learned to be), else the supplier's code as read.
+    // A learned line also gets its saved description, account and VAT rate.
     lineItems: (o?.lineItems ?? []).map((l, i) => {
       const hint = m?.lines[i];
-      const item = hint?.item ?? null;
-      const desc = hint?.description || (!item && l.partNumber && !l.description.toUpperCase().includes(l.partNumber.toUpperCase()) ? `${l.partNumber} · ${l.description}` : l.description);
-      return { description: desc, quantity: l.quantity, unitPrice: l.unitPrice, partNumber: item, accountId: hint?.accountId ?? null, taxRateId: hint?.taxRateId ?? null };
+      const sku = hint?.item ?? l.partNumber ?? null;
+      return { description: hint?.description || l.description, quantity: l.quantity, unitPrice: l.unitPrice, partNumber: sku, accountId: hint?.accountId ?? null, taxRateId: hint?.taxRateId ?? null };
     }),
     warnings,
     supplierDetails: o ? { vatNumber: o.supplierVatNumber, address: o.supplierAddress, phone: o.supplierPhone, email: o.supplierEmail, website: o.supplierWebsite } : undefined,

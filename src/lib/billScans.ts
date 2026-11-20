@@ -120,6 +120,11 @@ export function matchSupplier(o: Pick<BillOcr, 'supplier' | 'supplierVatNumber'>
   return null;
 }
 
+/** Letters a reader confuses with digits, and the digit each is counted as. */
+const LOOKALIKE_FROM = 'ILOQSBZG', LOOKALIKE_TO = '11005826';
+/** A part code for comparing: capitals and digits only, look-alike letters as their digits ("3P-I-1C" and "3P-1-1C" match). */
+export const codeKey = (s: unknown) => String(s ?? '').toUpperCase().split('').map(ch => { const i = LOOKALIKE_FROM.indexOf(ch); return i < 0 ? ch : LOOKALIKE_TO[i]; }).join('').replace(/[^A-Z0-9]/g, '');
+
 /** A PO number as quoted on an invoice, for comparing: capitals, no spaces. */
 export const poKey = (s: unknown) => text(s).toUpperCase().replace(/[\s#:]/g, '');
 
@@ -184,16 +189,25 @@ export async function matchesFor(db: Db, o: BillOcr | null) {
     const { rows: [p] } = await db.query(`SELECT id, po_number, supplier_id, status FROM purchase_orders WHERE upper(replace(po_number, ' ', '')) = $1`, [poKey(o.poNumber)]);
     if (p) po = { id: p.id, number: p.po_number, supplierId: p.supplier_id, status: p.status };
   }
+  // Each line's code to a stock item: by its stock code or a maker's / supplier's part number, with
+  // letters a reader confuses with digits counted the same ("XY-CC211-3P-1-1C" is XY-CC211-3P-I-1C).
   const codes = [...new Set(o.lineItems.map(l => l.partNumber).filter(Boolean) as string[])];
   const items = new Map<string, string>();
   if (codes.length) {
-    const up = codes.map(c => c.toUpperCase());
+    const keys = codes.map(codeKey);
+    const k = (col: string) => `regexp_replace(translate(upper(coalesce(${col}, '')), '${LOOKALIKE_FROM}', '${LOOKALIKE_TO}'), '[^A-Z0-9]', '', 'g')`;
+    const cols = ['serial_number', 'man_pn_1', 'man_pn_2', 'man_pn_3', 'sup_pn_1', 'sup_pn_2', 'sup_pn_3'];
     const { rows } = await db.query(
-      `SELECT serial_number, upper(serial_number) AS s, upper(trim(man_pn_1)) AS m1, upper(trim(man_pn_2)) AS m2, upper(trim(sup_pn_1)) AS p1, upper(trim(sup_pn_2)) AS p2
-         FROM inventory WHERE deleted IS NOT TRUE AND (upper(serial_number) = ANY($1) OR upper(trim(man_pn_1)) = ANY($1) OR upper(trim(man_pn_2)) = ANY($1) OR upper(trim(sup_pn_1)) = ANY($1) OR upper(trim(sup_pn_2)) = ANY($1))`, [up]);
-    for (const c of up) {
-      const hits = rows.filter((r: any) => [r.s, r.m1, r.m2, r.p1, r.p2].includes(c));
-      if (hits.length === 1) items.set(c, hits[0].serial_number);
+      `SELECT serial_number, ${cols.map((c, i) => `${k(c)} AS k${i}`).join(', ')} FROM inventory
+        WHERE deleted IS NOT TRUE AND (${cols.map(c => `${k(c)} = ANY($1)`).join(' OR ')})`, [keys]);
+    for (const c of codes) {
+      const key = codeKey(c);
+      if (key.length < 4) continue;
+      // An exact stock code wins; else the one item whose code or part number reads the same.
+      const exact = rows.filter((r: any) => String(r.serial_number).toUpperCase() === c.toUpperCase());
+      const hits = exact.length ? exact : rows.filter((r: any) => cols.some((_, i) => r[`k${i}`] === key));
+      const distinct = [...new Set(hits.map((r: any) => r.serial_number))];
+      if (distinct.length === 1) items.set(c.toUpperCase(), distinct[0] as string);
     }
   }
   // What this supplier's earlier bills taught (./billLearning): stock items, descriptions, accounts, the invoice number's shape, due days.
