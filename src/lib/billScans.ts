@@ -233,7 +233,8 @@ export async function fillSupplierGaps(db: Db, supplierId: string, values: Parti
 }
 
 const send = (res: Response, e: any, what: string) => {
-  if (e?.status && e.status < 500) return res.status(e.status).json({ error: e.message });
+  // A reader that isn't set up (501) or failed (502) says why: the message is ours, not a stack.
+  if (e?.status && (e.status < 500 || e.status === 501 || e.status === 502)) return res.status(e.status).json({ error: e.message });
   console.error(`[bill-scans] ${what} failed:`, e?.message);
   res.status(500).json({ error: `Could not ${what}. Please try again.` });
 };

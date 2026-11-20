@@ -110,6 +110,20 @@ describe('talking to Mindee', () => {
     err.mockRestore();
   });
 
+  it('says why each reader failed, so it can be put right', async () => {
+    process.env.OPENAI_API_KEY = 'sk-test';
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('https://api-v2.mindee.net')) return json(401, { detail: 'Invalid API key' });
+      throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ENOTFOUND' } });
+    }));
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await expect(readBill([page])).rejects.toMatchObject({
+      status: 502,
+      message: 'Could not read the bill. Mindee: Mindee refused the key (check MINDEE_API_KEY). OpenAI: it could not be reached (ENOTFOUND).',
+    });
+    err.mockRestore();
+  });
+
   it('needs a reader set up', async () => {
     delete process.env.MINDEE_API_KEY;
     await expect(readBill([page])).rejects.toMatchObject({ status: 501 });

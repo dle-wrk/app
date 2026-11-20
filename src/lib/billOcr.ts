@@ -153,17 +153,29 @@ export async function readBill(images: string[]): Promise<BillOcr> {
   const pages = images.filter((i) => typeof i === 'string' && i.startsWith('data:image/'));
   if (!pages.length) throw fail(400, 'There are no photos to read.');
   if (pages.length > 8) throw fail(400, 'Up to 8 pages can be read at once.');
-  let last: any = null;
+  // Each reader's reason, so the person sees why (a bad key, no credits, a network failure), not just "failed".
+  const reasons: string[] = [];
   for (const r of order) {
     try {
       const o = r === 'mindee' ? await readWithMindee(pages) : await readWithOpenAI(pages);
       return { ...o, reader: r };
     } catch (e: any) {
-      last = e;
-      if (order.length > 1) console.error(`[ocr:bill] ${r} failed${r === order[0] ? ', trying the other reader' : ''}:`, e?.message);
+      const why = readerError(e);
+      console.error(`[ocr:bill] ${r} failed:`, why, e?.cause?.code ?? '');
+      reasons.push(`${r === 'mindee' ? 'Mindee' : 'OpenAI'}: ${why}`);
     }
   }
-  throw last?.status ? last : fail(502, last?.message || 'Could not read the bill.');
+  throw fail(502, `Could not read the bill. ${reasons.join(' ')}`.trim());
+}
+
+/** Why a reader failed, in words: its own message, or what went wrong reaching it. */
+export function readerError(e: any): string {
+  const m = String(e?.message || '').trim();
+  if (e?.status) return m.replace(/\.?$/, '.');
+  const code = e?.cause?.code || e?.code;
+  if (e?.name === 'AbortError' || code === 'UND_ERR_CONNECT_TIMEOUT' || code === 'ETIMEDOUT') return 'it did not answer in time.';
+  if (code === 'ENOTFOUND' || code === 'ECONNREFUSED' || code === 'ECONNRESET' || m === 'fetch failed') return `it could not be reached${code ? ` (${code})` : ''}.`;
+  return m ? `${m.replace(/\.?$/, '')}.` : 'it failed without saying why.';
 }
 
 async function readWithOpenAI(pages: string[]): Promise<BillOcr> {
