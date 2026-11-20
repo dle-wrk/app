@@ -1,11 +1,18 @@
-// Reading a supplier invoice / bill / till slip from its photos with OpenAI
-// Vision (gpt-4o), for: the website's "Scan receipt" (POST
-// /api/bookkeeping/ocr/receipt), bills sent from the scanner (./billScans),
-// and filling in what existing bills and suppliers are missing.
+// Reading a supplier invoice / bill / till slip from its photos, for: the
+// website's "Scan receipt" (POST /api/bookkeeping/ocr/receipt), bills sent
+// from the scanner (./billScans), and filling in what existing bills and
+// suppliers are missing.
 //
-// The photos are sent to OpenAI to be read; nothing is kept there beyond
-// their usual API retention. Without OPENAI_API_KEY nothing is sent and
-// readBill throws a 501, which every caller turns into "not read".
+// Two readers, chosen by the server's settings:
+//   Mindee (invoice extraction model, API v2): MINDEE_API_KEY and MINDEE_MODEL_ID.
+//     Each page is sent on its own (the API takes one image per request) and
+//     the pages' results are put together (mergePages). Mindee keeps the
+//     results 12 h by default and doesn't train on them.
+//   OpenAI Vision (gpt-4o): OPENAI_API_KEY.
+// With both set, Mindee reads and OpenAI is the fallback when Mindee fails.
+// BILL_READER=openai (or mindee) puts that one first. With neither set
+// nothing is sent and readBill throws a 501, which every caller turns into
+// "not read".
 
 export interface BillOcrLine { description: string; partNumber: string | null; quantity: number; unitPrice: number; lineTotal: number }
 export interface BillOcr {
@@ -25,11 +32,22 @@ export interface BillOcr {
   total: number | null;
   lineItems: BillOcrLine[];
   text: string;
+  /** Which reader read it. */
+  reader?: 'mindee' | 'openai';
 }
 
 const fail = (status: number, message: string) => Object.assign(new Error(message), { status });
 
-export const ocrAvailable = () => !!process.env.OPENAI_API_KEY;
+const openaiReady = () => !!process.env.OPENAI_API_KEY;
+const mindeeReady = () => !!process.env.MINDEE_API_KEY && !!process.env.MINDEE_MODEL_ID;
+export const ocrAvailable = () => openaiReady() || mindeeReady();
+
+/** The readers to try, in order: Mindee first when it's set up (unless BILL_READER=openai), OpenAI as the fallback. */
+export function readerOrder(env: Record<string, string | undefined> = process.env): Array<'mindee' | 'openai'> {
+  const has = { mindee: !!env.MINDEE_API_KEY && !!env.MINDEE_MODEL_ID, openai: !!env.OPENAI_API_KEY };
+  const first = String(env.BILL_READER || '').toLowerCase() === 'openai' ? 'openai' : 'mindee';
+  return ([first, first === 'mindee' ? 'openai' : 'mindee'] as const).filter(r => has[r]);
+}
 
 export const SYSTEM_PROMPT = `You extract structured data from photos of a supplier invoice, bill, credit card slip or till slip (one document, possibly several pages).
 Return JSON matching this shape exactly:
@@ -124,13 +142,32 @@ export function ocrWarnings(o: BillOcr): string[] {
   return w;
 }
 
-/** Reads the photos (data: URLs). Throws 501 without an API key, 502 when the service fails. */
+/**
+ * Reads the photos (data: URLs) with the first reader that's set up, falling
+ * back to the other when it fails. Throws 501 when no reader is set up, 400
+ * for no photos, 502 when every reader failed.
+ */
 export async function readBill(images: string[]): Promise<BillOcr> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw fail(501, 'Reading bills is not set up on this server (no OPENAI_API_KEY).');
+  const order = readerOrder();
+  if (!order.length) throw fail(501, 'Reading bills is not set up on this server (no MINDEE_API_KEY + MINDEE_MODEL_ID, or OPENAI_API_KEY).');
   const pages = images.filter((i) => typeof i === 'string' && i.startsWith('data:image/'));
   if (!pages.length) throw fail(400, 'There are no photos to read.');
   if (pages.length > 8) throw fail(400, 'Up to 8 pages can be read at once.');
+  let last: any = null;
+  for (const r of order) {
+    try {
+      const o = r === 'mindee' ? await readWithMindee(pages) : await readWithOpenAI(pages);
+      return { ...o, reader: r };
+    } catch (e: any) {
+      last = e;
+      if (order.length > 1) console.error(`[ocr:bill] ${r} failed${r === order[0] ? ', trying the other reader' : ''}:`, e?.message);
+    }
+  }
+  throw last?.status ? last : fail(502, last?.message || 'Could not read the bill.');
+}
+
+async function readWithOpenAI(pages: string[]): Promise<BillOcr> {
+  const apiKey = process.env.OPENAI_API_KEY as string;
   const upstream = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
@@ -154,4 +191,137 @@ export async function readBill(images: string[]): Promise<BillOcr> {
   const content = data?.choices?.[0]?.message?.content;
   if (!content) throw fail(502, 'The reading service returned nothing.');
   try { return normaliseBillOcr(JSON.parse(content)); } catch { throw fail(502, 'The reading service returned something that is not JSON.'); }
+}
+
+// ---------------------------------------------------------------------------
+// Mindee (API v2): enqueue each page, poll its job, read its fields.
+
+const MINDEE = 'https://api-v2.mindee.net/v2';
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+/** A Mindee field's plain value: a simple field's value; a nested object's parts joined; a list's values joined. */
+function plain(node: any): unknown {
+  if (node == null) return null;
+  if (typeof node !== 'object') return node;
+  if ('value' in node && node.value != null) return node.value;
+  if (Array.isArray(node.items)) {
+    const vals = node.items.map(plain).filter((v: unknown) => v != null && String(v).trim());
+    return vals.length ? vals.map(String).join(', ') : null;
+  }
+  if (node.fields && typeof node.fields === 'object') {
+    const vals = Object.values(node.fields).map(plain).filter(v => v != null && String(v).trim());
+    return vals.length ? vals.map(String).join(', ') : null;
+  }
+  return null;
+}
+/** The first of these field names the result has a value for. */
+function pick(fields: any, names: string[]): unknown {
+  for (const n of names) { const v = plain(fields?.[n]); if (v != null && String(v).trim() !== '') return v; }
+  return null;
+}
+/** The supplier's VAT / tax number out of Mindee's registrations list: the one typed VAT first, else the first. */
+function vatFrom(fields: any): unknown {
+  for (const n of ['supplier_company_registrations', 'supplier_company_registration', 'supplier_registrations']) {
+    const items: any[] = fields?.[n]?.items ?? [];
+    if (!items.length) continue;
+    const typed = items.find(i => /vat|tax/i.test(String(plain(i?.fields?.type) ?? '')));
+    const one = typed ?? items[0];
+    const num = plain(one?.fields?.number) ?? plain(one);
+    if (num) return num;
+  }
+  return pick(fields, ['supplier_vat_number', 'supplier_tax_id', 'supplier_tax_number', 'vat_number', 'tax_id']);
+}
+
+/**
+ * One page's Mindee result (inference.result.fields) in the reader's own
+ * shape, ready for normaliseBillOcr. Field names are those of Mindee's
+ * invoice template; close alternatives are tried too.
+ */
+export function fromMindeeFields(fields: any): Record<string, unknown> {
+  const lines: any[] = fields?.line_items?.items ?? [];
+  return {
+    supplier: pick(fields, ['supplier_name', 'vendor_name', 'supplier']),
+    supplierVatNumber: vatFrom(fields),
+    supplierAddress: pick(fields, ['supplier_address', 'vendor_address']),
+    supplierPhone: pick(fields, ['supplier_phone_number', 'supplier_phone', 'vendor_phone']),
+    supplierEmail: pick(fields, ['supplier_email', 'vendor_email']),
+    supplierWebsite: pick(fields, ['supplier_website', 'vendor_website']),
+    invoiceNumber: pick(fields, ['invoice_number', 'document_number']),
+    date: pick(fields, ['date', 'invoice_date', 'document_date']),
+    dueDate: pick(fields, ['due_date', 'payment_due_date']),
+    poNumber: pick(fields, ['po_number', 'purchase_order_number', 'purchase_order', 'reference_numbers']),
+    currency: plain(fields?.locale?.fields?.currency) ?? pick(fields, ['currency']),
+    subtotal: pick(fields, ['total_net', 'subtotal', 'total_excluding_tax']),
+    taxTotal: pick(fields, ['total_tax', 'tax_total', 'tax_amount']),
+    total: pick(fields, ['total_amount', 'total', 'total_incl_tax']),
+    lineItems: lines.map(it => {
+      const f = it?.fields ?? {};
+      return {
+        description: pick(f, ['description', 'name', 'item_description']),
+        partNumber: pick(f, ['product_code', 'item_code', 'part_number', 'sku']),
+        quantity: pick(f, ['quantity']),
+        unitPrice: pick(f, ['unit_price', 'price']),
+        lineTotal: pick(f, ['total_price', 'total_amount', 'amount', 'line_total']),
+      };
+    }),
+    text: '',
+  };
+}
+
+/** A multi-page invoice from its pages: details from the first page that has them, totals from the last, every page's lines. */
+export function mergePages(pages: BillOcr[]): BillOcr {
+  const first = <K extends keyof BillOcr>(k: K) => pages.map(p => p[k]).find(v => v != null && v !== '') ?? null;
+  const lastOf = <K extends keyof BillOcr>(k: K) => [...pages].reverse().map(p => p[k]).find(v => v != null) ?? null;
+  return {
+    supplier: first('supplier') as any, supplierVatNumber: first('supplierVatNumber') as any, supplierAddress: first('supplierAddress') as any,
+    supplierPhone: first('supplierPhone') as any, supplierEmail: first('supplierEmail') as any, supplierWebsite: first('supplierWebsite') as any,
+    invoiceNumber: first('invoiceNumber') as any, date: first('date') as any, dueDate: first('dueDate') as any, poNumber: first('poNumber') as any,
+    currency: first('currency') as any,
+    subtotal: lastOf('subtotal') as any, taxTotal: lastOf('taxTotal') as any, total: lastOf('total') as any,
+    lineItems: pages.flatMap(p => p.lineItems),
+    text: pages.map(p => p.text).filter(Boolean).join('\n\n'),
+  };
+}
+
+async function mindeeJson(url: string, init: RequestInit = {}) {
+  const res = await fetch(url, { ...init, headers: { Authorization: process.env.MINDEE_API_KEY as string, ...(init.body ? { 'Content-Type': 'application/json' } : {}), ...(init.headers || {}) } });
+  const body: any = await res.json().catch(() => ({}));
+  if (!res.ok && res.status !== 202) {
+    const why = body?.detail || body?.title || body?.error?.message || '';
+    console.error('[ocr:mindee]', res.status, String(why).slice(0, 300));
+    throw fail(502, res.status === 401 || res.status === 403 ? 'Mindee refused the key (check MINDEE_API_KEY).' : res.status === 402 ? 'The Mindee account is out of credits.' : `Mindee refused the page (${res.status}).`);
+  }
+  return body;
+}
+
+/** One page through Mindee: enqueue, poll until processed (about 90 s at most), fetch the result. */
+async function mindeePage(dataUrl: string, n: number, wait = sleep): Promise<BillOcr> {
+  const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
+  const ext = /^data:image\/(\w+)/.exec(dataUrl)?.[1] ?? 'jpeg';
+  const queued = await mindeeJson(`${MINDEE}/products/extraction/enqueue`, {
+    method: 'POST', body: JSON.stringify({ model_id: process.env.MINDEE_MODEL_ID, file_base64: base64, filename: `page-${n}.${ext === 'jpeg' ? 'jpg' : ext}` }),
+  });
+  const job = queued?.job;
+  if (!job?.id) throw fail(502, 'Mindee did not take the page.');
+  let resultUrl: string | null = job.result_url ?? null;
+  for (let i = 0; i < 60 && !resultUrl; i++) {
+    await wait(i < 5 ? 1000 : 2000);
+    const st = await mindeeJson(`${MINDEE}/jobs/${job.id}?redirect=false`);
+    const s = st?.job?.status;
+    if (s === 'Failed') throw fail(502, `Mindee could not read page ${n}${st?.job?.error?.detail ? `: ${st.job.error.detail}` : ''}.`);
+    if (s === 'Processed') resultUrl = st.job.result_url || `${MINDEE}/products/extraction/results/${st.job.id}`;
+  }
+  if (!resultUrl) throw fail(502, `Mindee took too long with page ${n}.`);
+  const result = await mindeeJson(resultUrl);
+  const fields = result?.inference?.result?.fields ?? {};
+  const o = normaliseBillOcr(fromMindeeFields(fields));
+  if (!o.supplier && !o.total && !o.invoiceNumber && !o.lineItems.length) {
+    console.error('[ocr:mindee] nothing recognised on page', n, '- the model returned fields:', Object.keys(fields).join(', ') || '(none)');
+  }
+  return o;
+}
+
+export async function readWithMindee(pages: string[], wait = sleep): Promise<BillOcr> {
+  const read = await Promise.all(pages.map((p, i) => mindeePage(p, i + 1, wait)));
+  return mergePages(read);
 }

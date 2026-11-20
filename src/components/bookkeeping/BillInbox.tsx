@@ -266,7 +266,7 @@ export const FillMissingModal: React.FC<{
       <div className="space-y-md text-xs">
         {!results.length && !running && (
           <div className="space-y-sm">
-            <p>{withPhotos.length} bill{withPhotos.length === 1 ? ' has' : 's have'} photos attached. Each is read for the supplier's VAT number, address, phone, email and website, and the supplier's invoice number. The photos are sent to OpenAI to be read, the same as Scan Receipt. Bank details are never taken from an invoice.</p>
+            <p>{withPhotos.length} bill{withPhotos.length === 1 ? ' has' : 's have'} photos attached. Each is read for the supplier's VAT number, address, phone, email and website, and the supplier's invoice number. The photos are sent to the reading service (Mindee, or OpenAI) to be read, the same as Scan Receipt. Bank details are never taken from an invoice.</p>
             <PrimaryButton icon={<Wand2 className="w-3.5 h-3.5" />} disabled={!withPhotos.length} onClick={() => void readAll()}>Read {withPhotos.length} bill{withPhotos.length === 1 ? '' : 's'}</PrimaryButton>
           </div>
         )}

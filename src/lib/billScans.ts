@@ -291,7 +291,7 @@ export function registerBillScansRoutes(app: Express): void {
   app.post('/api/bills/inbox/:id/read', async (req, res) => {
     try {
       const id = idOf(req.params.id);
-      if (!ocrAvailable()) throw fail(501, 'Reading bills is not set up on this server (no OPENAI_API_KEY).');
+      if (!ocrAvailable()) throw fail(501, 'Reading bills is not set up on this server (no Mindee or OpenAI key).');
       await query(`UPDATE bill_scans SET ocr_status = 'WAITING', ocr_error = NULL WHERE id = $1`, [id]);
       await readScan(id);
       res.json(await loadScan(id));
