@@ -101,5 +101,11 @@ describe("one bill's Read button", () => {
     expect(summary).toContain('invoice SO-16907');
     expect(summary).toContain('VAT 4123456789');
     expect(btn(/Fill in 2 of 2/)).toBeTruthy();
+    // A poor read: read the invoice again; the row is replaced, not added.
+    await act(async () => { btn(/^\s*Read again\s*$/).click(); });
+    await settle();
+    expect(calls.filter(c => c.url === '/api/bills/7/read-missing')).toHaveLength(2);
+    expect(host.querySelectorAll('[data-testid="read-summary"]')).toHaveLength(1);
+    expect(btn(/Fill in 2 of 2/)).toBeTruthy();
   });
 });

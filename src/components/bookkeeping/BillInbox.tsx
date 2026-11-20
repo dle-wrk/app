@@ -227,6 +227,19 @@ export const FillMissingModal: React.FC<{
     setRunning(false);
   };
 
+  // Read one bill's invoice again (a blurry or misread page): its row is replaced, its ticks reset.
+  const [rereading, setRereading] = useState<number | null>(null);
+  const readAgain = async (billId: number) => {
+    setRereading(billId);
+    try {
+      const r: BillResult = await apiPost(`/api/bills/${billId}/read-missing`, {});
+      setResults(rs => rs.map(x => (x.billId === billId ? r : x)));
+      setPicked(s => { const n = new Set([...s].filter(k => !k.startsWith(`${billId}:`))); r.proposals.forEach(p => n.add(pkey(billId, p.key))); return n; });
+    } catch (e: any) {
+      setResults(rs => rs.map(x => (x.billId === billId ? { ...x, error: e.message || 'Could not read it' } : x)));
+    } finally { setRereading(null); }
+  };
+
   const apply = async () => {
     setApplying(true);
     let n = 0;
@@ -262,7 +275,16 @@ export const FillMissingModal: React.FC<{
           <ul className="divide-y divide-outline-variant/30 border border-outline-variant/40 rounded-lg" data-testid="fill-missing-results">
             {results.map(r => (
               <li key={r.billId} className="p-sm space-y-1">
-                <p className="font-bold"><span className="font-mono text-primary">{r.billNumber}</span>{r.supplier ? <span className="text-on-surface-variant font-normal"> · {r.supplier.name || r.supplier.id}</span> : null}</p>
+                <div className="flex items-center gap-2" data-no-mobile-stack>
+                  <p className="font-bold flex-1"><span className="font-mono text-primary">{r.billNumber}</span>{r.supplier ? <span className="text-on-surface-variant font-normal"> · {r.supplier.name || r.supplier.id}</span> : null}</p>
+                  {!running && results.length > 1 && (
+                    <button type="button" onClick={() => void readAgain(r.billId)} disabled={rereading !== null} aria-label={`Read ${r.billNumber} again`}
+                      className="inline-flex items-center gap-1 text-[11px] font-bold text-on-surface-variant hover:text-primary disabled:opacity-40">
+                      {rereading === r.billId ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}Read again
+                    </button>
+                  )}
+                </div>
+                {rereading === r.billId && <p className="text-primary">Reading again…</p>}
                 {r.error && <p className="text-error">{r.error}</p>}
                 {r.ocr && <p className="text-on-surface-variant" data-testid="read-summary">Read: {readSummary(r.ocr) || 'nothing clear'}</p>}
                 {!r.error && !r.proposals.length && <p className="text-outline">Nothing missing that the photos show.</p>}
@@ -280,6 +302,12 @@ export const FillMissingModal: React.FC<{
         )}
         <div className="flex justify-end gap-2 pt-sm border-t border-outline-variant/20">
           <SecondaryButton onClick={onClose}>Close</SecondaryButton>
+          {results.length > 0 && !running && (
+            <SecondaryButton icon={<RefreshCw className="w-3.5 h-3.5" />} disabled={rereading !== null || applying}
+              onClick={() => (results.length === 1 ? void readAgain(results[0].billId) : void readAll())}>
+              {rereading !== null ? 'Reading…' : results.length === 1 ? 'Read again' : 'Read all again'}
+            </SecondaryButton>
+          )}
           {results.length > 0 && !running && <PrimaryButton icon={<CheckCircle2 className="w-3.5 h-3.5" />} disabled={applying || !picked.size} onClick={() => void apply()}>{applying ? 'Filling in…' : `Fill in ${picked.size} of ${offered}`}</PrimaryButton>}
         </div>
       </div>
