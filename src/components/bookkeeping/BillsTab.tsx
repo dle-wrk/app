@@ -6,7 +6,7 @@ import { buildAndSaveDocPdf, docFileName } from '../../lib/pdfDocs';
 import { runOcr, OcrResult } from '../../lib/receiptOcr';
 import { openReceiptPage, receiptPages } from '../../lib/receiptPages';
 import { MonthHeaderRow, monthSum, useMonthGroups } from './MonthGroups';
-import { LineItemsEditor, EditableLine, newEditableLine } from './LineItemsEditor';
+import { LineItemsEditor, EditableLine, newEditableLine, lineTotals } from './LineItemsEditor';
 import { ErrorBoundary } from '../ErrorBoundary';
 import { confirmDialog, ConfirmOptions } from '../../lib/confirmDialog';
 import { BillInbox, FillMissingModal, prefillFromRead, type ScanPrefill } from './BillInbox';
@@ -897,6 +897,26 @@ const ReceiptScanModal: React.FC<{
   );
 };
 
+/**
+ * A bill read from an invoice comes to the invoice's own total: the supplier's
+ * round-off, or VAT the invoice rounded once where the bill rounds per line,
+ * goes on a "Round off" line (no VAT). Only for a few cents to R1: a bigger gap
+ * means something was misread, and the warnings say so instead.
+ */
+export function withRoundOff(lines: EditableLine[], invoiceTotal: number | null, taxRates: { id: number; rate: number }[]): EditableLine[] {
+  if (!invoiceTotal || !lines.some(l => Number(l.unitPrice))) return lines;
+  const billTotal = lines.reduce((s, l) => s + lineTotals(l, taxRates as any).lineTotal, 0);
+  const gap = Math.round((invoiceTotal - billTotal) * 100) / 100;
+  if (!gap || Math.abs(gap) > 1) return lines;
+  const line = newEditableLine();
+  line.key = 'ROUNDOFF';
+  line.description = 'Round off (to the invoice total)';
+  line.quantity = 1;
+  line.unitPrice = gap;
+  line.taxRateId = null;
+  return [...lines, line];
+}
+
 const BillEditorModal: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrder | null; prefillFromScan?: PrefillFromScan | null; onClose: () => void; onSaved: () => void }> = ({ suppliers, items, taxRates, accounts, prefillFromPO, prefillFromScan, onClose, onSaved, triggerToast }) => {
   // Fuzzy-match the OCR'd supplier name to a known supplier ID. Anything
   // shorter than 3 chars or with too many false positives is left blank so
@@ -938,7 +958,8 @@ const BillEditorModal: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
       : prefillFromScan ? 'From receipt scan' : ''
   );
   const poItems = (prefillFromPO as any)?.items as any[] | undefined;
-  const [lines, setLines] = useState<EditableLine[]>(() => {
+  const [lines, setLines] = useState<EditableLine[]>(() => withRoundOff(startLines(), prefillFromScan?.total ?? null, taxRates));
+  function startLines(): EditableLine[] {
     if (poItems?.length) {
       // A line already booked in with the scanner against the PO doesn't receive stock again.
       return poItems.map((it: any) => ({ key: `L${it.id}`, partNumber: it.partNumber, description: it.description, quantity: it.quantity, unitPrice: it.unitPrice, taxRateId: it.taxRateId ?? null, receiveStock: !!it.partNumber && !(Number(it.qtyReceived) > 0) }));
@@ -974,7 +995,7 @@ const BillEditorModal: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
       return [line];
     }
     return [newEditableLine()];
-  });
+  }
   const [saving, setSaving] = useState<'DRAFT' | 'AWAITING_PAYMENT' | null>(null);
 
   const submit = async (status: 'DRAFT' | 'AWAITING_PAYMENT') => {

@@ -97,7 +97,16 @@ export const InvoiceCreateSchema = z.object({
   items: z.array(SalesLineItemSchema).min(1).refine(noNegativeTotal, { message: 'The discounts come to more than the lines.' }),
 });
 
-const BillCreateSchema = z.object({
+// A bill line may be negative (a supplier's round-off, a discount) when it has no part number and
+// receives no stock; the lines together can't come below zero.
+const PurchaseLineItemSchema = LineItemSchema.extend({
+  unitPrice: z.preprocess((v) => v === '' || v === null || v === undefined ? v : Number(v), z.number()),
+}).refine((l) => l.unitPrice >= 0 || !String(l.partNumber ?? '').trim(), {
+  message: 'A line with a negative price (a round-off or discount) can\'t have a part number.',
+  path: ['unitPrice'],
+}).refine((l) => !(l.unitPrice < 0 && l.receiveStock), { message: "A round-off or discount line can't receive stock.", path: ['receiveStock'] });
+
+export const BillCreateSchema = z.object({
   supplierId: z.string().nullable().optional(),
   supplierInvoiceNumber: z.string().max(60).nullable().optional(),
   purchaseOrderId: z.number().nullable().optional(),
@@ -106,7 +115,7 @@ const BillCreateSchema = z.object({
   currency: z.string().optional(),
   notes: z.string().optional(),
   status: z.enum(['DRAFT', 'AWAITING_PAYMENT']).optional(),
-  items: z.array(LineItemSchema).min(1),
+  items: z.array(PurchaseLineItemSchema).min(1).refine(noNegativeTotal, { message: 'The round-offs and discounts come to more than the lines.' }),
 });
 
 const PurchaseOrderCreateSchema = z.object({
@@ -1338,7 +1347,11 @@ export function registerBookkeepingRoutes(app: Express) {
 
     const lines: any[] = [];
     for (const [accountId, amount] of byAccount.entries()) {
-      lines.push({ accountId, debit: amount, credit: 0, description: `Bill ${billNumber}` });
+      // An account whose lines net below zero (a round-off or discount on its own account) is credited.
+      if (Math.abs(amount) < 0.005) continue;
+      lines.push(amount >= 0
+        ? { accountId, debit: amount, credit: 0, description: `Bill ${billNumber}` }
+        : { accountId, debit: 0, credit: -amount, description: `Bill ${billNumber}` });
     }
     if (taxTotal > 0) lines.push({ accountId: vatAccountId, debit: taxTotal, credit: 0, description: `Input VAT on ${billNumber}` });
     lines.push({ accountId: apAccountId, debit: 0, credit: total, description: `Bill ${billNumber}` });
