@@ -49,11 +49,11 @@ describe('Mindee: what its invoice model returns, in the bill reader shape', () 
 
 describe('which reader reads', () => {
   it('Mindee first when it is set up, OpenAI as the fallback; BILL_READER=openai swaps them', () => {
-    expect(readerOrder({ MINDEE_API_KEY: 'k', MINDEE_MODEL_ID: 'm', OPENAI_API_KEY: 'o' })).toEqual(['mindee', 'openai']);
-    expect(readerOrder({ MINDEE_API_KEY: 'k', MINDEE_MODEL_ID: 'm', OPENAI_API_KEY: 'o', BILL_READER: 'openai' })).toEqual(['openai', 'mindee']);
-    expect(readerOrder({ MINDEE_API_KEY: 'k', OPENAI_API_KEY: 'o' })).toEqual(['openai']); // no model id: Mindee isn't set up
-    expect(readerOrder({ MINDEE_API_KEY: 'k', MINDEE_MODEL_ID: 'm' })).toEqual(['mindee']);
-    expect(readerOrder({})).toEqual([]);
+    expect(readerOrder({ MINDEE_API_KEY: 'k', MINDEE_MODEL_ID: 'm', OPENAI_API_KEY: 'o' })).toEqual(['mindee', 'openai', 'local']);
+    expect(readerOrder({ MINDEE_API_KEY: 'k', MINDEE_MODEL_ID: 'm', OPENAI_API_KEY: 'o', BILL_READER: 'openai' })).toEqual(['openai', 'mindee', 'local']);
+    expect(readerOrder({ MINDEE_API_KEY: 'k', OPENAI_API_KEY: 'o' })).toEqual(['openai', 'local']); // no model id: Mindee isn't set up
+    expect(readerOrder({ MINDEE_API_KEY: 'k', MINDEE_MODEL_ID: 'm', BILL_READER_LOCAL: 'off' })).toEqual(['mindee']);
+    expect(readerOrder({})).toEqual(['local']);
   });
 });
 
@@ -64,6 +64,7 @@ describe('talking to Mindee', () => {
   beforeEach(() => {
     calls = [];
     process.env.MINDEE_API_KEY = 'md_test_key'; process.env.MINDEE_MODEL_ID = 'model-123'; delete process.env.OPENAI_API_KEY; delete process.env.BILL_READER;
+    process.env.BILL_READER_LOCAL = 'off'; // these tests are about Mindee and OpenAI
   });
   afterEach(() => { vi.unstubAllGlobals(); process.env = { ...saved }; });
   const json = (status: number, body: unknown) => ({ ok: status < 300, status, json: async () => body, text: async () => JSON.stringify(body) });
@@ -124,7 +125,7 @@ describe('talking to Mindee', () => {
     err.mockRestore();
   });
 
-  it('needs a reader set up', async () => {
+  it("needs a reader set up (the server's own turned off too)", async () => {
     delete process.env.MINDEE_API_KEY;
     await expect(readBill([page])).rejects.toMatchObject({ status: 501 });
   });

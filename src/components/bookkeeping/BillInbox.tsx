@@ -21,7 +21,7 @@ export interface BillScan {
   user: { id: number | null; name: string }; capturedAt: string | null; createdAt: string;
   read: { status: 'WAITING' | 'READ' | 'FAILED' | 'OFF'; error: string | null; at: string | null };
   ocr: BillOcr | null; warnings: string[];
-  match: { supplier: { id: string; name: string; by: 'vat' | 'name' } | null; po: { id: number; number: string; supplierId: string | null; status: string } | null; dueDate: string | null; lines: { partNumber: string | null; item: string | null }[] } | null;
+  match: { supplier: { id: string; name: string; by: 'vat' | 'name' | 'web' } | null; po: { id: number; number: string; supplierId: string | null; status: string } | null; dueDate: string | null; lines: { partNumber: string | null; item: string | null }[] } | null;
   billId: number | null; billNumber: string | null;
 }
 
@@ -146,7 +146,7 @@ export const BillInbox: React.FC<{
               <div className="flex-1 min-w-[260px] space-y-0.5">
                 <p className="font-bold text-on-surface flex flex-wrap items-center gap-2">
                   {o?.supplier || 'Supplier not read yet'}
-                  {s.match?.supplier ? <span className="text-[10px] font-bold text-green-400" title={s.match.supplier.by === 'vat' ? 'Matched by VAT number' : 'Matched by name'}>→ {s.match.supplier.name}</span>
+                  {s.match?.supplier ? <span className="text-[10px] font-bold text-green-400" title={s.match.supplier.by === 'vat' ? 'Matched by VAT number' : s.match.supplier.by === 'web' ? 'Matched by the web address on the invoice' : 'Matched by name'}>→ {s.match.supplier.name}</span>
                     : o?.supplier ? <span className="text-[10px] font-bold text-amber-400">not a supplier in Tracklab</span> : null}
                   <ReadState s={s} />
                 </p>

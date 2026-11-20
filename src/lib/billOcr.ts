@@ -9,10 +9,11 @@
 //     the pages' results are put together (mergePages). Mindee keeps the
 //     results 12 h by default and doesn't train on them.
 //   OpenAI Vision (gpt-4o): OPENAI_API_KEY.
-// With both set, Mindee reads and OpenAI is the fallback when Mindee fails.
-// BILL_READER=openai (or mindee) puts that one first. With neither set
-// nothing is sent and readBill throws a 501, which every caller turns into
-// "not read".
+//   Tracklab's own server (./localOcr): Tesseract, free, no key, the photos
+//     stay on the server; header and totals only, not the lines.
+// They're tried in that order, each the fallback of the one before; the
+// server's own reader is always there, so a bill is always read (perhaps
+// thinly). BILL_READER=openai or =local puts that one first.
 
 export interface BillOcrLine { description: string; partNumber: string | null; quantity: number; unitPrice: number; lineTotal: number }
 export interface BillOcr {
@@ -33,20 +34,24 @@ export interface BillOcr {
   lineItems: BillOcrLine[];
   text: string;
   /** Which reader read it. */
-  reader?: 'mindee' | 'openai';
+  reader?: Reader;
 }
+
+import { parseBillText, recogniseText } from './localOcr';
 
 const fail = (status: number, message: string) => Object.assign(new Error(message), { status });
 
-const openaiReady = () => !!process.env.OPENAI_API_KEY;
-const mindeeReady = () => !!process.env.MINDEE_API_KEY && !!process.env.MINDEE_MODEL_ID;
-export const ocrAvailable = () => openaiReady() || mindeeReady();
+export type Reader = 'mindee' | 'openai' | 'local';
+/** A bill can always be read: the server's own reader needs nothing set up. */
+export const ocrAvailable = () => readerOrder().length > 0;
 
-/** The readers to try, in order: Mindee first when it's set up (unless BILL_READER=openai), OpenAI as the fallback. */
-export function readerOrder(env: Record<string, string | undefined> = process.env): Array<'mindee' | 'openai'> {
-  const has = { mindee: !!env.MINDEE_API_KEY && !!env.MINDEE_MODEL_ID, openai: !!env.OPENAI_API_KEY };
-  const first = String(env.BILL_READER || '').toLowerCase() === 'openai' ? 'openai' : 'mindee';
-  return ([first, first === 'mindee' ? 'openai' : 'mindee'] as const).filter(r => has[r]);
+/** The readers to try, in order: Mindee, OpenAI, the server's own (each when set up); BILL_READER names one to put first. */
+export function readerOrder(env: Record<string, string | undefined> = process.env): Reader[] {
+  const has: Record<Reader, boolean> = { mindee: !!env.MINDEE_API_KEY && !!env.MINDEE_MODEL_ID, openai: !!env.OPENAI_API_KEY, local: String(env.BILL_READER_LOCAL || '').toLowerCase() !== 'off' };
+  const pref = String(env.BILL_READER || '').toLowerCase() as Reader;
+  const order: Reader[] = ['mindee', 'openai', 'local'];
+  if (order.includes(pref)) order.sort((a, b) => (a === pref ? -1 : b === pref ? 1 : 0));
+  return order.filter(r => has[r]);
 }
 
 export const SYSTEM_PROMPT = `You extract structured data from photos of a supplier invoice, bill, credit card slip or till slip (one document, possibly several pages).
@@ -126,6 +131,7 @@ export function normaliseBillOcr(parsed: any): BillOcr {
 /** Things that don't add up on what was read, for the person checking it. */
 export function ocrWarnings(o: BillOcr): string[] {
   const w: string[] = [];
+  if (o.reader === 'local') w.push("Read by Tracklab's own reader (free, on the server): it reads the header and totals, not the lines, and can misread a photo. Check every field.");
   const near = (a: number, b: number) => Math.abs(a - b) <= Math.max(0.05, Math.abs(b) * 0.01);
   if (o.subtotal != null && o.taxTotal != null && o.total != null && !near(o.subtotal + o.taxTotal, o.total)) {
     w.push(`Subtotal ${o.subtotal.toFixed(2)} + VAT ${o.taxTotal.toFixed(2)} doesn't equal the total ${o.total.toFixed(2)}.`);
@@ -157,16 +163,18 @@ export async function readBill(images: string[]): Promise<BillOcr> {
   const reasons: string[] = [];
   for (const r of order) {
     try {
-      const o = r === 'mindee' ? await readWithMindee(pages) : await readWithOpenAI(pages);
+      const o = r === 'mindee' ? await readWithMindee(pages) : r === 'openai' ? await readWithOpenAI(pages) : normaliseBillOcr(parseBillText(await recogniseText(pages)));
       return { ...o, reader: r };
     } catch (e: any) {
       const why = readerError(e);
       console.error(`[ocr:bill] ${r} failed:`, why, e?.cause?.code ?? '');
-      reasons.push(`${r === 'mindee' ? 'Mindee' : 'OpenAI'}: ${why}`);
+      reasons.push(`${READER_NAME[r]}: ${why}`);
     }
   }
   throw fail(502, `Could not read the bill. ${reasons.join(' ')}`.trim());
 }
+
+const READER_NAME: Record<Reader, string> = { mindee: 'Mindee', openai: 'OpenAI', local: "Tracklab's own reader" };
 
 /** Why a reader failed, in words: its own message, or what went wrong reaching it. */
 export function readerError(e: any): string {

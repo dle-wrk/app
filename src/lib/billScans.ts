@@ -74,21 +74,49 @@ export const companyKey = (s: unknown) => text(s).toLowerCase()
   .replace(/\((pty|proprietary)\)/g, ' ').replace(/\b(pty|proprietary|ltd|limited|cc|inc|incorporated|llc|gmbh|co|company|sa|za|the)\b/g, ' ')
   .replace(/[^a-z0-9]+/g, ' ').trim();
 
-export interface SupplierRow { id: string; name: string | null; vat_number?: string | null }
+export interface SupplierRow { id: string; name: string | null; vat_number?: string | null; website?: string | null; contact_email?: string | null }
 
-/** The supplier an invoice is from: by VAT number first, then by name (exact, then one containing the other). */
-export function matchSupplier(o: Pick<BillOcr, 'supplier' | 'supplierVatNumber'>, suppliers: SupplierRow[]): { id: string; name: string; by: 'vat' | 'name' } | null {
+/** The company part of a web address or email: "info@hdcabling.co.za", "www.hdcabling.co.za" → "hdcabling". Null for free mail. */
+export function domainLabel(v: unknown): string | null {
+  const host = text(v).toLowerCase().replace(/^.*@/, '').replace(/^https?:\/\//, '').replace(/^www\./, '').split(/[\/:?#]/)[0];
+  const label = host.split('.')[0];
+  if (!label || label.length < 3 || /^(gmail|yahoo|hotmail|outlook|live|icloud|webmail|mweb|telkomsa|vodamail|absamail)$/.test(label)) return null;
+  return label.replace(/[^a-z0-9]/g, '');
+}
+
+/**
+ * The supplier an invoice is from: by VAT number first; then by name (exact,
+ * then one containing the other); then by the domain of the invoice's email
+ * or website against the supplier's name, website or email ("hdcabling" is
+ * HD Cabling).
+ */
+export function matchSupplier(o: Pick<BillOcr, 'supplier' | 'supplierVatNumber'> & Partial<Pick<BillOcr, 'supplierEmail' | 'supplierWebsite'>>, suppliers: SupplierRow[]): { id: string; name: string; by: 'vat' | 'name' | 'web' } | null {
+  const out = (s: SupplierRow, by: 'vat' | 'name' | 'web') => ({ id: String(s.id), name: s.name || String(s.id), by });
   const vat = o.supplierVatNumber;
   if (vat) {
     const hit = suppliers.find(s => tidyVatNumber(s.vat_number) === vat);
-    if (hit) return { id: String(hit.id), name: hit.name || String(hit.id), by: 'vat' };
+    if (hit) return out(hit, 'vat');
   }
   const key = companyKey(o.supplier);
-  if (key.length < 3) return null;
-  const exact = suppliers.filter(s => companyKey(s.name) === key);
-  if (exact.length === 1) return { id: String(exact[0].id), name: exact[0].name || String(exact[0].id), by: 'name' };
-  const loose = suppliers.filter(s => { const k = companyKey(s.name); return k.length >= 3 && (k.includes(key) || key.includes(k)); });
-  return loose.length === 1 ? { id: String(loose[0].id), name: loose[0].name || String(loose[0].id), by: 'name' } : null;
+  if (key.length >= 3) {
+    const exact = suppliers.filter(s => companyKey(s.name) === key);
+    if (exact.length === 1) return out(exact[0], 'name');
+    const compact = key.replace(/ /g, '');
+    const same = suppliers.filter(s => companyKey(s.name).replace(/ /g, '') === compact);
+    if (same.length === 1) return out(same[0], 'name');
+    const loose = suppliers.filter(s => { const k = companyKey(s.name); return k.length >= 3 && (k.includes(key) || key.includes(k)); });
+    if (loose.length === 1) return out(loose[0], 'name');
+  }
+  const labels = [...new Set([domainLabel(o.supplierEmail), domainLabel(o.supplierWebsite)].filter(Boolean) as string[])];
+  for (const d of labels) {
+    const hits = suppliers.filter(s => {
+      const name = companyKey(s.name).replace(/ /g, '');
+      return (name.length >= 4 && (name === d || (d.startsWith(name) && name.length >= 5) || (name.startsWith(d) && d.length >= 5)))
+        || domainLabel(s.website) === d || domainLabel(s.contact_email) === d;
+    });
+    if (hits.length === 1) return out(hits[0], 'web');
+  }
+  return null;
 }
 
 /** A PO number as quoted on an invoice, for comparing: capitals, no spaces. */
@@ -148,7 +176,7 @@ async function whoIs(user: { id: number | null; email: string }) {
 /** What an invoice that was read matches in Tracklab: the supplier, the PO, each line's stock item, and the due date from the supplier's terms. */
 export async function matchesFor(db: Db, o: BillOcr | null) {
   if (!o) return null;
-  const { rows: suppliers } = await db.query(`SELECT id, name, vat_number, payment_terms_days FROM suppliers`);
+  const { rows: suppliers } = await db.query(`SELECT id, name, vat_number, website, contact_email, payment_terms_days FROM suppliers`);
   const supplier = matchSupplier(o, suppliers);
   let po: { id: number; number: string; supplierId: string | null; status: string } | null = null;
   if (o.poNumber) {
