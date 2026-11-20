@@ -56,6 +56,10 @@ export interface Supplier {
   website: string;
   contact_email: string;
   notes: string;
+  /** From their invoices: VAT number, postal / street address, phone. */
+  vatNumber?: string | null;
+  address?: string | null;
+  phone?: string | null;
   leadTime?: number;
   responseTime?: number;
   /** Measured from its received purchase orders (src/lib/supplierLeadTime): median days, over how many, the slowest. */
@@ -437,6 +441,8 @@ export type BillStatus = 'DRAFT' | 'AWAITING_PAYMENT' | 'PARTIAL' | 'PAID' | 'OV
 export interface Bill {
   id: number;
   billNumber: string;
+  /** The supplier's own number for the invoice. */
+  supplierInvoiceNumber?: string | null;
   supplierId?: string;
   purchaseOrderId?: number;
   billDate: string;

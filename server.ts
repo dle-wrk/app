@@ -37,6 +37,7 @@ import { ensureReturnsSchema, registerReturnsRoutes } from './src/lib/returnsRou
 import { ensureScansSchema, registerScansRoutes } from './src/lib/scansRoutes';
 import { ensureScanStockSchema, registerScanStockRoutes } from './src/lib/scanStock';
 import { ensureBomPicksSchema, registerBomPicksRoutes } from './src/lib/bomPicks';
+import { ensureBillScansSchema, registerBillScansRoutes } from './src/lib/billScans';
 import { ensureRecurringInvoicesSchema, registerRecurringInvoiceRoutes, runDueRecurring } from './src/lib/recurringInvoices';
 import { registerSupplierQuoteRoutes } from './src/lib/supplierQuoteRoutes';
 import { registerUserPrefsRoutes, ensureUserPrefsSchema } from './src/lib/userPrefsRoutes';
@@ -231,6 +232,7 @@ registerScansRoutes(app);
 // Booking stock in and out from the scanner app (reels and any other item).
 registerScanStockRoutes(app);
 registerBomPicksRoutes(app);
+registerBillScansRoutes(app);
 registerRecurringInvoiceRoutes(app);
 registerSupplierQuoteRoutes(app);
 registerUserPrefsRoutes(app);
@@ -1226,6 +1228,7 @@ async function runSchemaBootstrap() {
   await ensureScansSchema().catch((e) => console.error('Failed to bootstrap scans schema:', e));
   await ensureScanStockSchema().catch((e) => console.error('Failed to bootstrap scanner stock schema:', e));
   await ensureBomPicksSchema().catch((e) => console.error('Failed to bootstrap BOM pick schema:', e));
+  await ensureBillScansSchema().catch((e) => console.error('Failed to bootstrap bill scan schema:', e));
   await ensureRecurringInvoicesSchema().catch((e) => console.error('Failed to bootstrap recurring invoices schema:', e));
   await ensureAutomationEngineSchema().catch((e) => console.error('Failed to bootstrap automation engine schema:', e));
   await ensureScheduledJobsSchema().catch((e) => console.error('Failed to bootstrap scheduled jobs schema:', e));

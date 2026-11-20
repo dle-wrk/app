@@ -1,3 +1,4 @@
+import { readBill, ocrWarnings } from './billOcr';
 import type { Express } from 'express';
 import { z } from 'zod';
 import { pool, query, queryOne } from './db';
@@ -97,6 +98,7 @@ export const InvoiceCreateSchema = z.object({
 
 const BillCreateSchema = z.object({
   supplierId: z.string().nullable().optional(),
+  supplierInvoiceNumber: z.string().max(60).nullable().optional(),
   purchaseOrderId: z.number().nullable().optional(),
   billDate: z.string().optional(),
   dueDate: z.string().nullable().optional(),
@@ -1376,9 +1378,9 @@ export function registerBookkeepingRoutes(app: Express) {
       const billDate = body.billDate || new Date().toISOString().slice(0, 10);
 
       const billRes = await client.query(
-        `INSERT INTO bills (bill_number, supplier_id, purchase_order_id, bill_date, due_date, status, currency, subtotal, tax_total, total, balance_due, notes)
-         VALUES ($1,$2,$3,$4,$5,'DRAFT',$6,$7,$8,$9,$10,$11) RETURNING id`,
-        [billNumber, body.supplierId || null, body.purchaseOrderId || null, billDate, body.dueDate || null, body.currency || 'ZAR', subtotal, taxTotal, total, total, body.notes || null]
+        `INSERT INTO bills (bill_number, supplier_id, purchase_order_id, bill_date, due_date, status, currency, subtotal, tax_total, total, balance_due, notes, supplier_invoice_number)
+         VALUES ($1,$2,$3,$4,$5,'DRAFT',$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+        [billNumber, body.supplierId || null, body.purchaseOrderId || null, billDate, body.dueDate || null, body.currency || 'ZAR', subtotal, taxTotal, total, total, body.notes || null, body.supplierInvoiceNumber?.trim() || null]
       );
       const billId = billRes.rows[0].id;
 
@@ -1684,111 +1686,21 @@ export function registerBookkeepingRoutes(app: Express) {
   // response_format=json_object mode. If the key isn't set the
   // endpoint 501s cleanly so the client falls back to image-only.
   app.post('/api/bookkeeping/ocr/receipt', async (req, res) => {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      return res.status(501).json({
-        error: 'OpenAI Vision OCR is not configured on this server. Add OPENAI_API_KEY via flyctl secrets set.',
-      });
-    }
+    // The reading itself: ./billOcr (shared with bills sent from the scanner).
     const rawImages = Array.isArray(req.body?.images) ? req.body.images
       : req.body?.image ? [req.body.image]
       : [];
-    const images: string[] = rawImages
-      .filter((v: any) => typeof v === 'string' && v.startsWith('data:image/'));
-    if (images.length === 0) {
-      return res.status(400).json({ error: 'Provide one or more data:image/… URLs in body.images[]' });
-    }
-    if (images.length > 8) {
-      return res.status(400).json({ error: 'Up to 8 images per receipt — split larger uploads.' });
-    }
-    const totalBytes = images.reduce((s, i) => s + i.length, 0);
-    if (totalBytes > 25_000_000) {
-      return res.status(413).json({ error: 'Combined image payload too large — please recompress or split.' });
-    }
-
-    // System prompt spells out the JSON schema exactly. Being strict
-    // here means the client can trust the shape without runtime
-    // validation of every field.
-    const systemPrompt = `You extract structured data from receipt / invoice / bill photos.
-Return JSON matching this shape exactly:
-{
-  "supplier": string | null,        // Trading name of the seller. Ignore addresses, VAT numbers, receipt headers.
-  "date": string | null,            // ISO YYYY-MM-DD. Prefer the invoice date over the print date.
-  "currency": string | null,        // "ZAR", "USD", "EUR", … — infer from symbols if not stated.
-  "total": number | null,           // Grand total the customer owes.
-  "taxTotal": number | null,        // VAT / GST amount if stated.
-  "lineItems": [                    // Each purchased line. Skip subtotals, tax, delivery, discount summary rows.
-    { "description": string, "quantity": number, "unitPrice": number, "lineTotal": number }
-  ],
-  "text": string                    // Concatenated readable text from every page in reading order.
-}
-If a field is unreadable, use null (or [] for lineItems). Never invent values.`;
-
-    const userContent: any[] = [
-      { type: 'text', text: `Extract the receipt data as JSON.` },
-      ...images.map(url => ({ type: 'image_url', image_url: { url, detail: 'high' } })),
-    ];
-
+    const images: string[] = rawImages.filter((v: any) => typeof v === 'string' && v.startsWith('data:image/'));
+    if (images.length === 0) return res.status(400).json({ error: 'Provide one or more data:image/… URLs in body.images[]' });
+    if (images.length > 8) return res.status(400).json({ error: 'Up to 8 images per receipt — split larger uploads.' });
+    if (images.reduce((s, i) => s + i.length, 0) > 25_000_000) return res.status(413).json({ error: 'Combined image payload too large — please recompress or split.' });
     try {
-      const upstream = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o',
-          response_format: { type: 'json_object' },
-          temperature: 0,
-          max_tokens: 2048,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userContent },
-          ],
-        }),
-      });
-      if (!upstream.ok) {
-        const errText = await upstream.text().catch(() => '');
-        console.error('[ocr:receipt] OpenAI', upstream.status, errText.slice(0, 300));
-        return res.status(502).json({ error: `Vision API rejected the request (${upstream.status}).` });
-      }
-      const data: any = await upstream.json();
-      const content = data?.choices?.[0]?.message?.content;
-      if (!content) return res.status(502).json({ error: 'Vision API returned no content.' });
-      let parsed: any = {};
-      try { parsed = JSON.parse(content); }
-      catch { return res.status(502).json({ error: 'Vision API returned unparseable JSON.' }); }
-
-      // Coerce to the shape the client expects. Null defaults for
-      // missing fields so the client can trust `?? null` semantics.
-      const num = (v: any): number | null => {
-        const n = typeof v === 'number' ? v : parseFloat(String(v || ''));
-        return Number.isFinite(n) ? n : null;
-      };
-      const str = (v: any): string | null => {
-        const s = typeof v === 'string' ? v.trim() : '';
-        return s ? s : null;
-      };
-      const lineItems = Array.isArray(parsed.lineItems)
-        ? parsed.lineItems.map((li: any) => ({
-            description: str(li?.description) || '',
-            quantity: num(li?.quantity) || 1,
-            unitPrice: num(li?.unitPrice) || 0,
-            lineTotal: num(li?.lineTotal) || 0,
-          })).filter((li: any) => li.description || li.lineTotal > 0)
-        : [];
-      res.json({
-        supplier: str(parsed.supplier),
-        date: str(parsed.date),
-        currency: str(parsed.currency),
-        total: num(parsed.total),
-        taxTotal: num(parsed.taxTotal),
-        lineItems,
-        text: str(parsed.text) || '',
-      });
+      const o = await readBill(images);
+      res.json({ ...o, warnings: ocrWarnings(o) });
     } catch (err: any) {
-      console.error('[ocr:receipt] failed:', err.message);
-      res.status(500).json({ error: err.message });
+      const status = err?.status || 500;
+      if (status >= 500 && status !== 501 && status !== 502) console.error('[ocr:receipt] failed:', err.message);
+      res.status(status).json({ error: err.message });
     }
   });
 

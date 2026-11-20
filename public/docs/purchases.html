@@ -144,6 +144,20 @@
                 </ol>
             </div>
 
+            <h3 id="bills-from-the-scanner">Bills from the scanner, and reading invoices</h3>
+            <div class="step">
+                <p><strong>Scan a bill on a phone.</strong> On the scanner (<a href="/scan"><code>/scan</code></a> or the scanner app), <strong>Scan a bill</strong> photographs a supplier's invoice page by page (up to 8) and sends it. It appears at the top of <span class="menu-path">Purchases &gt; Bills</span> under <strong>From the scanner</strong> within a few seconds and is read straight away: the supplier, their VAT number, address, phone, email and website, the invoice number, invoice and due dates, the PO it quotes, each line (with its part number) and the subtotal, VAT and total. What was read is matched in Tracklab: the supplier by VAT number, then by name; the PO by its number; each line's part number to a stock item; and, if the invoice prints no due date, one from the supplier's payment terms. Anything that doesn't add up is pointed out (the lines against the totals, VAT that isn't 15%, VAT charged with no VAT number).</p>
+                <ul>
+                    <li><strong>Create bill</strong> opens the new bill already filled in, with the photos attached. Check it and save. If the supplier has no VAT number, address, phone, email or website yet, the form offers to save the ones from the invoice (ticked; untick to leave them).</li>
+                    <li><strong>Attach</strong> puts its pages on a bill that already exists (after the ones there), and fills in that bill's supplier invoice number if it has none.</li>
+                    <li><strong>Read again</strong> reads it once more; <strong>Discard</strong> takes it off the list.</li>
+                </ul>
+                <p>Nothing becomes a bill on its own. Anyone but a viewer can send a bill from the phone; using it here needs the right to change bookkeeping. <strong>Scan Receipt</strong> on this page does the same reading for a photo taken or chosen on the computer.</p>
+                <p><strong>Fill missing details</strong> reads the photos already attached to bills and lists what each bill and its supplier are missing that the invoice shows: the supplier's VAT number, address, phone, email and website, and the bill's supplier invoice number (and its supplier, for a bill that has none). Only empty fields are offered, everything starts ticked (a supplier's detail once, on its first bill), and nothing changes until <strong>Fill in</strong>. A field that already has a value is never changed, and bank details are never taken from an invoice: a changed bank account on an invoice is a common fraud, so those are typed in by hand and checked by phone.</p>
+                <p>The photos are read by OpenAI's vision service; they are sent there to be read. Reading needs <code>OPENAI_API_KEY</code> on the server: without it, bills from the scanner still arrive and can be used, just not read.</p>
+                <p>Suppliers now carry a <strong>VAT number</strong>, <strong>phone</strong> and <strong>address</strong> (edit a vendor to change them), and a bill its <strong>supplier invoice no.</strong>, shown when the bill is opened.</p>
+            </div>
+
             <h3 id="deleting-a-bill">Deleting a bill</h3>
             <div class="step">
                 <p>A bill is in the books, so deleting one undoes it rather than just removing a row. Before you confirm, the app lists exactly what will go with it.</p>

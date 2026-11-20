@@ -313,6 +313,15 @@ scans }]`, `complete`. Scan: `POST /api/bom-picks/:id/scans { lineId, binId (nul
 says; otherwise `qty` defaults to what the line still needs and may not exceed it. Undo:
 `POST /api/bom-picks/:id/scans/:scanId/undo`. Booking out (`/book-out`) is the desktop's final check.
 
+### Scanning a bill
+
+`POST /api/bill-scans { pages: ["data:image/jpeg;base64,…", …], note?, clientRef?, capturedAt? }`: up to 8 photos
+(JPEG / PNG / WebP, each up to 6 MB; make them about 1800 px on the long side). Anyone but viewers.
+-> the scan (`status: "INBOX"`, `read.status: "WAITING"` while it's being read). It waits on the website
+under Purchases > Bills > From the scanner. `GET /api/bill-scans?status=ALL&mine=1` lists your own, each
+with `status` (`INBOX` waiting / `USED` with `billNumber` / `DISCARDED`), `ocr` (supplier, invoiceNumber,
+total, currency, …) and `thumb` (the first page). A resend with the same `clientRef` returns the saved one.
+
 ### Tracklab's own labels
 
 `find` reads them: a bin label `LOC:A1-03` is that location (`location`, no items); a reel label

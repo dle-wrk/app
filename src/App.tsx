@@ -808,6 +808,9 @@ export default function App() {
             website: s.website,
             contact_email: s.contact_email,
             notes: s.notes,
+            vatNumber: s.vat_number ?? null,
+            address: s.address ?? null,
+            phone: s.phone ?? null,
             leadTime: s.lead_time ?? undefined,
             responseTime: s.response_time ?? undefined,
             measuredLeadTime: s.measured_lead_time ?? undefined,
@@ -1209,6 +1212,9 @@ export default function App() {
             website: supplier.website,
             contact_email: supplier.contact_email,
             notes: supplier.notes,
+            vat_number: supplier.vatNumber ?? '',
+            address: supplier.address ?? '',
+            phone: supplier.phone ?? '',
             lead_time: supplier.leadTime,
             response_time: supplier.responseTime,
             ...(supplier.bank ? { bank: supplier.bank } : {}),
@@ -3033,6 +3039,9 @@ if (currentView === 'alternates') {
                     website: fd.get('website') as string,
                     contact_email: fd.get('contact_email') as string,
                     notes: fd.get('notes') as string,
+                    vatNumber: String(fd.get('vat_number') ?? '').trim() || null,
+                    address: String(fd.get('address') ?? '').trim() || null,
+                    phone: String(fd.get('phone') ?? '').trim() || null,
                     leadTime: parseInt(fd.get('lead_time') as string) || 0,
                     responseTime: parseInt(fd.get('response_time') as string) || 0,
                     bank,
@@ -3090,6 +3099,22 @@ if (currentView === 'alternates') {
                     type="email"
                     defaultValue={editingSupplier?.contact_email || ''}
                   />
+                </div>
+
+                <div className="grid grid-cols-2 gap-sm">
+                  <div className="flex flex-col gap-1">
+                    <label className="font-bold text-outline" htmlFor="supplier-vat">VAT number</label>
+                    <input id="supplier-vat" name="vat_number" placeholder="e.g. 4123456789" className="bg-surface-container-high border border-outline-variant rounded p-2 text-on-surface outline-none focus:border-primary font-mono text-xs" type="text" defaultValue={editingSupplier?.vatNumber || ''} />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="font-bold text-outline" htmlFor="supplier-phone">Phone</label>
+                    <input id="supplier-phone" name="phone" placeholder="e.g. 011 555 0100" className="bg-surface-container-high border border-outline-variant rounded p-2 text-on-surface outline-none focus:border-primary font-mono text-xs" type="tel" defaultValue={editingSupplier?.phone || ''} />
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className="font-bold text-outline" htmlFor="supplier-address">Address</label>
+                  <textarea id="supplier-address" name="address" rows={2} placeholder="Street or postal address, as on their invoices" className="bg-surface-container-high border border-outline-variant rounded p-2 text-on-surface outline-none focus:border-primary text-xs" defaultValue={editingSupplier?.address || ''} />
                 </div>
 
                 <div className="grid grid-cols-2 gap-sm">

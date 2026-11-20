@@ -168,7 +168,8 @@ describe('Bills — admin', () => {
       'Its scanned receipt is deleted with it.',
     ]);
     // The preview is fetched first; the delete only goes out after the confirmation.
-    expect(calls).toEqual([
+    // (The scanner inbox is read on its own when the tab opens: not part of this.)
+    expect(calls.filter(c => !c.url.startsWith('/api/bill-scans'))).toEqual([
       { method: 'GET', url: '/api/bills/5/delete-impact' },
       { method: 'DELETE', url: '/api/bills/5' },
     ]);

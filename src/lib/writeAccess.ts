@@ -55,6 +55,8 @@ export const AREAS: Record<string, Area> = {
   notifications: 'open', pricing: 'open', 'supplier-bom': 'open', 'supplier-quotes': 'open', settings: 'open',
   // Scanner app: photos of picked stock. Anyone but viewers saves them.
   scans: 'staff',
+  // Scanner app: photos of a supplier's bill, sent to the Bills inbox. Using them is bookkeeping (/api/bills/...).
+  'bill-scans': 'staff',
   // Scanner app sign-in.
   mobile: 'open',
   // Your own preferences (the routes only touch the caller's row).

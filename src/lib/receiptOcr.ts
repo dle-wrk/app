@@ -12,6 +12,7 @@
 
 export interface OcrLineItem {
   description: string;
+  partNumber?: string | null;
   quantity: number;
   unitPrice: number;
   lineTotal: number;
@@ -25,6 +26,18 @@ export interface OcrResult {
   taxTotal?: number | null; // new: VAT / GST amount when stated
   currency?: string | null; // new: ISO currency code when the model could infer one
   lineItems: OcrLineItem[];
+  // From the supplier's invoice (src/lib/billOcr.ts): who they are and the invoice's own numbers.
+  supplierVatNumber?: string | null;
+  supplierAddress?: string | null;
+  supplierPhone?: string | null;
+  supplierEmail?: string | null;
+  supplierWebsite?: string | null;
+  invoiceNumber?: string | null;
+  dueDate?: string | null;
+  poNumber?: string | null;
+  subtotal?: number | null;
+  /** Things that don't add up on what was read. */
+  warnings?: string[];
 }
 
 // runOcr accepts either a single data URL (backwards-compat with the
@@ -58,10 +71,21 @@ export async function runOcr(input: string | string[]): Promise<OcrResult> {
     lineItems: Array.isArray(data?.lineItems)
       ? data.lineItems.map((li: any) => ({
           description: String(li?.description || ''),
+          partNumber: li?.partNumber ? String(li.partNumber) : null,
           quantity: Number(li?.quantity) || 1,
           unitPrice: Number(li?.unitPrice) || 0,
           lineTotal: Number(li?.lineTotal) || 0,
         }))
       : [],
+    supplierVatNumber: data?.supplierVatNumber ?? null,
+    supplierAddress: data?.supplierAddress ?? null,
+    supplierPhone: data?.supplierPhone ?? null,
+    supplierEmail: data?.supplierEmail ?? null,
+    supplierWebsite: data?.supplierWebsite ?? null,
+    invoiceNumber: data?.invoiceNumber ?? null,
+    dueDate: data?.dueDate ?? null,
+    poNumber: data?.poNumber ?? null,
+    subtotal: typeof data?.subtotal === 'number' ? data.subtotal : null,
+    warnings: Array.isArray(data?.warnings) ? data.warnings.map(String) : [],
   };
 }

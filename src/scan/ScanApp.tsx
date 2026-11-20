@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ArrowDownToLine, ArrowUpFromLine, Barcode, Boxes, Camera, Check, CheckCircle2, ChevronDown, ClipboardList, Clock, Eye, EyeOff, Link2, Loader2,
-  ArrowUp, Layers, LogOut, MapPin, Minus, Package, PackagePlus, Plus, ScanLine, Search, Truck, X, XCircle,
+  ArrowUp, Layers, LogOut, MapPin, Receipt, Minus, Package, PackagePlus, Plus, ScanLine, Search, Truck, X, XCircle,
 } from 'lucide-react';
 import {
   api, session, newClientRef, stillDue, SignedOutError,
@@ -11,6 +11,7 @@ import { CodeScanner } from './CodeScanner';
 import { JobPicker, KitCard, PoCard } from './Jobs';
 import { CountJob } from './CountJob';
 import { BomPickJob } from './BomPick';
+import { BillScanJob } from './BillScan';
 import { TONE, big, card, field, label } from './ui';
 
 // The phone scan page. Sign in with a Tracklab account, choose Book in or
@@ -179,6 +180,7 @@ export const ScanApp: React.FC = () => {
   const [pick, setPick] = useState<PickLine | null>(null);
   const [counting, setCounting] = useState(false);
   const [bomPicking, setBomPicking] = useState(false);
+  const [billScanning, setBillScanning] = useState(false);
   // BOMs the desktop has sent to be scanned: announced on the home screen.
   const [bomsWaiting, setBomsWaiting] = useState<BomPickSummary[]>([]);
 
@@ -420,7 +422,7 @@ export const ScanApp: React.FC = () => {
   const signOut = async () => {
     await api('/api/session/logout', { method: 'POST', body: {} }).catch(() => {});
     session.clear();
-    setUser(null); reset(); setMine([]); setMineTotal(0); setPo(null); setKit(null); setCounting(false); setPicking(null); setBomPicking(false);
+    setUser(null); reset(); setMine([]); setMineTotal(0); setPo(null); setKit(null); setCounting(false); setPicking(null); setBomPicking(false); setBillScanning(false);
   };
 
   if (!user) return <SignIn onSignedIn={(u) => { setUser(u); setNotice(null); }} />;
@@ -454,7 +456,9 @@ export const ScanApp: React.FC = () => {
       </header>
 
       <main className="w-full max-w-[28rem] mx-auto p-4 pb-12 space-y-4">
-        {bomPicking ? (
+        {billScanning ? (
+          <BillScanJob onClose={() => setBillScanning(false)} onError={guard} />
+        ) : bomPicking ? (
           <BomPickJob onClose={() => setBomPicking(false)} onError={guard} />
         ) : counting ? (
           <CountJob locations={locations} onClose={() => setCounting(false)} onError={guard} />
@@ -480,9 +484,9 @@ export const ScanApp: React.FC = () => {
             )}
             {!item && !unknown && !choices && !picking && (
               <div className="grid grid-cols-2 gap-2" role="group" aria-label="Other jobs">
-                {([['bom', 'Scan BOM items', Layers], ['po', 'Receive a PO', Truck], ['kit', 'Pick a kit', Boxes], ['count', 'Count stock', ClipboardList]] as const).map(([k, text, Icon]) => (
-                  <button key={k} type="button" onClick={() => { setError(null); setNotice(null); if (k === 'count') setCounting(true); else if (k === 'bom') setBomPicking(true); else setPicking(k); }}
-                    className="flex flex-col items-center gap-1 rounded-xl border border-white/10 bg-surface-container py-2.5 text-xs font-bold text-on-surface-variant active:border-primary active:text-on-surface">
+                {([['bom', 'Scan BOM items', Layers], ['po', 'Receive a PO', Truck], ['kit', 'Pick a kit', Boxes], ['count', 'Count stock', ClipboardList], ['bill', 'Scan a bill', Receipt]] as const).map(([k, text, Icon]) => (
+                  <button key={k} type="button" onClick={() => { setError(null); setNotice(null); if (k === 'count') setCounting(true); else if (k === 'bom') setBomPicking(true); else if (k === 'bill') setBillScanning(true); else setPicking(k); }}
+                    className={`${k === 'bill' ? 'col-span-2 ' : ''}flex flex-col items-center gap-1 rounded-xl border border-white/10 bg-surface-container py-2.5 text-xs font-bold text-on-surface-variant active:border-primary active:text-on-surface`}>
                     <Icon className="w-4 h-4 text-primary" aria-hidden="true" />{text}
                   </button>
                 ))}
@@ -490,7 +494,7 @@ export const ScanApp: React.FC = () => {
             )}
           </>
         )}
-        {picking && !counting && !bomPicking && <JobPicker kind={picking} onPick={(id) => void openJob(picking, id)} onClose={() => setPicking(null)} onError={guard} />}
+        {picking && !counting && !bomPicking && !billScanning && <JobPicker kind={picking} onPick={(id) => void openJob(picking, id)} onClose={() => setPicking(null)} onError={guard} />}
 
         {notice && (
           <p role="status" className="flex items-start gap-2 rounded-xl border border-green-500/25 bg-green-500/10 text-green-400 text-sm font-semibold px-3.5 py-3">
@@ -504,7 +508,7 @@ export const ScanApp: React.FC = () => {
           </p>
         )}
 
-        {!counting && !picking && !bomPicking && (<>
+        {!counting && !picking && !bomPicking && !billScanning && (<>
         {unknown && !item && !choices && (
           <section className={`${card} overflow-hidden`} aria-label="Not in Tracklab">
             <div className="px-4 py-3 border-b border-white/[0.07] bg-primary/10 flex items-center gap-2" data-no-mobile-stack>
@@ -717,7 +721,7 @@ export const ScanApp: React.FC = () => {
         )}
         </>)}
 
-        {!counting && !bomPicking && <section className="pt-2">
+        {!counting && !bomPicking && !billScanning && <section className="pt-2">
           <div className="flex items-center gap-2 mb-2.5" data-no-mobile-stack>
             <h2 className="text-sm font-black">My scans</h2>
             {pending > 0 && <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-primary/15 text-primary">{pending} waiting</span>}

@@ -468,6 +468,13 @@ export async function ensureBookkeepingSchema() {
   await exec(`ALTER TABLE clients ADD COLUMN IF NOT EXISTS payment_terms_days INTEGER DEFAULT 30`).catch(() => {});
   await exec(`ALTER TABLE clients ADD COLUMN IF NOT EXISTS opening_balance NUMERIC(14,2) DEFAULT 0`).catch(() => {});
   await exec(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS payment_terms_days INTEGER DEFAULT 30`).catch(() => {});
+  // What a supplier's invoice carries that a bill needs: their VAT number and
+  // where to reach them. Filled by hand, or from a scanned invoice (./billScans).
+  await exec(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS vat_number TEXT`).catch(() => {});
+  await exec(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS address TEXT`).catch(() => {});
+  await exec(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS phone TEXT`).catch(() => {});
+  // The supplier's own number for the invoice a bill records.
+  await exec(`ALTER TABLE bills ADD COLUMN IF NOT EXISTS supplier_invoice_number TEXT`).catch(() => {});
 
   // --- Sales-order verification document (POP / customer PO attachment) ------
   // Each client_order can carry ONE attached proof-of-purchase / purchase-order
@@ -901,6 +908,7 @@ export const mapPurchaseOrderItem = (r: any) => ({
 export const mapBill = (r: any) => ({
   id: r.id,
   billNumber: r.bill_number,
+  supplierInvoiceNumber: r.supplier_invoice_number ?? null,
   supplierId: r.supplier_id,
   purchaseOrderId: r.purchase_order_id,
   billDate: r.bill_date,

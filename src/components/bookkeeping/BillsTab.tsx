@@ -9,6 +9,9 @@ import { MonthHeaderRow, monthSum, useMonthGroups } from './MonthGroups';
 import { LineItemsEditor, EditableLine, newEditableLine } from './LineItemsEditor';
 import { ErrorBoundary } from '../ErrorBoundary';
 import { confirmDialog, ConfirmOptions } from '../../lib/confirmDialog';
+import { BillInbox, FillMissingModal, type ScanPrefill } from './BillInbox';
+import { canChange } from '../../lib/changeAccess';
+import { Wand2 } from 'lucide-react';
 
 const STATUS_FILTERS = ['ALL', 'DRAFT', 'AWAITING_PAYMENT', 'PARTIAL', 'PAID', 'OVERDUE', 'VOID'];
 
@@ -64,13 +67,10 @@ function billDeleteConfirmation(impact: BillDeleteImpact): ConfirmOptions {
 // Payload the scan modal hands the editor when the user chooses "Continue to
 // bill". Any field may be null — the editor uses defaults where we couldn't
 // extract cleanly.
-interface PrefillFromScan {
-  supplierName: string | null;
-  date: string | null;
-  total: number | null;
-  receiptImage: string | null;
-  lineItems: { description: string; quantity: number; unitPrice: number }[];
-}
+type PrefillFromScan = ScanPrefill;
+
+/** A VAT number for comparing: no spaces, dots or dashes. */
+const vatKey = (v: unknown) => String(v ?? '').replace(/[\s.\-]/g, '').toUpperCase();
 
 export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrder | null; onPrefillConsumed?: () => void }> = (props) => {
   const { bills, setBills, triggerToast, refresh, prefillFromPO, onPrefillConsumed } = props;
@@ -81,6 +81,7 @@ export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
   const [scanningBill, setScanningBill] = useState<Bill | null>(null);
   const [scanningForNewBill, setScanningForNewBill] = useState(false);
   const [scanResultForEditor, setScanResultForEditor] = useState<PrefillFromScan | null>(null);
+  const [fillingMissing, setFillingMissing] = useState(false);
   const [busy, setBusy] = useState(false);
   // Anyone can delete a draft; only an admin can delete a bill that has been
   // posted, paid or voided. The server enforces the same rule.
@@ -179,6 +180,23 @@ export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
         </div>
       </div>
 
+      <BillInbox
+        bills={bills}
+        triggerToast={triggerToast}
+        onCreateBill={(p) => { setScanResultForEditor(p); setShowEditor(true); }}
+        onChanged={refresh}
+      />
+
+      {fillingMissing && (
+        <FillMissingModal
+          bills={bills}
+          supplierName={(id) => props.suppliers.find(x => String(x.id) === String(id))?.name || id}
+          onClose={() => setFillingMissing(false)}
+          onDone={refresh}
+          triggerToast={triggerToast}
+        />
+      )}
+
       <SectionCard
         title="Bills"
         actions={
@@ -188,6 +206,7 @@ export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
                 <button key={s} onClick={() => setStatusFilter(s)} className={`px-2 py-0.5 rounded text-[10px] font-bold border transition-colors ${statusFilter === s ? 'bg-primary text-white border-primary' : 'bg-surface-container-high text-on-surface-variant border-outline-variant'}`}>{s.replace('_', ' ')}</button>
               ))}
             </div>
+            {canChange('/api/bills/1/fill-missing', 'POST') && <SecondaryButton icon={<Wand2 className="w-3.5 h-3.5" />} onClick={() => setFillingMissing(true)} title="Read the photos attached to bills for the supplier's VAT number, contact details and invoice number they're missing">Fill missing details</SecondaryButton>}
             <SecondaryButton icon={<Camera className="w-3.5 h-3.5" />} onClick={() => setScanningForNewBill(true)}>Scan Receipt</SecondaryButton>
             <CreateButton path="/api/bills" icon={<Plus className="w-3.5 h-3.5" />} onClick={() => setShowEditor(true)}>New Bill</CreateButton>
           </>
@@ -285,7 +304,7 @@ export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
 
       {viewing && (
         <Modal title={viewing.billNumber} subtitle={`${viewing.supplierName || viewing.supplierId || 'No supplier'} · ${fmtDate(viewing.billDate)}`} onClose={() => setViewing(null)} maxWidth="max-w-2xl">
-          <div className="flex items-center gap-2 mb-md"><StatusPill status={viewing.status} /><span className="text-xs text-on-surface-variant">Due {fmtDate(viewing.dueDate)}</span></div>
+          <div className="flex items-center gap-2 mb-md"><StatusPill status={viewing.status} /><span className="text-xs text-on-surface-variant">Due {fmtDate(viewing.dueDate)}</span>{viewing.supplierInvoiceNumber && <span className="text-xs text-on-surface-variant">· Supplier invoice <span className="font-mono text-on-surface">{viewing.supplierInvoiceNumber}</span></span>}</div>
           <div className="overflow-x-auto rounded-lg border border-outline-variant/40 mb-md">
             <table className="w-full text-left text-xs">
               <thead>
@@ -634,7 +653,10 @@ const ReceiptScanModal: React.FC<{
     const receiptImage = previews.length === 1 ? previews[0] : JSON.stringify(previews);
     onContinueToBill({
       supplierName: ocr?.supplier ?? null,
+      supplierInvoiceNumber: ocr?.invoiceNumber ?? null,
       date: ocr?.date ?? null,
+      dueDate: ocr?.dueDate ?? null,
+      currency: ocr?.currency ?? null,
       total: ocr?.total ?? null,
       receiptImage,
       lineItems: (ocr?.lineItems || []).map(li => ({
@@ -642,6 +664,8 @@ const ReceiptScanModal: React.FC<{
         quantity: li.quantity,
         unitPrice: li.unitPrice,
       })),
+      warnings: ocr?.warnings ?? [],
+      supplierDetails: ocr ? { vatNumber: ocr.supplierVatNumber ?? null, address: ocr.supplierAddress ?? null, phone: ocr.supplierPhone ?? null, email: ocr.supplierEmail ?? null, website: ocr.supplierWebsite ?? null } : undefined,
     });
   };
 
@@ -854,6 +878,10 @@ const BillEditorModal: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
   // shorter than 3 chars or with too many false positives is left blank so
   // the user picks manually.
   const scanSupplierId = React.useMemo(() => {
+    if (prefillFromScan?.supplierId) return String(prefillFromScan.supplierId);
+    // The supplier's VAT number identifies them better than a name.
+    const vat = vatKey(prefillFromScan?.supplierDetails?.vatNumber);
+    if (vat) { const byVat = suppliers.find(s => vatKey(s.vatNumber) === vat); if (byVat) return String(byVat.id); }
     const name = prefillFromScan?.supplierName?.toLowerCase().trim();
     if (!name || name.length < 3) return '';
     const hit = suppliers.find(s => {
@@ -861,12 +889,25 @@ const BillEditorModal: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
       return cand === name || cand.includes(name) || name.includes(cand);
     });
     return hit ? String(hit.id) : '';
-  }, [prefillFromScan?.supplierName, suppliers]);
+  }, [prefillFromScan?.supplierName, prefillFromScan?.supplierId, prefillFromScan?.supplierDetails?.vatNumber, suppliers]);
 
   const [supplierId, setSupplierId] = useState(prefillFromPO?.supplierId || scanSupplierId || '');
   const [billDate, setBillDate] = useState(prefillFromScan?.date || todayISO());
-  const [dueDate, setDueDate] = useState(addDaysISO(30));
-  const [currency, setCurrency] = useState(prefillFromPO?.currency || 'ZAR');
+  const [dueDate, setDueDate] = useState(prefillFromScan?.dueDate || addDaysISO(30));
+  const [currency, setCurrency] = useState(prefillFromPO?.currency || prefillFromScan?.currency || 'ZAR');
+  const [supplierInvoiceNumber, setSupplierInvoiceNumber] = useState(prefillFromScan?.supplierInvoiceNumber || '');
+  const purchaseOrderId = prefillFromPO?.id || prefillFromScan?.purchaseOrderId || null;
+  // The supplier's details the invoice shows, saved where the supplier has none (ticked by default).
+  const details = prefillFromScan?.supplierDetails;
+  const chosenSupplier = suppliers.find(s => String(s.id) === String(supplierId));
+  const gaps = details && chosenSupplier ? ([
+    ['vatNumber', 'VAT number', chosenSupplier.vatNumber, details.vatNumber],
+    ['address', 'address', chosenSupplier.address, details.address],
+    ['phone', 'phone', chosenSupplier.phone, details.phone],
+    ['email', 'email', chosenSupplier.contact_email, details.email],
+    ['website', 'website', chosenSupplier.website, details.website],
+  ] as const).filter(([, , have, found]) => !String(have ?? '').trim() && found) : [];
+  const [fillSupplier, setFillSupplier] = useState(true);
   const [notes, setNotes] = useState(
     prefillFromScan && !prefillFromScan.supplierName && !prefillFromScan.date && !prefillFromScan.total
       ? 'From receipt scan (OCR extracted no fields cleanly)'
@@ -888,6 +929,7 @@ const BillEditorModal: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
         line.description = li.description;
         line.quantity = li.quantity;
         line.unitPrice = li.unitPrice;
+        if (li.partNumber) line.partNumber = li.partNumber; // matched to a stock item from the invoice's part number
         return line;
       });
     }
@@ -909,17 +951,28 @@ const BillEditorModal: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
     try {
       const created = await apiPost('/api/bills', {
         supplierId: supplierId || null,
-        purchaseOrderId: prefillFromPO?.id || null,
+        supplierInvoiceNumber: supplierInvoiceNumber.trim() || null,
+        purchaseOrderId,
         billDate, dueDate, currency, notes, status,
         items: validLines.map(l => ({ partNumber: l.partNumber || undefined, description: l.description, quantity: l.quantity, unitPrice: l.unitPrice, taxRateId: l.taxRateId || undefined, accountId: l.accountId || undefined, receiveStock: !!l.receiveStock, taxInclusive: !!l.taxInclusive && !!l.taxRateId })),
       });
       // If the user reached this modal from the scan flow, attach the image
       // to the fresh bill so line items and the source slip live together.
-      if (prefillFromScan?.receiptImage && created?.id) {
+      if (prefillFromScan?.billScanId && created?.id) {
+        // From the scanner: its photos go on the bill, and it leaves the inbox.
+        try {
+          await apiPost(`/api/bills/inbox/${prefillFromScan.billScanId}/used`, { billId: created.id, fillSupplier: fillSupplier && gaps.length > 0 });
+        } catch (err: any) {
+          triggerToast(`Bill saved, but the scanned bill couldn't be marked used: ${err.message}`, 'ERROR');
+        }
+      } else if (prefillFromScan?.receiptImage && created?.id) {
         try {
           await apiPost(`/api/bills/${created.id}/receipt`, { image: prefillFromScan.receiptImage });
         } catch (err: any) {
           triggerToast('Bill saved but receipt attach failed — retry from the row', 'ERROR');
+        }
+        if (fillSupplier && gaps.length) {
+          await apiPost(`/api/bills/${created.id}/fill-missing`, { values: Object.fromEntries(gaps.map(([k, , , v]) => [k, v])) }).catch(() => {});
         }
       }
       triggerToast(status === 'AWAITING_PAYMENT' ? 'Bill finalized and posted to the ledger.' : 'Bill saved as draft.');
@@ -941,6 +994,10 @@ const BillEditorModal: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
             {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
         </div>
+        <div className="md:col-span-2">
+          <FieldLabel>Supplier invoice no.</FieldLabel>
+          <input className={inputClass} value={supplierInvoiceNumber} onChange={(e) => setSupplierInvoiceNumber(e.target.value)} placeholder="Their number for this invoice" aria-label="Supplier invoice number" />
+        </div>
         <div>
           <FieldLabel>Bill Date</FieldLabel>
           <input type="date" className={inputClass} value={billDate} onChange={(e) => setBillDate(e.target.value)} />
@@ -950,6 +1007,18 @@ const BillEditorModal: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
           <input type="date" className={inputClass} value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
         </div>
       </div>
+
+      {(prefillFromScan?.warnings?.length || gaps.length) ? (
+        <div className="mb-md space-y-1 text-xs" data-testid="scan-checks">
+          {prefillFromScan?.warnings?.map(w => <p key={w} className="text-amber-400">⚠ {w}</p>)}
+          {gaps.length > 0 && (
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input type="checkbox" className="mt-0.5" checked={fillSupplier} onChange={(e) => setFillSupplier(e.target.checked)} />
+              <span>Save the supplier's {gaps.map(([, label, , v]) => `${label} (${v})`).join(', ')} from the invoice: {chosenSupplier?.name} has none.</span>
+            </label>
+          )}
+        </div>
+      ) : null}
 
       <ErrorBoundary>
         {poItems?.some((it: any) => Number(it.qtyReceived) > 0) && (

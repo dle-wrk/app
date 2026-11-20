@@ -43,6 +43,18 @@ async function saveBanking(id: string, bank: unknown, who: string | null): Promi
   return changed;
 }
 
+/** VAT number, address and phone: saved when the request carries them, so an older client doesn't blank them. */
+const CONTACT_COLUMNS = ['vat_number', 'address', 'phone'] as const;
+async function saveContact(id: string, body: any) {
+  const sets: string[] = []; const vals: any[] = [id];
+  for (const c of CONTACT_COLUMNS) {
+    if (body?.[c] === undefined) continue;
+    vals.push(String(body[c] ?? '').replace(/\s+/g, ' ').trim().slice(0, c === 'address' ? 300 : 60) || null);
+    sets.push(`${c} = $${vals.length}`);
+  }
+  if (sets.length) await query(`UPDATE suppliers SET ${sets.join(', ')} WHERE id = $1`, vals);
+}
+
 export function registerSuppliersRoutes(app: Express): void {
   app.get('/api/suppliers', async (_req, res) => {
     const { rows } = await query('SELECT * FROM suppliers ORDER BY id');
@@ -62,6 +74,7 @@ export function registerSuppliersRoutes(app: Express): void {
       if (req.body?.bank !== undefined) normalizeBanking(req.body.bank); // check before writing anything
       const { rowCount } = await query(sqlText, [name, website, contact_email, notes, lead_time, response_time, id]);
       if (rowCount === 0) return res.status(404).json({ error: 'supplier not found' });
+      await saveContact(id, req.body);
       const bankChanged = await saveBanking(id, req.body?.bank, req.user?.email ?? null);
       const row = await queryOne(`SELECT * FROM suppliers WHERE id = $1`, [id]);
       res.json({ ...row, bank_changed: bankChanged });
@@ -78,6 +91,7 @@ export function registerSuppliersRoutes(app: Express): void {
     try {
       if (req.body?.bank !== undefined) normalizeBanking(req.body.bank); // check before writing anything
       await query(sqlText, [id, name, website, contact_email, notes, lead_time, response_time]);
+      await saveContact(String(id), req.body);
       const bankChanged = await saveBanking(String(id), req.body?.bank, req.user?.email ?? null);
       const row = await queryOne(`SELECT * FROM suppliers WHERE id = $1`, [id]);
       res.status(201).json({ ...row, bank_changed: bankChanged });
