@@ -38,6 +38,9 @@ export interface OcrResult {
   subtotal?: number | null;
   /** Things that don't add up on what was read. */
   warnings?: string[];
+  /** What it matched in Tracklab, with what the supplier's earlier bills taught. */
+  match?: any;
+  reader?: string;
 }
 
 // runOcr accepts either a single data URL (backwards-compat with the
@@ -87,5 +90,7 @@ export async function runOcr(input: string | string[]): Promise<OcrResult> {
     poNumber: data?.poNumber ?? null,
     subtotal: typeof data?.subtotal === 'number' ? data.subtotal : null,
     warnings: Array.isArray(data?.warnings) ? data.warnings.map(String) : [],
+    match: data?.match ?? null,
+    reader: data?.reader,
   };
 }

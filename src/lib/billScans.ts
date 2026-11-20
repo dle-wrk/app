@@ -23,6 +23,7 @@
 import type { Express, Response } from 'express';
 import { pool, query, exec } from './db';
 import { readBill, ocrAvailable, ocrWarnings, tidyVatNumber, type BillOcr } from './billOcr';
+import { applyProfile, profileFor } from './billLearning';
 
 export async function ensureBillScansSchema(): Promise<void> {
   await exec(`CREATE TABLE IF NOT EXISTS bill_scans (
@@ -195,12 +196,21 @@ export async function matchesFor(db: Db, o: BillOcr | null) {
       if (hits.length === 1) items.set(c, hits[0].serial_number);
     }
   }
+  // What this supplier's earlier bills taught (./billLearning): stock items, descriptions, accounts, the invoice number's shape, due days.
+  const learned = supplier ? applyProfile(o, await profileFor(db, supplier.id).catch(() => null)) : null;
   const terms = supplier ? Number(suppliers.find((s: any) => String(s.id) === supplier.id)?.payment_terms_days) || null : null;
+  const days = learned?.dueDays ?? terms;
   let dueDate = o.dueDate;
-  if (!dueDate && o.date && terms) { const d = new Date(`${o.date}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + terms); dueDate = d.toISOString().slice(0, 10); }
+  if (!dueDate && o.date && days) { const d = new Date(`${o.date}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + days); dueDate = d.toISOString().slice(0, 10); }
   return {
     supplier, po, dueDate,
-    lines: o.lineItems.map(l => ({ partNumber: l.partNumber, item: l.partNumber ? items.get(l.partNumber.toUpperCase()) ?? null : null })),
+    invoiceNumber: learned?.invoiceNumber ?? o.invoiceNumber,
+    learnedFrom: learned?.learnedFrom ?? 0,
+    lines: o.lineItems.map((l, i) => {
+      const hint = learned?.lines[i];
+      const byCode = l.partNumber ? items.get(l.partNumber.toUpperCase()) ?? null : null;
+      return { partNumber: l.partNumber, item: (hint?.learned ? hint.item : null) ?? byCode, description: hint?.description ?? null, accountId: hint?.accountId ?? null, taxRateId: hint?.taxRateId ?? null, learned: !!hint?.learned };
+    }),
   };
 }
 

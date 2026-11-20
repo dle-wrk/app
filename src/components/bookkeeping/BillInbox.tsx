@@ -21,8 +21,19 @@ export interface BillScan {
   user: { id: number | null; name: string }; capturedAt: string | null; createdAt: string;
   read: { status: 'WAITING' | 'READ' | 'FAILED' | 'OFF'; error: string | null; at: string | null };
   ocr: BillOcr | null; warnings: string[];
-  match: { supplier: { id: string; name: string; by: 'vat' | 'name' | 'web' } | null; po: { id: number; number: string; supplierId: string | null; status: string } | null; dueDate: string | null; lines: { partNumber: string | null; item: string | null }[] } | null;
+  match: ReadMatch | null;
   billId: number | null; billNumber: string | null;
+}
+
+/** What a read invoice matched in Tracklab, with what its supplier's earlier bills taught (src/lib/billScans matchesFor). */
+export interface ReadMatch {
+  supplier: { id: string; name: string; by: 'vat' | 'name' | 'web' } | null;
+  po: { id: number; number: string; supplierId: string | null; status: string } | null;
+  dueDate: string | null;
+  invoiceNumber?: string | null;
+  /** How many of this supplier's bills the reading learned from. */
+  learnedFrom?: number;
+  lines: { partNumber: string | null; item: string | null; description?: string | null; accountId?: number | null; taxRateId?: number | null; learned?: boolean }[];
 }
 
 /** What the bill form is filled with from a scan (BillsTab's BillEditorModal). */
@@ -32,35 +43,47 @@ export interface ScanPrefill {
   /** Before VAT, and the VAT, as read off the invoice. */
   subtotal?: number | null; taxTotal?: number | null;
   purchaseOrderId?: number | null; receiptImage: string | null;
-  lineItems: { description: string; quantity: number; unitPrice: number; partNumber?: string | null }[];
+  lineItems: { description: string; quantity: number; unitPrice: number; partNumber?: string | null; accountId?: number | null; taxRateId?: number | null }[];
   billScanId?: number; warnings?: string[];
+  /** What was read, kept with the saved bill so the supplier's invoices are learned (src/lib/billLearning). */
+  ocr?: BillOcr | null;
+  /** How many of this supplier's earlier bills filled it in. */
+  learnedFrom?: number;
   /** The supplier's details the invoice shows, offered for filling where the supplier has none. */
   supplierDetails?: { vatNumber: string | null; address: string | null; phone: string | null; email: string | null; website: string | null };
 }
 
 /** The bill form's starting point from a scanned bill: what was read, with what it matched in Tracklab. */
 export function prefillFromBillScan(s: BillScan, pages: string[]): ScanPrefill {
-  const o = s.ocr;
+  return { ...prefillFromRead(s.ocr, s.match, pages, s.warnings), billScanId: s.id };
+}
+
+/** The bill form's starting point from any read invoice (a scanned bill, or Scan Receipt). */
+export function prefillFromRead(o: BillOcr | null, match: ReadMatch | null | undefined, pages: string[], warnings: string[] = []): ScanPrefill {
+  const m = match ?? null;
   return {
-    billScanId: s.id,
+    ocr: o,
+    learnedFrom: m?.learnedFrom ?? 0,
     supplierName: o?.supplier ?? null,
-    supplierId: s.match?.supplier?.id ?? null,
-    supplierInvoiceNumber: o?.invoiceNumber ?? null,
+    supplierId: m?.supplier?.id ?? null,
+    supplierInvoiceNumber: m?.invoiceNumber ?? o?.invoiceNumber ?? null,
     date: o?.date ?? null,
-    dueDate: s.match?.dueDate ?? o?.dueDate ?? null,
+    dueDate: m?.dueDate ?? o?.dueDate ?? null,
     currency: o?.currency ?? null,
     total: o?.total ?? null,
     subtotal: o?.subtotal ?? null,
     taxTotal: o?.taxTotal ?? null,
-    purchaseOrderId: s.match?.po && ['DRAFT', 'SENT', 'PARTIAL', 'RECEIVED'].includes(s.match.po.status) ? s.match.po.id : null,
+    purchaseOrderId: m?.po && ['DRAFT', 'SENT', 'PARTIAL', 'RECEIVED'].includes(m.po.status) ? m.po.id : null,
     receiptImage: pages.length ? (pages.length === 1 ? pages[0] : JSON.stringify(pages)) : null,
-    // A line matched to a stock item carries its stock code; otherwise the supplier's code leads its description.
+    // A line matched to a stock item carries its stock code; a learned line its saved description, account and VAT rate;
+    // otherwise the supplier's code leads its description.
     lineItems: (o?.lineItems ?? []).map((l, i) => {
-      const item = s.match?.lines[i]?.item ?? null;
-      const desc = !item && l.partNumber && !l.description.toUpperCase().includes(l.partNumber.toUpperCase()) ? `${l.partNumber} · ${l.description}` : l.description;
-      return { description: desc, quantity: l.quantity, unitPrice: l.unitPrice, partNumber: item };
+      const hint = m?.lines[i];
+      const item = hint?.item ?? null;
+      const desc = hint?.description || (!item && l.partNumber && !l.description.toUpperCase().includes(l.partNumber.toUpperCase()) ? `${l.partNumber} · ${l.description}` : l.description);
+      return { description: desc, quantity: l.quantity, unitPrice: l.unitPrice, partNumber: item, accountId: hint?.accountId ?? null, taxRateId: hint?.taxRateId ?? null };
     }),
-    warnings: s.warnings,
+    warnings,
     supplierDetails: o ? { vatNumber: o.supplierVatNumber, address: o.supplierAddress, phone: o.supplierPhone, email: o.supplierEmail, website: o.supplierWebsite } : undefined,
   };
 }
@@ -325,3 +348,49 @@ export const FillMissingModal: React.FC<{
 };
 
 export const ScanInboxIcon = ScanLine;
+
+// ---------------------------------------------------------------------------
+// What reading a supplier's invoices has learned (src/lib/billLearning), on the vendor's page.
+
+interface LearnedProfile { bills: number; examples: { billNumber: string | null; at: string }[]; lines: { label: string; item: string | null; description: string; seen: number }[]; invoiceShape: { prefix: string; digits: number } | null; dueDays: number | null }
+
+export const LearnedReading: React.FC<{ supplierId: string; supplierName: string }> = ({ supplierId, supplierName }) => {
+  const [p, setP] = useState<LearnedProfile | null>(null);
+  const [busy, setBusy] = useState(false);
+  const may = canChange('/api/bills/read-profiles/1/clear', 'POST');
+  useEffect(() => { apiGet(`/api/bill-read-profiles/${encodeURIComponent(supplierId)}`).then(setP).catch(() => setP(null)); }, [supplierId]);
+  const clear = async () => {
+    if (!(await confirmDialog({ title: 'Forget what was learned', message: `Forget how ${supplierName}'s invoices read (${p?.bills} bill${p?.bills === 1 ? '' : 's'})? Their next invoice is read from scratch and learning starts again. Bills already saved don't change.`, confirmLabel: 'Forget it', destructive: true }))) return;
+    setBusy(true);
+    try { await apiPost(`/api/bills/read-profiles/${encodeURIComponent(supplierId)}/clear`, {}); setP({ bills: 0, examples: [], lines: [], invoiceShape: null, dueDays: null }); } finally { setBusy(false); }
+  };
+  if (!p) return null;
+  return (
+    <div className="text-xs space-y-2" data-testid="learned-reading">
+      {!p.bills ? (
+        <p className="text-outline">Nothing learned yet. Each bill saved from a read invoice (a scanned bill or Scan Receipt) teaches how {supplierName}'s invoices read.</p>
+      ) : (
+        <>
+          <p className="text-on-surface-variant">Learned from {p.bills} bill{p.bills === 1 ? '' : 's'}{p.examples[0]?.billNumber ? `, latest ${p.examples[0].billNumber}` : ''}.
+            {p.invoiceShape ? ` Invoice numbers look like ${p.invoiceShape.prefix}${'0'.repeat(p.invoiceShape.digits)}.` : ''}
+            {p.dueDays != null ? ` Due ${p.dueDays} days after the invoice date.` : ''}</p>
+          {p.lines.length > 0 && (
+            <table className="w-full text-left">
+              <thead><tr className="text-[10px] uppercase text-outline"><th className="py-1">On their invoice</th><th>Becomes</th><th className="text-right">Seen</th></tr></thead>
+              <tbody className="divide-y divide-outline-variant/20">
+                {p.lines.slice(0, 30).map(l => (
+                  <tr key={l.label}>
+                    <td className="py-1 font-mono">{l.label}</td>
+                    <td>{l.item ? <span className="font-mono text-primary">{l.item}</span> : null}{l.item ? ' · ' : ''}<span className="text-on-surface-variant">{l.description}</span></td>
+                    <td className="text-right font-mono">{l.seen}×</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {may && <DangerButton icon={<Trash2 className="w-3.5 h-3.5" />} disabled={busy} onClick={() => void clear()}>Forget what was learned</DangerButton>}
+        </>
+      )}
+    </div>
+  );
+};

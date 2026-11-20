@@ -9,7 +9,7 @@ import { MonthHeaderRow, monthSum, useMonthGroups } from './MonthGroups';
 import { LineItemsEditor, EditableLine, newEditableLine } from './LineItemsEditor';
 import { ErrorBoundary } from '../ErrorBoundary';
 import { confirmDialog, ConfirmOptions } from '../../lib/confirmDialog';
-import { BillInbox, FillMissingModal, type ScanPrefill } from './BillInbox';
+import { BillInbox, FillMissingModal, prefillFromRead, type ScanPrefill } from './BillInbox';
 import { canChange } from '../../lib/changeAccess';
 import { Wand2 } from 'lucide-react';
 
@@ -666,6 +666,8 @@ const ReceiptScanModal: React.FC<{
     // page; single-page keeps the legacy bare-data-URL shape so any
     // downstream consumer that expects one image still gets one.
     const receiptImage = previews.length === 1 ? previews[0] : JSON.stringify(previews);
+    // With a full read (and what it matched), the same starting point as a bill from the scanner.
+    if (ocr?.match !== undefined) { onContinueToBill(prefillFromRead({ ...(ocr as any), lineItems: (ocr.lineItems || []).map(l => ({ ...l, partNumber: l.partNumber ?? null, lineTotal: l.lineTotal })) }, ocr.match, previews, ocr.warnings ?? [])); return; }
     onContinueToBill({
       supplierName: ocr?.supplier ?? null,
       supplierInvoiceNumber: ocr?.invoiceNumber ?? null,
@@ -955,6 +957,9 @@ const BillEditorModal: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
         line.unitPrice = li.unitPrice;
         if (li.partNumber) line.partNumber = li.partNumber; // matched to a stock item from the invoice's part number
         if (vatRate) line.taxRateId = vatRate;
+        // What this supplier's earlier bills taught for this line.
+        if (li.taxRateId && taxRates.some(t => t.id === li.taxRateId)) line.taxRateId = li.taxRateId;
+        if (li.accountId) line.accountId = li.accountId;
         return line;
       });
     }
@@ -986,6 +991,10 @@ const BillEditorModal: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
       });
       // If the user reached this modal from the scan flow, attach the image
       // to the fresh bill so line items and the source slip live together.
+      // Keep what was read beside what was saved: this supplier's next invoice reads better (src/lib/billLearning).
+      if (prefillFromScan?.ocr && created?.id && supplierId) {
+        apiPost(`/api/bills/${created.id}/learn`, { ocr: prefillFromScan.ocr }).catch(() => { /* learning is a bonus: the bill is saved */ });
+      }
       if (prefillFromScan?.billScanId && created?.id) {
         // From the scanner: its photos go on the bill, and it leaves the inbox.
         try {
@@ -1036,8 +1045,9 @@ const BillEditorModal: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
         </div>
       </div>
 
-      {(prefillFromScan?.warnings?.length || gaps.length) ? (
+      {(prefillFromScan?.warnings?.length || gaps.length || prefillFromScan?.learnedFrom) ? (
         <div className="mb-md space-y-1 text-xs" data-testid="scan-checks">
+          {!!prefillFromScan?.learnedFrom && <p className="text-green-400">✓ Filled in from what {prefillFromScan.learnedFrom} earlier bill{prefillFromScan.learnedFrom === 1 ? '' : 's'} from this supplier taught: stock items, descriptions, accounts and VAT rates for lines it has seen before. Saving this bill teaches it more.</p>}
           {prefillFromScan?.warnings?.map(w => <p key={w} className="text-amber-400">⚠ {w}</p>)}
           {gaps.length > 0 && (
             <label className="flex items-start gap-2 cursor-pointer">

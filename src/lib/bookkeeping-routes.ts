@@ -1,4 +1,5 @@
 import { readBill, ocrWarnings } from './billOcr';
+import { matchesFor } from './billScans';
 import type { Express } from 'express';
 import { z } from 'zod';
 import { pool, query, queryOne } from './db';
@@ -1696,7 +1697,9 @@ export function registerBookkeepingRoutes(app: Express) {
     if (images.reduce((s, i) => s + i.length, 0) > 25_000_000) return res.status(413).json({ error: 'Combined image payload too large — please recompress or split.' });
     try {
       const o = await readBill(images);
-      res.json({ ...o, warnings: ocrWarnings(o) });
+      // What it matches, with what the supplier's earlier bills taught (./billLearning).
+      const match = await matchesFor(pool as any, o).catch(() => null);
+      res.json({ ...o, warnings: ocrWarnings(o), match });
     } catch (err: any) {
       const status = err?.status || 500;
       if (status >= 500 && status !== 501 && status !== 502) console.error('[ocr:receipt] failed:', err.message);

@@ -17,6 +17,7 @@ import { Supplier, PurchaseOrder, Bill, PaymentMade, Expense } from '../../types
 import { fmtMoney, fmtDate } from './shared';
 import { hasBanking } from '../../lib/supplierBanking';
 import { Metric, Count, Panel, TabList, DocRow } from './Customer360Modal';
+import { LearnedReading } from './BillInbox';
 
 type TabKey = 'OVERVIEW' | 'POS' | 'BILLS' | 'PAYMENTS' | 'EXPENSES';
 
@@ -163,6 +164,9 @@ export const Vendor360Modal: React.FC<{
         <div className="flex-1 overflow-y-auto p-6">
           {tab === 'OVERVIEW' && (
             <div className="space-y-4">
+              <Panel title="Reading their invoices">
+                <LearnedReading supplierId={String(vendor.id)} supplierName={vendor.name} />
+              </Panel>
               <Panel title="Recent activity">
                 {activity.length === 0 ? (
                   <p className="text-xs text-outline italic">No activity yet.</p>
