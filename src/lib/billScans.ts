@@ -13,6 +13,7 @@
 //   POST /api/bills/inbox/:id/read          read it (again)
 //   POST /api/bills/inbox/:id/discard       {reason?}
 //   POST /api/bills/inbox/:id/attach        {billId}: its pages go on that bill
+//   POST /api/bills/inbox/:id/add-supplier  {name, vatNumber?, address?, phone?, email?, website?}: a new supplier from it
 //   POST /api/bills/inbox/:id/used          {billId, fillSupplier?}: a bill was made from it
 //   POST /api/bills/:id/read-missing        read a bill's attached photos: what its supplier and it are missing
 //   POST /api/bills/:id/fill-missing        {values: {key: value}}: fill those, only where still empty
@@ -24,6 +25,7 @@ import type { Express, Response } from 'express';
 import { pool, query, exec } from './db';
 import { readBill, ocrAvailable, ocrWarnings, tidyVatNumber, type BillOcr } from './billOcr';
 import { applyProfile, profileFor } from './billLearning';
+import { roleCan, notAllowedMessage } from './permissions';
 
 export async function ensureBillScansSchema(): Promise<void> {
   await exec(`CREATE TABLE IF NOT EXISTS bill_scans (
@@ -290,6 +292,16 @@ const send = (res: Response, e: any, what: string) => {
   console.error(`[bill-scans] ${what} failed:`, e?.message);
   res.status(500).json({ error: `Could not ${what}. Please try again.` });
 };
+/** A new supplier's details from the form: a name is needed; the rest tidied, empty as null. */
+export function newSupplierFrom(b: any) {
+  const t = (k: string, max: number) => text(b?.[k]).replace(/\s+/g, ' ').slice(0, max) || null;
+  const name = t('name', 120);
+  if (!name || name.length < 2) throw fail(400, "Type the supplier's name.");
+  const vat = t('vatNumber', 30);
+  const email = t('email', 120);
+  if (email && !/^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(email)) throw fail(400, `"${email}" isn't an email address.`);
+  return { name, vatNumber: vat ? tidyVatNumber(vat) ?? vat : null, address: t('address', 300), phone: t('phone', 60), email, website: t('website', 120) };
+}
 const idOf = (v: unknown) => { const n = Number(v); if (!Number.isInteger(n) || n <= 0) throw fail(400, 'Not a valid id.'); return n; };
 async function inTx<T>(fn: (c: Db) => Promise<T>): Promise<T> {
   const client = await pool.connect();
@@ -383,6 +395,33 @@ export function registerBillScansRoutes(app: Express): void {
       });
       res.json({ ...out, scan: await loadScan(id) });
     } catch (e) { send(res, e, 'attach the scanned bill'); }
+  });
+
+  // The invoice is from a supplier Tracklab doesn't have: add it, with what the
+  // invoice shows (checked and corrected on the website first: a reader can
+  // misread a name). Refused when it matches a supplier already there.
+  app.post('/api/bills/inbox/:id/add-supplier', async (req: any, res) => {
+    try {
+      const id = idOf(req.params.id);
+      if (!roleCan(req.user?.role, 'suppliers.update')) throw fail(403, notAllowedMessage('suppliers.update'));
+      const v = newSupplierFrom(req.body);
+      const supplier = await inTx(async (c) => {
+        await openScan(c, id);
+        // One new supplier id at a time (ids are 1, 2, 3...).
+        await c.query(`LOCK TABLE suppliers IN SHARE ROW EXCLUSIVE MODE`);
+        const { rows: all } = await c.query(`SELECT id, name, vat_number, website, contact_email FROM suppliers`);
+        const same = matchSupplier({ supplier: v.name, supplierVatNumber: v.vatNumber, supplierEmail: v.email, supplierWebsite: v.website }, all);
+        if (same && same.by !== 'web') throw fail(409, `${same.name} is already a supplier${same.by === 'vat' ? ' with that VAT number' : ''}.`);
+        const next = all.reduce((m: number, s: any) => Math.max(m, /^\d+$/.test(String(s.id)) ? Number(s.id) : 0), 0) + 1;
+        const { rows: [row] } = await c.query(
+          `INSERT INTO suppliers (id, name, vat_number, address, phone, contact_email, website, notes) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+          [String(next), v.name, v.vatNumber, v.address, v.phone, v.email ?? '', v.website ?? '', `Added from a scanned bill (scan ${id}).`]);
+        await c.query(`INSERT INTO user_activity_logs (user_email, action, entity_type, entity_id, details, status) VALUES ((SELECT email FROM users WHERE email = $1), 'CREATE', 'Supplier', $2, $3, 'SUCCESS')`,
+          [req.user?.email ?? null, String(next), JSON.stringify({ name: v.name, fromBillScan: id })]);
+        return row;
+      });
+      res.status(201).json({ supplier, scan: await loadScan(id) });
+    } catch (e) { send(res, e, 'add the supplier'); }
   });
 
   // A bill was made from it on the website: its photos go on the bill (when

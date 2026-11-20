@@ -3,10 +3,11 @@
 // attached photos. Server: src/lib/billScans.ts; reading: src/lib/billOcr.ts.
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, FileText, Loader2, Paperclip, RefreshCw, ScanLine, Sparkles, Trash2, Wand2 } from 'lucide-react';
-import type { Bill } from '../../types';
+import { AlertTriangle, CheckCircle2, FileText, Loader2, Paperclip, RefreshCw, ScanLine, Sparkles, Trash2, UserPlus, Wand2 } from 'lucide-react';
+import type { Bill, Supplier } from '../../types';
 import { Modal, PrimaryButton, SecondaryButton, DangerButton, SectionCard, apiGet, apiPost, fmtMoney, fmtDate, selectClass } from './shared';
 import { canChange } from '../../lib/changeAccess';
+import { currentUserCan } from '../../lib/permissions';
 import { confirmDialog } from '../../lib/confirmDialog';
 import { openReceiptPage, receiptPages } from '../../lib/receiptPages';
 
@@ -99,17 +100,66 @@ const ReadState: React.FC<{ s: BillScan }> = ({ s }) => {
   return <span className="text-[10px] font-bold text-error" title={s.read.error || ''}>Couldn't read it</span>;
 };
 
+/** A supplier row from the server (snake_case) as the app keeps it. */
+export const supplierFromRow = (r: any): Supplier => ({
+  id: String(r.id), name: r.name ?? '', website: r.website ?? '', contact_email: r.contact_email ?? '', notes: r.notes ?? '',
+  vatNumber: r.vat_number ?? null, address: r.address ?? null, phone: r.phone ?? null,
+  leadTime: r.lead_time ?? undefined, responseTime: r.response_time ?? undefined,
+});
+
+/** Adds the supplier a scanned invoice is from, with what it shows: every field can be corrected first. */
+const AddSupplierModal: React.FC<{ scan: BillScan; onClose: () => void; onAdded: (r: { supplier: any; scan: BillScan }) => void; triggerToast: (m: string, t?: 'SUCCESS' | 'ERROR' | 'INFO') => void }> = ({ scan, onClose, onAdded, triggerToast }) => {
+  const o = scan.ocr;
+  const [f, setF] = useState({ name: o?.supplier ?? '', vatNumber: o?.supplierVatNumber ?? '', phone: o?.supplierPhone ?? '', email: o?.supplierEmail ?? '', website: o?.supplierWebsite ?? '', address: o?.supplierAddress ?? '' });
+  const [saving, setSaving] = useState(false);
+  const field = (k: keyof typeof f, label: string, wide = false) => (
+    <label className={`flex flex-col gap-1 text-xs ${wide ? 'col-span-2' : ''}`}>
+      <span className="font-bold text-outline">{label}</span>
+      <input value={f[k]} onChange={e => setF(x => ({ ...x, [k]: e.target.value }))} aria-label={label}
+        className="bg-surface-container-high border border-outline-variant rounded p-2 text-on-surface outline-none focus:border-primary" />
+    </label>
+  );
+  const save = async () => {
+    setSaving(true);
+    try { onAdded(await apiPost(`/api/bills/inbox/${scan.id}/add-supplier`, f)); }
+    catch (e: any) { triggerToast(e.message || 'Could not add the supplier.', 'ERROR'); }
+    finally { setSaving(false); }
+  };
+  return (
+    <Modal title="Add supplier" subtitle="From what the invoice shows. The reader can misread a name: check it against the photo." onClose={onClose} maxWidth="max-w-lg">
+      <div className="grid grid-cols-2 gap-sm">
+        {scan.thumb && <img src={scan.thumb} alt="The invoice" className="col-span-2 max-h-48 object-contain rounded border border-outline-variant bg-surface-container-high" />}
+        {field('name', 'Name', true)}
+        {field('vatNumber', 'VAT number')}
+        {field('phone', 'Phone')}
+        {field('email', 'Email')}
+        {field('website', 'Website')}
+        {field('address', 'Address', true)}
+      </div>
+      <p className="text-[11px] text-outline mt-sm">Bank details are never taken from an invoice: add those on the supplier by hand, and check them by phone.</p>
+      <div className="flex justify-end gap-2 mt-md">
+        <SecondaryButton onClick={onClose}>Cancel</SecondaryButton>
+        <PrimaryButton icon={<UserPlus className="w-3.5 h-3.5" />} disabled={saving || f.name.trim().length < 2} onClick={() => void save()}>{saving ? 'Adding…' : 'Add supplier'}</PrimaryButton>
+      </div>
+    </Modal>
+  );
+};
+
 export const BillInbox: React.FC<{
   bills: Bill[];
   triggerToast: (m: string, t?: 'SUCCESS' | 'ERROR' | 'INFO') => void;
   onCreateBill: (p: ScanPrefill) => void;
   onChanged: () => void | Promise<void>;
-}> = ({ bills, triggerToast, onCreateBill, onChanged }) => {
+  /** A supplier was added from a scanned invoice: into the app's list of suppliers. */
+  onSupplierAdded?: (s: Supplier) => void;
+}> = ({ bills, triggerToast, onCreateBill, onChanged, onSupplierAdded }) => {
   const [items, setItems] = useState<BillScan[] | null>(null);
   const [busy, setBusy] = useState<number | null>(null);
   const [attachTo, setAttachTo] = useState<Record<number, string>>({});
   const [pagesOf, setPagesOf] = useState<BillScan | null>(null);
+  const [addingFor, setAddingFor] = useState<BillScan | null>(null);
   const may = canChange('/api/bills/inbox/1/discard', 'POST');
+  const mayAddSupplier = may && currentUserCan('suppliers.update');
 
   const load = useCallback(async () => {
     try { const r = await apiGet('/api/bill-scans?status=INBOX'); setItems(r.items || []); } catch { setItems(i => i ?? []); }
@@ -166,6 +216,15 @@ export const BillInbox: React.FC<{
           </div>
         </Modal>
       )}
+      {addingFor && (
+        <AddSupplierModal scan={addingFor} triggerToast={triggerToast} onClose={() => setAddingFor(null)} onAdded={({ supplier, scan }) => {
+          setAddingFor(null);
+          setItems(xs => (xs || []).map(x => (x.id === scan.id ? scan : x)));
+          onSupplierAdded?.(supplierFromRow(supplier));
+          triggerToast(`Added ${supplier.name} as a supplier.`, 'SUCCESS');
+          void load(); // other scans from them now match too
+        }} />
+      )}
       <ul className="divide-y divide-outline-variant/30" data-testid="bill-inbox">
         {items.map(s => {
           const o = s.ocr;
@@ -178,7 +237,12 @@ export const BillInbox: React.FC<{
                 <p className="font-bold text-on-surface flex flex-wrap items-center gap-2">
                   {o?.supplier || 'Supplier not read yet'}
                   {s.match?.supplier ? <span className="text-[10px] font-bold text-green-400" title={s.match.supplier.by === 'vat' ? 'Matched by VAT number' : s.match.supplier.by === 'web' ? 'Matched by the web address on the invoice' : 'Matched by name'}>→ {s.match.supplier.name}</span>
-                    : o?.supplier ? <span className="text-[10px] font-bold text-amber-400">not a supplier in Tracklab</span> : null}
+                    : o?.supplier ? <span className="inline-flex items-center gap-1.5">
+                      <span className="text-[10px] font-bold text-amber-400">not a supplier in Tracklab</span>
+                      {mayAddSupplier && <button type="button" onClick={() => setAddingFor(s)} disabled={busy === s.id}
+                        className="inline-flex items-center gap-1 text-[10px] font-bold text-primary border border-primary/50 rounded px-1.5 py-0.5 hover:bg-primary/10">
+                        <UserPlus className="w-3 h-3" />Add supplier</button>}
+                    </span> : null}
                   <ReadState s={s} />
                 </p>
                 <p className="text-on-surface-variant">

@@ -186,6 +186,7 @@ export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
         triggerToast={triggerToast}
         onCreateBill={(p) => { setScanResultForEditor(p); setShowEditor(true); }}
         onChanged={refresh}
+        onSupplierAdded={(s) => props.setSuppliers?.(xs => xs.some(x => String(x.id) === s.id) ? xs : [...xs, s])}
       />
 
       {fillingMissing && (

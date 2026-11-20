@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('./db', () => ({ pool: {}, query: vi.fn(), queryOne: vi.fn(), exec: vi.fn() }));
 
 import { normaliseBillOcr, ocrWarnings, tidyVatNumber, type BillOcr } from './billOcr';
-import { billPages, checkPages, codeKey, companyKey, matchSupplier, missingProposals, poKey } from './billScans';
+import { billPages, checkPages, codeKey, companyKey, matchSupplier, missingProposals, newSupplierFrom, poKey } from './billScans';
 import { permissionForWrite } from './writeAccess';
 import { prefillFromBillScan, type BillScan } from '../components/bookkeeping/BillInbox';
 
@@ -101,5 +101,17 @@ describe('filling in what existing bills miss', () => {
     expect(permissionForWrite('POST', '/api/bill-scans')).toBe('staff');
     expect(permissionForWrite('POST', '/api/bills/inbox/3/attach')).toBe('orders.update');
     expect(permissionForWrite('POST', '/api/bills/4/fill-missing')).toBe('orders.update');
+  });
+});
+
+describe('adding the supplier a scanned invoice is from', () => {
+  it('needs a name, and tidies the rest', () => {
+    expect(newSupplierFrom({ name: '  Conti  Mirage Store ', vatNumber: 'VAT 4020 267 262', phone: '', email: ' ', website: 'conti.co.za' }))
+      .toEqual({ name: 'Conti Mirage Store', vatNumber: '4020267262', address: null, phone: null, email: null, website: 'conti.co.za' });
+    expect(() => newSupplierFrom({ name: ' ' })).toThrow("Type the supplier's name.");
+    expect(() => newSupplierFrom({ name: 'Conti', email: 'not mail' })).toThrow("isn't an email address");
+  });
+  it('is a bookkeeping change, with the supplier right checked by the route', () => {
+    expect(permissionForWrite('POST', '/api/bills/inbox/3/add-supplier')).toBe('orders.update');
   });
 });
