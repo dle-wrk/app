@@ -111,13 +111,94 @@ function after(lines: string[], label: RegExp, value: RegExp): string | null {
   return null;
 }
 
+/** Prices on an item row, unit prices with up to 5 decimals included (R 75,65217). */
+export function pricesIn(line: string): number[] {
+  const out: number[] = [];
+  for (const raw of line.match(/\d{1,3}(?:[ \u00a0]\d{3})+[.,]\d{2,5}(?!\d)|\d+[.,]\d{2,5}(?!\d)/g) ?? []) {
+    const s = raw.replace(/[ \u00a0]/g, '').replace(',', '.');
+    const n = Number(s);
+    if (Number.isFinite(n)) out.push(n);
+  }
+  return out;
+}
+
+/** Misreads that break numbers: "R49, 50" and "R197,.50" are R49,50 / R197,50; an O between digits is a 0. */
+export function tidyNumbers(text: string): string {
+  return text
+    .replace(/(\d)[,.]\s*[,.](\d)/g, '$1,$2')
+    .replace(/(\d)([,.])\s(\d{2})(?!\d)/g, '$1$2$3')
+    .replace(/(?<=[\dR])[Oo](?=[\d,.])|(?<=\d)[Oo]/g, '0');
+}
+
+export interface ReadLine { description: string; partNumber: string | null; quantity: number; unitPrice: number; lineTotal: number }
+
+/**
+ * The invoice's item rows, from the text between the table's heading
+ * (Description / Qty / Unit price) and its totals. A row is a line ending in a
+ * price; the lines after it, up to the next row, are its description (and
+ * often its quantity, "x4"). With two prices the first is the unit price and
+ * the last the line total; with one it's the unit price. When the rows don't
+ * add up to the subtotal and one row's quantity is the only thing that fixes
+ * that ("x31" misread for "x1"), it is fixed.
+ */
+export function parseBillLines(lines: string[], subtotal: number | null): ReadLine[] {
+  const start = lines.findIndex(l => /\bunit\s*price\b|\bdescription\b|\bqty\b|\bquantity\b/i.test(l));
+  if (start < 0) return [];
+  let end = lines.findIndex((l, i) => i > start && /\bsub\s*-?\s*total\b|\bbanking\s*details\b|\bgrand\s*t\w{2,4}\b|^\s*(?:total|vat)\b/i.test(l) && !/\bunit\s*price\b/i.test(l));
+  if (end < 0) end = lines.length;
+  const region = lines.slice(start + 1, end);
+  const isRow = (l: string) => pricesIn(l.replace(/\s*[|)\]]*\s*$/, '')).length > 0 && /[\d.,]\d\s*[|)\]]*\s*$/.test(l) && /\b(?:R\s?)?\d+[.,]\d{2,5}\s*[|)\]]*\s*$/.test(l);
+  const rows: { at: number; line: string }[] = [];
+  region.forEach((l, i) => { if (isRow(l)) rows.push({ at: i, line: l }); });
+  const out: ReadLine[] = [];
+  rows.forEach((r, k) => {
+    const next = k + 1 < rows.length ? rows[k + 1].at : region.length;
+    const more = region.slice(r.at + 1, next).filter(l => l.replace(/[^A-Za-z]/g, '').length >= 3);
+    const prices = pricesIn(r.line);
+    // The quantity: "x4" / "x 30" on its lines, else a whole number just before the first price.
+    let qty: number | null = null;
+    // "x4" counts; "X 7,8MM" (a size) doesn't.
+    const QTY = /\bx\s?(\d{1,5})(?![\d,.]|\s*mm\b)\b/i;
+    for (const l of [r.line, ...more]) { const m = QTY.exec(l); if (m) { qty = Number(m[1]); break; } }
+    if (qty === null) {
+      const firstPrice = r.line.search(/(?:R\s?)?\d+[.,]\d{2,5}/);
+      const m = /(?:^|\s)(\d{1,5})\s+(?:R\s?)?$/.exec(r.line.slice(0, firstPrice));
+      if (m) qty = Number(m[1]);
+    }
+    qty = qty && qty > 0 ? qty : 1;
+    const unitPrice = prices[0];
+    const lineTotal = prices.length >= 2 ? prices[prices.length - 1] : Math.round(unitPrice * qty * 100) / 100;
+    // The code: the first word on the row with letters and digits ("1551USB3TSK", "XY-CC211-3P-1-1C").
+    const words = r.line.replace(/(?:R\s?)?\d+[.,]\d{2,5}.*$/, '').replace(/^\W*\d{1,3}\s+/, '').split(/\s+/).map(w => w.replace(/^[^\w]+|[^\w]+$/g, '')).filter(Boolean);
+    const code = words.find(w => /^[A-Z0-9][A-Z0-9\-\/.]{3,}$/.test(w) && /\d/.test(w) && /[A-Z]/.test(w)) ?? null;
+    // The description: the row's own words when it has enough of them, else the lines under it.
+    const own = words.filter(w => w !== code && /[A-Za-z]{2,}/.test(w) && !/^(taxable|exempt|zero|ea|each|in|an|pcs?)$/i.test(w)).join(' ')
+      .replace(/^\W+/, '').replace(/\s+\d{1,5}$/, '').trim();
+    const below = more.slice(0, 2).map(l => l.replace(new RegExp(QTY.source, 'gi'), '').replace(/[|{}]/g, '').trim()).filter(Boolean).join(' ');
+    const description = (own.replace(/[^A-Za-z]/g, '').length >= 12 ? `${own}${below && own.length < 60 ? ` ${below}` : ''}` : below || own || code || 'Item').replace(/\s+/g, ' ').trim().slice(0, 200);
+    out.push({ description, partNumber: code, quantity: qty, unitPrice, lineTotal });
+  });
+  // One misread quantity: the only row whose quantity, set to a whole number, makes the rows add up to the subtotal.
+  if (subtotal && out.length) {
+    const sum = out.reduce((t, l) => t + l.lineTotal, 0);
+    if (Math.abs(sum - subtotal) > 0.05) {
+      const fixes = out.map((l, i) => {
+        const q = (subtotal - (sum - l.lineTotal)) / l.unitPrice;
+        return l.unitPrice > 0 && q >= 1 && Math.abs(q - Math.round(q)) < 0.001 ? { i, q: Math.round(q) } : null;
+      }).filter(Boolean) as { i: number; q: number }[];
+      if (fixes.length === 1) { const f = fixes[0]; out[f.i] = { ...out[f.i], quantity: f.q, lineTotal: Math.round(out[f.i].unitPrice * f.q * 100) / 100 }; }
+    }
+  }
+  return out;
+}
+
 /**
  * The bill's fields from its text, in the reader's shape (normaliseBillOcr
- * tidies them). What isn't clearly there is left null; lines aren't read.
+ * tidies them). What isn't clearly there is left null.
  */
 export function parseBillText(text: string): Record<string, unknown> {
-  // "co,za" and "co .za" are a misread full stop in a web address.
-  const tidy = text.replace(/\b(co|com|org|net|gov|ac)\s*[,.]\s*(za|uk|com)\b/gi, '$1.$2');
+  // "co,za" and "co .za" are a misread full stop in a web address; numbers are tidied too.
+  const tidy = tidyNumbers(text.replace(/\b(co|com|org|net|gov|ac)\s*[,.]\s*(za|uk|com)\b/gi, '$1.$2'));
   const lines = tidy.split(/\r?\n/).map(l => l.replace(/\s+/g, ' ').trim()).filter(Boolean);
   const all = lines.join('\n');
 
@@ -149,18 +230,31 @@ export function parseBillText(text: string): Record<string, unknown> {
     ?? lines.map(l => (DUE.test(l) ? null : findDate(l))).find(Boolean) ?? null;
 
   // Each total is the amount after its label on the line (a line can carry other numbers before it).
-  let subtotal: number | null = null, taxTotal: number | null = null, total: number | null = null;
+  let subtotal: number | null = null, taxTotal: number | null = null, total: number | null = null, extra = 0, roundOff = 0;
   const amountAfter = (l: string, re: RegExp) => { const m = re.exec(l); return m ? lastAmount(l.slice(m.index + m[0].length)) : null; };
   for (const l of lines) {
     if (lastAmount(l) === null) continue;
+    const ro = amountAfter(l, /\bround(?:ing)?\s*off\b/i);
+    if (ro !== null) { roundOff = /round(?:ing)?\s*off\W*-/i.test(l) ? -ro : ro; continue; }
+    const ex = amountAfter(l, /\b(extra\s*charges?|delivery|freight|shipping)\b/i);
+    if (ex !== null && !/\btotal\b/i.test(l)) { extra += ex; continue; }
     const sub = amountAfter(l, /\b(sub\s*-?\s*total|total\s*(?:excl|ex|before|nett?)\.?|nett?\s*total|amount\s*excl)/i);
     if (sub !== null) { subtotal = sub; continue; }
     const tax = amountAfter(l, /\b(vat|tax)\b(?!\s*(?:reg|no\b|number|#|incl|able))(?:\s*\(?\d{1,2}\s*%\)?)?/i);
     if (tax !== null && !/\btotal\s*(incl|due)/i.test(l)) { taxTotal = tax; continue; }
     if (/\b(qty|items|quantity|paid|balance|change|tendered|round)\b/i.test(l)) continue;
-    const tot = amountAfter(l, /\b(grand\s*total|total\s*(?:incl\w*|due|amount|payable)?|amount\s*due)\b/i);
+    const tot = amountAfter(l, /\b(grand\s*t\w{2,4}|total\s*(?:incl\w*|due|amount|payable)?|amount\s*due)\b/i);
     if (tot !== null) total = tot;
   }
+  // The total from its parts when it wasn't read, or was misread while the VAT is exactly 15% of the subtotal.
+  if (subtotal !== null && taxTotal !== null) {
+    const parts = Math.round((subtotal + extra + taxTotal + roundOff) * 100) / 100;
+    const vatRight = Math.abs(taxTotal - Math.round((subtotal + extra) * 15) / 100) <= 0.02;
+    if (total === null || (vatRight && Math.abs(total - parts) > 0.05)) total = parts;
+  } else if (total !== null && taxTotal !== null && subtotal === null) {
+    subtotal = Math.round((total - taxTotal - extra - roundOff) * 100) / 100;
+  }
+  const lineItems = parseBillLines(lines, subtotal);
 
   // A misread address ("communica €o.2a") is left out rather than kept wrong: the domain must end in letters.
   const email = /[\w.+-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\b/i.exec(all)?.[0]?.toLowerCase() ?? null;
@@ -184,6 +278,6 @@ export function parseBillText(text: string): Record<string, unknown> {
 
   return {
     supplier, supplierVatNumber: vat, supplierAddress: null, supplierPhone: phone, supplierEmail: email, supplierWebsite: website,
-    invoiceNumber, date, dueDate, poNumber, currency, subtotal, taxTotal, total, lineItems: [], text,
+    invoiceNumber, date, dueDate, poNumber, currency, subtotal, taxTotal, total, lineItems, text,
   };
 }

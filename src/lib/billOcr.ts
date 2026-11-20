@@ -131,7 +131,7 @@ export function normaliseBillOcr(parsed: any): BillOcr {
 /** Things that don't add up on what was read, for the person checking it. */
 export function ocrWarnings(o: BillOcr): string[] {
   const w: string[] = [];
-  if (o.reader === 'local') w.push("Read by Tracklab's own reader (free, on the server): it reads the header and totals, not the lines, and can misread a photo. Check every field.");
+  if (o.reader === 'local') w.push("Read by Tracklab's own reader (free, on the server): it can misread a photo, and a line can come out split, joined or missed. Check every field and line against the invoice.");
   const near = (a: number, b: number) => Math.abs(a - b) <= Math.max(0.05, Math.abs(b) * 0.01);
   if (o.subtotal != null && o.taxTotal != null && o.total != null && !near(o.subtotal + o.taxTotal, o.total)) {
     w.push(`Subtotal ${o.subtotal.toFixed(2)} + VAT ${o.taxTotal.toFixed(2)} doesn't equal the total ${o.total.toFixed(2)}.`);

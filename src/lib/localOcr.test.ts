@@ -2,7 +2,28 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('./db', () => ({ pool: {}, query: vi.fn(), queryOne: vi.fn(), exec: vi.fn() }));
 
-import { amountsIn, findDate, parseBillText } from './localOcr';
+import { amountsIn, findDate, parseBillLines, parseBillText, pricesIn, tidyNumbers } from './localOcr';
+
+// An invoice's middle page: the item table (row: number, code, price; next lines: description and "xN"), then the totals.
+const ITEMS = [
+  'N/A N/A',
+  ' # Name Unit Price',
+  'ai LLL JOR 1 CLR',
+  '1 1551USB3TSK 11 AN R61,00',
+  'ENCLOSURE ABS MINIATURE PLASTIC x4',
+  '65X30X15.5MM FOR USB',
+  '3 CAB HDF195:: IN R18,20',
+  'COAXIAL CABLE LOW LOSS x 30',
+  '4 LIQUID FLUX S00ML :: 1N R49, 50',
+  'LIQUID FLUX FOR SMD COMPONENTS x1',
+  '€ CETEB380BL i: 50N R197,.50',
+  'CABLE TIE 388MM X 7,8MM T120R X31',
+  'Our Banking Detalles Sub-Total R1 037,00',
+  'a/c Mo. 1084804371 ; Extra Charges: R0,00',
+  'VAT: R155,55',
+  '[edb ank, Business | Round Off: -R0O,05',
+  'Brench Code. 186786 Grand Teta: __R1 192,50',
+].join('\n');
 import { normaliseBillOcr, ocrWarnings, readerOrder } from './billOcr';
 import { domainLabel, matchSupplier } from './billScans';
 
@@ -86,6 +107,42 @@ describe("Tracklab's own reader: picking fields out of the text", () => {
   it("says it was read by the server's own reader, so every field gets checked", () => {
     const o = { ...normaliseBillOcr(parseBillText(INVOICE)), reader: 'local' as const };
     expect(ocrWarnings(o)[0]).toContain("Tracklab's own reader");
+  });
+});
+
+describe("Tracklab's own reader: the invoice's lines", () => {
+  it('tidies misread numbers', () => {
+    expect(tidyNumbers('R49, 50 and R197,.50 and -R0O,04')).toBe('R49,50 and R197,50 and -R00,04');
+    expect(pricesIn('Cable 2 R 75,65217 Taxable R 151,30')).toEqual([75.65217, 151.3]);
+  });
+
+  it('reads each item row as a line: code, description, quantity ("x4"), unit price, line total', () => {
+    const o = parseBillText(ITEMS) as any;
+    expect(o.lineItems).toEqual([
+      { description: 'ENCLOSURE ABS MINIATURE PLASTIC 65X30X15.5MM FOR USB', partNumber: '1551USB3TSK', quantity: 4, unitPrice: 61, lineTotal: 244 },
+      { description: 'COAXIAL CABLE LOW LOSS', partNumber: 'HDF195', quantity: 30, unitPrice: 18.2, lineTotal: 546 },
+      { description: 'LIQUID FLUX FOR SMD COMPONENTS', partNumber: 'S00ML', quantity: 1, unitPrice: 49.5, lineTotal: 49.5 },
+      // "X31" misread for x1: the only quantity that makes the lines add up to the subtotal.
+      { description: 'CABLE TIE 388MM X 7,8MM T120R', partNumber: 'CETEB380BL', quantity: 1, unitPrice: 197.5, lineTotal: 197.5 },
+    ]);
+    expect(o.subtotal).toBe(1037);
+  });
+
+  it('works the total out from its parts when its label was misread ("Grand Teta") or the figure was', () => {
+    const o = parseBillText(ITEMS) as any;
+    expect(o.taxTotal).toBe(155.55);
+    expect(o.total).toBe(1192.5); // 1037.00 + 0 + 155.55 - 0.05
+    const misread = parseBillText(ITEMS.replace('R1 192,50', 'R1 182,50')) as any; // 9 read as 8: VAT is 15% of the subtotal, so the parts win
+    expect(misread.total).toBe(1192.5);
+  });
+
+  it('a row with its description, quantity and both prices on one line', () => {
+    const lines = ['ITEM DESCRIPTION QUANTITY UNIT PRICE', '+00 Pack Network Cable Label Clips / Cable 2 R 75,65217 Taxable R 151,30', 'Markers 4-6mm For Wire Management.', 'SUB-TOTAL R 151.30'];
+    expect(parseBillLines(lines, 151.3)).toEqual([{ description: 'Pack Network Cable Label Clips Cable Markers 4-6mm For Wire Management.', partNumber: null, quantity: 2, unitPrice: 75.65217, lineTotal: 151.3 }]);
+  });
+
+  it('no item table: no lines', () => {
+    expect(parseBillLines(['TOTAL R 174,00'], 151.3)).toEqual([]);
   });
 });
 

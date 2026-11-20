@@ -29,6 +29,8 @@ export interface BillScan {
 export interface ScanPrefill {
   supplierName: string | null; supplierId?: string | null; supplierInvoiceNumber?: string | null;
   date: string | null; dueDate?: string | null; currency?: string | null; total: number | null;
+  /** Before VAT, and the VAT, as read off the invoice. */
+  subtotal?: number | null; taxTotal?: number | null;
   purchaseOrderId?: number | null; receiptImage: string | null;
   lineItems: { description: string; quantity: number; unitPrice: number; partNumber?: string | null }[];
   billScanId?: number; warnings?: string[];
@@ -48,9 +50,16 @@ export function prefillFromBillScan(s: BillScan, pages: string[]): ScanPrefill {
     dueDate: s.match?.dueDate ?? o?.dueDate ?? null,
     currency: o?.currency ?? null,
     total: o?.total ?? null,
+    subtotal: o?.subtotal ?? null,
+    taxTotal: o?.taxTotal ?? null,
     purchaseOrderId: s.match?.po && ['DRAFT', 'SENT', 'PARTIAL', 'RECEIVED'].includes(s.match.po.status) ? s.match.po.id : null,
     receiptImage: pages.length ? (pages.length === 1 ? pages[0] : JSON.stringify(pages)) : null,
-    lineItems: (o?.lineItems ?? []).map((l, i) => ({ description: l.description, quantity: l.quantity, unitPrice: l.unitPrice, partNumber: s.match?.lines[i]?.item ?? null })),
+    // A line matched to a stock item carries its stock code; otherwise the supplier's code leads its description.
+    lineItems: (o?.lineItems ?? []).map((l, i) => {
+      const item = s.match?.lines[i]?.item ?? null;
+      const desc = !item && l.partNumber && !l.description.toUpperCase().includes(l.partNumber.toUpperCase()) ? `${l.partNumber} · ${l.description}` : l.description;
+      return { description: desc, quantity: l.quantity, unitPrice: l.unitPrice, partNumber: item };
+    }),
     warnings: s.warnings,
     supplierDetails: o ? { vatNumber: o.supplierVatNumber, address: o.supplierAddress, phone: o.supplierPhone, email: o.supplierEmail, website: o.supplierWebsite } : undefined,
   };

@@ -673,6 +673,8 @@ const ReceiptScanModal: React.FC<{
       dueDate: ocr?.dueDate ?? null,
       currency: ocr?.currency ?? null,
       total: ocr?.total ?? null,
+      subtotal: ocr?.subtotal ?? null,
+      taxTotal: ocr?.taxTotal ?? null,
       receiptImage,
       lineItems: (ocr?.lineItems || []).map(li => ({
         description: li.description,
@@ -942,6 +944,8 @@ const BillEditorModal: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
     // OCR extracted per-line items — prefer these over the single-line
     // fallback so the user starts with a structured bill they only need
     // to check, not retype.
+    // An invoice that charged VAT: its lines (prices before VAT) get the standard rate, so the bill's VAT and total match it.
+    const vatRate = prefillFromScan?.taxTotal ? (taxRates.find(t => Number(t.rate) === 15) ?? taxRates.find(t => t.isDefault && Number(t.rate) > 0))?.id ?? null : null;
     if (prefillFromScan?.lineItems?.length) {
       return prefillFromScan.lineItems.map((li, idx) => {
         const line = newEditableLine();
@@ -950,14 +954,18 @@ const BillEditorModal: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
         line.quantity = li.quantity;
         line.unitPrice = li.unitPrice;
         if (li.partNumber) line.partNumber = li.partNumber; // matched to a stock item from the invoice's part number
+        if (vatRate) line.taxRateId = vatRate;
         return line;
       });
     }
-    if (prefillFromScan?.total && prefillFromScan.total > 0) {
+    // No lines read: one line for the whole invoice, before VAT when the subtotal was read.
+    const net = prefillFromScan?.subtotal && vatRate ? prefillFromScan.subtotal : null;
+    if (net || (prefillFromScan?.total && prefillFromScan.total > 0)) {
       const line = newEditableLine();
-      line.description = 'Receipt total (edit to break down)';
+      line.description = 'Invoice total: see the attached invoice (break it into lines if needed)';
       line.quantity = 1;
-      line.unitPrice = prefillFromScan.total;
+      line.unitPrice = net ?? prefillFromScan!.total!;
+      if (net && vatRate) line.taxRateId = vatRate;
       return [line];
     }
     return [newEditableLine()];
