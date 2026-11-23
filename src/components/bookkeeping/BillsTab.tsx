@@ -917,6 +917,7 @@ export function withRoundOff(lines: EditableLine[], invoiceTotal: number | null,
   line.quantity = 1;
   line.unitPrice = gap;
   line.taxRateId = null;
+  line.noTax = true; // the editor would otherwise put the default VAT rate on it
   return [...lines, line];
 }
 

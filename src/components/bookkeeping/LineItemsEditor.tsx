@@ -26,6 +26,8 @@ export interface EditableLine {
   quantity: number;
   unitPrice: number;
   taxRateId: number | null;
+  /** "No tax" was chosen on purpose (a round-off line, or picked by hand): the default VAT rate is never filled in. */
+  noTax?: boolean;
   deductStock?: boolean;
   receiveStock?: boolean;
   accountId?: number | null;
@@ -107,9 +109,9 @@ export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChang
   // rows where taxRateId is null.
   React.useEffect(() => {
     if (defaultTaxRateId == null) return;
-    const needsDefault = lines.some(l => l.taxRateId == null);
+    const needsDefault = lines.some(l => l.taxRateId == null && !l.noTax);
     if (!needsDefault) return;
-    onChange(lines.map(l => l.taxRateId == null ? { ...l, taxRateId: defaultTaxRateId } : l));
+    onChange(lines.map(l => l.taxRateId == null && !l.noTax ? { ...l, taxRateId: defaultTaxRateId } : l));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [defaultTaxRateId, lines.length]);
 
@@ -396,7 +398,7 @@ export const LineItemsEditor: React.FC<LineItemsEditorProps> = ({ lines, onChang
                     <label className="block text-xs font-semibold text-outline mb-1.5 uppercase tracking-wide">Tax</label>
                     <select
                       value={line.taxRateId ?? ''}
-                      onChange={(e) => update(line.key, { taxRateId: e.target.value ? Number(e.target.value) : null })}
+                      onChange={(e) => update(line.key, { taxRateId: e.target.value ? Number(e.target.value) : null, noTax: !e.target.value })}
                       className={`${selectClass} py-2.5 px-3 text-sm w-full`}
                     >
                       <option value="">No tax</option>
