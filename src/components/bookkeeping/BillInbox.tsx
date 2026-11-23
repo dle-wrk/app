@@ -54,6 +54,16 @@ export interface ScanPrefill {
   supplierDetails?: { vatNumber: string | null; address: string | null; phone: string | null; email: string | null; website: string | null };
 }
 
+/**
+ * A supplier code written at the front of a description, "CEL4041549 - DATA CABLE ADAPTER":
+ * the code (one word with a digit in it, then a dash) and the rest. Null when there's none.
+ */
+export function splitLeadingCode(description: string): { partNumber: string; description: string } | null {
+  const m = /^\s*([A-Za-z0-9][A-Za-z0-9./_-]{2,30})\s+[-–—:]\s+(\S.*)$/.exec(description || '');
+  if (!m || !/\d/.test(m[1])) return null;
+  return { partNumber: m[1], description: m[2].trim() };
+}
+
 /** The bill form's starting point from a scanned bill: what was read, with what it matched in Tracklab. */
 export function prefillFromBillScan(s: BillScan, pages: string[]): ScanPrefill {
   return { ...prefillFromRead(s.ocr, s.match, pages, s.warnings), billScanId: s.id };
@@ -80,8 +90,10 @@ export function prefillFromRead(o: BillOcr | null, match: ReadMatch | null | und
     // A learned line also gets its saved description, account and VAT rate.
     lineItems: (o?.lineItems ?? []).map((l, i) => {
       const hint = m?.lines[i];
-      const sku = hint?.item ?? l.partNumber ?? null;
-      return { description: hint?.description || l.description, quantity: l.quantity, unitPrice: l.unitPrice, partNumber: sku, accountId: hint?.accountId ?? null, taxRateId: hint?.taxRateId ?? null };
+      const split = !l.partNumber && !hint?.item ? splitLeadingCode(l.description) : null;
+      // A quantity some suppliers print on the code ("EZ9F3210 :: 1N") isn't part of it.
+      const sku = (hint?.item ?? l.partNumber ?? split?.partNumber ?? '').replace(/\s*::\s*\d+\s*N\s*$/i, '').trim() || null;
+      return { description: (hint?.description || split?.description || l.description).trim(), quantity: l.quantity, unitPrice: l.unitPrice, partNumber: sku, accountId: hint?.accountId ?? null, taxRateId: hint?.taxRateId ?? null };
     }),
     warnings,
     supplierDetails: o ? { vatNumber: o.supplierVatNumber, address: o.supplierAddress, phone: o.supplierPhone, email: o.supplierEmail, website: o.supplierWebsite } : undefined,

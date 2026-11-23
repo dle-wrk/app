@@ -5,7 +5,7 @@ vi.mock('./db', () => ({ pool: {}, query: vi.fn(), queryOne: vi.fn(), exec: vi.f
 import { normaliseBillOcr, ocrWarnings, tidyVatNumber, type BillOcr } from './billOcr';
 import { billPages, checkPages, codeKey, companyKey, matchSupplier, missingProposals, newSupplierFrom, poKey } from './billScans';
 import { permissionForWrite } from './writeAccess';
-import { prefillFromBillScan, type BillScan } from '../components/bookkeeping/BillInbox';
+import { prefillFromBillScan, splitLeadingCode, type BillScan } from '../components/bookkeeping/BillInbox';
 
 const ocr = (over: Partial<BillOcr> = {}): BillOcr => ({
   supplier: 'Mouser Electronics', supplierVatNumber: '4123456789', supplierAddress: '1 Main Rd, Midrand', supplierPhone: '011 555 0100',
@@ -114,4 +114,22 @@ describe('adding the supplier a scanned invoice is from', () => {
   it('is a bookkeeping change, with the supplier right checked by the route', () => {
     expect(permissionForWrite('POST', '/api/bills/inbox/3/add-supplier')).toBe('orders.update');
   });
+});
+
+describe("a supplier code on the front of a description", () => {
+  it('is split off into the SKU / part number', () => {
+    expect(splitLeadingCode('CEL4041549 - DATA CABLE ADAPTER')).toEqual({ partNumber: 'CEL4041549', description: 'DATA CABLE ADAPTER' });
+    expect(splitLeadingCode('PROMO13 - SALES PROMOTION TRADERS AGENT')?.partNumber).toBe('PROMO13');
+  });
+  it('leaves a description that is only words, or has no dash after the first word', () => {
+    expect(splitLeadingCode('new keypad labels')).toBeNull();
+    expect(splitLeadingCode('DATA CABLE ADAPTER')).toBeNull();
+    expect(splitLeadingCode('Rags - A Grade (5) /kg')).toBeNull();
+    expect(splitLeadingCode('AC-5V6A')).toBeNull();
+  });
+});
+
+it('a quantity printed on a code ("EZ9F3210 :: 1N") is left off the SKU', () => {
+  const scan = { id: 1, ocr: { ...ocr(), lineItems: [{ description: 'Breaker', partNumber: 'EZ9F3210 :: 1N', quantity: 1, unitPrice: 5, lineTotal: 5 }] }, match: null, warnings: [] } as unknown as BillScan;
+  expect(prefillFromBillScan(scan, []).lineItems[0].partNumber).toBe('EZ9F3210');
 });

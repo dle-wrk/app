@@ -311,6 +311,7 @@ export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
             <table className="w-full text-left text-xs">
               <thead>
                 <tr className="bg-surface-container-high/50 text-outline text-[10px] uppercase">
+                  <th className="py-2 px-3">SKU / Part #</th>
                   <th className="py-2 px-3">Description</th>
                   <th className="py-2 px-3 text-right">Qty</th>
                   <th className="py-2 px-3 text-right">Cost</th>
@@ -320,7 +321,8 @@ export const BillsTab: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
               <tbody>
                 {(viewing.items || []).map((it: any) => (
                   <tr key={it.id} className="border-t border-outline-variant/20">
-                    <td className="py-2 px-3">{it.description}{it.partNumber && <span className="block text-[10px] text-outline font-mono">{it.partNumber}</span>}</td>
+                    <td className="py-2 px-3 font-mono whitespace-nowrap">{it.partNumber || <span className="text-outline">—</span>}</td>
+                    <td className="py-2 px-3">{String(it.description ?? '').trim()}</td>
                     <td className="py-2 px-3 text-right font-mono">{it.quantity}</td>
                     <td className="py-2 px-3 text-right font-mono">{fmtMoney(it.unitPrice, viewing.currency)}</td>
                     <td className="py-2 px-3 text-right font-mono font-bold">{fmtMoney(it.lineTotal, viewing.currency)}</td>

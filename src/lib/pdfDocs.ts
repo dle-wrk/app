@@ -47,6 +47,8 @@ export interface BuildDocPdfInput {
   notes?: string;
   currency?: string;        // ZAR, USD… routed to fmtCurrency
   extraColumnHeader?: string; // e.g. "Serial numbers" for dispatch
+  /** Part numbers go in a SKU / Part # column of their own (the default, when any line has one); false puts them in front of the description. */
+  partNumberColumn?: boolean;
   /** Image data URLs (scanned receipt pages, …) appended one per page after the document. */
   attachments?: string[];
   attachmentsLabel?: string; // heading on each attachment page, default "Attachment"
@@ -186,16 +188,16 @@ export async function buildAndSaveDocPdf(input: BuildDocPdfInput): Promise<strin
   const hasMoney = input.lines.some(l => l.unitPrice != null || l.lineTotal != null);
   const hasExtra = !!input.extraColumnHeader && input.lines.some(l => l.extra);
 
-  const head: string[] = ['Description', 'Qty'];
+  const pnColumn = input.partNumberColumn !== false && input.lines.some(l => l.partNumber);
+  const head: string[] = pnColumn ? ['SKU / Part #', 'Description', 'Qty'] : ['Description', 'Qty'];
   if (hasMoney) { head.push('Unit Price', 'Total'); }
   if (hasExtra) { head.push(input.extraColumnHeader!); }
 
   const body = input.lines.length > 0
     ? input.lines.map(l => {
-        const row: string[] = [
-          `${l.partNumber ? `${l.partNumber}  ` : ''}${l.description || ''}`,
-          String(l.quantity ?? ''),
-        ];
+        const row: string[] = pnColumn
+          ? [l.partNumber || '', (l.description || '').trim(), String(l.quantity ?? '')]
+          : [`${l.partNumber ? `${l.partNumber}  ` : ''}${l.description || ''}`, String(l.quantity ?? '')];
         if (hasMoney) {
           row.push(l.unitPrice != null ? money(l.unitPrice) : '');
           row.push(l.lineTotal != null ? money(l.lineTotal) : '');
@@ -205,10 +207,12 @@ export async function buildAndSaveDocPdf(input: BuildDocPdfInput): Promise<strin
       })
     : [Array(head.length).fill('').map((_, i) => i === 0 ? 'No line items' : '')];
 
-  const colStyles: any = { 0: { cellWidth: 'auto' }, 1: { halign: 'right', cellWidth: 20 } };
+  const o = pnColumn ? 1 : 0; // columns after the description move along one
+  const colStyles: any = { [o]: { cellWidth: 'auto' }, [o + 1]: { halign: 'right', cellWidth: 14 } };
+  if (pnColumn) colStyles[0] = { cellWidth: 38, fontStyle: 'bold' };
   if (hasMoney) {
-    colStyles[2] = { halign: 'right', cellWidth: 30 };
-    colStyles[3] = { halign: 'right', cellWidth: 30, fontStyle: 'bold' };
+    colStyles[o + 2] = { halign: 'right', cellWidth: 28 };
+    colStyles[o + 3] = { halign: 'right', cellWidth: 28, fontStyle: 'bold' };
   }
   if (hasExtra) {
     colStyles[head.length - 1] = { cellWidth: 40, fontSize: 8 };

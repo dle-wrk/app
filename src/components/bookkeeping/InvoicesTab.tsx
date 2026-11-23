@@ -607,9 +607,12 @@ const QuickPaymentModal: React.FC<{ invoice: Invoice; accounts: ModuleDataProps[
 async function printInvoice(inv: any, clientName: string): Promise<void> {
   const money = (n: number) => fmtMoney(n, inv.currency);
   const items = (inv.items || []) as InvoiceItem[];
+  // SKU / Part # in a column of its own, as on every printed and PDF document.
+  const pnCol = items.some((it) => it.partNumber);
   const rows = items.map((it) => `
     <tr>
-      <td>${it.partNumber ? `<span class="pn">${escapeHtml(it.partNumber)}</span> ` : ''}${escapeHtml(it.description)}</td>
+      ${pnCol ? `<td class="pn">${escapeHtml(it.partNumber || '')}</td>` : ''}
+      <td>${escapeHtml(String(it.description ?? '').trim())}</td>
       <td class="num">${it.quantity}</td>
       <td class="num">${escapeHtml(money(it.unitPrice))}</td>
       <td class="num strong">${escapeHtml(money(it.lineTotal))}</td>
@@ -637,7 +640,7 @@ async function printInvoice(inv: any, clientName: string): Promise<void> {
   td { padding: 10px 6px; border-bottom: 1px solid #ddd; font-size: 12px; vertical-align: top; }
   td.num { text-align: right; font-family: ui-monospace, monospace; }
   td.strong { font-weight: 700; }
-  .pn { font-family: ui-monospace, monospace; font-size: 10px; color: #f7912b; }
+  .pn { font-family: ui-monospace, monospace; font-size: 11px; color: #f7912b; white-space: nowrap; }
   .totals { margin-top: 16px; display: flex; justify-content: flex-end; }
   .totals table { width: 280px; }
   .totals td { padding: 6px 4px; border: 0; font-size: 12px; }
@@ -676,13 +679,14 @@ async function printInvoice(inv: any, clientName: string): Promise<void> {
     <table>
       <thead>
         <tr>
+          ${pnCol ? '<th>SKU / Part #</th>' : ''}
           <th>Description</th>
           <th style="text-align:right">Qty</th>
           <th style="text-align:right">Unit Price</th>
           <th style="text-align:right">Total</th>
         </tr>
       </thead>
-      <tbody>${rows || '<tr><td colspan="4" style="text-align:center;color:#999;padding:20px">No line items</td></tr>'}</tbody>
+      <tbody>${rows || '<tr><td colspan="${pnCol ? 5 : 4}" style="text-align:center;color:#999;padding:20px">No line items</td></tr>'}</tbody>
     </table>
 
     <div class="totals">
