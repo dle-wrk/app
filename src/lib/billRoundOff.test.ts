@@ -47,4 +47,18 @@ describe('a bill read from an invoice comes to its total', () => {
   it('a round-off can be up too', () => {
     expect(withRoundOff(lines, 2609.3, VAT)[6].unitPrice).toBe(0.05);
   });
+  it("matches the invoice's VAT too: the VAT difference on a small VAT rounding line, the rest on a no-VAT round-off", () => {
+    const tax = (ls: any[]) => Math.round(ls.reduce((s, l) => s + lineTotals(l, VAT as any).taxAmount, 0) * 100) / 100;
+    expect(tax(lines)).toBe(340.35);
+    // Communica: VAT 340.34 on the invoice, total 2 609.20.
+    const out = withRoundOff(lines, 2609.2, VAT, 340.34);
+    expect(out.slice(6)).toMatchObject([{ description: 'VAT rounding (to the invoice VAT)', unitPrice: -0.04, taxRateId: 1 }]);
+    expect([tax(out), total(out)]).toEqual([340.34, 2609.2]);
+    // A supplier's own round-off on top: that part carries no VAT.
+    const more = withRoundOff(lines, 2609.1, VAT, 340.34);
+    expect(more.slice(6)).toMatchObject([{ description: 'VAT rounding (to the invoice VAT)', taxRateId: 1 }, { description: 'Round off (to the invoice total)', unitPrice: -0.1, taxRateId: null, noTax: true }]);
+    expect([tax(more), total(more)]).toEqual([340.34, 2609.1]);
+    // VAT read far off (a misread) isn't followed.
+    expect(withRoundOff(lines, 2609.25, VAT, 300).length).toBe(6);
+  });
 });

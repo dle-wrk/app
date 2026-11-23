@@ -901,24 +901,45 @@ const ReceiptScanModal: React.FC<{
 };
 
 /**
- * A bill read from an invoice comes to the invoice's own total: the supplier's
- * round-off, or VAT the invoice rounded once where the bill rounds per line,
- * goes on a "Round off" line (no VAT). Only for a few cents to R1: a bigger gap
+ * A bill read from an invoice comes to the invoice's own total and VAT. The
+ * bill works VAT out per line, where the invoice may round it once on the
+ * whole: a "VAT rounding (to the invoice VAT)" line at the VAT rate, as small
+ * as gives the invoice's VAT, takes that difference. Any other cents (the
+ * supplier's round-off) go on a "Round off (to the invoice total)" line with
+ * no VAT. Only for a few cents (VAT up to 10c, total up to R1): a bigger gap
  * means something was misread, and the warnings say so instead.
  */
-export function withRoundOff(lines: EditableLine[], invoiceTotal: number | null, taxRates: { id: number; rate: number }[]): EditableLine[] {
+export function withRoundOff(lines: EditableLine[], invoiceTotal: number | null, taxRates: { id: number; rate: number }[], invoiceTax: number | null = null): EditableLine[] {
   if (!invoiceTotal || !lines.some(l => Number(l.unitPrice))) return lines;
-  const billTotal = lines.reduce((s, l) => s + lineTotals(l, taxRates as any).lineTotal, 0);
-  const gap = Math.round((invoiceTotal - billTotal) * 100) / 100;
-  if (!gap || Math.abs(gap) > 1) return lines;
-  const line = newEditableLine();
-  line.key = 'ROUNDOFF';
-  line.description = 'Round off (to the invoice total)';
-  line.quantity = 1;
-  line.unitPrice = gap;
-  line.taxRateId = null;
-  line.noTax = true; // the editor would otherwise put the default VAT rate on it
-  return [...lines, line];
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  const sum = (ls: EditableLine[], k: 'lineTotal' | 'taxAmount') => ls.reduce((s, l) => s + Number((lineTotals(l, taxRates as any) as any)[k] || 0), 0);
+  const gap = r2(invoiceTotal - sum(lines, 'lineTotal'));
+  if (Math.abs(gap) > 1) return lines;
+  const out = [...lines];
+  // The VAT: the rate most of the lines carry.
+  const vatGap = invoiceTax != null ? r2(invoiceTax - sum(lines, 'taxAmount')) : 0;
+  const counts = new Map<number, number>();
+  for (const l of lines) if (l.taxRateId && Number(taxRates.find(t => t.id === l.taxRateId)?.rate) > 0 && !l.taxInclusive) counts.set(l.taxRateId, (counts.get(l.taxRateId) || 0) + 1);
+  const rateId = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+  if (vatGap && Math.abs(vatGap) <= 0.1 && rateId) {
+    for (let cents = 1; cents <= 200; cents++) {
+      const v: EditableLine = { ...newEditableLine(), key: 'VATROUND', description: 'VAT rounding (to the invoice VAT)', quantity: 1, unitPrice: Math.sign(vatGap) * cents / 100, taxRateId: rateId };
+      const t = lineTotals(v, taxRates as any);
+      if (r2(Number(t.taxAmount)) === vatGap) { out.push(v); break; }
+    }
+  }
+  const rest = r2(invoiceTotal - sum(out, 'lineTotal'));
+  if (rest && Math.abs(rest) <= 1) {
+    const line = newEditableLine();
+    line.key = 'ROUNDOFF';
+    line.description = 'Round off (to the invoice total)';
+    line.quantity = 1;
+    line.unitPrice = rest;
+    line.taxRateId = null;
+    line.noTax = true; // the editor would otherwise put the default VAT rate on it
+    out.push(line);
+  }
+  return out;
 }
 
 const BillEditorModal: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrder | null; prefillFromScan?: PrefillFromScan | null; onClose: () => void; onSaved: () => void }> = ({ suppliers, items, taxRates, accounts, prefillFromPO, prefillFromScan, onClose, onSaved, triggerToast }) => {
@@ -962,7 +983,7 @@ const BillEditorModal: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
       : prefillFromScan ? 'From receipt scan' : ''
   );
   const poItems = (prefillFromPO as any)?.items as any[] | undefined;
-  const [lines, setLines] = useState<EditableLine[]>(() => withRoundOff(startLines(), prefillFromScan?.total ?? null, taxRates));
+  const [lines, setLines] = useState<EditableLine[]>(() => withRoundOff(startLines(), prefillFromScan?.total ?? null, taxRates, prefillFromScan?.taxTotal ?? null));
   function startLines(): EditableLine[] {
     if (poItems?.length) {
       // A line already booked in with the scanner against the PO doesn't receive stock again.
