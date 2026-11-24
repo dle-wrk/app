@@ -241,6 +241,26 @@ export async function returnInvoiceStock(client: any, invoiceNumber: string, why
   return returned;
 }
 
+/** Puts back the stock a delivery / collection note still has out, as its
+ *  stock transactions say ('Dispatch DN-1' out, 'Dispatch DN-1 reopened' back).
+ *  Running it twice returns nothing the second time. Returns what was put back. */
+export async function returnDispatchStock(client: any, noteNumber: string): Promise<Array<{ partNumber: string; qty: number }>> {
+  const { rows } = await client.query(
+    `SELECT itempartnumber AS part, SUM(qtychange) AS net FROM transactions
+      WHERE reference = $1 OR reference LIKE $2 GROUP BY itempartnumber ORDER BY itempartnumber`,
+    [`Dispatch ${noteNumber}`, `Dispatch ${noteNumber.replace(/[\%_]/g, (m) => `\${m}`)} %`]
+  );
+  const returned: Array<{ partNumber: string; qty: number }> = [];
+  for (const r of rows) {
+    const out = -(Number(r.net) || 0);
+    if (r.part && out > 0) {
+      await adjustStock(client, r.part, out, 'INBOUND', `Dispatch ${noteNumber} reopened`);
+      returned.push({ partNumber: r.part, qty: out });
+    }
+  }
+  return returned;
+}
+
 /** The stock a still-open sales order needs reserved: its lines less what its
  *  other live invoices booked out. Used when one of its invoices is voided,
  *  since sending that invoice released the order's reservation. */
@@ -2547,6 +2567,42 @@ export function registerBookkeepingRoutes(app: Express) {
       }
     });
   }
+
+  // Reopen: a note marked delivered / collected by mistake goes back to ISSUED.
+  // The stock it booked out comes back (as its stock transactions say, so a
+  // second reopen returns nothing), and is held for its sales order again
+  // while that order is still open.
+  app.post('/api/dispatch-notes/:id/reopen', async (req: any, res) => {
+    const id = parseInt(req.params.id);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const { rows: [note] } = await client.query(`SELECT id, note_number, client_order_id, status FROM dispatch_notes WHERE id = $1 FOR UPDATE`, [id]);
+      if (!note) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'dispatch note not found' }); }
+      if (note.status !== 'COMPLETED') { await client.query('ROLLBACK'); return res.status(400).json({ error: `Only a completed note can be reopened; this one is ${note.status}.` }); }
+      await client.query(`UPDATE dispatch_notes SET status = 'ISSUED', completed_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [id]);
+      const returned = await returnDispatchStock(client, note.note_number);
+      if (note.client_order_id && returned.length) {
+        const { rows: [so] } = await client.query(`SELECT status FROM client_orders WHERE id = $1`, [note.client_order_id]);
+        if (so && !['FULFILLED', 'CANCELLED', 'POTENTIAL', 'QUOTATION'].includes(so.status)) {
+          for (const r of returned) {
+            await client.query(`INSERT INTO client_order_reservations (client_order_id, part_number, reserved_qty, backorder_qty) VALUES ($1, $2, $3, 0)`, [note.client_order_id, r.partNumber, r.qty]);
+          }
+        }
+      }
+      await client.query(
+        `INSERT INTO user_activity_logs (user_email, action, entity_type, entity_id, details, status) VALUES ((SELECT email FROM users WHERE email = $1), 'REOPEN', 'DispatchNote', $2, $3, 'SUCCESS')`,
+        [req.user?.email ?? null, note.note_number, JSON.stringify({ returned, by: req.user?.email ?? null })]);
+      await client.query('COMMIT');
+      const finalRow = await queryOne(`${DISPATCH_NOTE_JOIN} WHERE dn.id = $1`, [id]);
+      res.json({ ...mapDispatchNote(finalRow), returned });
+    } catch (err: any) {
+      await client.query('ROLLBACK').catch(() => {});
+      res.status(500).json({ error: err.message });
+    } finally {
+      client.release();
+    }
+  });
 
   app.delete('/api/dispatch-notes/:id', async (req, res) => {
     const id = parseInt(req.params.id);

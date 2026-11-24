@@ -1,7 +1,8 @@
 import { RelatedScans } from './ScansTab';
 import { showToast } from '../../lib/toast';
 import React, { useEffect, useMemo, useState } from 'react';
-import { Plus, Eye, Send, CheckCircle2, Ban, Trash2, Printer, X, Truck, PackageCheck, Download } from 'lucide-react';
+import { Plus, Eye, Send, CheckCircle2, Ban, Trash2, Printer, X, Truck, PackageCheck, Download, RotateCcw } from 'lucide-react';
+import { canChange } from '../../lib/changeAccess';
 import { buildAndSaveDocPdf, docFileName } from '../../lib/pdfDocs';
 import { DispatchNote, DispatchNoteItem, DispatchNoteType } from '../../types';
 import {
@@ -161,6 +162,23 @@ const DispatchNotesPanel: React.FC<ModuleDataProps & { type: DispatchNoteType } 
     }
   };
 
+  // A note marked delivered / collected by mistake: back to Issued, its stock back on the shelf.
+  const mayChange = canChange('/api/dispatch-notes/1/reopen', 'POST');
+  const doReopen = async (n: DispatchNote) => {
+    if (!(await confirmDialog({ title: `Reopen ${n.noteNumber}`, message: `Undo "${meta.verb.toLowerCase()}" on ${n.noteNumber}? It goes back to Issued, and any stock it booked out is put back (and held for its sales order again).`, confirmLabel: 'Reopen' }))) return;
+    const snap = rows;
+    setRows(prev => prev.map(r => r.id === n.id ? { ...r, status: 'ISSUED' } : r));
+    setViewing(null);
+    try {
+      const r = await apiPost(`/api/dispatch-notes/${n.id}/reopen`);
+      const back = (r?.returned || []) as Array<{ partNumber: string; qty: number }>;
+      triggerToast(`${n.noteNumber} reopened (back to Issued).${back.length ? ` Stock put back: ${back.map(b => `${b.qty} × ${b.partNumber}`).join(', ')}.` : ''}`);
+    } catch (err: any) {
+      setRows(snap);
+      triggerToast(err.message || 'Failed to reopen', 'ERROR');
+    }
+  };
+
   const doDelete = async (id: number) => {
     if (!(await confirmDialog({ title: 'Delete draft note', message: 'Delete this draft note permanently?', confirmLabel: 'Delete', destructive: true }))) return;
     const snap = rows;
@@ -213,6 +231,9 @@ const DispatchNotesPanel: React.FC<ModuleDataProps & { type: DispatchNoteType } 
                       {n.status === 'ISSUED' && (
                         <button onClick={() => doAction(n.id, 'complete')} className="p-1.5 rounded hover:bg-surface-container-high text-green-400" title={`Mark ${meta.verb.toLowerCase()}`}><CheckCircle2 className="w-3.5 h-3.5" /></button>
                       )}
+                      {n.status === 'COMPLETED' && mayChange && (
+                        <button onClick={() => doReopen(n)} className="p-1.5 rounded hover:bg-surface-container-high text-amber-400" title={`Undo ${meta.verb.toLowerCase()}: back to Issued`} aria-label={`Reopen ${n.noteNumber}`}><RotateCcw className="w-3.5 h-3.5" /></button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -242,6 +263,7 @@ const DispatchNotesPanel: React.FC<ModuleDataProps & { type: DispatchNoteType } 
           onEdit={() => { openEdit(viewing); setViewing(null); }}
           onIssue={() => doAction(viewing.id, 'issue')}
           onComplete={() => doAction(viewing.id, 'complete')}
+          onReopen={mayChange ? () => doReopen(viewing) : undefined}
           onCancel={() => doAction(viewing.id, 'cancel', 'Cancel this dispatch note?')}
           onDelete={() => doDelete(viewing.id)}
           busy={busy}
@@ -478,7 +500,9 @@ const DispatchViewModal: React.FC<{
   note: DispatchNote; clientName: string; sourceOrder?: import('../../types').ClientOrder;
   onClose: () => void; onEdit: () => void;
   onIssue: () => void; onComplete: () => void; onCancel: () => void; onDelete: () => void; busy: boolean;
-}> = ({ note, clientName, sourceOrder, onClose, onEdit, onIssue, onComplete, onCancel, onDelete, busy }) => {
+  /** Undo "delivered" / "collected": back to Issued (when allowed). */
+  onReopen?: () => void;
+}> = ({ note, clientName, sourceOrder, onClose, onEdit, onIssue, onComplete, onCancel, onDelete, busy, onReopen }) => {
   const meta = TYPE_META[note.noteType];
 
   const printNote = async () => {
@@ -647,6 +671,9 @@ const DispatchViewModal: React.FC<{
             <DangerButton icon={<Ban className="w-3.5 h-3.5" />} onClick={onCancel} disabled={busy}>Cancel</DangerButton>
             <PrimaryButton icon={<CheckCircle2 className="w-3.5 h-3.5" />} onClick={onComplete} disabled={busy}>Mark {meta.verb}</PrimaryButton>
           </>
+        )}
+        {note.status === 'COMPLETED' && onReopen && (
+          <SecondaryButton icon={<RotateCcw className="w-3.5 h-3.5" />} onClick={onReopen} disabled={busy}>Undo {meta.verb.toLowerCase()} (reopen)</SecondaryButton>
         )}
       </div>
     </Modal>
