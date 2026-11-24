@@ -38,7 +38,7 @@ export const VendorsTab: React.FC<ModuleDataProps & { onNewVendor?: () => void }
               <tr className="bg-surface-container-high/50 text-[10px] uppercase font-bold text-outline border-b border-outline-variant">
                 <th className="px-lg py-sm">ID</th>
                 <th className="px-lg py-sm">Name</th>
-                <th className="px-lg py-sm">Contact</th>
+                <th className="px-lg py-sm">Contact / VAT</th>
                 <th className="px-lg py-sm">Banking</th>
                 <th className="px-lg py-sm text-right">Lead Time</th>
                 <th className="px-lg py-sm text-right">AP Balance</th>
@@ -68,7 +68,10 @@ export const VendorsTab: React.FC<ModuleDataProps & { onNewVendor?: () => void }
                       </a>
                     )}
                   </td>
-                  <td className="px-lg py-sm text-on-surface-variant">{s.contact_email || '—'}</td>
+                  <td className="px-lg py-sm text-on-surface-variant">
+                    {s.contact_email || (s.vatNumber ? '' : '—')}
+                    {s.vatNumber && <span className="block text-[10px] font-mono text-outline">VAT {s.vatNumber}</span>}
+                  </td>
                   <td className="px-lg py-sm text-on-surface-variant">
                     {s.bank && hasBanking(s.bank)
                       ? <span title="Open the vendor for the full details">{s.bank.bankName || 'Bank'}{s.bank.accountNumber ? <span className="font-mono"> {maskAccount(s.bank.accountNumber)}</span> : ''}{s.bank.branchCode ? <span className="font-mono text-outline"> · {s.bank.branchCode}</span> : ''}</span>

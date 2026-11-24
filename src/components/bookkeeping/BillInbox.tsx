@@ -10,12 +10,15 @@ import { canChange } from '../../lib/changeAccess';
 import { currentUserCan } from '../../lib/permissions';
 import { confirmDialog } from '../../lib/confirmDialog';
 import { openReceiptPage, receiptPages } from '../../lib/receiptPages';
+import { describeBank, invoiceBank, type InvoiceBank } from '../../lib/invoiceBank';
 
 export interface BillOcr {
   supplier: string | null; supplierVatNumber: string | null; supplierAddress: string | null; supplierPhone: string | null;
   supplierEmail: string | null; supplierWebsite: string | null; invoiceNumber: string | null; date: string | null; dueDate: string | null;
   poNumber: string | null; currency: string | null; subtotal: number | null; taxTotal: number | null; total: number | null;
   lineItems: { description: string; partNumber: string | null; quantity: number; unitPrice: number; lineTotal: number }[];
+  /** The supplier's bank details as printed; older reads have only the text (see invoiceBank). */
+  bank?: InvoiceBank | null; text?: string;
 }
 export interface BillScan {
   id: number; status: 'INBOX' | 'USED' | 'DISCARDED'; pageCount: number; thumb: string | null; pages?: string[]; note: string | null;
@@ -51,7 +54,7 @@ export interface ScanPrefill {
   /** How many of this supplier's earlier bills filled it in. */
   learnedFrom?: number;
   /** The supplier's details the invoice shows, offered for filling where the supplier has none. */
-  supplierDetails?: { vatNumber: string | null; address: string | null; phone: string | null; email: string | null; website: string | null };
+  supplierDetails?: { vatNumber: string | null; address: string | null; phone: string | null; email: string | null; website: string | null; bank?: InvoiceBank | null };
 }
 
 /**
@@ -96,9 +99,12 @@ export function prefillFromRead(o: BillOcr | null, match: ReadMatch | null | und
       return { description: (hint?.description || split?.description || l.description).trim(), quantity: l.quantity, unitPrice: l.unitPrice, partNumber: sku, accountId: hint?.accountId ?? null, taxRateId: hint?.taxRateId ?? null };
     }),
     warnings,
-    supplierDetails: o ? { vatNumber: o.supplierVatNumber, address: o.supplierAddress, phone: o.supplierPhone, email: o.supplierEmail, website: o.supplierWebsite } : undefined,
+    supplierDetails: o ? { vatNumber: o.supplierVatNumber, address: o.supplierAddress, phone: o.supplierPhone, email: o.supplierEmail, website: o.supplierWebsite, bank: invoiceBank(o) } : undefined,
   };
 }
+
+/** What fillSupplierGaps filled, in words. */
+export const FILLED_WORDS: Record<string, string> = { vatNumber: 'VAT number', address: 'address', phone: 'phone', email: 'email', website: 'website', bank: 'bank details' };
 
 const when = (v: string | null) => {
   const d = new Date(v || '');
@@ -148,7 +154,9 @@ const AddSupplierModal: React.FC<{ scan: BillScan; onClose: () => void; onAdded:
         {field('website', 'Website')}
         {field('address', 'Address', true)}
       </div>
-      <p className="text-[11px] text-outline mt-sm">Bank details are never taken from an invoice: add those on the supplier by hand, and check them by phone.</p>
+      {invoiceBank(o)
+        ? <p className="text-[11px] text-amber-400 mt-sm">Bank details from the invoice are saved with it: {describeBank(invoiceBank(o))}. The reader can misread a digit: confirm them by phone before the first payment.</p>
+        : <p className="text-[11px] text-outline mt-sm">The invoice shows no bank details: add them on the supplier when you have them.</p>}
       <div className="flex justify-end gap-2 mt-md">
         <SecondaryButton onClick={onClose}>Cancel</SecondaryButton>
         <PrimaryButton icon={<UserPlus className="w-3.5 h-3.5" />} disabled={saving || f.name.trim().length < 2} onClick={() => void save()}>{saving ? 'Adding…' : 'Add supplier'}</PrimaryButton>
@@ -207,7 +215,9 @@ export const BillInbox: React.FC<{
     if (!billId) { triggerToast('Choose the bill to attach it to.', 'ERROR'); return; }
     const r = await apiPost(`/api/bills/inbox/${s.id}/attach`, { billId });
     setItems(xs => (xs || []).filter(x => x.id !== s.id));
-    triggerToast(`Attached to ${r.billNumber} (${r.pages} page${r.pages === 1 ? '' : 's'})${r.invoiceNumber ? `, supplier invoice ${r.invoiceNumber} filled in` : ''}.`);
+    const filled = (r.supplierFilled || []).map((k: string) => FILLED_WORDS[k] || k);
+    triggerToast([`Attached to ${r.billNumber} (${r.pages} page${r.pages === 1 ? '' : 's'})${r.invoiceNumber ? `, supplier invoice ${r.invoiceNumber} filled in` : ''}.`,
+      filled.length ? `Saved the supplier's ${filled.join(', ')} from the invoice.` : '', ...(r.notes || [])].filter(Boolean).join(' '));
     await onChanged();
   });
   const showPages = (s: BillScan) => act(s, async () => { setPagesOf(await apiGet(`/api/bill-scans/${s.id}`)); });
@@ -233,7 +243,7 @@ export const BillInbox: React.FC<{
           setAddingFor(null);
           setItems(xs => (xs || []).map(x => (x.id === scan.id ? scan : x)));
           onSupplierAdded?.(supplierFromRow(supplier));
-          triggerToast(`Added ${supplier.name} as a supplier.`, 'SUCCESS');
+          triggerToast(`Added ${supplier.name} as a supplier.${supplier.bank_note ? ` ${supplier.bank_note}` : ''}`, 'SUCCESS');
           void load(); // other scans from them now match too
         }} />
       )}
@@ -350,6 +360,7 @@ export const FillMissingModal: React.FC<{
   const apply = async () => {
     setApplying(true);
     let n = 0;
+    const notes: string[] = [];
     try {
       for (const r of results) {
         const values: Record<string, string> = {};
@@ -357,8 +368,9 @@ export const FillMissingModal: React.FC<{
         if (!Object.keys(values).length) continue;
         const res = await apiPost(`/api/bills/${r.billId}/fill-missing`, { values });
         n += (res.filled || []).length;
+        notes.push(...(res.notes || []));
       }
-      triggerToast(n ? `${n} detail${n === 1 ? '' : 's'} filled in.` : 'Nothing needed filling in.');
+      triggerToast([n ? `${n} detail${n === 1 ? '' : 's'} filled in.` : 'Nothing needed filling in.', ...notes].join(' '));
       await onDone();
       onClose();
     } catch (e: any) { triggerToast(e.message || 'Could not fill them in', 'ERROR'); } finally { setApplying(false); }
@@ -367,7 +379,11 @@ export const FillMissingModal: React.FC<{
   const started = React.useRef(false);
   useEffect(() => { if (autoStart && !started.current && withPhotos.length) { started.current = true; void readAll(); } }, [autoStart, withPhotos.length]); // eslint-disable-line react-hooks/exhaustive-deps
   const offered = results.reduce((s, r) => s + r.proposals.length, 0);
-  const show = (p: Proposal) => (p.key === 'supplierId' ? supplierName(p.value) : p.value);
+  const show = (p: Proposal) => {
+    if (p.key === 'supplierId') return supplierName(p.value);
+    if (p.key === 'bank') { try { return `${describeBank(JSON.parse(p.value))} (confirm by phone before paying)`; } catch { return p.value; } }
+    return p.value;
+  };
   return (
     <Modal title={autoStart && bills.length === 1 ? `Read ${bills[0].billNumber}` : 'Fill missing details from photos'} subtitle="Reads each bill's attached photos and offers what the bill and its supplier are missing. Only empty fields are filled; nothing is changed until you apply it." onClose={onClose} maxWidth="max-w-4xl">
       <div className="space-y-md text-xs">

@@ -26,6 +26,8 @@ import { pool, query, exec } from './db';
 import { readBill, ocrAvailable, ocrWarnings, tidyVatNumber, type BillOcr } from './billOcr';
 import { applyProfile, profileFor } from './billLearning';
 import { roleCan, notAllowedMessage } from './permissions';
+import { describeBank, invoiceBank, tidyInvoiceBank, type InvoiceBank } from './invoiceBank';
+import { maskAccount } from './supplierBanking';
 
 export async function ensureBillScansSchema(): Promise<void> {
   await exec(`CREATE TABLE IF NOT EXISTS bill_scans (
@@ -131,8 +133,8 @@ export const codeKey = (s: unknown) => String(s ?? '').toUpperCase().split('').m
 export const poKey = (s: unknown) => text(s).toUpperCase().replace(/[\s#:]/g, '');
 
 export interface Proposal { key: FillKey; target: 'bill' | 'supplier'; label: string; current: string | null; value: string }
-export type FillKey = 'supplierInvoiceNumber' | 'supplierId' | 'vatNumber' | 'address' | 'phone' | 'email' | 'website';
-export const FILL_KEYS: FillKey[] = ['supplierInvoiceNumber', 'supplierId', 'vatNumber', 'address', 'phone', 'email', 'website'];
+export type FillKey = 'supplierInvoiceNumber' | 'supplierId' | 'vatNumber' | 'address' | 'phone' | 'email' | 'website' | 'bank';
+export const FILL_KEYS: FillKey[] = ['supplierInvoiceNumber', 'supplierId', 'vatNumber', 'address', 'phone', 'email', 'website', 'bank'];
 
 /**
  * What a bill and its supplier are missing that the invoice shows: only
@@ -142,7 +144,7 @@ export const FILL_KEYS: FillKey[] = ['supplierInvoiceNumber', 'supplierId', 'vat
  */
 export function missingProposals(
   bill: { supplier_id: string | null; supplier_invoice_number: string | null },
-  supplier: { id: string; name: string | null; vat_number: string | null; address: string | null; phone: string | null; contact_email: string | null; website: string | null } | null,
+  supplier: { id: string; name: string | null; vat_number: string | null; address: string | null; phone: string | null; contact_email: string | null; website: string | null; bank_account_number?: string | null } | null,
   o: BillOcr,
   match: { id: string; name: string } | null,
 ): Proposal[] {
@@ -158,6 +160,9 @@ export function missingProposals(
     add('phone', 'Phone', s.phone, o.supplierPhone);
     add('email', 'Email', s.contact_email, o.supplierEmail);
     add('website', 'Website', s.website, o.supplierWebsite);
+    // Bank details only for a supplier with no bank account yet; the value is the details as JSON.
+    const bank = invoiceBank(o);
+    if (bank && empty(s.bank_account_number)) out.push({ key: 'bank', target: 'supplier', label: 'Bank details', current: null, value: JSON.stringify(bank) });
   }
   return out;
 }
@@ -273,8 +278,38 @@ async function openScan(db: Db, id: number) {
   return r;
 }
 
-/** Fills a supplier's empty contact fields from what an invoice showed. Returns the fields filled. */
-export async function fillSupplierGaps(db: Db, supplierId: string, values: Partial<Record<'vatNumber' | 'address' | 'phone' | 'email' | 'website', string | null>>): Promise<string[]> {
+/**
+ * A supplier's bank details from their invoice, only when the supplier has no
+ * bank account yet (never a change: a changed account on an invoice is a common
+ * fraud). Stamped and logged like any banking change, so the vendor shows
+ * "changed recently" and asks for a phone check before paying.
+ * 'filled'; 'differs' when the supplier has another account; null otherwise.
+ */
+export async function fillSupplierBank(db: Db, supplierId: string, raw: unknown, who: string | null, from: string): Promise<'filled' | 'differs' | null> {
+  const bank = tidyInvoiceBank(raw);
+  if (!bank) return null;
+  const { rows: [s] } = await db.query(`SELECT bank_account_number FROM suppliers WHERE id = $1 FOR UPDATE`, [supplierId]);
+  if (!s) return null;
+  const have = text(s.bank_account_number).replace(/[\s-]/g, '');
+  if (have) return have === bank.accountNumber ? null : 'differs';
+  const by = `${who || 'unknown'} (from ${from})`;
+  await db.query(
+    `UPDATE suppliers SET bank_name = $2, bank_account_number = $3, bank_branch_code = $4, bank_account_type = $5, bank_swift = $6, bank_updated_at = now(), bank_updated_by = $7 WHERE id = $1`,
+    [supplierId, bank.bankName, bank.accountNumber, bank.branchCode, bank.accountType, bank.swift, by.slice(0, 200)]);
+  await db.query(
+    `INSERT INTO user_activity_logs (user_email, action, entity_type, entity_id, details, status) VALUES ((SELECT email FROM users WHERE email = $1), 'UPDATE_SUPPLIER_BANKING', 'Supplier', $2, $3, 'SUCCESS')`,
+    [who, supplierId, JSON.stringify({ changed: ['bankName', 'accountNumber', 'branchCode', 'accountType', 'swift'], by, fromInvoice: from, accountBefore: null, accountAfter: maskAccount(bank.accountNumber), bankAfter: bank.bankName })]);
+  return 'filled';
+}
+
+/** What fillSupplierGaps did to the bank details, in words for the person (or null). */
+export const bankNote = (r: 'filled' | 'differs' | null, bank: InvoiceBank | null) =>
+  r === 'filled' ? `Bank details saved from the invoice (${describeBank(bank)}): confirm them by phone before the first payment.`
+    : r === 'differs' ? `The invoice shows bank account ${maskAccount(bank?.accountNumber)}, not the one on the supplier: left unchanged. If they've changed banks, confirm by phone before changing it.`
+      : null;
+
+/** Fills a supplier's empty contact fields (and bank details, when it has none) from what an invoice showed. Returns the fields filled. */
+export async function fillSupplierGaps(db: Db, supplierId: string, values: Partial<Record<'vatNumber' | 'address' | 'phone' | 'email' | 'website', string | null>> & { bank?: unknown }, meta?: { who: string | null; from: string; notes?: string[] }): Promise<string[]> {
   const cols: Record<string, string> = { vatNumber: 'vat_number', address: 'address', phone: 'phone', email: 'contact_email', website: 'website' };
   const filled: string[] = [];
   for (const [k, col] of Object.entries(cols)) {
@@ -283,8 +318,19 @@ export async function fillSupplierGaps(db: Db, supplierId: string, values: Parti
     const r = await db.query(`UPDATE suppliers SET ${col} = $2 WHERE id = $1 AND (${col} IS NULL OR trim(${col}) = '')`, [supplierId, k === 'vatNumber' ? tidyVatNumber(v) ?? v : v]);
     if (r.rowCount) filled.push(k);
   }
+  if (values.bank && meta) {
+    const r = await fillSupplierBank(db, supplierId, values.bank, meta.who, meta.from);
+    if (r === 'filled') filled.push('bank');
+    const note = bankNote(r, tidyInvoiceBank(values.bank));
+    if (note) meta.notes?.push(note);
+  }
   return filled;
 }
+
+/** Everything a read invoice shows about its supplier, for fillSupplierGaps. */
+const supplierValues = (o: BillOcr, withBank: boolean) => ({ vatNumber: o.supplierVatNumber, address: o.supplierAddress, phone: o.supplierPhone, email: o.supplierEmail, website: o.supplierWebsite, bank: withBank ? invoiceBank(o) : null });
+/** Bank details are saved only by someone who may change suppliers (as on the Suppliers page). */
+const mayBank = (req: any) => roleCan(req.user?.role, 'suppliers.update');
 
 const send = (res: Response, e: any, what: string) => {
   // A reader that isn't set up (501) or failed (502) says why: the message is ours, not a stack.
@@ -376,7 +422,8 @@ export function registerBillScansRoutes(app: Express): void {
   });
 
   // Its pages go on a bill that exists (after the ones already there), and
-  // what that bill misses (the supplier's invoice number) is filled in.
+  // what that bill misses (the supplier's invoice number) is filled in, and
+  // what its supplier misses (VAT number, contact, bank details) too.
   app.post('/api/bills/inbox/:id/attach', async (req: any, res) => {
     try {
       const id = idOf(req.params.id);
@@ -384,14 +431,16 @@ export function registerBillScansRoutes(app: Express): void {
       const who = await whoIs(req.user);
       const out = await inTx(async (c) => {
         const s = await openScan(c, id);
-        const { rows: [b] } = await c.query(`SELECT id, bill_number, receipt_image, supplier_invoice_number FROM bills WHERE id = $1 FOR UPDATE`, [billId]);
+        const { rows: [b] } = await c.query(`SELECT id, bill_number, supplier_id, receipt_image, supplier_invoice_number FROM bills WHERE id = $1 FOR UPDATE`, [billId]);
         if (!b) throw fail(404, 'That bill no longer exists.');
         const pages = [...billPages(b.receipt_image), ...s.pages];
         if (pages.length > 16) throw fail(400, `${b.bill_number} would have ${pages.length} pages: 16 at most.`);
         const inv = !text(b.supplier_invoice_number) && s.ocr?.invoiceNumber ? s.ocr.invoiceNumber : null;
         await c.query(`UPDATE bills SET receipt_image = $2, supplier_invoice_number = COALESCE($3, supplier_invoice_number), updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [billId, storePages(pages), inv]);
+        const notes: string[] = [];
+        const supplierFilled = b.supplier_id && s.ocr ? await fillSupplierGaps(c, String(b.supplier_id), supplierValues(s.ocr, mayBank(req)), { who: req.user?.email ?? null, from: `the invoice on ${b.bill_number}`, notes }) : [];
         await c.query(`UPDATE bill_scans SET status = 'USED', bill_id = $2, decided_by = $3, decided_at = now() WHERE id = $1`, [id, billId, who.name]);
-        return { billNumber: b.bill_number as string, pages: pages.length, invoiceNumber: inv };
+        return { billNumber: b.bill_number as string, pages: pages.length, invoiceNumber: inv, supplierFilled, notes };
       });
       res.json({ ...out, scan: await loadScan(id) });
     } catch (e) { send(res, e, 'attach the scanned bill'); }
@@ -418,7 +467,12 @@ export function registerBillScansRoutes(app: Express): void {
           [String(next), v.name, v.vatNumber, v.address, v.phone, v.email ?? '', v.website ?? '', `Added from a scanned bill (scan ${id}).`]);
         await c.query(`INSERT INTO user_activity_logs (user_email, action, entity_type, entity_id, details, status) VALUES ((SELECT email FROM users WHERE email = $1), 'CREATE', 'Supplier', $2, $3, 'SUCCESS')`,
           [req.user?.email ?? null, String(next), JSON.stringify({ name: v.name, fromBillScan: id })]);
-        return row;
+        // The bank details the invoice shows (the reader's; the form can't change them).
+        const { rows: [sc] } = await c.query(`SELECT ocr FROM bill_scans WHERE id = $1`, [id]);
+        const bank = invoiceBank(sc?.ocr);
+        const r = bank ? await fillSupplierBank(c, String(next), bank, req.user?.email ?? null, `scanned bill ${id}`) : null;
+        const { rows: [saved] } = await c.query(`SELECT * FROM suppliers WHERE id = $1`, [String(next)]);
+        return { ...saved, bank_note: bankNote(r, bank) };
       });
       res.status(201).json({ supplier, scan: await loadScan(id) });
     } catch (e) { send(res, e, 'add the supplier'); }
@@ -438,12 +492,12 @@ export function registerBillScansRoutes(app: Express): void {
         if (!b) throw fail(404, 'That bill no longer exists.');
         if (!billPages(b.receipt_image).length) await c.query(`UPDATE bills SET receipt_image = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [billId, storePages(s.pages)]);
         let supplierFilled: string[] = [];
+        const notes: string[] = [];
         if (req.body?.fillSupplier && b.supplier_id && s.ocr) {
-          const o: BillOcr = s.ocr;
-          supplierFilled = await fillSupplierGaps(c, b.supplier_id, { vatNumber: o.supplierVatNumber, address: o.supplierAddress, phone: o.supplierPhone, email: o.supplierEmail, website: o.supplierWebsite });
+          supplierFilled = await fillSupplierGaps(c, String(b.supplier_id), supplierValues(s.ocr, mayBank(req)), { who: req.user?.email ?? null, from: `the invoice on bill ${billId}`, notes });
         }
         await c.query(`UPDATE bill_scans SET status = 'USED', bill_id = $2, decided_by = $3, decided_at = now() WHERE id = $1`, [id, billId, who.name]);
-        return { supplierFilled };
+        return { supplierFilled, notes };
       });
       res.json({ ...out, scan: await loadScan(id) });
     } catch (e) { send(res, e, 'record the scanned bill'); }
@@ -458,7 +512,7 @@ export function registerBillScansRoutes(app: Express): void {
       const pages = billPages(b.receipt_image).filter(p => p.startsWith('data:image/'));
       if (!pages.length) throw fail(400, `${b.bill_number} has no photos attached to read.`);
       const o = await readBill(pages.slice(0, 8));
-      const { rows: [s] } = b.supplier_id ? await query(`SELECT id, name, vat_number, address, phone, contact_email, website FROM suppliers WHERE id = $1`, [b.supplier_id]) : { rows: [] as any[] };
+      const { rows: [s] } = b.supplier_id ? await query(`SELECT id, name, vat_number, address, phone, contact_email, website, bank_account_number FROM suppliers WHERE id = $1`, [b.supplier_id]) : { rows: [] as any[] };
       const match = await matchesFor(pool as any, o);
       const proposals = missingProposals(b, s ?? null, o, match?.supplier ?? null);
       // The bill's supplier differs from the one the invoice names: say so, change nothing.
@@ -477,6 +531,7 @@ export function registerBillScansRoutes(app: Express): void {
         const { rows: [b] } = await c.query(`SELECT id, bill_number, supplier_id, supplier_invoice_number FROM bills WHERE id = $1 FOR UPDATE`, [id]);
         if (!b) throw fail(404, 'That bill no longer exists.');
         const filled: string[] = [];
+        const notes: string[] = [];
         if (keys.includes('supplierInvoiceNumber') && !text(b.supplier_invoice_number) && text(values.supplierInvoiceNumber)) {
           await c.query(`UPDATE bills SET supplier_invoice_number = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [id, text(values.supplierInvoiceNumber).slice(0, 60)]);
           filled.push('supplierInvoiceNumber');
@@ -488,12 +543,13 @@ export function registerBillScansRoutes(app: Express): void {
           await c.query(`UPDATE bills SET supplier_id = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [id, String(s.id)]);
           supplierId = String(s.id); filled.push('supplierId');
         }
-        if (supplierId) filled.push(...await fillSupplierGaps(c, supplierId, { vatNumber: keys.includes('vatNumber') ? values.vatNumber : null, address: keys.includes('address') ? values.address : null, phone: keys.includes('phone') ? values.phone : null, email: keys.includes('email') ? values.email : null, website: keys.includes('website') ? values.website : null }));
+        const bank = keys.includes('bank') && mayBank(req) ? (typeof values.bank === 'string' ? (() => { try { return JSON.parse(values.bank); } catch { return null; } })() : values.bank) : null;
+        if (supplierId) filled.push(...await fillSupplierGaps(c, supplierId, { vatNumber: keys.includes('vatNumber') ? values.vatNumber : null, address: keys.includes('address') ? values.address : null, phone: keys.includes('phone') ? values.phone : null, email: keys.includes('email') ? values.email : null, website: keys.includes('website') ? values.website : null, bank }, { who: req.user?.email ?? null, from: `the invoice on ${b.bill_number}`, notes }));
         if (filled.length) {
           await c.query(`INSERT INTO user_activity_logs (user_email, action, entity_type, entity_id, details, status) VALUES ((SELECT email FROM users WHERE email = $1), 'FILL_FROM_INVOICE', 'Bill', $2, $3, 'SUCCESS')`,
             [req.user?.email ?? null, b.bill_number, JSON.stringify({ filled, supplierId, by: req.user?.email ?? null })]);
         }
-        return { billNumber: b.bill_number as string, filled };
+        return { billNumber: b.bill_number as string, filled, notes };
       });
       res.json(out);
     } catch (e) { send(res, e, 'fill in the bill'); }

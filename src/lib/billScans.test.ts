@@ -133,3 +133,11 @@ it('a quantity printed on a code ("EZ9F3210 :: 1N") is left off the SKU', () => 
   const scan = { id: 1, ocr: { ...ocr(), lineItems: [{ description: 'Breaker', partNumber: 'EZ9F3210 :: 1N', quantity: 1, unitPrice: 5, lineTotal: 5 }] }, match: null, warnings: [] } as unknown as BillScan;
   expect(prefillFromBillScan(scan, []).lineItems[0].partNumber).toBe('EZ9F3210');
 });
+
+it("offers an invoice's bank details only to a supplier with no bank account", () => {
+  const o = ocr({ text: 'Our banking details: Nedbank, Business a/c no. 1084804371 branch code 198765' } as any);
+  const supplier = { id: '6', name: 'Communica', vat_number: '1', address: 'a', phone: 'p', contact_email: 'e@x.co', website: 'w', bank_account_number: null };
+  const bank = missingProposals({ supplier_id: '6', supplier_invoice_number: 'X' }, supplier, o, null).find(p => p.key === 'bank');
+  expect(JSON.parse(bank!.value)).toMatchObject({ bankName: 'Nedbank', accountNumber: '1084804371', branchCode: '198765', accountType: 'Business' });
+  expect(missingProposals({ supplier_id: '6', supplier_invoice_number: 'X' }, { ...supplier, bank_account_number: '999999999' }, o, null).some(p => p.key === 'bank')).toBe(false);
+});

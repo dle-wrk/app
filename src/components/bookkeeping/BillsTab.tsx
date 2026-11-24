@@ -10,6 +10,8 @@ import { LineItemsEditor, EditableLine, newEditableLine, lineTotals } from './Li
 import { ErrorBoundary } from '../ErrorBoundary';
 import { confirmDialog, ConfirmOptions } from '../../lib/confirmDialog';
 import { BillInbox, FillMissingModal, prefillFromRead, type ScanPrefill } from './BillInbox';
+import { describeBank } from '../../lib/invoiceBank';
+import { maskAccount } from '../../lib/supplierBanking';
 import { canChange } from '../../lib/changeAccess';
 import { Wand2 } from 'lucide-react';
 
@@ -975,8 +977,13 @@ const BillEditorModal: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
     ['phone', 'phone', chosenSupplier.phone, details.phone],
     ['email', 'email', chosenSupplier.contact_email, details.email],
     ['website', 'website', chosenSupplier.website, details.website],
+    // Bank details only when the supplier has no bank account yet (a changed account on an invoice is a common fraud).
+    ['bank', 'bank details', chosenSupplier.bank?.accountNumber, details.bank ? describeBank(details.bank) : null],
   ] as const).filter(([, , have, found]) => !String(have ?? '').trim() && found) : [];
   const [fillSupplier, setFillSupplier] = useState(true);
+  // The invoice's bank account isn't the one on the supplier: never changed from here, but said.
+  const bankDiffers = details?.bank && chosenSupplier?.bank?.accountNumber && chosenSupplier.bank.accountNumber.replace(/[\s-]/g, '') !== details.bank.accountNumber
+    ? `This invoice shows bank account ${maskAccount(details.bank.accountNumber)}, not ${maskAccount(chosenSupplier.bank.accountNumber)} on ${chosenSupplier.name}. Changed bank details on an invoice are a common fraud: confirm by phone before paying, and change them on the supplier only after that.` : null;
   const [notes, setNotes] = useState(
     prefillFromScan && !prefillFromScan.supplierName && !prefillFromScan.date && !prefillFromScan.total
       ? 'From receipt scan (OCR extracted no fields cleanly)'
@@ -1044,7 +1051,8 @@ const BillEditorModal: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
       if (prefillFromScan?.billScanId && created?.id) {
         // From the scanner: its photos go on the bill, and it leaves the inbox.
         try {
-          await apiPost(`/api/bills/inbox/${prefillFromScan.billScanId}/used`, { billId: created.id, fillSupplier: fillSupplier && gaps.length > 0 });
+          const used = await apiPost(`/api/bills/inbox/${prefillFromScan.billScanId}/used`, { billId: created.id, fillSupplier: fillSupplier && gaps.length > 0 });
+          if (used?.notes?.length) triggerToast(used.notes.join(' '), 'INFO');
         } catch (err: any) {
           triggerToast(`Bill saved, but the scanned bill couldn't be marked used: ${err.message}`, 'ERROR');
         }
@@ -1055,7 +1063,8 @@ const BillEditorModal: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
           triggerToast('Bill saved but receipt attach failed — retry from the row', 'ERROR');
         }
         if (fillSupplier && gaps.length) {
-          await apiPost(`/api/bills/${created.id}/fill-missing`, { values: Object.fromEntries(gaps.map(([k, , , v]) => [k, v])) }).catch(() => {});
+          const filled = await apiPost(`/api/bills/${created.id}/fill-missing`, { values: Object.fromEntries(gaps.map(([k, , , v]) => [k, k === 'bank' ? details?.bank : v])) }).catch(() => null);
+          if (filled?.notes?.length) triggerToast(filled.notes.join(' '), 'INFO');
         }
       }
       triggerToast(status === 'AWAITING_PAYMENT' ? 'Bill finalized and posted to the ledger.' : 'Bill saved as draft.');
@@ -1091,14 +1100,15 @@ const BillEditorModal: React.FC<ModuleDataProps & { prefillFromPO?: PurchaseOrde
         </div>
       </div>
 
-      {(prefillFromScan?.warnings?.length || gaps.length || prefillFromScan?.learnedFrom) ? (
+      {(prefillFromScan?.warnings?.length || gaps.length || prefillFromScan?.learnedFrom || bankDiffers) ? (
         <div className="mb-md space-y-1 text-xs" data-testid="scan-checks">
           {!!prefillFromScan?.learnedFrom && <p className="text-green-400">✓ Filled in from what {prefillFromScan.learnedFrom} earlier bill{prefillFromScan.learnedFrom === 1 ? '' : 's'} from this supplier taught: stock items, descriptions, accounts and VAT rates for lines it has seen before. Saving this bill teaches it more.</p>}
           {prefillFromScan?.warnings?.map(w => <p key={w} className="text-amber-400">⚠ {w}</p>)}
+          {bankDiffers && <p className="text-error font-bold">⚠ {bankDiffers}</p>}
           {gaps.length > 0 && (
             <label className="flex items-start gap-2 cursor-pointer">
               <input type="checkbox" className="mt-0.5" checked={fillSupplier} onChange={(e) => setFillSupplier(e.target.checked)} />
-              <span>Save the supplier's {gaps.map(([, label, , v]) => `${label} (${v})`).join(', ')} from the invoice: {chosenSupplier?.name} has none.</span>
+              <span>Save the supplier's {gaps.map(([, label, , v]) => `${label} (${v})`).join(', ')} from the invoice: {chosenSupplier?.name} has none.{gaps.some(([k]) => k === 'bank') ? ' The reader can misread a digit: confirm the bank details by phone before the first payment.' : ''}</span>
             </label>
           )}
         </div>

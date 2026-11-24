@@ -33,11 +33,14 @@ export interface BillOcr {
   total: number | null;
   lineItems: BillOcrLine[];
   text: string;
+  /** The supplier's bank details, as printed (./invoiceBank). */
+  bank?: InvoiceBank | null;
   /** Which reader read it. */
   reader?: Reader;
 }
 
 import { parseBillText, recogniseText } from './localOcr';
+import { bankFromText, tidyInvoiceBank, type InvoiceBank } from './invoiceBank';
 
 const fail = (status: number, message: string) => Object.assign(new Error(message), { status });
 
@@ -74,6 +77,8 @@ Return JSON matching this shape exactly:
   "lineItems": [                      // Each purchased line. Skip subtotal, tax, discount summary and payment rows. Keep delivery as a line.
     { "description": string, "partNumber": string | null, "quantity": number, "unitPrice": number, "lineTotal": number }
   ],                                  // partNumber: the manufacturer's or supplier's part / stock code on that line, if any.
+  "bank": { "bankName": string | null, "accountNumber": string | null, "branchCode": string | null, "accountType": string | null, "swift": string | null } | null,
+                                      // The SELLER's banking details for payment, as printed ("Our banking details"). Never the buyer's account number.
   "text": string                      // All readable text from every page, in reading order.
 }
 Unit prices exclude VAT when the invoice shows them that way. If a field is unreadable, use null (or [] for lineItems). Never invent values; never take the buyer's details for the seller's.`;
@@ -108,9 +113,11 @@ export function normaliseBillOcr(parsed: any): BillOcr {
   })).filter((li: BillOcrLine) => li.description || li.lineTotal > 0) : [];
   const email = str(parsed?.supplierEmail, 120);
   const cur = str(parsed?.currency, 10)?.toUpperCase() ?? null;
+  const text = str(parsed?.text, 20000) || '';
+  const vat = tidyVatNumber(parsed?.supplierVatNumber);
   return {
     supplier: str(parsed?.supplier, 120),
-    supplierVatNumber: tidyVatNumber(parsed?.supplierVatNumber),
+    supplierVatNumber: vat,
     supplierAddress: str(parsed?.supplierAddress, 300),
     supplierPhone: str(parsed?.supplierPhone, 40),
     supplierEmail: email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email.toLowerCase() : null,
@@ -124,7 +131,9 @@ export function normaliseBillOcr(parsed: any): BillOcr {
     taxTotal: num(parsed?.taxTotal),
     total: num(parsed?.total),
     lineItems: lines,
-    text: str(parsed?.text, 20000) || '',
+    text,
+    // The reader's own, else found in the text (Tracklab's own reader has only the text).
+    bank: tidyInvoiceBank(parsed?.bank) ?? bankFromText(text, [vat]),
   };
 }
 
@@ -284,6 +293,10 @@ export function fromMindeeFields(fields: any): Record<string, unknown> {
         lineTotal: pick(f, ['total_price', 'total_amount', 'amount', 'line_total']),
       };
     }),
+    bank: (() => {
+      const p = (fields?.supplier_payment_details?.items ?? [])[0]?.fields;
+      return p ? { accountNumber: plain(p.account_number) ?? plain(p.iban), branchCode: plain(p.routing_number), swift: plain(p.swift), bankName: null, accountType: null } : null;
+    })(),
     text: '',
   };
 }
@@ -300,6 +313,7 @@ export function mergePages(pages: BillOcr[]): BillOcr {
     subtotal: lastOf('subtotal') as any, taxTotal: lastOf('taxTotal') as any, total: lastOf('total') as any,
     lineItems: pages.flatMap(p => p.lineItems),
     text: pages.map(p => p.text).filter(Boolean).join('\n\n'),
+    bank: first('bank') as any,
   };
 }
 
