@@ -44,6 +44,8 @@
             <div class="step">
                 <ul>
                     <li><strong>Returns for repair:</strong> a repaired line raises a draft delivery or collection note and, for a charge, a draft invoice. A replaced board goes back under its new serial number. Returns can be edited, and deleted until closed.</li>
+                    <li><strong>Undo delivered / collected:</strong> a delivery or collection note marked complete by mistake can be reopened (back to Issued); the stock it booked out is put back.</li>
+                    <li><strong>SKU / Part # column:</strong> every Save PDF and print (bills, invoices, credit notes, sales orders, delivery / collection notes) shows the part number in its own column, not in front of the description.</li>
                     <li><strong>Save PDF file names:</strong> bills, invoices, sales orders, quotations and delivery / collection notes save as <code>NUMBER_CLIENT.pdf</code>, e.g. <code>BILL-2026-0009_ACDC_EXPRESS.pdf</code>.</li>
                 </ul>
             </div>
@@ -55,6 +57,8 @@
                     <li><strong>Tax-inclusive prices</strong> on bills and purchase orders are saved at the ex-VAT cost, so totals match what was typed.</li>
                     <li><strong>Receipts:</strong> multi-page receipts preview per page and open full size; a bill's <em>Save PDF</em> adds every receipt page.</li>
                     <li><strong>Supplier banking details</strong>, with every change logged and flagged to confirm by phone before paying.</li>
+                    <li><strong>Bills from the scanner:</strong> photos sent from the phone are read (Tracklab's own reader, or Mindee / OpenAI when set up) into a new bill, learning each supplier's invoices as bills are saved. A bill matches the invoice's total and VAT with a <em>Round off</em> (no VAT) and a <em>VAT rounding</em> line; a line set to <em>No tax</em> stays that way.</li>
+                    <li><strong>Vendors from scanned bills:</strong> <em>Add supplier</em> for an invoice from a supplier Tracklab doesn't have, and the VAT number and bank details printed on an invoice saved to a vendor that has none (bank details are never changed from an invoice; confirm them by phone).</li>
                 </ul>
             </div>
         </div>

@@ -663,6 +663,7 @@
                         <tr><td><span class="m m-post">POST</span></td><td>/api/dispatch-notes/:id/issue</td><td>Issue a note.</td></tr>
                         <tr><td><span class="m m-post">POST</span></td><td>/api/dispatch-notes/:id/complete</td><td>Complete a note.</td></tr>
                         <tr><td><span class="m m-post">POST</span></td><td>/api/dispatch-notes/:id/cancel</td><td>Cancel a note.</td></tr>
+                        <tr><td><span class="m m-post">POST</span></td><td>/api/dispatch-notes/:id/reopen</td><td>Undo completing a note: back to ISSUED, the stock it booked out put back (and reserved for its open sales order again). Returns the note with <code>returned</code>: <code>[{partNumber, qty}]</code>.</td></tr>
                         <tr><td><span class="m m-delete">DELETE</span></td><td>/api/dispatch-notes/:id</td><td>Delete a note.</td></tr>
                     </tbody>
                 </table>

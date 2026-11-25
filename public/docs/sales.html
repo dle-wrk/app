@@ -238,6 +238,12 @@
                     <li>Save PDF includes Applied + Refunded + Remaining rows.</li>
                 </ul>
             </div>
+            <h3 id="delivery-collection-notes">Delivery &amp; collection notes</h3>
+            <div class="step">
+                <p>Under Bookkeeping → Sales → <strong>Delivery &amp; Collection</strong>. A note goes <code>DRAFT → ISSUED → COMPLETED</code> (or is cancelled while draft or issued). Pressing <strong>Mark Delivered</strong> / <strong>Mark Collected</strong> completes it: lines ticked to deduct stock book it out, and the stock held for its sales order is released.</p>
+                <p><strong>Undo a completed note.</strong> If a note was marked delivered or collected by mistake, press the amber ↺ on its row, or <strong>Undo delivered (reopen)</strong> / <strong>Undo collected (reopen)</strong> in its view, and confirm. The note goes back to <em>Issued</em>, so it can be marked again later or cancelled. Any stock it booked out is put back on the shelf (worked out from its own stock transactions, so reopening a note again never returns the stock twice), and held for its sales order again while that order is still open. Each reopen is recorded in the activity log. Only people who can change bookkeeping see the button.</p>
+                <p><strong>Save PDF / Print</strong> lists each line's part number in its own <em>SKU / Part #</em> column, with its serial numbers.</p>
+            </div>
             <h3 id="scanner-stock">Scanner: stock in and out</h3>
             <div class="step">
                 <p><strong>Sales &gt; Scanner &gt; Stock in &amp; out</strong> is where stock scanned on a phone waits to be approved. Reels, packets and any other item are scanned in or out on the phone scan page; each scan appears here as <em>Pending</em> within a few seconds, and stock only changes when someone presses <strong>Approve</strong>. <strong>Reject</strong> leaves stock as it was.</p>
