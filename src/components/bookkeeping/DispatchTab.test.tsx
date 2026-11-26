@@ -21,6 +21,9 @@ const ORDER_LINES = [
 type Call = { method: string; url: string; body?: any };
 let calls: Call[];
 let orderItemsStatus: number;
+let listNotes: any[] = [];
+const ISSUED_NOTE = { id: 13, noteNumber: 'DN-2026-0013', noteType: 'DELIVERY', clientId: 30, clientOrderId: null, noteDate: '2026-11-19', scheduledDate: null, status: 'ISSUED', contactPerson: 'MILLVALE', address: 'MILLVALE SOLAR PLANT', carrier: 'TRACKLAB', reference: null, notes: null,
+  items: [{ id: 1, partNumber: 'TCU-001-SAT', description: 'Single Axis Tracker', quantity: 6, serialNumbers: '31522, 8594', deductStock: false }] };
 const toast = vi.fn();
 
 const reply = (data: unknown, status = 200) =>
@@ -73,12 +76,15 @@ beforeEach(() => {
   localStorage.setItem('currentUser', JSON.stringify({ role: 'manager' }));
   calls = [];
   orderItemsStatus = 200;
+  listNotes = [];
   toast.mockClear();
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const method = (init?.method || 'GET').toUpperCase();
     calls.push({ method, url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
-    if (method === 'GET' && url.startsWith('/api/dispatch-notes')) return reply([]);
+    if (method === 'GET' && url === '/api/dispatch-notes/13') return reply(ISSUED_NOTE);
+    if (method === 'PUT' && url === '/api/dispatch-notes/13') return reply({ ...ISSUED_NOTE, ...JSON.parse(String(init!.body)) });
+    if (method === 'GET' && url.startsWith('/api/dispatch-notes')) return reply(listNotes);
     if (method === 'GET' && url === '/api/production-products') return reply([]);
     if (method === 'GET' && url === '/api/client-order-items') {
       return orderItemsStatus === 200 ? reply(ORDER_LINES) : reply({ error: 'boom' }, orderItemsStatus);
@@ -158,5 +164,29 @@ describe('DispatchTab — note started from the list', () => {
     expect(headings()).toContain('New Delivery Note');
     expect(lineRows()).toEqual([{ part: '', description: '', quantity: '1', bookOut: false }]);
     expect(calls.some((c) => c.url === '/api/client-order-items')).toBe(false);
+  });
+});
+
+describe('DispatchTab — editing an issued note', () => {
+  it('has Edit in its view, and saving keeps it issued (no re-issue)', async () => {
+    listNotes = [{ ...ISSUED_NOTE, items: undefined }];
+    await render(null);
+    await act(async () => { (Array.from(document.querySelectorAll('td')).find(td => td.textContent === 'DN-2026-0013') as HTMLElement).click(); });
+    await settle();
+    await act(async () => { button('Edit').click(); });
+    await settle();
+    expect(headings()).toContain('Edit DN-2026-0013');
+    expect(button('Save Draft')).toBeUndefined();
+    const carrier = Array.from(document.querySelectorAll<HTMLInputElement>('input')).find(i => i.value === 'TRACKLAB')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(carrier, 'COURIER GUY');
+      carrier.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { button('Save changes').click(); });
+    await settle();
+    const writes = calls.filter(c => c.method !== 'GET');
+    expect(writes.map(c => `${c.method} ${c.url}`)).toEqual(['PUT /api/dispatch-notes/13']);
+    expect(writes[0].body).toMatchObject({ carrier: 'COURIER GUY', items: [{ partNumber: 'TCU-001-SAT', quantity: 6, serialNumbers: '31522, 8594' }] });
+    expect(toast).toHaveBeenCalledWith('DN-2026-0013 updated.');
   });
 });

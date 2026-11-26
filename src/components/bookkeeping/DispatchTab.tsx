@@ -1,7 +1,7 @@
 import { RelatedScans } from './ScansTab';
 import { showToast } from '../../lib/toast';
 import React, { useEffect, useMemo, useState } from 'react';
-import { Plus, Eye, Send, CheckCircle2, Ban, Trash2, Printer, X, Truck, PackageCheck, Download, RotateCcw } from 'lucide-react';
+import { Plus, Eye, Send, CheckCircle2, Ban, Trash2, Printer, X, Truck, PackageCheck, Download, RotateCcw, Pencil } from 'lucide-react';
 import { canChange } from '../../lib/changeAccess';
 import { buildAndSaveDocPdf, docFileName } from '../../lib/pdfDocs';
 import { DispatchNote, DispatchNoteItem, DispatchNoteType } from '../../types';
@@ -367,9 +367,12 @@ const DispatchEditorModal: React.FC<ModuleDataProps & { type: DispatchNoteType; 
         contactPerson, address, carrier, reference, notes, status,
         items: validLines.map(l => ({ partNumber: l.partNumber || undefined, description: l.description, quantity: l.quantity, serialNumbers: l.serialNumbers || undefined, deductStock: !!l.deductStock })),
       };
-      if (initial) await apiPut(`/api/dispatch-notes/${initial.id}`, payload);
-      else await apiPost('/api/dispatch-notes', payload);
-      triggerToast(status === 'ISSUED' ? `${meta.label} issued.` : `${meta.label} saved as draft.`);
+      if (initial) {
+        await apiPut(`/api/dispatch-notes/${initial.id}`, payload);
+        // Saving keeps the note's status: a draft being issued is issued after it's saved.
+        if (initial.status === 'DRAFT' && status === 'ISSUED') await apiPost(`/api/dispatch-notes/${initial.id}/issue`);
+      } else await apiPost('/api/dispatch-notes', payload);
+      triggerToast(initial?.status === 'ISSUED' ? `${initial.noteNumber} updated.` : status === 'ISSUED' ? `${meta.label} issued.` : `${meta.label} saved as draft.`);
       onSaved();
     } catch (err: any) {
       triggerToast(err.message || 'Failed to save', 'ERROR');
@@ -485,8 +488,15 @@ const DispatchEditorModal: React.FC<ModuleDataProps & { type: DispatchNoteType; 
 
       <div className="flex justify-end gap-2 pt-md mt-md border-t border-outline-variant/20">
         <SecondaryButton onClick={onClose}>Cancel</SecondaryButton>
-        <SecondaryButton onClick={() => submit('DRAFT')} disabled={!!saving}>{saving === 'DRAFT' ? 'Saving...' : 'Save Draft'}</SecondaryButton>
-        <PrimaryButton icon={<Send className="w-3.5 h-3.5" />} onClick={() => submit('ISSUED')} disabled={!!saving}>{saving === 'ISSUED' ? 'Issuing...' : 'Issue'}</PrimaryButton>
+        {initial?.status === 'ISSUED' ? (
+          // An issued note stays issued: just its details and lines change.
+          <PrimaryButton icon={<CheckCircle2 className="w-3.5 h-3.5" />} onClick={() => submit('ISSUED')} disabled={!!saving}>{saving ? 'Saving...' : 'Save changes'}</PrimaryButton>
+        ) : (
+          <>
+            <SecondaryButton onClick={() => submit('DRAFT')} disabled={!!saving}>{saving === 'DRAFT' ? 'Saving...' : 'Save Draft'}</SecondaryButton>
+            <PrimaryButton icon={<Send className="w-3.5 h-3.5" />} onClick={() => submit('ISSUED')} disabled={!!saving}>{saving === 'ISSUED' ? 'Issuing...' : 'Issue'}</PrimaryButton>
+          </>
+        )}
       </div>
     </Modal>
   );
@@ -668,6 +678,7 @@ const DispatchViewModal: React.FC<{
         )}
         {note.status === 'ISSUED' && (
           <>
+            <SecondaryButton icon={<Pencil className="w-3.5 h-3.5" />} onClick={onEdit} disabled={busy}>Edit</SecondaryButton>
             <DangerButton icon={<Ban className="w-3.5 h-3.5" />} onClick={onCancel} disabled={busy}>Cancel</DangerButton>
             <PrimaryButton icon={<CheckCircle2 className="w-3.5 h-3.5" />} onClick={onComplete} disabled={busy}>Mark {meta.verb}</PrimaryButton>
           </>

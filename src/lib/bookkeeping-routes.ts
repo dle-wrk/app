@@ -2497,7 +2497,8 @@ export function registerBookkeepingRoutes(app: Express) {
       await client.query('BEGIN');
       const existing = await client.query(`SELECT status FROM dispatch_notes WHERE id = $1`, [id]);
       if (!existing.rows.length) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'dispatch note not found' }); }
-      if (existing.rows[0].status !== 'DRAFT') { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Only DRAFT dispatch notes can be edited.' }); }
+      // Draft and issued notes can be edited (an issued note has moved no stock yet: that happens on complete).
+      if (!['DRAFT', 'ISSUED'].includes(existing.rows[0].status)) { await client.query('ROLLBACK'); return res.status(400).json({ error: `A ${String(existing.rows[0].status).toLowerCase()} note can't be edited${existing.rows[0].status === 'COMPLETED' ? ': reopen it first' : ''}.` }); }
 
       await client.query(
         `UPDATE dispatch_notes SET client_id=$1, client_order_id=$2, invoice_id=$3, note_date=$4, scheduled_date=$5, contact_person=$6, address=$7, carrier=$8, reference=$9, notes=$10, updated_at=CURRENT_TIMESTAMP WHERE id=$11`,
