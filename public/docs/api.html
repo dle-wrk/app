@@ -659,7 +659,7 @@
                         <tr><td><span class="m m-get">GET</span></td><td>/api/dispatch-notes</td><td>List notes. Optional <code>type=DELIVERY</code> or <code>type=COLLECTION</code>.</td></tr>
                         <tr><td><span class="m m-get">GET</span></td><td>/api/dispatch-notes/:id</td><td>Get one note with its lines.</td></tr>
                         <tr><td><span class="m m-post">POST</span></td><td>/api/dispatch-notes</td><td>Create a note.</td></tr>
-                        <tr><td><span class="m m-put">PUT</span></td><td>/api/dispatch-notes/:id</td><td>Update a note.</td></tr>
+                        <tr><td><span class="m m-put">PUT</span></td><td>/api/dispatch-notes/:id</td><td>Update a draft or issued note (an issued note stays issued). A completed note is refused: reopen it first.</td></tr>
                         <tr><td><span class="m m-post">POST</span></td><td>/api/dispatch-notes/:id/issue</td><td>Issue a note.</td></tr>
                         <tr><td><span class="m m-post">POST</span></td><td>/api/dispatch-notes/:id/complete</td><td>Complete a note.</td></tr>
                         <tr><td><span class="m m-post">POST</span></td><td>/api/dispatch-notes/:id/cancel</td><td>Cancel a note.</td></tr>
